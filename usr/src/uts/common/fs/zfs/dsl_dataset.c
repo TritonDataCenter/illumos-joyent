@@ -535,6 +535,7 @@ dsl_dataset_hold_obj(dsl_pool_t *dp, uint64_t dsobj, void *tag,
 		ds->ds_dbuf = dbuf;
 		ds->ds_object = dsobj;
 		ds->ds_is_snapshot = dsl_dataset_phys(ds)->ds_num_children != 0;
+		list_link_init(&ds->ds_synced_link);
 
 		err = dsl_dir_hold_obj(dp, dsl_dataset_phys(ds)->ds_dir_obj,
 		    NULL, ds, &ds->ds_dir);
