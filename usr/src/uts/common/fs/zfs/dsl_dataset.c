@@ -3928,6 +3928,8 @@ dsl_dataset_check_quota(dsl_dataset_t *ds, boolean_t check_quota,
 			error = SET_ERROR(ERESTART);
 		else
 			error = SET_ERROR(EDQUOT);
+
+		DMU_TX_STAT_BUMP(dmu_tx_quota);
 	}
 	mutex_exit(&ds->ds_lock);
 

@@ -301,6 +301,7 @@
 #endif
 #include <sys/callb.h>
 #include <sys/kstat.h>
+#include <sys/dmu_tx.h>
 #include <sys/zthr.h>
 #include <zfs_fletcher.h>
 #include <sys/arc_impl.h>
@@ -6787,14 +6788,17 @@ arc_memory_throttle(spa_t *spa, uint64_t reserve, uint64_t txg)
 	 */
 	if (curproc == proc_pageout) {
 		if (spa->spa_lowmem_page_load >
-		    MAX(ptob(minfree), available_memory) / 4)
+		    MAX(ptob(minfree), available_memory) / 4) {
+			DMU_TX_STAT_BUMP(dmu_tx_memory_reclaim);
 			return (SET_ERROR(ERESTART));
+		}
 		/* Note: reserve is inflated, so we deflate */
 		atomic_add_64(&spa->spa_lowmem_page_load, reserve / 8);
 		return (0);
 	} else if (spa->spa_lowmem_page_load > 0 && arc_reclaim_needed()) {
 		/* memory is low, delay before restarting */
 		ARCSTAT_INCR(arcstat_memory_throttle_count, 1);
+		DMU_TX_STAT_BUMP(dmu_tx_memory_reclaim);
 		return (SET_ERROR(EAGAIN));
 	}
 	spa->spa_lowmem_page_load = 0;
@@ -6831,8 +6835,10 @@ arc_tempreserve_space(spa_t *spa, uint64_t reserve, uint64_t txg)
 
 	if (reserve > arc_c/4 && !arc_no_grow)
 		arc_c = MIN(arc_c_max, reserve * 4);
-	if (reserve > arc_c)
+	if (reserve > arc_c) {
+		DMU_TX_STAT_BUMP(dmu_tx_memory_reserve);
 		return (SET_ERROR(ENOMEM));
+	}
 
 	/*
 	 * Don't count loaned bufs as in flight dirty data to prevent long
@@ -6886,6 +6892,7 @@ arc_tempreserve_space(spa_t *spa, uint64_t reserve, uint64_t txg)
 		    "anon_data=%lluK tempreserve=%lluK arc_c=%lluK\n",
 		    arc_tempreserve >> 10, meta_esize >> 10,
 		    data_esize >> 10, reserve >> 10, arc_c >> 10);
+		DMU_TX_STAT_BUMP(dmu_tx_dirty_throttle);
 		return (SET_ERROR(ERESTART));
 	}
 	atomic_add_64(&arc_tempreserve, reserve);

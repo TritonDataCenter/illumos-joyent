@@ -633,6 +633,8 @@ txg_delay(dsl_pool_t *dp, uint64_t txg, hrtime_t delay, hrtime_t resolution)
 		    &tx->tx_sync_lock, delay, resolution, 0);
 	}
 
+	DMU_TX_STAT_BUMP(dmu_tx_delay);
+
 	mutex_exit(&tx->tx_sync_lock);
 }
 
