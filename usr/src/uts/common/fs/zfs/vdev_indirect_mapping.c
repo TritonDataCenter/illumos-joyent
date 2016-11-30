@@ -405,9 +405,9 @@ vdev_indirect_mapping_add_entries(vdev_indirect_mapping_t *vim,
 
 	dmu_buf_will_dirty(vim->vim_dbuf, tx);
 
-	mapbuf = zio_buf_alloc(SPA_OLD_MAXBLOCKSIZE);
+	mapbuf = kmem_alloc(SPA_OLD_MAXBLOCKSIZE, KM_SLEEP);
 	if (vim->vim_havecounts) {
-		countbuf = zio_buf_alloc(SPA_OLD_MAXBLOCKSIZE);
+		countbuf = kmem_alloc(SPA_OLD_MAXBLOCKSIZE, KM_SLEEP);
 		ASSERT(spa_feature_is_active(vim->vim_objset->os_spa,
 		    SPA_FEATURE_OBSOLETE_COUNTS));
 	}
@@ -462,9 +462,9 @@ vdev_indirect_mapping_add_entries(vdev_indirect_mapping_t *vim,
 		}
 		vim->vim_phys->vimp_num_entries += i;
 	}
-	zio_buf_free(mapbuf, SPA_OLD_MAXBLOCKSIZE);
+	kmem_free(mapbuf, SPA_OLD_MAXBLOCKSIZE);
 	if (vim->vim_havecounts)
-		zio_buf_free(countbuf, SPA_OLD_MAXBLOCKSIZE);
+		kmem_free(countbuf, SPA_OLD_MAXBLOCKSIZE);
 
 	/*
 	 * Update the entry array to reflect the new entries. First, copy
