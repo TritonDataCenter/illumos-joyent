@@ -56,6 +56,7 @@ dmu_tx_stats_t dmu_tx_stats = {
 	{ "dmu_tx_memory_inflight",	KSTAT_DATA_UINT64 },
 	{ "dmu_tx_dirty_throttle",	KSTAT_DATA_UINT64 },
 	{ "dmu_tx_write_limit",		KSTAT_DATA_UINT64 },
+	{ "dmu_tx_dirty_frees_delay",	KSTAT_DATA_UINT64 },
 	{ "dmu_tx_quota",		KSTAT_DATA_UINT64 },
 };
 

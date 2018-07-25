@@ -125,6 +125,7 @@ typedef struct dmu_tx_stats {
 	kstat_named_t dmu_tx_memory_inflight;
 	kstat_named_t dmu_tx_dirty_throttle;
 	kstat_named_t dmu_tx_write_limit;
+	kstat_named_t dmu_tx_dirty_frees_delay;
 	kstat_named_t dmu_tx_quota;
 } dmu_tx_stats_t;
 
