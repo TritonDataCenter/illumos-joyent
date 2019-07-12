@@ -232,6 +232,7 @@ SYMBOL_SCOPE {
 	list_next			{ FLAGS = EXTERN };
 	list_remove			{ FLAGS = EXTERN };
 	list_remove_head		{ FLAGS = EXTERN };
+	list_remove_tail		{ FLAGS = EXTERN };
 	membar_consumer			{ FLAGS = EXTERN };
 	membar_enter			{ FLAGS = EXTERN };
 	membar_exit			{ FLAGS = EXTERN };
