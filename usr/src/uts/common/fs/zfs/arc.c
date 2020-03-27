@@ -303,7 +303,7 @@
 #include <zfs_fletcher.h>
 #include <sys/arc_impl.h>
 #include <sys/aggsum.h>
-#include <sys/cityhash.h>
+#include <cityhash.h>
 #include <sys/param.h>
 
 #ifndef _KERNEL

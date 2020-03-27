@@ -48,7 +48,7 @@
 #include <sys/callb.h>
 #include <sys/abd.h>
 #include <sys/vdev.h>
-#include <sys/cityhash.h>
+#include <cityhash.h>
 #include <sys/spa_impl.h>
 
 static boolean_t dbuf_undirty(dmu_buf_impl_t *db, dmu_tx_t *tx);

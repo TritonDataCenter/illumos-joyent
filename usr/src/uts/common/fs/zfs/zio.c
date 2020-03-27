@@ -49,7 +49,7 @@
 #include <sys/dsl_scan.h>
 #include <sys/metaslab_impl.h>
 #include <sys/abd.h>
-#include <sys/cityhash.h>
+#include <cityhash.h>
 #include <sys/dsl_crypt.h>
 #include <sys/stdbool.h>
 

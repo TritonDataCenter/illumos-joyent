@@ -36,6 +36,7 @@ amd64_OBJS_SHARED=		\
 
 OBJS_SHARED=				\
 	$($(MACH64)_OBJS_SHARED)	\
+	cityhash.o			\
 	zfeature_common.o		\
 	zfs_comutil.o			\
 	zfs_deleg.o			\
