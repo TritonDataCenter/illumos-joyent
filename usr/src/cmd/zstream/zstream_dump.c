@@ -37,12 +37,14 @@
 #include <strings.h>
 #include <unistd.h>
 #include <stddef.h>
+#include <errno.h>
 
 #include <sys/hexdump.h>
 #include <sys/dmu.h>
 #include <sys/zfs_ioctl.h>
 #include <sys/zio.h>
 #include <zfs_fletcher.h>
+#include "zstream.h"
 
 /*
  * If dump mode is enabled, the number of bytes to print per line
@@ -59,17 +61,6 @@ uint64_t total_stream_len = 0;
 FILE *send_stream = 0;
 boolean_t do_byteswap = B_FALSE;
 boolean_t do_cksum = B_TRUE;
-
-static void
-usage(void)
-{
-	(void) fprintf(stderr, "usage: zstreamdump [-v] [-C] [-d] < file\n");
-	(void) fprintf(stderr, "\t -v -- verbose\n");
-	(void) fprintf(stderr, "\t -C -- suppress checksum verification\n");
-	(void) fprintf(stderr, "\t -d -- dump contents of blocks modified, "
-	    "implies verbose\n");
-	exit(1);
-}
 
 static void *
 safe_malloc(size_t size)
@@ -98,9 +89,9 @@ ssread(void *buf, size_t len, zio_cksum_t *cksum)
 
 	if (do_cksum) {
 		if (do_byteswap)
-			fletcher_4_incremental_byteswap(buf, len, cksum);
+			(void) fletcher_4_incremental_byteswap(buf, len, cksum);
 		else
-			fletcher_4_incremental_native(buf, len, cksum);
+			(void) fletcher_4_incremental_native(buf, len, cksum);
 	}
 	total_stream_len += len;
 	return (outlen);
@@ -169,7 +160,7 @@ sprintf_bytes(char *str, uint8_t *buf, uint_t buf_len)
 }
 
 int
-main(int argc, char *argv[])
+zstream_do_dump(int argc, char *argv[])
 {
 	char *buf = safe_malloc(SPA_MAXBLOCKSIZE);
 	uint64_t drr_record_count[DRR_NUMTYPES] = { 0 };
@@ -223,26 +214,39 @@ main(int argc, char *argv[])
 		case ':':
 			(void) fprintf(stderr,
 			    "missing argument for '%c' option\n", optopt);
-			usage();
+			zstream_usage();
 			break;
 		case '?':
 			(void) fprintf(stderr, "invalid option '%c'\n",
 			    optopt);
-			usage();
+			zstream_usage();
 			break;
 		}
 	}
 
-	if (isatty(STDIN_FILENO)) {
-		(void) fprintf(stderr,
-		    "Error: Backup stream can not be read "
-		    "from a terminal.\n"
-		    "You must redirect standard input.\n");
-		exit(1);
+	if (argc > optind) {
+		const char *filename = argv[optind];
+		send_stream = fopen(filename, "r");
+		if (send_stream == NULL) {
+			(void) fprintf(stderr,
+			    "Error while opening file '%s': %s\n",
+			    filename, strerror(errno));
+			exit(1);
+		}
+	} else {
+		if (isatty(STDIN_FILENO)) {
+			(void) fprintf(stderr,
+			    "Error: The send stream is a binary format "
+			    "and can not be read from a\n"
+			    "terminal.  Standard input must be redirected, "
+			    "or a file must be\n"
+			    "specified as a command-line argument.\n");
+			exit(1);
+		}
+		send_stream = stdin;
 	}
 
 	fletcher_4_init();
-	send_stream = stdin;
 	while (read_hdr(drr, &zc)) {
 
 		/*
@@ -259,8 +263,9 @@ main(int argc, char *argv[])
 					 * that we know it needs to be
 					 * byteswapped.
 					 */
-					fletcher_4_incremental_byteswap(drr,
-					    sizeof (dmu_replay_record_t), &zc);
+					(void) fletcher_4_incremental_byteswap(
+					    drr, sizeof (dmu_replay_record_t),
+					    &zc);
 				}
 			} else if (drrb->drr_magic != DMU_BACKUP_MAGIC) {
 				(void) fprintf(stderr, "Invalid stream "

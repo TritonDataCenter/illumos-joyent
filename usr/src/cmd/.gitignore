@@ -2405,6 +2405,7 @@ zonestat/zonestatd/zonestatd
 
 zpool/zpool
 
+zstream/zstream
 zstreamdump/zstreamdump
 
 ztest/zloop

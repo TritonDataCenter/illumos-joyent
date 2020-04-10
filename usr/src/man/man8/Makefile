@@ -540,6 +540,7 @@ _MANFILES=	6to4relay.8		\
 		zonecfg.8		\
 		zonestatd.8		\
 		zpool.8			\
+		zstream.8		\
 		zstreamdump.8		\
 		ztest.8
 

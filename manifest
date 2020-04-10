@@ -11241,6 +11241,7 @@ f usr/sbin/zlogin 0555 root bin
 f usr/sbin/zoneadm 0555 root bin
 f usr/sbin/zonecfg 0555 root bin
 s usr/sbin/zpool=../../sbin/zpool
+f usr/sbin/zstream 0555 root bin
 f usr/sbin/zstreamdump 0555 root bin
 d usr/sfw 0755 root bin
 d usr/sfw/bin 0755 root bin
@@ -20125,6 +20126,7 @@ f usr/share/man/man8/zoneadmd.8 0444 root bin
 f usr/share/man/man8/zonecfg.8 0444 root bin
 f usr/share/man/man8/zonestatd.8 0444 root bin
 f usr/share/man/man8/zpool.8 0444 root bin
+f usr/share/man/man8/zstream.8 0444 root bin
 f usr/share/man/man8/zstreamdump.8 0444 root bin
 f usr/share/man/man8/ztest.8 0444 root bin
 d usr/share/man/man9 0755 root bin

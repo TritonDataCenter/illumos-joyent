@@ -4596,9 +4596,7 @@ zfs_receive_impl(libzfs_handle_t *hdl, const char *tosnap,
 	}
 
 	/* Holds feature is set once in the compound stream header. */
-	boolean_t holds = (DMU_GET_FEATUREFLAGS(drrb->drr_versioninfo) &
-	    DMU_BACKUP_FEATURE_HOLDS);
-	if (holds)
+	if (featureflags & DMU_BACKUP_FEATURE_HOLDS)
 		flags->holds = B_TRUE;
 
 	if (strchr(drrb->drr_toname, '@') == NULL) {

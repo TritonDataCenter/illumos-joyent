@@ -133,6 +133,7 @@ dir  path=usr/sbin/$(ARCH64)
 file path=usr/sbin/zdb mode=0555
 link path=usr/sbin/zfs target=../../sbin/zfs
 link path=usr/sbin/zpool target=../../sbin/zpool
+file path=usr/sbin/zstream mode=0555
 file path=usr/sbin/zstreamdump mode=0555
 file path=usr/share/man/man7/zpool-features.7
 dir  path=usr/share/man/man8
@@ -140,6 +141,7 @@ file path=usr/share/man/man8/zdb.8
 file path=usr/share/man/man8/zfs-program.8
 file path=usr/share/man/man8/zfs.8
 file path=usr/share/man/man8/zpool.8
+file path=usr/share/man/man8/zstream.8
 file path=usr/share/man/man8/zstreamdump.8
 file path=usr/share/man/man8/ztest.8
 driver name=zfs perms="* 0600 root sys" perms="zfs 0666 root sys"
