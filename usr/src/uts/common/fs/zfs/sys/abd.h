@@ -146,6 +146,12 @@ abd_zero(abd_t *abd, size_t size)
 	abd_zero_off(abd, 0, size);
 }
 
+static inline uint_t
+abd_get_size(abd_t *abd)
+{
+	return (abd->abd_size);
+}
+
 /*
  * Module lifecycle
  */

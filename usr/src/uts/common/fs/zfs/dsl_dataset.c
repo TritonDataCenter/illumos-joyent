@@ -2002,10 +2002,8 @@ dsl_dataset_sync_done(dsl_dataset_t *ds, dmu_tx_t *tx)
 	bplist_iterate(&ds->ds_pending_deadlist,
 	    deadlist_enqueue_cb, &ds->ds_deadlist, tx);
 
-	if (os->os_synced_dnodes != NULL) {
-		multilist_destroy(os->os_synced_dnodes);
-		os->os_synced_dnodes = NULL;
-	}
+	multilist_destroy(os->os_synced_dnodes);
+	os->os_synced_dnodes = NULL;
 
 	if (os->os_encrypted)
 		os->os_next_write_raw[tx->tx_txg & TXG_MASK] = B_FALSE;

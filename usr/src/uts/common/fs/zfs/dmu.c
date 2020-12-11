@@ -1703,6 +1703,32 @@ dmu_return_arcbuf(arc_buf_t *buf)
 	arc_buf_destroy(buf, FTAG);
 }
 
+/*
+ * A "lightweight" write is faster than a regular write (e.g.
+ * dmu_write_by_dnode() or dmu_assign_arcbuf_by_dnode()), because it avoids the
+ * CPU cost of creating a dmu_buf_impl_t and arc_buf_[hdr_]_t.  However, the
+ * data can not be read or overwritten until the transaction's txg has been
+ * synced.  This makes it appropriate for workloads that are known to be
+ * (temporarily) write-only, like "zfs receive".
+ *
+ * A single block is written, starting at the specified offset in bytes.  If
+ * the call is successful, it returns 0 and the provided abd has been
+ * consumed (the caller should not free it).
+ */
+int
+dmu_lightweight_write_by_dnode(dnode_t *dn, uint64_t offset, abd_t *abd,
+    const zio_prop_t *zp, enum zio_flag flags, dmu_tx_t *tx)
+{
+	dbuf_dirty_record_t *dr =
+	    dbuf_dirty_lightweight(dn, dbuf_whichblock(dn, 0, offset), tx);
+	if (dr == NULL)
+		return (SET_ERROR(EIO));
+	dr->dt.dll.dr_abd = abd;
+	dr->dt.dll.dr_props = *zp;
+	dr->dt.dll.dr_flags = flags;
+	return (0);
+}
+
 void
 dmu_copy_from_buf(objset_t *os, uint64_t object, uint64_t offset,
     dmu_buf_t *handle, dmu_tx_t *tx)
@@ -1776,8 +1802,8 @@ dmu_assign_arcbuf_by_dnode(dnode_t *dn, uint64_t offset, arc_buf_t *buf,
 		return (SET_ERROR(EIO));
 
 	/*
-	 * We can only assign if the offset is aligned, the arc buf is the
-	 * same size as the dbuf, and the dbuf is not metadata.
+	 * We can only assign if the offset is aligned and the arc buf is the
+	 * same size as the dbuf.
 	 */
 	if (offset == db->db.db_offset && blksz == db->db.db_size) {
 		dbuf_assign_arcbuf(db, buf, tx);
