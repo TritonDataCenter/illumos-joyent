@@ -21,6 +21,7 @@ include ../Makefile.cmd
 include ../Makefile.cmd.64
 include $(SRC)/common/hexdump/Makefile.com
 
+LINKPROGS=	zstreamdump
 INCS +=	-I../../uts/common/fs/zfs
 INCS +=	-I../../common/zfs
 
@@ -30,6 +31,8 @@ CSTD=	$(CSTD_GNU99)
 
 CPPFLAGS += -D_REENTRANT $(INCS)
 $(NOT_RELEASE_BUILD)CPPFLAGS += -DDEBUG
+
+ROOTUSRSBINLINKS=	$(LINKPROGS:%=$(ROOTUSRSBIN)/%)
 
 zstream_redup.o := CPPFLAGS += -I../../lib/libzfs/common
 zstream_redup.o := CPPFLAGS += -I../../lib/libzutil/common
@@ -44,10 +47,14 @@ $(PROG): $(OBJS)
 	$(LINK.c) -o $@ $(OBJS) $(LDLIBS)
 	$(POST_PROCESS)
 
-install: all $(ROOTUSRSBINPROG)
+install: all $(ROOTUSRSBINPROG) $(ROOTUSRSBINLINKS)
 
 clean:
 	$(RM) $(OBJS)
+
+$(ROOTUSRSBINLINKS): $(ROOTUSRSBINPROG)
+		-$(RM) $@
+		-$(LN) $(ROOTUSRSBINPROG) $@
 
 FRC:
 

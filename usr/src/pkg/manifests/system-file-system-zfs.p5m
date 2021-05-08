@@ -134,7 +134,7 @@ file path=usr/sbin/zdb mode=0555
 link path=usr/sbin/zfs target=../../sbin/zfs
 link path=usr/sbin/zpool target=../../sbin/zpool
 file path=usr/sbin/zstream mode=0555
-file path=usr/sbin/zstreamdump mode=0555
+hardlink path=usr/sbin/zstreamdump target=../../usr/sbin/zstream
 file path=usr/share/man/man7/zpool-features.7
 dir  path=usr/share/man/man8
 file path=usr/share/man/man8/zdb.8

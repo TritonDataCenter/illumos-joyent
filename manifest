@@ -11242,7 +11242,7 @@ f usr/sbin/zoneadm 0555 root bin
 f usr/sbin/zonecfg 0555 root bin
 s usr/sbin/zpool=../../sbin/zpool
 f usr/sbin/zstream 0555 root bin
-f usr/sbin/zstreamdump 0555 root bin
+h usr/sbin/zstreamdump=usr/sbin/zstream
 d usr/sfw 0755 root bin
 d usr/sfw/bin 0755 root bin
 d usr/sfw/bin/amd64 0755 root bin
