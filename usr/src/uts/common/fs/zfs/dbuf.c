@@ -103,8 +103,8 @@ static boolean_t dbuf_evict_thread_exit;
  * by those caches' matching enum values (from dbuf_cached_state_t).
  */
 typedef struct dbuf_cache {
-	multilist_t *cache;
-	zfs_refcount_t size;
+	multilist_t cache;
+	zfs_refcount_t size __cacheline_aligned;
 } dbuf_cache_t;
 dbuf_cache_t dbuf_caches[DB_CACHE_MAX];
 
@@ -518,9 +518,9 @@ dbuf_cache_above_lowater(void)
 static void
 dbuf_evict_one(void)
 {
-	int idx = multilist_get_random_index(dbuf_caches[DB_DBUF_CACHE].cache);
+	int idx = multilist_get_random_index(&dbuf_caches[DB_DBUF_CACHE].cache);
 	multilist_sublist_t *mls = multilist_sublist_lock(
-	    dbuf_caches[DB_DBUF_CACHE].cache, idx);
+	    &dbuf_caches[DB_DBUF_CACHE].cache, idx);
 
 	ASSERT(!MUTEX_HELD(&dbuf_evict_lock));
 
@@ -666,8 +666,8 @@ retry:
 	dbu_evict_taskq = taskq_create("dbu_evict", 1, minclsyspri, 0, 0, 0);
 
 	for (dbuf_cached_state_t dcs = 0; dcs < DB_CACHE_MAX; dcs++) {
-		dbuf_caches[dcs].cache =
-		    multilist_create(sizeof (dmu_buf_impl_t),
+		multilist_create(&dbuf_caches[dcs].cache,
+		    sizeof (dmu_buf_impl_t),
 		    offsetof(dmu_buf_impl_t, db_cache_link),
 		    dbuf_cache_multilist_index_func);
 		zfs_refcount_create(&dbuf_caches[dcs].size);
@@ -705,7 +705,7 @@ dbuf_fini(void)
 
 	for (dbuf_cached_state_t dcs = 0; dcs < DB_CACHE_MAX; dcs++) {
 		zfs_refcount_destroy(&dbuf_caches[dcs].size);
-		multilist_destroy(dbuf_caches[dcs].cache);
+		multilist_destroy(&dbuf_caches[dcs].cache);
 	}
 }
 
@@ -2461,7 +2461,7 @@ dbuf_destroy(dmu_buf_impl_t *db)
 		ASSERT(db->db_caching_status == DB_DBUF_CACHE ||
 		    db->db_caching_status == DB_DBUF_METADATA_CACHE);
 
-		multilist_remove(dbuf_caches[db->db_caching_status].cache, db);
+		multilist_remove(&dbuf_caches[db->db_caching_status].cache, db);
 		(void) zfs_refcount_remove_many(
 		    &dbuf_caches[db->db_caching_status].size,
 		    db->db.db_size, db);
@@ -3124,7 +3124,7 @@ top:
 		ASSERT(db->db_caching_status == DB_DBUF_CACHE ||
 		    db->db_caching_status == DB_DBUF_METADATA_CACHE);
 
-		multilist_remove(dbuf_caches[db->db_caching_status].cache, db);
+		multilist_remove(&dbuf_caches[db->db_caching_status].cache, db);
 		(void) zfs_refcount_remove_many(
 		    &dbuf_caches[db->db_caching_status].size,
 		    db->db.db_size, db);
@@ -3357,7 +3357,7 @@ dbuf_rele_and_unlock(dmu_buf_impl_t *db, void *tag, boolean_t evicting)
 				    DB_DBUF_METADATA_CACHE : DB_DBUF_CACHE;
 				db->db_caching_status = dcs;
 
-				multilist_insert(dbuf_caches[dcs].cache, db);
+				multilist_insert(&dbuf_caches[dcs].cache, db);
 				(void) zfs_refcount_add_many(
 				    &dbuf_caches[dcs].size, db->db.db_size, db);
 				mutex_exit(&db->db_mtx);
