@@ -673,7 +673,8 @@ function stream_has_features
 	shift
 
 	[[ -f $file ]] || log_fail "Couldn't find file: $file"
-	typeset flags=$(cat $file | zstreamdump | awk '/features =/ {print $3}')
+	typeset flags=$(cat $file | zstream dump | \
+	    awk '/features =/ {print $3}')
 	typeset -A feature
 	feature[dedup]="1"
 	feature[dedupprops]="2"
@@ -699,7 +700,7 @@ function stream_has_features
 }
 
 #
-# Parse zstreamdump -v output.  The output varies for each kind of record:
+# Parse zstream dump -v output.  The output varies for each kind of record:
 # BEGIN records are simply output as "BEGIN"
 # END records are output as "END"
 # OBJECT records become "OBJECT <object num>"
@@ -726,7 +727,7 @@ function parse_dump
 # comparing. This function does not currently handle incremental streams
 # that remove data.
 #
-# $1 The zstreamdump output file
+# $1 The zstream dump output file
 # $2 The dataset to compare against
 #    This can be a source of a send or recv target (fs, not snapshot)
 # $3 The percentage below which verification is deemed a failure
@@ -743,7 +744,7 @@ function verify_stream_size
 	[[ -f $stream ]] || log_fail "No such file: $stream"
 	datasetexists $ds || log_fail "No such dataset: $ds"
 
-	typeset stream_size=$(cat $stream | zstreamdump | sed -n \
+	typeset stream_size=$(cat $stream | zstream dump | sed -n \
 	    's/	Total write size = \(.*\) (0x.*)/\1/p')
 
 	typeset inc_size=0

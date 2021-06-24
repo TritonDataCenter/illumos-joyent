@@ -20,17 +20,17 @@
 
 #
 # Description:
-# Verify compression features show up in zstreamdump
+# Verify compression features show up in zstream dump
 #
 # Strategy:
 # 1. Create a full compressed send stream
-# 2. Verify zstreamdump shows this stream has the relevant features
-# 3. Verify zstreamdump's accounting of logical and compressed size is correct
+# 2. Verify zstream dump shows this stream has the relevant features
+# 3. Verify zstream dump's accounting of logical and compressed size is correct
 #
 
 verify_runnable "both"
 
-log_assert "Verify zstreamdump correctly interprets compressed send streams."
+log_assert "Verify zstream dump correctly interprets compressed send streams."
 log_onexit cleanup_pool $POOL2
 
 typeset sendfs=$POOL2/fs
@@ -42,7 +42,7 @@ log_must zfs snapshot $sendfs@full
 
 log_must eval "zfs send -c $sendfs@full >$BACKDIR/full"
 log_must stream_has_features $BACKDIR/full lz4 compressed
-cat $BACKDIR/full | zstreamdump -v | parse_dump > $BACKDIR/dump.out
+cat $BACKDIR/full | zstream dump -v | parse_dump > $BACKDIR/dump.out
 
 lsize=$(awk '/^WRITE [^0]/ {lsize += $4} END {printf("%d", lsize)}' \
     $BACKDIR/dump.out)
@@ -56,4 +56,4 @@ csize_prop=$(get_prop used $sendfs)
 within_percent $csize $csize_prop 90 || log_fail \
     "$csize and $csize_prop differed by too much"
 
-log_pass "zstreamdump correctly interprets compressed send streams."
+log_pass "zstream dump correctly interprets compressed send streams."
