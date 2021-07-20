@@ -863,6 +863,13 @@ typedef struct arc_stats {
 /* number of bytes in the arc from arc_buf_t's */
 #define	arc_overhead_size	ARCSTAT(arcstat_overhead_size)
 
+#define	arc_anon	(&ARC_anon)
+#define	arc_mru		(&ARC_mru)
+#define	arc_mru_ghost	(&ARC_mru_ghost)
+#define	arc_mfu		(&ARC_mfu)
+#define	arc_mfu_ghost	(&ARC_mfu_ghost)
+#define	arc_l2c_only	(&ARC_l2c_only)
+
 extern arc_stats_t arc_stats;
 
 /* used in zdb.c */
