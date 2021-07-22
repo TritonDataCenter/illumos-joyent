@@ -799,17 +799,6 @@ lxpr_lookup_fdnode(vnode_t *dvp, const char *name)
 	vp = LXPTOV(lxfp);
 
 	/*
-	 * Since the resulting vnode is highly likely to be at some abitrary
-	 * position in another filesystem, the vnode type is set to VDIR
-	 * (causing lookups to be done via lxpr_lookup) and the VTRAVERSE flag
-	 * is set. See the comment in lxpr_lookup() for more details.
-	 */
-	if (lxfp->lxpr_realvp->v_type == VDIR) {
-		vp->v_type = VDIR;
-		vp->v_flag |= VTRAVERSE;
-	}
-
-	/*
 	 * For certain entries (sockets, pipes, etc), Linux expects a
 	 * bogus-named symlink.  If that's the case, report the type as
 	 * VNON to bypass link-following elsewhere in the vfs system.
