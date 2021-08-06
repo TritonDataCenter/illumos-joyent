@@ -140,8 +140,7 @@ create chaincmd 1030 chars allot
 
 \
 \ Platform-image selection for standalone SmartOS is mostly in pi.rc.
-\ We steal a boot environment routine too in pi_draw_screen (way below).
-  
+\ We will also steal a boot environment routine in pi_draw_screen (way below).
 
 : init_pi ( -- )
 	s" bootpi" getenv? 0= if
