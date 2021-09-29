@@ -60,7 +60,7 @@ case "\$1" in
 EOF
 
 # Populate resolv.conf setup files IFF we have resolvers information.
-resolvers=`zone_attr resolvers`
+resolvers=$(zone_attr resolvers)
 if [ -n "$resolvers" ]; then
 
     echo "# AUTOMATIC ZONE CONFIG" > $tmpfile
@@ -68,7 +68,7 @@ if [ -n "$resolvers" ]; then
         echo "nameserver $r"
     done >> $tmpfile
     IFS=$_IFS
-    domain=`zone_attr dns-domain`
+    domain=$(zone_attr dns-domain)
     [ -n "$domain" ] && echo "search $domain" >> $tmpfile
 
     if [ -f $ZONEROOT/etc/systemd/resolved.conf ]; then
