@@ -11,7 +11,7 @@
 #
 
 #
-# Copyright 2015 Joyent, Inc.
+# Copyright 2021 Joyent, Inc.
 # Copyright 2016 OmniTI Computer Consulting, Inc. All rights reserved.
 #
 
