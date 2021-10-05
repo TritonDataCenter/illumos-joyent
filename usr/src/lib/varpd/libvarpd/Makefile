@@ -40,9 +40,9 @@ install :=	TARGET = install
 
 all clean clobber: $(SUBDIRS)
 
-install: 	$(SUBDIRS) $(VARPD_MAPFILES) install_h
+install:	$(SUBDIRS) $(VARPD_MAPFILES) install_h
 
-install_h: 	$(ROOTHDRS)
+install_h:	$(ROOTHDRS)
 
 check:		$(CHECKHDRS) $(TYPECHECK)
 
