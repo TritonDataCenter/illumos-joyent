@@ -298,7 +298,7 @@ zerror(zlog_t *zlogp, boolean_t use_strerror, const char *fmt, ...)
 static void
 strnappend(char *dest, size_t destsize, const char *src)
 {
-	size_t startpoint = strlen(dest);
+	size_t startpoint = strnlen(dest, destsize);
 
 	if (startpoint >= destsize - 1) {
 		/* We've run out of room.  Record something?! */
