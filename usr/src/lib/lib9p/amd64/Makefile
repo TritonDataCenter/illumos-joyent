@@ -10,27 +10,10 @@
 #
 
 #
-# Copyright 2021 Joyent, Inc.
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 #
 
-LIBRARY =	libvarpd_direct.a
-VERS =		.1
-OBJECTS =	libvarpd_direct.o
+include ../Makefile.com
+include ../../Makefile.lib.64
 
-include ../../../Makefile.lib
-include ../../Makefile.plugin
-
-LIBS =		$(DYNLIB)
-LDLIBS +=	-lc -lumem -lnvpair
-CPPFLAGS +=	-I../common
-
-C99MODE=	-xc99=%all
-C99LMODE=	-Xc99=%all
-
-SRCDIR =	../common
-
-.KEEP_STATE:
-
-all:	$(LIBS)
-
-include ../../../Makefile.targ
+install: all $(ROOTLIBS64) $(ROOTLINKS64)

@@ -10,27 +10,32 @@
 #
 
 #
-# Copyright 2021 Joyent, Inc.
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 #
 
-LIBRARY =	libvarpd_direct.a
-VERS =		.1
-OBJECTS =	libvarpd_direct.o
+include ../Makefile.lib
 
-include ../../../Makefile.lib
-include ../../Makefile.plugin
+$(BUILD64)SUBDIRS += $(MACH64)
 
-LIBS =		$(DYNLIB)
-LDLIBS +=	-lc -lumem -lnvpair
-CPPFLAGS +=	-I../common
+HDRS =		lib9p.h
+HDRDIR =	common
+CHECKHDRS =
 
-C99MODE=	-xc99=%all
-C99LMODE=	-Xc99=%all
-
-SRCDIR =	../common
+all:=		TARGET= all
+install:=	TARGET= install
+clean:=		TARGET= clean
+clobber:=	TARGET= clobber
 
 .KEEP_STATE:
 
-all:	$(LIBS)
+all install clean clobber: $(SUBDIRS)
 
-include ../../../Makefile.targ
+install_h:	$(ROOTHDRS)
+check:		$(CHECKHDRS)
+
+$(SUBDIRS): FRC
+	cd $@; pwd; $(MAKE) $(TARGET)
+
+FRC:
+
+include ../Makefile.targ
