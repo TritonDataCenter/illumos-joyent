@@ -1286,6 +1286,8 @@ extern const char *cpuid_getsocketstr(struct cpu *);
 
 extern int cpuid_opteron_erratum(struct cpu *, uint_t);
 
+extern uint32_t cpuid_get_ucode_rev(struct cpu *);
+
 struct cpuid_info;
 
 extern void setx86isalist(void);
