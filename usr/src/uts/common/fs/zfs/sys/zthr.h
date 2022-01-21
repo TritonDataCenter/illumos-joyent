@@ -35,5 +35,6 @@ extern void zthr_cancel(zthr_t *t);
 extern void zthr_resume(zthr_t *t);
 
 extern boolean_t zthr_iscancelled(zthr_t *t);
+extern boolean_t zthr_iscurthread(zthr_t *t);
 
 #endif /* _SYS_ZTHR_H */
