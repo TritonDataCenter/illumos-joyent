@@ -324,6 +324,8 @@ static zthr_t		*arc_reap_zthr;
  * arc_evict(), which improves arc_is_overflowing().
  */
 static zthr_t		*arc_evict_zthr;
+static arc_buf_hdr_t **arc_state_evict_markers;
+static int arc_state_evict_marker_count;
 
 static kmutex_t		arc_evict_lock;
 static kcondvar_t	arc_evict_waiters_cv;
@@ -4008,6 +4010,38 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 }
 
 /*
+ * Allocate an array of buffer headers used as placeholders during arc state
+ * eviction.
+ */
+static arc_buf_hdr_t **
+arc_state_alloc_markers(int count)
+{
+	arc_buf_hdr_t **markers;
+
+	markers = kmem_zalloc(sizeof (*markers) * count, KM_SLEEP);
+	for (int i = 0; i < count; i++) {
+		markers[i] = kmem_cache_alloc(hdr_full_cache, KM_SLEEP);
+
+		/*
+		 * A b_spa of 0 is used to indicate that this header is
+		 * a marker. This fact is used in arc_evict_type() and
+		 * arc_evict_state_impl().
+		 */
+		markers[i]->b_spa = 0;
+
+	}
+	return (markers);
+}
+
+static void
+arc_state_free_markers(arc_buf_hdr_t **markers, int count)
+{
+	for (int i = 0; i < count; i++)
+		kmem_cache_free(hdr_full_cache, markers[i]);
+	kmem_free(markers, sizeof (*markers) * count);
+}
+
+/*
  * Evict buffers from the given arc state, until we've removed the
  * specified number of bytes. Move the removed buffers to the
  * appropriate evict state.
@@ -4038,17 +4072,13 @@ arc_evict_state(arc_state_t *state, uint64_t spa, uint64_t bytes,
 	 * pick up where we left off for each individual sublist, rather
 	 * than starting from the tail each time.
 	 */
-	markers = kmem_zalloc(sizeof (*markers) * num_sublists, KM_SLEEP);
+	if (zthr_iscurthread(arc_evict_zthr)) {
+		markers = arc_state_evict_markers;
+		ASSERT3S(num_sublists, <=, arc_state_evict_marker_count);
+	} else {
+		markers = arc_state_alloc_markers(num_sublists);
+	}
 	for (int i = 0; i < num_sublists; i++) {
-		markers[i] = kmem_cache_alloc(hdr_full_cache, KM_SLEEP);
-
-		/*
-		 * A b_spa of 0 is used to indicate that this header is
-		 * a marker. This fact is used in arc_evict_type() and
-		 * arc_evict_state_impl().
-		 */
-		markers[i]->b_spa = 0;
-
 		multilist_sublist_t *mls = multilist_sublist_lock(ml, i);
 		multilist_sublist_insert_tail(mls, markers[i]);
 		multilist_sublist_unlock(mls);
@@ -4117,10 +4147,9 @@ arc_evict_state(arc_state_t *state, uint64_t spa, uint64_t bytes,
 		multilist_sublist_t *mls = multilist_sublist_lock(ml, i);
 		multilist_sublist_remove(mls, markers[i]);
 		multilist_sublist_unlock(mls);
-
-		kmem_cache_free(hdr_full_cache, markers[i]);
 	}
-	kmem_free(markers, sizeof (*markers) * num_sublists);
+	if (markers != arc_state_evict_markers)
+		arc_state_free_markers(markers, num_sublists);
 
 	return (total_evicted);
 }
@@ -6958,6 +6987,15 @@ arc_state_multilist_index_func(multilist_t *ml, void *obj)
 }
 
 static void
+arc_state_multilist_init(multilist_t *ml,
+    multilist_sublist_index_func_t *index_func, int *maxcountp)
+{
+	multilist_create(ml, sizeof (arc_buf_hdr_t),
+	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node), index_func);
+	*maxcountp = MAX(*maxcountp, multilist_get_num_sublists(ml));
+}
+
+static void
 arc_state_init(void)
 {
 	multilist_create(&arc_mru->arcs_list[ARC_BUFC_METADATA],
@@ -7206,6 +7244,8 @@ arc_init(void)
 		kstat_install(arc_ksp);
 	}
 
+	arc_state_evict_markers =
+	    arc_state_alloc_markers(arc_state_evict_marker_count);
 	arc_evict_zthr = zthr_create(arc_evict_cb_check,
 	    arc_evict_cb, NULL);
 	arc_reap_zthr = zthr_create_timer(arc_reap_cb_check,
@@ -7248,6 +7288,8 @@ arc_fini(void)
 
 	(void) zthr_cancel(arc_reap_zthr);
 	zthr_destroy(arc_reap_zthr);
+	arc_state_free_markers(arc_state_evict_markers,
+	    arc_state_evict_marker_count);
 
 	mutex_destroy(&arc_evict_lock);
 	cv_destroy(&arc_evict_waiters_cv);
