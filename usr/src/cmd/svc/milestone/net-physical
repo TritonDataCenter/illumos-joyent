@@ -398,7 +398,7 @@ function setup_mtu
 #
 # Set up resolvers, if we can
 #
-function conigure_resolv_conf
+function configure_resolv_conf
 {
     if [[ ${RESOLV_CONF_DONE} == true ]]; then
         return
@@ -731,7 +731,7 @@ if smf_is_globalzone; then
         done
 
         # All vnics are done. If the config has admin_ip=none, then we won't
-        # have resolvers set up yet, so try agian here.
+        # have resolvers set up yet, so try again here.
         configure_resolv_conf
     fi
 else
