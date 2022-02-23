@@ -145,11 +145,13 @@ _MANFILES=	aac.4d		\
 		virtualkm.4d	\
 		vni.4d		\
 		vr.4d		\
+		vnd.4d		\
 		wscons.4d	\
 		xge.4d		\
 		yge.4d		\
 		zcons.4d	\
-		zero.4d
+		zero.4d		\
+		zfd.4d
 
 sparc_MANFILES=	audiocs.4d	\
 		bbc_beep.4d	\

@@ -510,7 +510,10 @@ _MANFILES=	6to4relay.8		\
 		uucleanup.8		\
 		uusched.8		\
 		uuxqt.8			\
+		vfsstat.8		\
 		vmstat.8		\
+		vndadm.8		\
+		vndstat.8		\
 		volcopy.8		\
 		volcopy_ufs.8		\
 		vscanadm.8		\
