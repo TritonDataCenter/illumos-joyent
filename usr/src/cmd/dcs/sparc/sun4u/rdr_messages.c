@@ -31,8 +31,8 @@
  *
  *	Project	    Location
  *	-------	    --------
- *	Solaris	    usr/src/cmd/dcs/sparc/sun4u/%M%
- *	SMS	    src/sms/lib/librdr/%M%
+ *	Solaris	    usr/src/cmd/dcs/sparc/sun4u/rdr_messages.c
+ *	SMS	    src/sms/lib/librdr/rdr_messages.c
  *
  * In order for proper communication to occur,  the files in the
  * above locations must match exactly. Any changes that are made

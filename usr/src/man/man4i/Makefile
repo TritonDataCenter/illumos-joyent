@@ -41,9 +41,9 @@ MANFILES=	audio.4i	\
 		visual_io.4i	\
 		vt.4i
 
-MANLINKS=	uccid.7i
+MANLINKS=	uccid.4i
 
-uccid.7i	:= LINKSRC = ../man7d/ccid.7d
+uccid.7i	:= LINKSRC = ../man4d/ccid.4d
 
 .KEEP_STATE:
 
