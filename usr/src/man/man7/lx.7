@@ -12,7 +12,7 @@
 .\" Copyright 2016, Joyent, Inc.
 .\"
 .Dd February 5, 2106
-.Dt LX 5
+.Dt LX 7
 .Os
 .Sh NAME
 .Nm lx
@@ -22,7 +22,7 @@ The
 .Em lx
 brand
 uses the
-.Xr brands 5
+.Xr brands 7
 framework to provide an environment for running binary applications built
 for GNU/Linux.
 User-level code, including an entire Linux distribution, can run inside the
@@ -48,7 +48,7 @@ That is, within the zone there is no way to increase the resource limits set on
 the zone itself.
 .Pp
 The zone must be installed using a clone of a
-.Xr zfs 1m
+.Xr zfs 8
 dataset which contains an image of the software to be run in the zone.
 .Pp
 Example:
@@ -59,7 +59,7 @@ within the zone under the
 .Em /native
 mount point.
 This allows the use of various native tools such as
-.Xr dtrace 1m ,
+.Xr dtrace 8 ,
 .Xr mdb 1 ,
 or the
 .Xr proc 1
@@ -71,7 +71,7 @@ zone.
 The
 .Em kernel-version
 attribute can be included in the zone's
-.Xr zonecfg 1m
+.Xr zonecfg 8
 settings as a way to specify the Linux version that the zone is emulating.
 For example, the value could be
 .Em 3.13.0 .
@@ -103,11 +103,11 @@ privileges.
 .Sh SEE ALSO
 .Xr mdb 1 ,
 .Xr proc 1 ,
-.Xr dtrace 1m ,
-.Xr zfs 1m ,
-.Xr zoneadm 1m ,
-.Xr zonecfg 1m ,
-.Xr brands 5 ,
-.Xr privileges 5 ,
-.Xr resource_controls 5 ,
-.Xr zones 5
+.Xr brands 7 ,
+.Xr privileges 7 ,
+.Xr resource_controls 7 ,
+.Xr zones 7 ,
+.Xr dtrace 8 ,
+.Xr zfs 8 ,
+.Xr zoneadm 8 ,
+.Xr zonecfg 8

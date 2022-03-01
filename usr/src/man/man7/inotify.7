@@ -8,7 +8,7 @@
 .\"  A full copy of the text of the CDDL should have accompanied this
 .\"  source.  A copy of the CDDL is also available via the Internet at
 .\"  http://www.illumos.org/license/CDDL.
-.TH INOTIFY 5 "Sep 17, 2014"
+.TH INOTIFY 7 "Sep 17, 2014"
 .SH NAME
 inotify \- Linux-compatible file event notification facility
 .SH SYNOPSIS
@@ -252,7 +252,7 @@ The filesystem containing the watched entity was unmounted.
 .LP
 
 \fBinotify\fR instances can be monitored via \fBpoll\fR(2), 
-\fBport_get\fR(3C), \fBepoll\fR(5), etc.
+\fBport_get\fR(3C), \fBepoll\fR(7), etc.
 
 The event queue associated with an \fBinotify\fR instance is serialized
 and ordered: events will be placed on the tail of the queue in the order
@@ -302,4 +302,4 @@ that contain files with multiple hard links in the same directory.
 .sp
 .LP
 \fBinotify_init\fR(3C), \fBinotify_init1\fR(3C), \fBinotify_add_watch\fR(3C),
-\fBinotify_rm_watch\fR(3C), \fBport_get\fR(3C), \fBepoll\fR(5)
+\fBinotify_rm_watch\fR(3C), \fBport_get\fR(3C), \fBepoll\fR(7)
