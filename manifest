@@ -19350,7 +19350,7 @@ s usr/share/man/man7/SVID.7=standards.7
 s usr/share/man/man7/SVID3.7=standards.7
 s usr/share/man/man7/XNS.7=standards.7
 s usr/share/man/man7/XNS4.7=standards.7
-s usr/share/man/man7/XNS7.7=standards.7
+s usr/share/man/man7/XNS5.7=standards.7
 s usr/share/man/man7/XPG.7=standards.7
 s usr/share/man/man7/XPG3.7=standards.7
 s usr/share/man/man7/XPG4.7=standards.7
@@ -19376,10 +19376,10 @@ f usr/share/man/man7/color.4th.7 0444 root bin
 s usr/share/man/man7/compile.7=regexp.7
 f usr/share/man/man7/condition.7 0444 root bin
 f usr/share/man/man7/crypt_bsdbf.7 0444 root bin
-f usr/share/man/man7/crypt_bsdmd7.7 0444 root bin
-f usr/share/man/man7/crypt_sha276.7 0444 root bin
-f usr/share/man/man7/crypt_sha712.7 0444 root bin
-f usr/share/man/man7/crypt_sunmd7.7 0444 root bin
+f usr/share/man/man7/crypt_bsdmd5.7 0444 root bin
+f usr/share/man/man7/crypt_sha256.7 0444 root bin
+f usr/share/man/man7/crypt_sha512.7 0444 root bin
+f usr/share/man/man7/crypt_sunmd5.7 0444 root bin
 f usr/share/man/man7/crypt_unix.7 0444 root bin
 f usr/share/man/man7/delay.4th.7 0444 root bin
 f usr/share/man/man7/device_clean.7 0444 root bin
@@ -19408,8 +19408,8 @@ f usr/share/man/man7/ipfilter.7 0444 root bin
 f usr/share/man/man7/isalist.7 0444 root bin
 f usr/share/man/man7/isoboot.7 0444 root bin
 f usr/share/man/man7/kerberos.7 0444 root bin
-f usr/share/man/man7/krb7_auth_rules.7 0444 root bin
-f usr/share/man/man7/krb7envvar.7 0444 root bin
+f usr/share/man/man7/krb5_auth_rules.7 0444 root bin
+f usr/share/man/man7/krb5envvar.7 0444 root bin
 f usr/share/man/man7/largefile.7 0444 root bin
 f usr/share/man/man7/lf64.7 0444 root bin
 f usr/share/man/man7/lfcompile.7 0444 root bin
@@ -19439,8 +19439,8 @@ f usr/share/man/man7/pam_authtok_store.7 0444 root bin
 f usr/share/man/man7/pam_deny.7 0444 root bin
 f usr/share/man/man7/pam_dhkeys.7 0444 root bin
 f usr/share/man/man7/pam_dial_auth.7 0444 root bin
-f usr/share/man/man7/pam_krb7.7 0444 root bin
-f usr/share/man/man7/pam_krb7_migrate.7 0444 root bin
+f usr/share/man/man7/pam_krb5.7 0444 root bin
+f usr/share/man/man7/pam_krb5_migrate.7 0444 root bin
 f usr/share/man/man7/pam_ldap.7 0444 root bin
 f usr/share/man/man7/pam_list.7 0444 root bin
 f usr/share/man/man7/pam_passwd_auth.7 0444 root bin
