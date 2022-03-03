@@ -12,7 +12,7 @@
 .\" Copyright 2017, Joyent, Inc.
 .\"
 .Dd Aug 14, 2017
-.Dt SWAP 7
+.Dt SWAP 4
 .Os
 .Sh NAME
 .Nm swap
@@ -56,14 +56,14 @@ until it is used, so the error handling when space is not available can be
 complex or problematic on those systems.
 .Pp
 The
-.Xr vmstat 1m
+.Xr vmstat 8
 command can be used to monitor swap and paging activity.
 The
 .Xr pmap 1
 command can be used to inspect all of the mappings in a process address space,
 and their backing objects.
 The
-.Xr swap 1m
+.Xr swap 8
 command can be used to monitor, add and remove swap space.
 .Pp
 The operating system provides the
@@ -76,7 +76,7 @@ setting for a zone.
 See the
 .Xr prctl 1
 and
-.Xr zonecfg 1m
+.Xr zonecfg 8
 man pages for information on setting this limit.
 The zone's usage against this resource control can be seen using the
 .Ql swapresv_zone_{zoneid}
@@ -84,9 +84,9 @@ kstat.
 .Sh SEE ALSO
 .Xr pmap 1 ,
 .Xr prctl 1 ,
-.Xr kstat 1m ,
-.Xr swap 1m ,
-.Xr vmstat 1m ,
-.Xr zonecfg 1m ,
 .Xr sbrk 2 ,
-.Xr resource_controls 5
+.Xr resource_controls 5 ,
+.Xr kstat 8 ,
+.Xr swap 8 ,
+.Xr vmstat 8 ,
+.Xr zonecfg 8
