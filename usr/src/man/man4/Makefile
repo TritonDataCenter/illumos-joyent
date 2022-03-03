@@ -21,7 +21,8 @@ MANSECT= 	4
 MANFILES= 	FSS.4	\
 		Intro.4	\
 		cpr.4	\
-		ibmf.4
+		ibmf.4 \
+		swap.4
 
 MANLINKS=	intro.4
 
