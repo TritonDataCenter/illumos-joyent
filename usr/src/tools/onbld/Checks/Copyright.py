@@ -26,6 +26,7 @@
 
 # Copyright 2008, 2010, Richard Lowe
 # Copyright 2019 Joyent, Inc.
+# Copyright 2022 MNX Cloud, Inc.
 
 # Make sure there is a copyright claim for the current year.
 
@@ -38,7 +39,7 @@ def is_copyright(line):
 	return re.search(r'Copyright (?!\[yyyy\])', line)
 
 def is_current_copyright(line):
-	return re.search(r'Copyright %s Joyent, Inc.$' % time.strftime('%Y'), line)
+	return re.search(r'Copyright %s MNX Cloud, Inc.$' % time.strftime('%Y'), line)
 
 def copyright(fh, filename=None, output=sys.stderr):
 	ret = rights = goodrights = 0
