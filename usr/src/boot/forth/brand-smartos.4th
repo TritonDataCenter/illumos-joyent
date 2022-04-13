@@ -27,12 +27,12 @@
 	0 1 1 0 0 s" /boot/triton-logo.png" fb-putimage if 2drop exit then
 
 	s"                                           " brand+
-	s" ####### #####  # #######   ###   #    #   " brand+
-	s"    #    #      #    #     #   #  ##   #   " brand+
-	s"    #    #      #    #    #     # # #  #   " brand+
-	s"    #    #      #    #    #     # #  # #   " brand+
-	s"    #    #      #    #     #   #  #   ##   " brand+
-	s"    #    #      #    #      ###   #    # TM" brand+
+	s" #####  ####   #  #####   ###   #   #      " brand+
+	s"   #    #   #  #    #    #   #  ##  #      " brand+
+	s"   #    ####   #    #    #   #  # # #      " brand+
+	s"   #    # #    #    #    #   #  #  ##      " brand+
+	s"   #    #  #   #    #    #   #  #  ##      " brand+
+	s"   #    #   #  #    #     ###   #   # TM   " brand+
 
 	2drop
 ;

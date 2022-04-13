@@ -58,7 +58,7 @@ def copyright(fh, filename=None, output=sys.stderr):
 		err(output, "no copyright message found", filename)
 		ret = 1
 	elif goodrights == 0:
-		err(output, "'Copyright %s Joyent, Inc.' not found" %
+		err(output, "'Copyright %s MNX Cloud, Inc.' not found" %
 		    time.strftime('%Y'), filename)
 		ret = 1
 
