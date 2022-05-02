@@ -1,6 +1,0 @@
-$AWK: syntax error at source line 3
- context is
-	{ >>> 
- <<< 
-$AWK: illegal statement at source line 3
-	missing }

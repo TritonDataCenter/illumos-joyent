@@ -1,4 +1,0 @@
-$AWK: f is a function, not an array at source line 5 in function f source file delfunc.awk
- context is
-		delete f >>> 
- <<< 

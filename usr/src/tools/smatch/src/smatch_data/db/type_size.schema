@@ -1,1 +1,0 @@
-CREATE TABLE type_size (type varchar(80), size integer);

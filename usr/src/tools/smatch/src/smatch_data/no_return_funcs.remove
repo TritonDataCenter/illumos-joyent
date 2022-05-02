@@ -1,5 +1,0 @@
-main
-reserve_bootmem
-reserve_bootmem_node
-smp_reboot_interrupt
-xfs_fs_alloc_inode

@@ -1,1 +1,0 @@
-CREATE TABLE type_value (type varchar(80), value varchar(80));

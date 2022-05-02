@@ -1,1 +1,0 @@
-CREATE TABLE local_values (file varchar(128), variable varchar(64), value varchar(256));

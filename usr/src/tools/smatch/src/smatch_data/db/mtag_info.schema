@@ -1,1 +1,0 @@
-CREATE TABLE mtag_info (file varchar(80), tag big int, type integer, value varchar(80));

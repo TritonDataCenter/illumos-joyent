@@ -1,3 +1,0 @@
-$AWK: `foo' is both function name and argument name at source line 5 source file funsmnam.awk
- context is
-	 >>> } <<< 

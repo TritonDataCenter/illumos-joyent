@@ -1,3 +1,0 @@
-#
-# You should specify -ascii option to get the correct table!
-#
