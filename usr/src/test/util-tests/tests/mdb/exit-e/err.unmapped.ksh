@@ -1,1 +1,0 @@
-$MDB -e '0x0/v 0x02' /bin/ls

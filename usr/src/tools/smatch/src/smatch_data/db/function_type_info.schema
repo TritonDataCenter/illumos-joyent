@@ -1,1 +1,0 @@
-CREATE TABLE function_type_info (file varchar(128), function varchar(80), type integer, struct varchar(80), member varchar(80), value varchar(80));
