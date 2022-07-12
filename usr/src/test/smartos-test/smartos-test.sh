@@ -13,6 +13,7 @@
 
 #
 # Copyright 2020 Joyent, Inc.
+# Copyright 2022 MNX Cloud, Inc.
 #
 
 #
@@ -202,7 +203,7 @@ function setup_pkgsrc {
     # We should always use the same pkgsrc version as we have installed
     # on the build machine in case any of our tests link against libraries
     # in /opt/local
-    PKGSRC_STEM="https://pkgsrc.joyent.com/packages/SmartOS/bootstrap"
+    PKGSRC_STEM="https://pkgsrc.smartos.org/packages/SmartOS/bootstrap"
     BOOTSTRAP_TAR="bootstrap-2018Q4-tools.tar.gz"
     BOOTSTRAP_SHA="b599667c80e4a42157763ed25d868ec7dc34962d"
 
