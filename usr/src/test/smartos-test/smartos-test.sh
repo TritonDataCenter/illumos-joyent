@@ -30,7 +30,7 @@ export SMARTOS_TEST_PKGS="
     python27
     sudo
     coreutils
-    gcc7
+    gcc10
     gmake
 "
 
