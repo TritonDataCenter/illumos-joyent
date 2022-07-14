@@ -296,7 +296,7 @@ EOF
 function execute_tests {
 
     log "Starting test runs"
-    log_test bhyvetest /opt/bhyve-test/bin/bhyvetest
+    log_test bhyvetest /opt/bhyve-tests/bin/bhyvetest
     log_testrunner crypto-tests /opt/crypto-tests/runfiles/default.run
     log_testrunner elf-tests /opt/elf-tests/runfiles/default.run
     log_testrunner libc-tests /opt/libc-tests/runfiles/default.run
