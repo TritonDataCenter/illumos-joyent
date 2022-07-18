@@ -228,6 +228,25 @@ i40e_m_promisc(void *arg, boolean_t on)
 	}
 
 
+#if 1
+	/*
+	 * XXX KEBE SAYS try this from Linux...
+	 *
+	 * Their comment says:
+	 *
+	 * set defport ON for Main VSI instead of true promisc
+	 * this way we will get all unicast/multicast and VLAN
+	 * promisc behavior but will not get VF or VMDq traffic
+	 * replicated on the Main VSI.
+	 */
+
+	ret = on ? i40e_aq_set_default_vsi(hw, I40E_DEF_VSI_SEID(i40e), NULL) :
+	    i40e_aq_clear_default_vsi(hw, I40E_DEF_VSI_SEID(i40e), NULL);
+	if (ret == I40E_SUCCESS)
+		i40e->i40e_promisc_on = on;
+	else
+		err = EIO;
+#else
 	ret = i40e_aq_set_vsi_unicast_promiscuous(hw, I40E_DEF_VSI_SEID(i40e),
 	    on, NULL, B_FALSE);
 	if (ret != I40E_SUCCESS) {
@@ -271,6 +290,7 @@ i40e_m_promisc(void *arg, boolean_t on)
 	} else {
 		i40e->i40e_promisc_on = on;
 	}
+#endif
 
 done:
 	mutex_exit(&i40e->i40e_general_lock);
