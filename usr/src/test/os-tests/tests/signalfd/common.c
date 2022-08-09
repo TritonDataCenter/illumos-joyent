@@ -17,6 +17,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "common.h"
+
 void
 test_fail(const char *fmt, ...)
 {
@@ -35,4 +37,22 @@ test_pass(void)
 {
 	errx(EXIT_SUCCESS, "TEST PASSED");
 	/* NOTREATCHED */
+}
+
+int
+test_basic_prep(int sigfd_flags)
+{
+	sigset_t mask;
+
+	assert(sigemptyset(&mask) == 0);
+	assert(sigaddset(&mask, SIGUSR1) == 0);
+	assert(sigaddset(&mask, SIGUSR2) == 0);
+	assert(sigaddset(&mask, SIGALRM) == 0);
+
+	int fd = signalfd(-1, &mask, sigfd_flags);
+	assert(fd >= 0);
+
+	assert(sigprocmask(SIG_BLOCK, &mask, NULL) == 0);
+
+	return (fd);
 }
