@@ -284,7 +284,7 @@ EOF
 function zfs_test_check {
     # DISKS is set either in our environment, or in the .profile of ~ztest.
     zprofile=/zones/global/ztest/.profile
-    zdisksvar=$(su - ztest -c 'echo $DISKS')
+    zdisksvar=$(su - ztest -c 'echo $DISKS' | tail -1)
 
     # Check for KEEP too.
     grep -q ^KEEP= $zprofile || \
@@ -309,7 +309,7 @@ function zfs_test_check {
     fi
 
     # OKAY, now we can run it!
-    log_test zfstest su - ztest -c /opt/zfs-test/bin/zfstest
+    log_test zfstest su - ztest -c /opt/zfs-tests/bin/zfstest
 }
 
 #
