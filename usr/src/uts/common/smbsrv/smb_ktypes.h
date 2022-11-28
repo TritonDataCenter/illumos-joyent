@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2011-2020 Tintri by DDN, Inc.  All rights reserved.
+ * Copyright 2011-2022 Tintri by DDN, Inc.  All rights reserved.
  * Copyright 2022 RackTop Systems, Inc.
  */
 
@@ -1227,6 +1227,7 @@ typedef struct smb_tree {
 #define	SMB_ODIR_FLAG_CATIA		0x0010
 #define	SMB_ODIR_FLAG_ABE		0x0020
 #define	SMB_ODIR_FLAG_SHORTNAMES	0x0040
+#define	SMB_ODIR_FLAG_RESTRICTED	0x0080
 
 typedef enum {
 	SMB_ODIR_STATE_OPEN = 0,
@@ -1416,6 +1417,7 @@ typedef struct smb_ofile {
 	cred_t			*f_cr;
 	pid_t			f_pid;
 	smb_attr_t		f_pending_attr;
+	boolean_t		f_written;
 	smb_oplock_grant_t	f_oplock;
 	boolean_t		f_oplock_closing;
 	uint8_t			TargetOplockKey[SMB_LEASE_KEY_SZ];

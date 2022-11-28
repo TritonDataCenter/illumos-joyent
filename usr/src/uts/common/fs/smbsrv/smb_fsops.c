@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2012-2021 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2012-2022 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 #include <sys/sid.h>
@@ -885,7 +886,12 @@ smb_fsop_remove_streams(smb_request_t *sr, cred_t *cr, smb_node_t *fnode)
 	if (SMB_TREE_SUPPORTS_CATIA(sr))
 		flags |= SMB_CATIA;
 
-	status = smb_odir_openat(sr, fnode, &od);
+	/*
+	 * NB: There aren't currently any restricted streams that could be
+	 * removed by this function. If there ever are, be careful to exclude
+	 * any restricted streams that we DON'T want to remove.
+	 */
+	status = smb_odir_openat(sr, fnode, &od, B_FALSE);
 	switch (status) {
 	case 0:
 		break;
@@ -2335,6 +2341,11 @@ smb_fsop_aclwrite(smb_request_t *sr, cred_t *cr, smb_node_t *snode,
 			flags = ATTR_NOACLCHECK;
 
 		error = smb_vop_acl_write(snode->vp, acl, flags, cr);
+		if (error == 0 && snode->n_dnode != NULL) {
+			// FILE_NOTIFY_CHANGE_SECURITY
+			smb_node_notify_change(snode->n_dnode,
+			    FILE_ACTION_MODIFIED, snode->od_name);
+		}
 	}
 
 	if (dacl && sacl)

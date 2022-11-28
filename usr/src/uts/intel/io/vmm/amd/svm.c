@@ -355,6 +355,9 @@ vmcb_init(struct svm_softc *sc, int vcpu, uint64_t iopm_base_pa,
 	svm_enable_intercept(sc, vcpu, VMCB_CTRL1_INTCPT,
 	    VMCB_INTCPT_FERR_FREEZE);
 
+	/* Enable exit-on-hlt by default */
+	svm_enable_intercept(sc, vcpu, VMCB_CTRL1_INTCPT, VMCB_INTCPT_HLT);
+
 	svm_enable_intercept(sc, vcpu, VMCB_CTRL2_INTCPT, VMCB_INTCPT_MONITOR);
 	svm_enable_intercept(sc, vcpu, VMCB_CTRL2_INTCPT, VMCB_INTCPT_MWAIT);
 
@@ -375,6 +378,10 @@ vmcb_init(struct svm_softc *sc, int vcpu, uint64_t iopm_base_pa,
 	svm_enable_intercept(sc, vcpu, VMCB_CTRL2_INTCPT, VMCB_INTCPT_STGI);
 	svm_enable_intercept(sc, vcpu, VMCB_CTRL2_INTCPT, VMCB_INTCPT_CLGI);
 	svm_enable_intercept(sc, vcpu, VMCB_CTRL2_INTCPT, VMCB_INTCPT_SKINIT);
+	if (vcpu_trap_wbinvd(sc->vm, vcpu) != 0) {
+		svm_enable_intercept(sc, vcpu, VMCB_CTRL2_INTCPT,
+		    VMCB_INTCPT_WBINVD);
+	}
 
 	/*
 	 * The ASID will be set to a non-zero value just before VMRUN.
@@ -1445,7 +1452,6 @@ svm_vmexit(struct svm_softc *svm_sc, int vcpu, struct vm_exit *vmexit)
 		(void) vm_suspend(svm_sc->vm, VM_SUSPEND_TRIPLEFAULT);
 		handled = 1;
 		break;
-	case VMCB_EXIT_INVD:
 	case VMCB_EXIT_INVLPGA:
 		/* privileged invalidation instructions */
 		vm_inject_ud(svm_sc->vm, vcpu);
@@ -1459,6 +1465,11 @@ svm_vmexit(struct svm_softc *svm_sc, int vcpu, struct vm_exit *vmexit)
 	case VMCB_EXIT_SKINIT:
 		/* privileged vmm instructions */
 		vm_inject_ud(svm_sc->vm, vcpu);
+		handled = 1;
+		break;
+	case VMCB_EXIT_INVD:
+	case VMCB_EXIT_WBINVD:
+		/* ignore exit */
 		handled = 1;
 		break;
 	case VMCB_EXIT_VMMCALL:

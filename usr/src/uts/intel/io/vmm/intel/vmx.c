@@ -98,10 +98,16 @@ __FBSDID("$FreeBSD$");
 	(PROCBASED_INT_WINDOW_EXITING	|				\
 	PROCBASED_NMI_WINDOW_EXITING)
 
-/* We consider TSC offset a necessity for unsynched TSC handling */
+/*
+ * Distinct from FreeBSD bhyve, we consider several additional proc-based
+ * controls necessary:
+ * - TSC offsetting
+ * - HLT exiting
+ */
 #define	PROCBASED_CTLS_ONE_SETTING					\
 	(PROCBASED_SECONDARY_CONTROLS	|				\
 	PROCBASED_TSC_OFFSET		|				\
+	PROCBASED_HLT_EXITING		|				\
 	PROCBASED_MWAIT_EXITING		|				\
 	PROCBASED_MONITOR_EXITING	|				\
 	PROCBASED_IO_EXITING		|				\
@@ -179,11 +185,11 @@ static int vmx_initialized;
  * Optional capabilities
  */
 
-/* HLT triggers a VM-exit */
-static int cap_halt_exit;
-
 /* PAUSE triggers a VM-exit */
 static int cap_pause_exit;
+
+/* WBINVD triggers a VM-exit */
+static int cap_wbinvd_exit;
 
 /* Monitor trap flag */
 static int cap_monitor_trap;
@@ -474,7 +480,10 @@ vmx_init(void)
 		return (error);
 	}
 
-	/* Clear the processor-based ctl bits that are set on demand */
+	/*
+	 * Clear interrupt-window/NMI-window exiting from the default proc-based
+	 * controls. They are set and cleared based on runtime vCPU events.
+	 */
 	procbased_ctls &= ~PROCBASED_CTLS_WINDOW_SETTING;
 
 	/* Check support for secondary processor-based VM-execution controls */
@@ -532,11 +541,6 @@ vmx_init(void)
 	 * Check support for optional features by testing them
 	 * as individual bits
 	 */
-	cap_halt_exit = (vmx_set_ctlreg(MSR_VMX_PROCBASED_CTLS,
-	    MSR_VMX_TRUE_PROCBASED_CTLS,
-	    PROCBASED_HLT_EXITING, 0,
-	    &tmp) == 0);
-
 	cap_monitor_trap = (vmx_set_ctlreg(MSR_VMX_PROCBASED_CTLS,
 	    MSR_VMX_PROCBASED_CTLS,
 	    PROCBASED_MTF, 0,
@@ -545,6 +549,11 @@ vmx_init(void)
 	cap_pause_exit = (vmx_set_ctlreg(MSR_VMX_PROCBASED_CTLS,
 	    MSR_VMX_TRUE_PROCBASED_CTLS,
 	    PROCBASED_PAUSE_EXITING, 0,
+	    &tmp) == 0);
+
+	cap_wbinvd_exit = (vmx_set_ctlreg(MSR_VMX_PROCBASED_CTLS2,
+	    MSR_VMX_PROCBASED_CTLS2,
+	    PROCBASED2_WBINVD_EXITING, 0,
 	    &tmp) == 0);
 
 	cap_invpcid = (vmx_set_ctlreg(MSR_VMX_PROCBASED_CTLS2,
@@ -748,6 +757,21 @@ vmx_vminit(struct vm *vm)
 		pin_ctls |= PINBASED_POSTED_INTERRUPT;
 	}
 
+	/* Reflect any enabled defaults in the cap set */
+	int cap_defaults = 0;
+	if ((proc_ctls & PROCBASED_HLT_EXITING) != 0) {
+		cap_defaults |= (1 << VM_CAP_HALT_EXIT);
+	}
+	if ((proc_ctls & PROCBASED_PAUSE_EXITING) != 0) {
+		cap_defaults |= (1 << VM_CAP_PAUSE_EXIT);
+	}
+	if ((proc_ctls & PROCBASED_MTF) != 0) {
+		cap_defaults |= (1 << VM_CAP_MTRAP_EXIT);
+	}
+	if ((proc2_ctls & PROCBASED2_ENABLE_INVPCID) != 0) {
+		cap_defaults |= (1 << VM_CAP_ENABLE_INVPCID);
+	}
+
 	maxcpus = vm_get_maxcpus(vm);
 	datasel = vmm_get_host_datasel();
 	for (i = 0; i < maxcpus; i++) {
@@ -803,7 +827,12 @@ vmx_vminit(struct vm *vm)
 		vmcs_write(VMCS_EPTP, vmx->eptp);
 		vmcs_write(VMCS_PIN_BASED_CTLS, pin_ctls);
 		vmcs_write(VMCS_PRI_PROC_BASED_CTLS, proc_ctls);
-		vmcs_write(VMCS_SEC_PROC_BASED_CTLS, proc2_ctls);
+
+		uint32_t use_proc2_ctls = proc2_ctls;
+		if (cap_wbinvd_exit && vcpu_trap_wbinvd(vm, i) != 0)
+			use_proc2_ctls |= PROCBASED2_WBINVD_EXITING;
+		vmcs_write(VMCS_SEC_PROC_BASED_CTLS, use_proc2_ctls);
+
 		vmcs_write(VMCS_EXIT_CTLS, exit_ctls);
 		vmcs_write(VMCS_ENTRY_CTLS, entry_ctls);
 		vmcs_write(VMCS_MSR_BITMAP, msr_bitmap_pa);
@@ -857,7 +886,7 @@ vmx_vminit(struct vm *vm)
 
 		vmcs_clear(vmx->vmcs_pa[i]);
 
-		vmx->cap[i].set = 0;
+		vmx->cap[i].set = cap_defaults;
 		vmx->cap[i].proc_ctls = proc_ctls;
 		vmx->cap[i].proc_ctls2 = proc2_ctls;
 		vmx->cap[i].exc_bitmap = exc_bitmap;
@@ -1018,11 +1047,6 @@ vmx_set_pcpu_defaults(struct vmx *vmx, int vcpu)
 	vmcs_write(VMCS_HOST_GS_BASE, vmm_get_host_gsbase());
 	vmx_invvpid(vmx, vcpu, 1);
 }
-
-/*
- * We depend on 'procbased_ctls' to have the Interrupt Window Exiting bit set.
- */
-CTASSERT((PROCBASED_CTLS_ONE_SETTING & PROCBASED_INT_WINDOW_EXITING) != 0);
 
 static __inline void
 vmx_set_int_window_exiting(struct vmx *vmx, int vcpu)
@@ -2519,6 +2543,11 @@ vmx_exit_process(struct vmx *vmx, int vcpu, struct vm_exit *vmexit)
 		SDT_PROBE3(vmm, vmx, exit, vminsn, vmx, vcpu, vmexit);
 		vmexit->exitcode = VM_EXITCODE_VMINSN;
 		break;
+	case EXIT_REASON_INVD:
+	case EXIT_REASON_WBINVD:
+		/* ignore exit */
+		handled = HANDLED;
+		break;
 	default:
 		SDT_PROBE4(vmm, vmx, exit, unknown,
 		    vmx, vcpu, vmexit, reason);
@@ -3295,8 +3324,7 @@ vmx_getcap(void *arg, int vcpu, int type, int *retval)
 
 	switch (type) {
 	case VM_CAP_HALT_EXIT:
-		if (cap_halt_exit)
-			ret = 0;
+		ret = 0;
 		break;
 	case VM_CAP_PAUSE_EXIT:
 		if (cap_pause_exit)
@@ -3336,13 +3364,11 @@ vmx_setcap(void *arg, int vcpu, int type, int val)
 
 	switch (type) {
 	case VM_CAP_HALT_EXIT:
-		if (cap_halt_exit) {
-			error = 0;
-			pptr = &vmx->cap[vcpu].proc_ctls;
-			baseval = *pptr;
-			flag = PROCBASED_HLT_EXITING;
-			reg = VMCS_PRI_PROC_BASED_CTLS;
-		}
+		error = 0;
+		pptr = &vmx->cap[vcpu].proc_ctls;
+		baseval = *pptr;
+		flag = PROCBASED_HLT_EXITING;
+		reg = VMCS_PRI_PROC_BASED_CTLS;
 		break;
 	case VM_CAP_MTRAP_EXIT:
 		if (cap_monitor_trap) {

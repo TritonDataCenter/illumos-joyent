@@ -256,6 +256,9 @@ usage(int code)
 		"       %*s [-s <pci>] [-U uuid] vmname\n"
 #endif
 		"       -a: local apic is in xAPIC mode (deprecated)\n"
+#ifndef __FreeBSD__
+		"       -B type,key=value,...: set SMBIOS information\n"
+#endif
 		"       -C: include guest memory in core file\n"
 		"       -c: number of cpus and/or topology specification\n"
 		"       -D: destroy on power-off\n"
@@ -1126,6 +1129,7 @@ static vmexit_handler_t handler[VM_EXITCODE_MAX] = {
 #else
 	[VM_EXITCODE_RUN_STATE] = vmexit_run_state,
 	[VM_EXITCODE_PAGING] = vmexit_paging,
+	[VM_EXITCODE_HLT] = vmexit_hlt,
 #endif
 	[VM_EXITCODE_SUSPENDED] = vmexit_suspend,
 	[VM_EXITCODE_TASK_SWITCH] = vmexit_task_switch,
@@ -1224,6 +1228,7 @@ fbsdrun_set_capabilities(struct vmctx *ctx, int cpu)
 {
 	int err, tmp;
 
+#ifdef	__FreeBSD__
 	if (get_config_bool_default("x86.vmexit_on_hlt", false)) {
 		err = vm_get_capability(ctx, cpu, VM_CAP_HALT_EXIT, &tmp);
 		if (err < 0) {
@@ -1234,6 +1239,19 @@ fbsdrun_set_capabilities(struct vmctx *ctx, int cpu)
 		if (cpu == BSP)
 			handler[VM_EXITCODE_HLT] = vmexit_hlt;
 	}
+#else
+	/*
+	 * We insist that vmexit-on-hlt is available on the host CPU, and enable
+	 * it by default.  Configuration of that feature is done with both of
+	 * those facts in mind.
+	 */
+	tmp = (int)get_config_bool_default("x86.vmexit_on_hlt", true);
+	err = vm_set_capability(ctx, cpu, VM_CAP_HALT_EXIT, tmp);
+	if (err < 0) {
+		fprintf(stderr, "VM exit on HLT not supported\n");
+		exit(4);
+	}
+#endif /* __FreeBSD__ */
 
 	if (get_config_bool_default("x86.vmexit_on_pause", false)) {
 		/*
@@ -1751,11 +1769,9 @@ main(int argc, char *argv[])
 		}
 	}
 
-#ifndef __FreeBSD__
-	smbios_apply();
-#endif
 	error = smbios_build(ctx);
-	assert(error == 0);
+	if (error != 0)
+		exit(4);
 
 	if (get_config_bool("acpi_tables")) {
 		error = acpi_build(ctx, guest_ncpus);

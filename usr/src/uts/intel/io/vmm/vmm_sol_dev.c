@@ -481,6 +481,8 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 	case VM_MUNMAP_MEMSEG:
 	case VM_WRLOCK_CYCLE:
 	case VM_PMTMR_LOCATE:
+	case VM_PAUSE:
+	case VM_RESUME:
 		vmm_write_lock(sc);
 		lock_type = LOCK_WRITE_HOLD;
 		break;
@@ -1701,9 +1703,10 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 		}
 		len = roundup(tracker.vdt_len / PAGESIZE, 8) / 8;
 		bitmap = kmem_zalloc(len, KM_SLEEP);
-		vm_track_dirty_pages(sc->vmm_vm, tracker.vdt_start_gpa,
+		error = vm_track_dirty_pages(sc->vmm_vm, tracker.vdt_start_gpa,
 		    tracker.vdt_len, bitmap);
-		if (ddi_copyout(bitmap, tracker.vdt_pfns, len, md) != 0) {
+		if (error == 0 &&
+		    ddi_copyout(bitmap, tracker.vdt_pfns, len, md) != 0) {
 			error = EFAULT;
 		}
 		kmem_free(bitmap, len);
@@ -1841,6 +1844,15 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 		if (buf != NULL) {
 			kmem_free(buf, len);
 		}
+		break;
+	}
+
+	case VM_PAUSE: {
+		error = vm_pause_instance(sc->vmm_vm);
+		break;
+	}
+	case VM_RESUME: {
+		error = vm_resume_instance(sc->vmm_vm);
 		break;
 	}
 
