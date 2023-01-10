@@ -1126,7 +1126,7 @@ UTS_LABEL=	$(RELEASE)
 # format.
 #
 BOOTBANNER1=	SmartOS Version ^v ^w-bit
-# XXX SmartOS:  BANNER_YEAR pulled from illumos.sh
+# XXX SmartOS: BANNER_YEAR in environment set in smartos-live's build_illumos.
 BOOTBANNER2=	Copyright 2022-$(BANNER_YEAR) MNX Cloud, Inc.
 BOOTBANNER3=
 BOOTBANNER4=
