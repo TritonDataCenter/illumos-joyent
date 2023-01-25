@@ -131,7 +131,6 @@
 #include <sys/schedctl.h>
 #include <sys/id_space.h>
 #include <sys/sdt.h>
-#include <sys/brand.h>
 #include <sys/disp.h>
 #include <sys/taskq_impl.h>
 #include <sys/condvar.h>
@@ -544,8 +543,6 @@ signalfd_consume_signal(k_sigset_t set, uio_t *uio, bool should_block)
 	}
 
 	/* Convert signal info into external, datamodel independent, struct. */
-	if (PROC_IS_BRANDED(p) && BROP(p)->b_sigfd_translate)
-		BROP(p)->b_sigfd_translate(infop);
 	signalfd_siginfo_t ssi;
 	bzero(&ssi, sizeof (ssi));
 	if (lwp->lwp_curinfo != NULL) {
