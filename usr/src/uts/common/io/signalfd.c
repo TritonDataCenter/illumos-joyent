@@ -131,6 +131,7 @@
 #include <sys/schedctl.h>
 #include <sys/id_space.h>
 #include <sys/sdt.h>
+#include <sys/brand.h>
 #include <sys/disp.h>
 #include <sys/taskq_impl.h>
 #include <sys/condvar.h>
@@ -549,6 +550,9 @@ signalfd_consume_signal(k_sigset_t set, uio_t *uio, bool should_block)
 	if (lwp->lwp_curinfo != NULL) {
 		infop = &lwp->lwp_curinfo->sq_info;
 
+		if (PROC_IS_BRANDED(p) && BROP(p)->b_sigfd_translate)
+			BROP(p)->b_sigfd_translate(infop);
+
 		ssi.ssi_signo	= infop->si_signo;
 		ssi.ssi_errno	= infop->si_errno;
 		ssi.ssi_code	= infop->si_code;
@@ -567,6 +571,9 @@ signalfd_consume_signal(k_sigset_t set, uio_t *uio, bool should_block)
 
 		infop->si_signo = lwp->lwp_cursig;
 		infop->si_code = SI_NOINFO;
+
+		if (PROC_IS_BRANDED(p) && BROP(p)->b_sigfd_translate)
+			BROP(p)->b_sigfd_translate(infop);
 
 		ssi.ssi_signo = infop->si_signo;
 		ssi.ssi_code = infop->si_code;
