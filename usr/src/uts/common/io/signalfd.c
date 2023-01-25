@@ -543,10 +543,11 @@ signalfd_consume_signal(k_sigset_t set, uio_t *uio, bool should_block)
 	}
 
 	/* Convert signal info into external, datamodel independent, struct. */
-	signalfd_siginfo_t ssi;
-	bzero(&ssi, sizeof (ssi));
+	signalfd_siginfo_t ssi = { 0 };
+	k_siginfo_t info;
+	k_siginfo_t *infop;	/* initialized differently per below check */
 	if (lwp->lwp_curinfo != NULL) {
-		k_siginfo_t *infop = &lwp->lwp_curinfo->sq_info;
+		infop = &lwp->lwp_curinfo->sq_info;
 
 		ssi.ssi_signo	= infop->si_signo;
 		ssi.ssi_errno	= infop->si_errno;
@@ -560,19 +561,17 @@ signalfd_consume_signal(k_sigset_t set, uio_t *uio, bool should_block)
 		ssi.ssi_utime	= infop->si_utime;
 		ssi.ssi_stime	= infop->si_stime;
 		ssi.ssi_addr	= (uint64_t)(intptr_t)infop->si_addr;
-
-		DTRACE_PROC2(signal__clear, int, 0, ksiginfo_t *, infop);
 	} else {
-		ssi.ssi_signo = lwp->lwp_cursig;
-		ssi.ssi_code = SI_NOINFO;
+		infop = &info;
+		bzero(infop, sizeof (info));
 
-		/* Convert to the format expected by the probe. */
-		k_siginfo_t info = {
-			.si_signo = lwp->lwp_cursig,
-			.si_code = SI_NOINFO,
-		};
-		DTRACE_PROC2(signal__clear, int, 0, ksiginfo_t *, &info);
+		infop->si_signo = lwp->lwp_cursig;
+		infop->si_code = SI_NOINFO;
+
+		ssi.ssi_signo = infop->si_signo;
+		ssi.ssi_code = infop->si_code;
 	}
+	DTRACE_PROC2(signal__clear, int, 0, ksiginfo_t *, infop);
 
 	lwp->lwp_ru.nsignals++;
 	lwp->lwp_cursig = 0;
