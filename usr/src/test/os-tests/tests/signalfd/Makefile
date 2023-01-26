@@ -39,16 +39,21 @@ clobber: clean
 clean:
 	-$(RM) $(COMMON_OBJS)
 
-$(CMDS): $(TESTDIR) $(PROGS)
+$(CMDS): $(ROOTOPTSIGFD) $(PROGS)
 
 $(PROGS): $(COMMON_OBJS)
-
-%: %.c
-	$(LINK.c) -o $@ $< $(COMMON_OBJS) $(LDLIBS)
-	$(POST_PROCESS)
 
 $(ROOTOPTSIGFD):
 	$(INS.dir)
 
 $(ROOTOPTSIGFD)/%: %
 	$(INS.file)
+
+%.o: %.c
+	$(COMPILE.c) -o $@ -c $<
+	$(POST_PROCESS_O)
+
+%: %.o
+	$(LINK.c) -o $@ $< $(COMMON_OBJS) $(LDLIBS)
+	$(POST_PROCESS)
+
