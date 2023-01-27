@@ -11,7 +11,16 @@
 
 /*
  * Copyright 2023 Oxide Computer Company
+ * Copyright 2023 MNX Cloud, Inc.
  */
+
+#ifndef _SIGFDTEST_COMMON_H
+#define _SIGFDTEST_COMMON_H
+
+#ifdef  __cplusplus
+extern "C" {
+#endif
+
 
 #include <assert.h>
 #include <err.h>
@@ -28,3 +37,9 @@
 extern void test_fail(const char *, ...);
 extern void test_pass(void);
 extern int test_basic_prep(int);
+
+#ifdef	__cplusplus
+}
+#endif
+
+#endif	/* _SIGFDTEST_COMMON_H */
