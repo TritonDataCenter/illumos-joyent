@@ -14,8 +14,8 @@
  * Copyright 2023 MNX Cloud, Inc.
  */
 
-#ifndef _SIGFDTEST_COMMON_H
-#define _SIGFDTEST_COMMON_H
+#ifndef	_SIGFDTEST_COMMON_H
+#define	_SIGFDTEST_COMMON_H
 
 #ifdef  __cplusplus
 extern "C" {
