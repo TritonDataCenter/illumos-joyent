@@ -10,8 +10,12 @@
  */
 
 /*
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
+
+#include <err.h>
+#include <string.h>
+#include <stdlib.h>
 
 #include "common.h"
 

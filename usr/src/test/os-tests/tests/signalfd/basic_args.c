@@ -13,6 +13,10 @@
  * Copyright 2023 Oxide Computer Company
  */
 
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+
 #include "common.h"
 
 int
