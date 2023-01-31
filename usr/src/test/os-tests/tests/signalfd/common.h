@@ -11,35 +11,18 @@
 
 /*
  * Copyright 2023 Oxide Computer Company
- * Copyright 2023 MNX Cloud, Inc.
  */
 
-#ifndef	_SIGFDTEST_COMMON_H
-#define	_SIGFDTEST_COMMON_H
-
-#ifdef  __cplusplus
-extern "C" {
-#endif
-
+#ifndef	_COMMON_H_
+#define	_COMMON_H_
 
 #include <assert.h>
-#include <err.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <siginfo.h>
 #include <signal.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
 #include <sys/signalfd.h>
 
-extern void test_fail(const char *, ...);
-extern void test_pass(void);
-extern int test_basic_prep(int);
+void test_fail(const char *, ...);
+void test_pass(void);
+int test_basic_prep(int);
 
-#ifdef	__cplusplus
-}
-#endif
-
-#endif	/* _SIGFDTEST_COMMON_H */
+#endif	/* _COMMON_H_ */

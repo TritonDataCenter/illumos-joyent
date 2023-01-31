@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2017 Joyent, Inc.
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -111,7 +111,8 @@
  *
  * Waking a pollhead, from taskq:
  * 1. signalfd_poller_t`sp_lock
- * 2. pollcache_t`pc_lock
+ * ... Disjoint from signalfd_poller_t`sp_lock hold ...
+ * 1. pollcache_t`pc_lock
  *
  * Closing signalfd, dissociating pollers:
  * 1. signalfd_state_t`sfd_lock
@@ -178,6 +179,7 @@ typedef struct signalfd_poller {
 	taskq_ent_t	sp_taskent;	/* pollwakeup() dispatch taskq */
 	k_sigset_t	sp_mask;	/* signal match mask */
 	short		sp_pollev;	/* Event(s) pending delivery */
+	bool		sp_pending;	/* pollwakeup() via taskq in progress */
 } signalfd_poller_t;
 
 static dev_info_t	*signalfd_devi;		/* device info */
@@ -207,16 +209,43 @@ signalfd_wake_task(void *arg)
 
 	mutex_enter(&sp->sp_lock);
 	VERIFY(sp->sp_pollev != 0);
-	pollwakeup(&sp->sp_pollhead, sp->sp_pollev);
-	if ((sp->sp_pollev & POLLERR) != 0) {
-		pollhead_clean(&sp->sp_pollhead);
-	}
-	sp->sp_pollev = 0;
+	VERIFY(sp->sp_pending);
+	do {
+		const short pollev = sp->sp_pollev;
+		const bool is_err = (pollev & POLLERR) != 0;
+		sp->sp_pollev = 0;
+		mutex_exit(&sp->sp_lock);
+
+		/*
+		 * Actions against the pollhead and associated pollcache(s) are
+		 * taken without signalfd_poller_t`sp_lock held, since the chain
+		 * of dependencies through pollcache_t`pc_lock and
+		 * signalfd_state_t`sfd_lock form a potential for deadlock.
+		 */
+		pollwakeup(&sp->sp_pollhead, pollev);
+		if (is_err) {
+			pollhead_clean(&sp->sp_pollhead);
+		}
+
+		mutex_enter(&sp->sp_lock);
+		/*
+		 * Once pollhead/pollcache actions are complete, check for newly
+		 * queued events which could have appeared in the mean time.  We
+		 * can bail immediately if POLLER was being delivered, since the
+		 * underlying resource is undergoing clean-up.
+		 */
+		if (is_err) {
+			break;
+		}
+	} while (sp->sp_pollev != 0);
 
 	/*
-	 * If this poller is being torn down, wake any thread waiting for the
-	 * event delivery to finish.
+	 * Indicate that wake task processing is complete.
+	 *
+	 * Wake any thread waiting for event delivery to complete if this poller
+	 * is being torn down.
 	 */
+	sp->sp_pending = false;
 	cv_signal(&sp->sp_cv);
 	mutex_exit(&sp->sp_lock);
 }
@@ -226,10 +255,9 @@ signalfd_poller_wake(signalfd_poller_t *sp, short ev)
 {
 	ASSERT(MUTEX_HELD(&sp->sp_lock));
 
-	const bool pending = (sp->sp_pollev != 0);
 	sp->sp_pollev |= ev;
-
-	if (!pending) {
+	if (!sp->sp_pending) {
+		sp->sp_pending = true;
 		taskq_dispatch_ent(signalfd_wakeq, signalfd_wake_task, sp, 0,
 		    &sp->sp_taskent);
 	}
@@ -399,7 +427,7 @@ signalfd_pollers_free(signalfd_state_t *state)
 		ASSERT3P(sp->sp_proc, ==, NULL);
 
 		mutex_enter(&sp->sp_lock);
-		while (sp->sp_pollev != 0) {
+		while (sp->sp_pending) {
 			cv_wait(&sp->sp_cv, &sp->sp_lock);
 		}
 		/*
