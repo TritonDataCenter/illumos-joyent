@@ -1133,20 +1133,28 @@ int
 rfs4_clear_client_state(struct nfs4clrst_args *clr)
 {
 	nfs4_srv_t *nsrv4 = nfs4_get_srv();
+	int rc;
 
 	/* Once nfssrv is loaded, every zone should have one of these. */
 	VERIFY(nsrv4 != NULL);
+
+	mutex_enter(&nsrv4->state_lock);
 	/*
-	 * But only after NFS service is running is one of THESE around.
-	 * It's dirty, but all of the databases live deep in the
-	 * nfs4_server_state, so it's the only thing to legitimately check
-	 * prior to using anything. The pointers themselves may be stale.
+	 * But only after NFS service is running is the nfs4_server_state
+	 * around. It's dirty (and needs the state_lock held), but all of the
+	 * databases live deep in the nfs4_server_state, so it's the only thing
+	 * to legitimately check prior to using anything. The pointers
+	 * themselves may be stale.
 	 */
-	if (nsrv4->nfs4_server_state == NULL)
-		return (ENXIO);	/* Uninitialzed NFS stack instance. */
-	VERIFY(nsrv4->rfs4_client_tab != NULL);
-	rfs4_dbe_walk(nsrv4->rfs4_client_tab, rfs4_client_scrub, clr);
-	return (0);
+	if (nsrv4->nfs4_server_state != NULL) {
+		VERIFY(nsrv4->rfs4_client_tab != NULL);
+		rfs4_dbe_walk(nsrv4->rfs4_client_tab, rfs4_client_scrub, clr);
+		rc = 0;
+	} else {
+		rc = ENXIO;
+	}
+	mutex_exit(&nsrv4->state_lock);
+	return (rc);
 }
 
 /*
