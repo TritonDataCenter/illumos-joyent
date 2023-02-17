@@ -14,7 +14,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright 2017 Tegile Systems, Inc.  All rights reserved.
  * Copyright 2020 Ryan Zezeski
- * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 /*
@@ -185,6 +185,26 @@ typedef enum i40e_itr_index {
  * received by the OS.
  */
 #define	I40E_BUF_IPHDR_ALIGNMENT	2
+
+/*
+ * The XL710 controller has a total of five buffers available for the
+ * reception of any single frame. This is defined in 8.3.1 - Receive
+ * Packet in System Memory.
+ */
+#define	I40E_RX_MAX_SEGMENT	5
+
+/*
+ * The maximum size of a single RX buffer. A packet may be segmented across
+ * as many as I40E_RX_MAX_SEGMENT (5) buffers. A value of 2048 will accomidate
+ * the largest MTU supported by the hardware (9728 bytes -- Table 1-3).
+ */
+#define	I40E_RX_MAX_BUF		2048
+
+/*
+ * The maximum size of a single TX buffer. A packet may be segmented across
+ * as many as I40E_TX_MAX_COOKIE buffers.
+ */
+#define	I40E_TX_MAX_BUF		4096
 
 /*
  * The XL710 controller has a total of eight buffers available for the
