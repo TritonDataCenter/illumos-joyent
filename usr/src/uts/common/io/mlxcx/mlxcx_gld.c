@@ -12,6 +12,7 @@
 /*
  * Copyright (c) 2021, the University of Queensland
  * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2023 MNX Cloud, Inc.
  */
 
 /*
@@ -43,13 +44,27 @@ static char *mlxcx_priv_props[] = {
 #define	GBITS		(1000ULL * MBITS)
 
 static uint64_t
-mlxcx_speed_to_bits(mlxcx_eth_proto_t v)
+mlxcx_speed_to_bits(mlxcx_eth_proto_t proto, mlxcx_ext_eth_proto_t ext_proto)
 {
-	switch (v) {
+	/*
+	 * Older parts only used "proto", but starting with ConnectX-6, there
+	 * might be speeds & link-types in an extended set of proto bits.
+	 *
+	 * For now, we check the old ones first, and act accordingly. If we
+	 * get a legitimate single-bit value, we don't worry about ext_proto.
+	 * (That may be something we do need to check, however, in
+	 * appropriately new HW, just in case.)
+	 */
+	switch (proto) {
+	case 0:
+		/* Go straight to checking ext_proto. */
+		break;
 	case MLXCX_PROTO_SGMII_100BASE:
+	case MLXCX_PROTO_100BASE_T:
 		return (100ULL * MBITS);
 	case MLXCX_PROTO_SGMII:
 	case MLXCX_PROTO_1000BASE_KX:
+	case MLXCX_PROTO_1000BASE_T:
 		return (1000ULL * MBITS);
 	case MLXCX_PROTO_10GBASE_CX4:
 	case MLXCX_PROTO_10GBASE_KX4:
@@ -57,6 +72,7 @@ mlxcx_speed_to_bits(mlxcx_eth_proto_t v)
 	case MLXCX_PROTO_10GBASE_CR:
 	case MLXCX_PROTO_10GBASE_SR:
 	case MLXCX_PROTO_10GBASE_ER_LR:
+	case MLXCX_PROTO_10GBASE_T:
 		return (10ULL * GBITS);
 	case MLXCX_PROTO_40GBASE_CR4:
 	case MLXCX_PROTO_40GBASE_KR4:
@@ -70,14 +86,66 @@ mlxcx_speed_to_bits(mlxcx_eth_proto_t v)
 	case MLXCX_PROTO_50GBASE_SR2:
 	case MLXCX_PROTO_50GBASE_CR2:
 	case MLXCX_PROTO_50GBASE_KR2:
+	case MLXCX_PROTO_50GBASE_KR4:
 		return (50ULL * GBITS);
 	case MLXCX_PROTO_100GBASE_CR4:
 	case MLXCX_PROTO_100GBASE_SR4:
 	case MLXCX_PROTO_100GBASE_KR4:
+	case MLXCX_PROTO_100GBASE_LR4:
 		return (100ULL * GBITS);
 	default:
+		/*
+		 * We've checked for 0 explicitly above, so don't worry here.
+		 *
+		 * There ARE legitimate single-bit values we don't support,
+		 * and should just return 0 immediately.  We will ASSERT()
+		 * that it's a single-bit value, however.
+		 */
+		ASSERT0((uint32_t)proto & ((uint32_t)proto - 1U));
 		return (0);
 	}
+
+	switch (ext_proto) {
+	case MLXCX_EXTPROTO_SGMII_100M:
+		return (100ULL * MBITS);
+	case MLXCX_EXTPROTO_1000BASE_X_SGMII:
+		return (1000ULL * MBITS);
+	case MLXCX_EXTPROTO_5GBASE_R:
+		/* XXX KEBE ASKS - Need more for 5Gbit support here? */
+		return (5ULL * GBITS);
+	case MLXCX_EXTPROTO_10GBASE_XFI_XAUI_1:
+		return (10ULL * GBITS);
+	case MLXCX_EXTPROTO_40GBASE_XLAUI_4_XLPPI_4:
+		return (40ULL * GBITS);
+	case MLXCX_EXTPROTO_25GAUI_1_25GBASE_CR_KR:
+		return (25ULL * GBITS);
+	case MLXCX_EXTPROTO_50GAUI_2_LAUI_2_50GBASE_CR2_KR2:
+	case MLXCX_EXTPROTO_50GAUI_1_LAUI_1_50GBASE_CR_KR:
+		return (50ULL * GBITS);
+	case MLXCX_EXTPROTO_CAUI_4_100GBASE_CR4_KR4:
+	case MLXCX_EXTPROTO_100GAUI_2_100GBASE_CR2_KR2:
+	case MLXCX_EXTPROTO_100GAUI_1_100GBASE_CR_KR:
+		return (100ULL * GBITS);
+#if 0	/* Not yet... */
+	case MLXCX_EXTPROTO_200GAUI_4_200GBASE_CR4_KR4:
+	case MLXCX_EXTPROTO_200GAUI_2_200GBASE_CR2_KR2:
+	case MLXCX_EXTPROTO_400GAUI_8:
+	case MLXCX_EXTPROTO_400GAUI_4_400GBASE_CR4_KR4:
+		/* Not yet supported... */
+		break;
+#endif /* Not yet... */
+	default:
+		/*
+		 * There ARE legitimate single-bit values we don't support,
+		 * and should just return 0 immediately.  We will ASSERT()
+		 * that it's a single-bit value, however.
+		 */
+		/* This check should work okay for 0 too. */
+		ASSERT0((uint32_t)proto & ((uint32_t)proto - 1U));
+		break;
+	}
+
+	return (0);
 }
 
 static link_fec_t
@@ -240,7 +308,8 @@ mlxcx_mac_stat(void *arg, uint_t stat, uint64_t *val)
 
 	switch (stat) {
 	case MAC_STAT_IFSPEED:
-		*val = mlxcx_speed_to_bits(port->mlp_oper_proto);
+		*val = mlxcx_speed_to_bits(port->mlp_oper_proto,
+		    port->mlp_ext_oper_proto);
 		break;
 	case ETHER_STAT_LINK_DUPLEX:
 		*val = LINK_DUPLEX_FULL;
@@ -1152,43 +1221,56 @@ mlxcx_mac_propinfo(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 	case MAC_PROP_EN_100GFDX_CAP:
 		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
 		mac_prop_info_set_default_uint8(prh,
-		    (port->mlp_oper_proto & MLXCX_PROTO_100G) != 0);
+		    ((port->mlp_oper_proto & MLXCX_PROTO_100G) != 0 ||
+		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_100G)) != 0);
 		break;
 	case MAC_PROP_ADV_50GFDX_CAP:
 	case MAC_PROP_EN_50GFDX_CAP:
 		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
 		mac_prop_info_set_default_uint8(prh,
-		    (port->mlp_oper_proto & MLXCX_PROTO_50G) != 0);
+		    ((port->mlp_oper_proto & MLXCX_PROTO_50G) != 0 ||
+		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_50G)) != 0);
 		break;
 	case MAC_PROP_ADV_40GFDX_CAP:
 	case MAC_PROP_EN_40GFDX_CAP:
 		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
 		mac_prop_info_set_default_uint8(prh,
-		    (port->mlp_oper_proto & MLXCX_PROTO_40G) != 0);
+		    ((port->mlp_oper_proto & MLXCX_PROTO_40G) != 0 ||
+		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_40G)) != 0);
 		break;
 	case MAC_PROP_ADV_25GFDX_CAP:
 	case MAC_PROP_EN_25GFDX_CAP:
 		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
 		mac_prop_info_set_default_uint8(prh,
-		    (port->mlp_oper_proto & MLXCX_PROTO_25G) != 0);
+		    ((port->mlp_oper_proto & MLXCX_PROTO_25G) != 0 ||
+		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_25G)) != 0);
 		break;
 	case MAC_PROP_ADV_10GFDX_CAP:
 	case MAC_PROP_EN_10GFDX_CAP:
 		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
 		mac_prop_info_set_default_uint8(prh,
-		    (port->mlp_oper_proto & MLXCX_PROTO_10G) != 0);
+		    ((port->mlp_oper_proto & MLXCX_PROTO_10G) != 0 ||
+		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_10G)) != 0);
+		break;
+	case MAC_PROP_ADV_5GFDX_CAP:
+	case MAC_PROP_EN_5GFDX_CAP:
+		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
+		mac_prop_info_set_default_uint8(prh,
+		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_5G) != 0);
 		break;
 	case MAC_PROP_ADV_1000FDX_CAP:
 	case MAC_PROP_EN_1000FDX_CAP:
 		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
 		mac_prop_info_set_default_uint8(prh,
-		    (port->mlp_oper_proto & MLXCX_PROTO_1G) != 0);
+		    ((port->mlp_oper_proto & MLXCX_PROTO_1G) != 0 ||
+		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_1G)) != 0);
 		break;
 	case MAC_PROP_ADV_100FDX_CAP:
 	case MAC_PROP_EN_100FDX_CAP:
 		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
 		mac_prop_info_set_default_uint8(prh,
-		    (port->mlp_oper_proto & MLXCX_PROTO_100M) != 0);
+		    ((port->mlp_oper_proto & MLXCX_PROTO_100M) != 0 ||
+		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_100M)) != 0);
 		break;
 	default:
 		break;
@@ -1339,7 +1421,8 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			ret = EOVERFLOW;
 			break;
 		}
-		speed = mlxcx_speed_to_bits(port->mlp_oper_proto);
+		speed = mlxcx_speed_to_bits(port->mlp_oper_proto,
+		    port->mlp_ext_oper_proto);
 		bcopy(&speed, pr_val, sizeof (speed));
 		break;
 	case MAC_PROP_STATUS:
@@ -1395,7 +1478,8 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			break;
 		}
 		*(uint8_t *)pr_val = (port->mlp_max_proto &
-		    MLXCX_PROTO_100G) != 0;
+		    MLXCX_PROTO_100G) != 0 ||
+		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_100G) != 0;
 		break;
 	case MAC_PROP_ADV_50GFDX_CAP:
 	case MAC_PROP_EN_50GFDX_CAP:
@@ -1404,7 +1488,8 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			break;
 		}
 		*(uint8_t *)pr_val = (port->mlp_max_proto &
-		    MLXCX_PROTO_50G) != 0;
+		    MLXCX_PROTO_50G) != 0 ||
+		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_50G) != 0;
 		break;
 	case MAC_PROP_ADV_40GFDX_CAP:
 	case MAC_PROP_EN_40GFDX_CAP:
@@ -1413,7 +1498,8 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			break;
 		}
 		*(uint8_t *)pr_val = (port->mlp_max_proto &
-		    MLXCX_PROTO_40G) != 0;
+		    MLXCX_PROTO_40G) != 0 ||
+		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_40G) != 0;
 		break;
 	case MAC_PROP_ADV_25GFDX_CAP:
 	case MAC_PROP_EN_25GFDX_CAP:
@@ -1422,7 +1508,8 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			break;
 		}
 		*(uint8_t *)pr_val = (port->mlp_max_proto &
-		    MLXCX_PROTO_25G) != 0;
+		    MLXCX_PROTO_25G) != 0 ||
+		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_25G) != 0;
 		break;
 	case MAC_PROP_ADV_10GFDX_CAP:
 	case MAC_PROP_EN_10GFDX_CAP:
@@ -1431,7 +1518,17 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			break;
 		}
 		*(uint8_t *)pr_val = (port->mlp_max_proto &
-		    MLXCX_PROTO_10G) != 0;
+		    MLXCX_PROTO_10G) != 0 ||
+		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_10G) != 0;
+		break;
+	case MAC_PROP_ADV_5GFDX_CAP:
+	case MAC_PROP_EN_5GFDX_CAP:
+		if (pr_valsize < sizeof (uint8_t)) {
+			ret = EOVERFLOW;
+			break;
+		}
+		*(uint8_t *)pr_val =
+		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_5G) != 0;
 		break;
 	case MAC_PROP_ADV_1000FDX_CAP:
 	case MAC_PROP_EN_1000FDX_CAP:
@@ -1440,7 +1537,8 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			break;
 		}
 		*(uint8_t *)pr_val = (port->mlp_max_proto &
-		    MLXCX_PROTO_1G) != 0;
+		    MLXCX_PROTO_1G) != 0 ||
+		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_1G) != 0;
 		break;
 	case MAC_PROP_ADV_100FDX_CAP:
 	case MAC_PROP_EN_100FDX_CAP:
@@ -1449,7 +1547,8 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			break;
 		}
 		*(uint8_t *)pr_val = (port->mlp_max_proto &
-		    MLXCX_PROTO_100M) != 0;
+		    MLXCX_PROTO_100M) != 0 ||
+		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_100M) != 0;
 		break;
 	default:
 		ret = ENOTSUP;

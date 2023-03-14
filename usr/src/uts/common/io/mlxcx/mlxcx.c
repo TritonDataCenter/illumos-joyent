@@ -13,6 +13,7 @@
  * Copyright 2021, The University of Queensland
  * Copyright (c) 2018, Joyent, Inc.
  * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2023 MNX Cloud, Inc.
  */
 
 /*
@@ -20,9 +21,15 @@
  */
 
 /*
- * The PRM for this family of parts is freely available, and can be found at:
- * https://www.mellanox.com/related-docs/user_manuals/ \
- *   Ethernet_Adapters_Programming_Manual.pdf
+ * The PRM for this family of parts was freely available at:
+ *
+ * BEGIN CSTYLED
+ * https://www.mellanox.com/related-docs/user_manuals/Ethernet_Adapters_Programming_Manual.pdf
+ * END CSTYLED
+ *
+ * But has since disappeared. The FreeBSD driver has some visibility into how
+ * things still work, but there have been changes in the 6-series that we are
+ * only beginning to adopt here.
  */
 /*
  * ConnectX glossary
@@ -481,12 +488,17 @@ mlxcx_load_prop_defaults(mlxcx_t *mlxp)
 	 * maximum speed of 10Gb/s, and another for those above that.
 	 */
 	if ((port->mlp_max_proto & (MLXCX_PROTO_25G | MLXCX_PROTO_40G |
-	    MLXCX_PROTO_50G | MLXCX_PROTO_100G)) != 0) {
+	    MLXCX_PROTO_50G | MLXCX_PROTO_100G)) != 0 ||
+	    (port->mlp_ext_max_proto & (MLXCX_EXTPROTO_25G |
+	    MLXCX_EXTPROTO_40G | MLXCX_EXTPROTO_50G |
+	    MLXCX_EXTPROTO_100G)) != 0) {
 		p->mldp_cq_size_shift_default = MLXCX_CQ_SIZE_SHIFT_25G;
 		p->mldp_rq_size_shift_default = MLXCX_RQ_SIZE_SHIFT_25G;
 		p->mldp_sq_size_shift_default = MLXCX_SQ_SIZE_SHIFT_25G;
 	} else if ((port->mlp_max_proto & (MLXCX_PROTO_100M | MLXCX_PROTO_1G |
-	    MLXCX_PROTO_10G)) != 0) {
+	    MLXCX_PROTO_10G)) != 0 ||
+	    (port->mlp_ext_max_proto & (MLXCX_EXTPROTO_100M |
+	    MLXCX_EXTPROTO_5G | MLXCX_EXTPROTO_1G | MLXCX_EXTPROTO_10G)) != 0) {
 		p->mldp_cq_size_shift_default = MLXCX_CQ_SIZE_SHIFT_DFLT;
 		p->mldp_rq_size_shift_default = MLXCX_RQ_SIZE_SHIFT_DFLT;
 		p->mldp_sq_size_shift_default = MLXCX_SQ_SIZE_SHIFT_DFLT;
