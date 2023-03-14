@@ -475,7 +475,7 @@ mlxcx_eth_proto_to_string(mlxcx_eth_proto_t p, mlxcx_ext_eth_proto_t ep,
 
 	/* Now, for the extended bits... */
 	if (ep & MLXCX_EXTPROTO_SGMII_100M)
-		(void) strlcat(buf, "SGMII_100M|");
+		(void) strlcat(buf, "SGMII_100M|", size);
 	if (ep & MLXCX_EXTPROTO_1000BASE_X_SGMII)
 		(void) strlcat(buf, "1000BASE_X_SGMII|", size);
 	if (ep & MLXCX_EXTPROTO_5GBASE_R)

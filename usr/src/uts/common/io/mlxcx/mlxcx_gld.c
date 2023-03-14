@@ -56,7 +56,7 @@ mlxcx_speed_to_bits(mlxcx_eth_proto_t proto, mlxcx_ext_eth_proto_t ext_proto)
 	 * appropriately new HW, just in case.)
 	 */
 	switch (proto) {
-	case 0:
+	case MLXCX_PROTO_NONE:	/* Aka "0" */
 		/* Go straight to checking ext_proto. */
 		break;
 	case MLXCX_PROTO_SGMII_100BASE:
@@ -1252,12 +1252,6 @@ mlxcx_mac_propinfo(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 		    ((port->mlp_oper_proto & MLXCX_PROTO_10G) != 0 ||
 		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_10G)) != 0);
 		break;
-	case MAC_PROP_ADV_5GFDX_CAP:
-	case MAC_PROP_EN_5GFDX_CAP:
-		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
-		mac_prop_info_set_default_uint8(prh,
-		    (port->mlp_ext_oper_proto & MLXCX_EXTPROTO_5G) != 0);
-		break;
 	case MAC_PROP_ADV_1000FDX_CAP:
 	case MAC_PROP_EN_1000FDX_CAP:
 		mac_prop_info_set_perm(prh, MAC_PROP_PERM_READ);
@@ -1520,15 +1514,6 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 		*(uint8_t *)pr_val = (port->mlp_max_proto &
 		    MLXCX_PROTO_10G) != 0 ||
 		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_10G) != 0;
-		break;
-	case MAC_PROP_ADV_5GFDX_CAP:
-	case MAC_PROP_EN_5GFDX_CAP:
-		if (pr_valsize < sizeof (uint8_t)) {
-			ret = EOVERFLOW;
-			break;
-		}
-		*(uint8_t *)pr_val =
-		    (port->mlp_ext_max_proto & MLXCX_EXTPROTO_5G) != 0;
 		break;
 	case MAC_PROP_ADV_1000FDX_CAP:
 	case MAC_PROP_EN_1000FDX_CAP:

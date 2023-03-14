@@ -2260,6 +2260,7 @@ typedef struct {
 
 /* Some values are derived from the FreeBSD `mlx5` directory. */
 typedef enum {
+	MLXCX_PROTO_NONE			= 0,
 	MLXCX_PROTO_SGMII			= 1 << 0,
 	MLXCX_PROTO_1000BASE_KX			= 1 << 1,
 	MLXCX_PROTO_10GBASE_CX4			= 1 << 2,
@@ -2296,6 +2297,7 @@ typedef enum {
 
 /* Values are derived from the FreeBSD `mlx5` directory. */
 typedef enum {
+	MLXCX_EXTPROTO_NONE				= 0,
 	MLXCX_EXTPROTO_SGMII_100M			= 1UL << 0,
 	MLXCX_EXTPROTO_1000BASE_X_SGMII			= 1UL << 1,
 	/* 1UL << 2 */
@@ -2338,7 +2340,7 @@ typedef enum {
 #define	MLXCX_PROTO_40G		(MLXCX_PROTO_40GBASE_SR4 | \
 	MLXCX_PROTO_40GBASE_LR4_ER4 | MLXCX_PROTO_40GBASE_CR4 | \
 	MLXCX_PROTO_40GBASE_KR4)
-#define	MLXCX_EXTPROTO_40G	MLXCX_EXTPROTO_40GBASE_XLAUI_5_XLPPI_4
+#define	MLXCX_EXTPROTO_40G	MLXCX_EXTPROTO_40GBASE_XLAUI_4_XLPPI_4
 
 #define	MLXCX_PROTO_50G		(MLXCX_PROTO_50GBASE_CR2 | \
 	MLXCX_PROTO_50GBASE_KR2 | MLXCX_PROTO_50GBASE_SR2)
