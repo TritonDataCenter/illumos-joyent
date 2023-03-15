@@ -1456,7 +1456,6 @@ typedef struct {
 	uint8_t		mlcap_general_log_max_sq;
 	uint8_t		mlcap_general_log_max_tir;
 	uint8_t		mlcap_general_log_max_tis;
-	uint8_t		mlcap_general_rsvd18[144];
 } mlxcx_hca_cap_general_caps_t;
 
 typedef enum {
