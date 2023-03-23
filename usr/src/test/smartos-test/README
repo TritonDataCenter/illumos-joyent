@@ -60,7 +60,7 @@ Specifically, the script will:
   file that need to be installed to a normally read-only location, and
   extract the portions of test archive that must appear in /usr
 * extract the remaining test archive contents to /opt and /kernel
-* configure pkgsrc (or use existing GZ pkgsrc if installed)
+* install pkgsrc-tools (or update existing GZ pkgsrc if installed)
 * create a `ztest` user for ZFS tests (if DISKS is set... see below)
 * enable per-process coredumps
 * put /etc/shadow on to /etc itself to allow tests like the ZFS one to
@@ -127,9 +127,10 @@ inconsistencies in the BHYVE/VMM results) which has:
 
 	16GB of RAM (though 8 would probably suffice)
 
-	A 100GB disk for `zones` (less can cause ENOSPC problems sometimes)
+	A 100GB disk for `zones` (a smaller disk can cause ENOSPC problems
+	sometimes)
 
-	Three 30GB disks for setting up in DISKS for ZFS testing.  (less
+	Three 30GB disks for setting up in DISKS for ZFS testing.  (fewer
 	can cause ZFS test failures)
 
 	An NIC that can reach the public Internet.
