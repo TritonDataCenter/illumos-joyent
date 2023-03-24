@@ -163,7 +163,7 @@ we run:
 
 	/opt/smartos-build/bin/smartos-build -e ./tests-release-20230323-20230323T000605Z.tgz
 		(Run the tests!
-		 You can also uses ./opt/ as /opt is copied from here)
+		 You can also use ./opt/ as /opt is copied from here)
 
 Now the tests are running, and with ZFS tests also executing, this will take
 a long time. All of the test results will end up in /var/tmp/test_results
