@@ -5,15 +5,12 @@
 # 1.0 of the CDDL.
 #
 # A full copy of the text of the CDDL should have accompanied this
-# source.  A copy of the CDDL is also available via the Internet at
-# http://www.illumos.org/license/CDDL.
+# source.  A copy of the CDDL is also available via the Internet
+# at http://www.illumos.org/license/CDDL.
 #
 
 #
-# Copyright 2016 Toomas Soome <tsoome@me.com>
+# Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
 #
 
-include ../Makefile.com
-include ../../Makefile.cmd.64
-
-install: all $(ROOTPROG64)
+file path=usr/has/man/man1has/csh.1has

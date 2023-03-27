@@ -19,7 +19,7 @@
 # CDDL HEADER END
 #
 #
-# Copyright 2022 MNX Cloud, Inc.
+# Copyright 2023 MNX Cloud, Inc.
 # Copyright 2020 Joyent, Inc.
 # Copyright 2017 ASS-Einrichtungssysteme GmbH
 #
@@ -2397,6 +2397,30 @@ h platform/i86pc/ucode/GenuineIntel/000806EB-80=platform/i86pc/ucode/GenuineInte
 f platform/i86pc/ucode/GenuineIntel/000806EC-04 0444 root sys
 h platform/i86pc/ucode/GenuineIntel/000806EC-10=platform/i86pc/ucode/GenuineIntel/000806EC-04
 h platform/i86pc/ucode/GenuineIntel/000806EC-80=platform/i86pc/ucode/GenuineIntel/000806EC-04
+f platform/i86pc/ucode/GenuineIntel/000806F4-01 0444 root sys
+h platform/i86pc/ucode/GenuineIntel/000806F4-02=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F4-04=platform/i86pc/ucode/GenuineIntel/000806F4-01
+f platform/i86pc/ucode/GenuineIntel/000806F4-10 0444 root sys
+h platform/i86pc/ucode/GenuineIntel/000806F4-80=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F5-01=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F5-02=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F5-04=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F5-10=platform/i86pc/ucode/GenuineIntel/000806F4-10
+h platform/i86pc/ucode/GenuineIntel/000806F5-80=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F6-01=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F6-02=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F6-04=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F6-10=platform/i86pc/ucode/GenuineIntel/000806F4-10
+h platform/i86pc/ucode/GenuineIntel/000806F6-80=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F7-01=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F7-02=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F7-04=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F7-80=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F8-01=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F8-02=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F8-04=platform/i86pc/ucode/GenuineIntel/000806F4-01
+h platform/i86pc/ucode/GenuineIntel/000806F8-10=platform/i86pc/ucode/GenuineIntel/000806F4-10
+h platform/i86pc/ucode/GenuineIntel/000806F8-80=platform/i86pc/ucode/GenuineIntel/000806F4-01
 f platform/i86pc/ucode/GenuineIntel/00090661-01 0444 root sys
 f platform/i86pc/ucode/GenuineIntel/00090672-01 0444 root sys
 h platform/i86pc/ucode/GenuineIntel/00090672-02=platform/i86pc/ucode/GenuineIntel/00090672-01
@@ -2428,6 +2452,10 @@ f platform/i86pc/ucode/GenuineIntel/000A0671-02 0444 root sys
 f platform/i86pc/ucode/GenuineIntel/000B0671-02 0444 root sys
 h platform/i86pc/ucode/GenuineIntel/000B0671-10=platform/i86pc/ucode/GenuineIntel/000B0671-02
 h platform/i86pc/ucode/GenuineIntel/000B0671-20=platform/i86pc/ucode/GenuineIntel/000B0671-02
+f platform/i86pc/ucode/GenuineIntel/000B06A2-40 0444 root sys
+h platform/i86pc/ucode/GenuineIntel/000B06A2-80=platform/i86pc/ucode/GenuineIntel/000B06A2-40
+h platform/i86pc/ucode/GenuineIntel/000B06A3-40=platform/i86pc/ucode/GenuineIntel/000B06A2-40
+h platform/i86pc/ucode/GenuineIntel/000B06A3-80=platform/i86pc/ucode/GenuineIntel/000B06A2-40
 h platform/i86pc/ucode/GenuineIntel/000B06F2-01=platform/i86pc/ucode/GenuineIntel/00090672-01
 h platform/i86pc/ucode/GenuineIntel/000B06F2-02=platform/i86pc/ucode/GenuineIntel/00090672-01
 h platform/i86pc/ucode/GenuineIntel/000B06F2-04=platform/i86pc/ucode/GenuineIntel/00090672-01
@@ -2516,7 +2544,6 @@ s usr/bin/amd64/elfdump=../elfdump
 f usr/bin/amd64/elfedit 0555 root bin
 f usr/bin/amd64/elfwrap 0555 root bin
 f usr/bin/amd64/encrypt 0555 root bin
-f usr/bin/amd64/ficl-sys 0555 root bin
 f usr/bin/amd64/gcore 0555 root bin
 f usr/bin/amd64/ksh93 0555 root bin
 h usr/bin/amd64/ksh=usr/bin/amd64/ksh93
@@ -2619,7 +2646,7 @@ h usr/bin/cputrack=usr/lib/isaexec
 f usr/bin/crle 0555 root bin
 f usr/bin/crontab 4555 root bin
 f usr/bin/crypt 0555 root bin
-f usr/bin/csh 0555 root bin
+s usr/bin/csh=../has/bin/csh
 f usr/bin/csplit 0555 root bin
 f usr/bin/ctfdiff 0555 root bin
 f usr/bin/ctfdump 0555 root bin
@@ -2680,7 +2707,7 @@ f usr/bin/fdetach 0555 root bin
 f usr/bin/fdformat 4555 root bin
 h usr/bin/fg=usr/bin/alias
 h usr/bin/fgrep=usr/bin/grep
-h usr/bin/ficl-sys=usr/lib/isaexec
+f usr/bin/ficl-sys 0555 root bin
 f usr/bin/file 0555 root bin
 f usr/bin/filesync 0555 root bin
 f usr/bin/find 0555 root bin
@@ -3049,8 +3076,11 @@ d usr/gnu/share/man/man3 0755 root bin
 d usr/gnu/share/man/man5 0755 root bin
 d usr/gnu/share/man/man7 0755 root bin
 d usr/has 0755 root bin
+d usr/has/bin 0755 root bin
+f usr/has/bin/csh 0555 root bin
 d usr/has/man 0755 root bin
 d usr/has/man/man1has 0755 root bin
+f usr/has/man/man1has/csh.1has 0444 root bin
 f usr/has/man/man1has/edit.1has 0444 root bin
 f usr/has/man/man1has/vi.1has 0444 root bin
 d usr/include 0755 root bin
@@ -11436,6 +11466,7 @@ f usr/share/lib/zoneinfo/America/Cayenne 0644 root bin
 h usr/share/lib/zoneinfo/America/Cayman=usr/share/lib/zoneinfo/America/Panama
 f usr/share/lib/zoneinfo/America/Chicago 0644 root bin
 f usr/share/lib/zoneinfo/America/Chihuahua 0644 root bin
+f usr/share/lib/zoneinfo/America/Ciudad_Juarez 0644 root bin
 h usr/share/lib/zoneinfo/America/Coral_Harbour=usr/share/lib/zoneinfo/America/Panama
 h usr/share/lib/zoneinfo/America/Cordoba=usr/share/lib/zoneinfo/America/Argentina/Cordoba
 f usr/share/lib/zoneinfo/America/Costa_Rica 0644 root bin
@@ -11522,7 +11553,7 @@ f usr/share/lib/zoneinfo/America/North_Dakota/New_Salem 0644 root bin
 f usr/share/lib/zoneinfo/America/Nuuk 0644 root bin
 f usr/share/lib/zoneinfo/America/Ojinaga 0644 root bin
 f usr/share/lib/zoneinfo/America/Panama 0644 root bin
-f usr/share/lib/zoneinfo/America/Pangnirtung 0644 root bin
+h usr/share/lib/zoneinfo/America/Pangnirtung=usr/share/lib/zoneinfo/America/Iqaluit
 f usr/share/lib/zoneinfo/America/Paramaribo 0644 root bin
 f usr/share/lib/zoneinfo/America/Phoenix 0644 root bin
 f usr/share/lib/zoneinfo/America/Port-au-Prince 0644 root bin
@@ -11564,7 +11595,7 @@ h usr/share/lib/zoneinfo/America/Virgin=usr/share/lib/zoneinfo/America/Puerto_Ri
 f usr/share/lib/zoneinfo/America/Whitehorse 0644 root bin
 f usr/share/lib/zoneinfo/America/Winnipeg 0644 root bin
 f usr/share/lib/zoneinfo/America/Yakutat 0644 root bin
-f usr/share/lib/zoneinfo/America/Yellowknife 0644 root bin
+h usr/share/lib/zoneinfo/America/Yellowknife=usr/share/lib/zoneinfo/America/Edmonton
 d usr/share/lib/zoneinfo/Antarctica 0755 root bin
 f usr/share/lib/zoneinfo/Antarctica/Casey 0644 root bin
 f usr/share/lib/zoneinfo/Antarctica/Davis 0644 root bin
@@ -12030,7 +12061,7 @@ f usr/share/man/man1/cputrack.1 0444 root bin
 f usr/share/man/man1/crle.1 0444 root bin
 f usr/share/man/man1/crontab.1 0444 root bin
 f usr/share/man/man1/crypt.1 0444 root bin
-f usr/share/man/man1/csh.1 0444 root bin
+s usr/share/man/man1/csh.1=../../../has/man/man1has/csh.1has
 f usr/share/man/man1/csplit.1 0444 root bin
 f usr/share/man/man1/ctfdiff.1 0444 root bin
 f usr/share/man/man1/ctfdump.1 0444 root bin

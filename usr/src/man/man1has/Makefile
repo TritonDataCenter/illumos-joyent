@@ -19,6 +19,7 @@ include		$(SRC)/Makefile.master
 MANSECT=	1has
 
 MANFILES=			\
+		csh.1has	\
 		ctags.1has	\
 		edit.1has	\
 		ex.1has		\
