@@ -14,15 +14,19 @@
 #
 
 PROG=csh
+KSHPROG=csh
 
 include ../Makefile.cmd
 
 .KEEP_STATE:
 
-all: $(KSHPROG)
+all: $(PROG)
 
 install: all $(ROOTPROG)
 
 clean:
+
+$(PROG).po:
+	$(TOUCH) $(PROG).po
 
 include ../Makefile.targ
