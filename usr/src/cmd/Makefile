@@ -107,7 +107,7 @@ COMMON_SUBDIRS=		\
 	cpc		\
 	cron		\
 	crypt		\
-	csh		\
+	csh-wrapper	\
 	csplit		\
 	ctfconvert	\
 	ctfdiff		\
