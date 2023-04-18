@@ -107,7 +107,6 @@ COMMON_SUBDIRS=		\
 	cpc		\
 	cron		\
 	crypt		\
-	csh-wrapper	\
 	csplit		\
 	ctfconvert	\
 	ctfdiff		\
@@ -314,6 +313,7 @@ COMMON_SUBDIRS=		\
 	pgstat		\
 	pgrep		\
 	picl		\
+	pkgsrc-wrapper	\
 	plimit		\
 	policykit	\
 	power		\

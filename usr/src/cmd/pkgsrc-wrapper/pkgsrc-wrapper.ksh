@@ -38,10 +38,10 @@ if [[ $? != 0 ]]; then
 fi
 
 # Restore PATH at this point, since 'cmd' is a full path.
-PATH=$OLDPATH
+export PATH=$OLDPATH
 cmd=$(PATH=$PATH type -fp "$cmd")
 if [[ -z $cmd ]]; then
-   echo "INTERNAL ERROR"
+   echo "INTERNAL ERROR: command $cmd is suddenly missing" >&2
    exit 2
 fi
 

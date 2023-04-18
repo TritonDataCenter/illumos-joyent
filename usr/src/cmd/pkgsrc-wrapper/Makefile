@@ -13,8 +13,13 @@
 # Copyright 2023 MNX Cloud, Inc.
 #
 
-PROG=csh
-KSHPROG=csh
+PROG=pkgsrc-wrapper
+KSHPROG=pkgsrc-wrapper
+
+# Add programs to $WRAPPER_LINKS that you want to actually have hardlink to
+# the pkgsrc wrapper.
+WRAPPER_LINKS=csh
+WRAPPER_LINKS+=zsh
 
 include ../Makefile.cmd
 
@@ -22,7 +27,10 @@ include ../Makefile.cmd
 
 all: $(PROG)
 
-install: all $(ROOTPROG)
+install: all $(ROOTPROG) $(WRAPPER_LINKS)
+
+$(WRAPPER_LINKS):
+	$(LN) $(ROOTPROG) $(ROOTBIN)/%
 
 clean:
 

@@ -2643,7 +2643,7 @@ h usr/bin/cputrack=usr/lib/isaexec
 f usr/bin/crle 0555 root bin
 f usr/bin/crontab 4555 root bin
 f usr/bin/crypt 0555 root bin
-f usr/bin/csh 0555 root bin
+h usr/bin/csh=usr/bin/pkgsrc-wrapper
 f usr/bin/csplit 0555 root bin
 f usr/bin/ctfdiff 0555 root bin
 f usr/bin/ctfdump 0555 root bin
@@ -2862,6 +2862,7 @@ f usr/bin/pg 0555 root bin
 f usr/bin/pginfo 0555 root bin
 f usr/bin/pgrep 0555 root bin
 f usr/bin/pgstat 0555 root bin
+f usr/bin/pkgsrc-wrapper 0555 root bin
 f usr/bin/pkgtrans 0555 root bin
 h usr/bin/pkill=usr/bin/pgrep
 f usr/bin/pktool 0555 root bin
@@ -3028,6 +3029,7 @@ f usr/bin/yppasswd 0555 root bin
 f usr/bin/ypwhich 0555 root other
 f usr/bin/zcat 0555 root bin
 f usr/bin/ziostat 0555 root bin
+h usr/bin/zsh=usr/bin/pkgsrc-wrapper
 s usr/bin/zonename=../../sbin/zonename
 f usr/bin/ztest 0555 root bin
 d usr/ccs 0755 root bin
