@@ -1,0 +1,65 @@
+.\" Generated with Ronnjs 0.4.0
+.\" http://github.com/kapouer/ronnjs
+.
+.TH "PKGSRC\-WRAPPER" "1" "April 2023" "" ""
+.
+.SH "NAME"
+\fBpkgsrc-wrapper\fR \-\- Platform commands supplied by pkgsrc
+.
+.SH "SYNOPSIS"
+.
+.nf
+/usr/bin/pkgsrc\-wrapper
+.
+.fi
+.
+.P
+This command should not be run directly\. This command should only be called
+where \fBarg[0]\fR is the name of another command to be \fBexec(2)\fR\'d\.
+.
+.SH "DESCRIPTION"
+This is a generic wrapper for supplying lesser\-used commands via pkgsrc rather
+than directly in the platform image\. This allows preserving space in the
+ram disk while also extending the platform image with additional commands\. The
+primary target for this is shells and interpreters\.
+.
+.P
+This works both with base/minimal zone images as well as pkgsrc\-tools installed
+in the global zone\. If both are installed, \fB/opt/tools\fR will be preferred over \fB/opt/local\fR\|\.
+.
+.P
+Note: This does not allow operators to arbitrarily extend the SmartOS platform
+image because that would require writing to \fB/usr/bin\fR, which is read\-only\.
+Rather, SmartOS itself provides hooks for specific commands that can be
+satisfied using pkgsrc\.
+.
+.P
+The following platform commands can be satisfied using pkgsrc:
+.
+.IP "\(bu" 4
+csh (by installing tcsh)
+.
+.IP "\(bu" 4
+tcsh
+.
+.IP "\(bu" 4
+zsh
+.
+.P
+Thus, if \fBtcsh\fR is installed via pkgsrc, then you can call \fB/usr/bin/csh\fR,
+which would then invoke \fB/opt/{tools,local}/bin/tcsh\fR\|\. This will allow, for
+example, \fB/usr/bin/csh\fR to be used as a script interpreter or as an LDAP user\'s
+shell in either the global zone or non\-global zones without any additional
+special handling\.
+.
+.SH "SEE ALSO"
+.
+.nf
+  exec(2), shells(5), csh(1), tcsh(1), zsh(1), pkgin(1)
+.
+.fi
+.
+.SH "NOTES"
+The SmartOS platform image is currently mosty composed of 32\-bit binaries\.
+Packages installed via pkgsrc will be 64\-bit if using pkgsrc\-tools (in the
+global zone) or a base\-64/minimal\-64 zone image\.
