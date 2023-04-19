@@ -33,6 +33,10 @@ static struct {
 	const char *bin_needs;
 } remap_table[] = {
 	{ "csh", "tcsh" },
+	/* login(1) invokes shells as -$SHELL. */
+	{ "-csh", "tcsh" },
+	{ "-tcsh", "tcsh" },
+	{ "-zsh", "zsh" },
 	{ NULL, NULL}
 };
 
@@ -157,7 +161,7 @@ main(int argc, char *argv[], char *envp[])
 		/* XXX KEBE ASKS L10N? */
 		/* XXX KEBE ALSO ASKS -- better message? */
 		(void) fprintf(stderr, "Please install %s from pkgsrc.\n",
-		    myname);
+		    remapped_bin);
 		exit(1);
 	}
 
