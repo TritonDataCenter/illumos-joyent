@@ -14,11 +14,12 @@
 #
 
 PROG=pkgsrc-wrapper
-KSHPROG=pkgsrc-wrapper
+#KSHPROG=pkgsrc-wrapper
 
 # Add programs to $WRAPPER_LINKS that you want to actually have hardlink to
 # the pkgsrc wrapper.
 WRAPPER_LINKS=csh
+WRAPPER_LINKS+=tcsh
 WRAPPER_LINKS+=zsh
 
 include ../Makefile.cmd
