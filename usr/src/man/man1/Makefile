@@ -276,6 +276,7 @@ MANFILES=	acctcom.1			\
 		pkgmk.1				\
 		pkgparam.1			\
 		pkgproto.1			\
+		pkgsrc-wrapper.1		\
 		pkgtrans.1			\
 		pktool.1			\
 		plabel.1			\
