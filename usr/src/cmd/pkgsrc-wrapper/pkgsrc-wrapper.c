@@ -22,9 +22,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <assert.h>
+#include <errno.h>
 
 static struct {
 	const char *bin_name;
@@ -167,4 +169,9 @@ main(int argc, char *argv[], char *envp[])
 		    pkgsrc_path, strerror(errno));
 		exit(2);
 	}
+
+	/* We shouldn't return here... */
+	/* XXX KEBE ALSO ASKS -- better message? */
+	(void) fprintf(stderr, "execve bug with %s.\n", pkgsrc_path);
+	return (2);
 }
