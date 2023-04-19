@@ -15,6 +15,7 @@
 # Copyright 2022 Garrett D'Amore
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2020 Joyent, Inc.
+# Copyright 2023 MNX Cloud, Inc.
 #
 
 include		$(SRC)/Makefile.master
