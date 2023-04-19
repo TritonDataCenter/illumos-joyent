@@ -25,7 +25,7 @@
 static struct {
 	const char *bin_name;
 	const char *bin_needs;
-} remap_table = {
+} remap_table[] = {
 	{ "csh", "tcsh" },
 	{ NULL, NULL}
 };
