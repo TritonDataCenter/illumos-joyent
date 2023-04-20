@@ -28,11 +28,11 @@ include ../Makefile.cmd
 
 all: $(PROG)
 
-install: all $(ROOTPROG) $(ROOTLINKS)
+install: all $(ROOTLIBPROG) $(ROOTLINKS)
 
-$(ROOTLINKS): $(ROOTPROG)
+$(ROOTLINKS): $(ROOTLIBPROG)
 	-$(RM) $@
-	-$(LN) $(ROOTPROG) $@
+	-$(LN) $(ROOTLIBPROG) $@
 
 clean:
 
