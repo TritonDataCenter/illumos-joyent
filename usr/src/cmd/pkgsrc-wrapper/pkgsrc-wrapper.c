@@ -28,12 +28,13 @@
 #include <assert.h>
 #include <errno.h>
 
+/* Remap table for when we have commands with than one name (e.g. tcsh/csh). */
 static struct {
 	const char *bin_name;
 	const char *bin_needs;
 } remap_table[] = {
 	{ "csh", "tcsh" },
-	/* login(1) invokes shells as -$SHELL. */
+	/* login(1) invokes shells as -$SHELL. Cover that here. */
 	{ "-csh", "tcsh" },
 	{ "-tcsh", "tcsh" },
 	{ "-zsh", "zsh" },
@@ -55,12 +56,7 @@ remap_bin(const char *base_bin)
 }
 
 
-/*
- * This returns an allocated string.  Since we're exec()-ing or exit()-ing we
- * really don't need to worry about leaks, however.
- */
-
-/* List these in desired search order. */
+/* List these pkgsrc paths in desired search order. */
 static const char *pkgsrc_paths[] = {
 	"/opt/local/bin",
 	"/opt/local/sbin",
@@ -69,6 +65,10 @@ static const char *pkgsrc_paths[] = {
 	NULL
 };
 
+/*
+ * This returns an allocated string.  Since we're exec()-ing or exit()-ing we
+ * really don't need to worry about leaks, however.
+ */
 static char *
 generate_pkgsrc_path(const char *desired_bin)
 {
@@ -96,7 +96,7 @@ generate_pkgsrc_path(const char *desired_bin)
 		if (cmdfd == -1) {
 			/*
 			 * XXX KEBE ASKS, print diagnostics?
-			 * If so, move close(dirfd) here after printing or
+			 * If so, move close(dirfd) here after printing, or
 			 * save off errno for openat() above.
 			 */
 			continue; /* Try next one */
@@ -134,7 +134,7 @@ main(int argc, char *argv[], char *envp[])
 
 	/*
 	 * 1. Get the binary name in argv[0], remapping if need be.
-	 * (e.g. csh -> tcsh .)
+	 * (e.g. csh -> tcsh, or -($SHELL) invocations.)
 	 */
 	base_bin = strrchr(argv[0], '/');
 	if (base_bin == NULL)
