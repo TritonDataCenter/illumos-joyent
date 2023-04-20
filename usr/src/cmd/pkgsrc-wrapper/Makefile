@@ -16,11 +16,11 @@
 PROG=pkgsrc-wrapper
 #KSHPROG=pkgsrc-wrapper
 
-# Add programs to $WRAPPER_LINKS that you want to actually have hardlink to
+# Add programs to $ROOTLINKS that you want to actually have hardlink to
 # the pkgsrc wrapper.
-WRAPPER_LINKS=csh
-WRAPPER_LINKS+=tcsh
-WRAPPER_LINKS+=zsh
+ROOTLINKS = $(ROOTBIN)/csh
+ROOTLINKS += $(ROOTBIN)/tcsh
+ROOTLINKS += $(ROOTBIN)/zsh
 
 include ../Makefile.cmd
 
@@ -28,10 +28,11 @@ include ../Makefile.cmd
 
 all: $(PROG)
 
-install: all $(ROOTPROG) $(WRAPPER_LINKS)
+install: all $(ROOTPROG) $(ROOTLINKS)
 
-$(WRAPPER_LINKS):
-	$(LN) $(ROOTPROG) $(ROOTBIN)/%
+$(ROOTLINKS): $(ROOTPROG)
+	-$(RM) $@
+	-$(LN) $(ROOTPROG) $@
 
 clean:
 
