@@ -15,7 +15,6 @@
 # Copyright 2022 Garrett D'Amore
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2020 Joyent, Inc.
-# Copyright 2023 MNX Cloud, Inc.
 #
 
 include		$(SRC)/Makefile.master
@@ -276,7 +275,6 @@ MANFILES=	acctcom.1			\
 		pkgmk.1				\
 		pkgparam.1			\
 		pkgproto.1			\
-		pkgsrc-wrapper.1		\
 		pkgtrans.1			\
 		pktool.1			\
 		plabel.1			\

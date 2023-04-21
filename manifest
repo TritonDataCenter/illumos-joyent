@@ -12260,7 +12260,6 @@ s usr/share/man/man1/pflags.1=proc.1
 s usr/share/man/man1/pfsh.1=pfexec.1
 f usr/share/man/man1/pg.1 0444 root bin
 f usr/share/man/man1/pgrep.1 0444 root bin
-f usr/share/man/man1/pkgsrc-wrapper.1 0444 root bin
 f usr/share/man/man1/pkgtrans.1 0444 root bin
 s usr/share/man/man1/pkill.1=pgrep.1
 f usr/share/man/man1/pktool.1 0444 root bin
