@@ -89,20 +89,12 @@ generate_pkgsrc_path(const char *desired_bin)
 		 */
 
 		dirfd = open(pkgsrc_paths[index], O_RDONLY);
-		if (dirfd == -1) {
-			/* XXX KEBE ASKS, print diagnostics? */
+		if (dirfd == -1)
 			continue; /* Try next one */
-		}
 		cmdfd = openat(dirfd, desired_bin, O_RDONLY);
-		(void) close(dirfd); /* XXX KEBE WARNS, errno reset... */
-		if (cmdfd == -1) {
-			/*
-			 * XXX KEBE ASKS, print diagnostics?
-			 * If so, move close(dirfd) here after printing, or
-			 * save off errno for openat() above.
-			 */
+		(void) close(dirfd);
+		if (cmdfd == -1)
 			continue; /* Try next one */
-		}
 		(void) close(cmdfd);
 		path = pkgsrc_paths[index];
 		break;	/* We're done. */
@@ -117,7 +109,8 @@ generate_pkgsrc_path(const char *desired_bin)
 	 */
 
 	if (asprintf(&binpath, "%s/%s", path, desired_bin) == -1) {
-		/* XXX KEBE ASKS, print diagnostics? */
+		(void) fprintf(stderr, "altexec: asprintf failed: %s\n",
+		    strerror(errno));
 		assert(binpath == NULL); /* man pages says this is true. */
 	}
 
