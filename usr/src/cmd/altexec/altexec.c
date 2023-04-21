@@ -14,8 +14,7 @@
  */
 
 /*
- * Use a C program instead of a shell script to exec() something in
- * the pkgsrc paths.
+ * Use a dedicated C program to exec() something in the pkgsrc paths.
  */
 
 #include <sys/types.h>
@@ -56,7 +55,10 @@ remap_bin(const char *base_bin)
 }
 
 
-/* List these pkgsrc paths in desired search order. */
+/*
+ * List the pkgsrc paths in desired search order. We are ignoring PATH
+ * intentionally.
+ */
 static const char *pkgsrc_paths[] = {
 	"/opt/local/bin",
 	"/opt/local/sbin",
@@ -147,8 +149,7 @@ main(int argc, char *argv[], char *envp[])
 	 * (Can use strcmp() because "myname" is bounded.)
 	 */
 	if (strcmp(myname, base_bin) == 0) {
-		/* XXX KEBE ASKS L10N? */
-		(void) fprintf(stderr, "%s should not be run by itself.\n",
+		(void) fprintf(stderr, "%s should not be run directly.\n",
 		    myname);
 		exit(3);
 	}
@@ -158,7 +159,6 @@ main(int argc, char *argv[], char *envp[])
 	/* 3. See if the binary name is in one of the pkgsrc paths. */
 	pkgsrc_path = generate_pkgsrc_path(remapped_bin);
 	if (pkgsrc_path == NULL) {
-		/* XXX KEBE ASKS L10N? */
 		/* XXX KEBE ALSO ASKS -- better message? */
 		(void) fprintf(stderr, "Please install %s from pkgsrc.\n",
 		    remapped_bin);
@@ -167,9 +167,8 @@ main(int argc, char *argv[], char *envp[])
 
 	/* 4. If so, launch it with our exact arg[vc] (assume env goes thru?) */
 	if (execve(pkgsrc_path, argv, envp) == -1) {
-		/* XXX KEBE ASKS L10N? */
 		/* XXX KEBE ALSO ASKS -- better message? */
-		(void) fprintf(stderr, "Cannot execute %s: %s.\n",
+		(void) fprintf(stderr, "Failed to execute %s: %s.\n",
 		    pkgsrc_path, strerror(errno));
 		exit(2);
 	}

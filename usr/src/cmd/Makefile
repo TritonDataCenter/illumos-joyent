@@ -64,6 +64,7 @@ COMMON_SUBDIRS=		\
 	adbgen		\
 	acct		\
 	acctadm		\
+	altexec		\
 	arch		\
 	asa		\
 	ast		\
@@ -314,7 +315,6 @@ COMMON_SUBDIRS=		\
 	pgstat		\
 	pgrep		\
 	picl		\
-	pkgsrc-wrapper	\
 	plimit		\
 	policykit	\
 	power		\

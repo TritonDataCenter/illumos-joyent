@@ -13,11 +13,10 @@
 # Copyright 2023 MNX Cloud, Inc.
 #
 
-PROG=pkgsrc-wrapper
-#KSHPROG=pkgsrc-wrapper
+PROG=altexec
 
 # Add programs to $ROOTLINKS that you want to actually have hardlink to
-# the pkgsrc wrapper.
+# the pkgsrc wrapper, altexec.
 ROOTLINKS = $(ROOTBIN)/csh
 ROOTLINKS += $(ROOTBIN)/tcsh
 ROOTLINKS += $(ROOTBIN)/zsh
