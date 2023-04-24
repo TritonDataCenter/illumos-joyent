@@ -150,7 +150,7 @@ main(int argc, char *argv[], char *envp[])
 	/* 3. See if the binary name is in one of the pkgsrc paths. */
 	pkgsrc_path = generate_pkgsrc_path(remapped_bin);
 	if (pkgsrc_path == NULL) {
-		/* XXX KEBE ALSO ASKS -- better message? */
+		/* XXX KEBE ALSO ASKS - better message? */
 		(void) fprintf(stderr, "Please install %s from pkgsrc.\n",
 		    remapped_bin);
 		exit(1);
