@@ -109,9 +109,7 @@ generate_pkgsrc_path(const char *desired_bin)
 	 */
 
 	if (asprintf(&binpath, "%s/%s", path, desired_bin) == -1) {
-		(void) fprintf(stderr, "altexec: asprintf failed: %s\n",
-		    strerror(errno));
-		assert(binpath == NULL); /* man pages says this is true. */
+		assert(binpath == NULL); /* man page says this must be true. */
 	}
 
 	return (binpath);
