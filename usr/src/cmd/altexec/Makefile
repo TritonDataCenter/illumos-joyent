@@ -35,7 +35,4 @@ $(ROOTLINKS): $(ROOTLIBPROG)
 
 clean:
 
-$(PROG).po:
-	$(TOUCH) $(PROG).po
-
 include ../Makefile.targ

@@ -26,6 +26,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include <errno.h>
+#include <locale.h>
 
 /* Remap table for when we have commands with than one name (e.g. tcsh/csh). */
 static struct {
@@ -140,8 +141,8 @@ main(int argc, char *argv[], char *envp[])
 	 * (Can use strcmp() because "myname" is bounded.)
 	 */
 	if (strcmp(myname, base_bin) == 0) {
-		(void) fprintf(stderr, "%s should not be run directly.\n",
-		    myname);
+		(void) fprintf(stderr,
+		    gettext("%s should not be run directly.\n"), myname);
 		exit(3);
 	}
 
@@ -150,22 +151,21 @@ main(int argc, char *argv[], char *envp[])
 	/* 3. See if the binary name is in one of the pkgsrc paths. */
 	pkgsrc_path = generate_pkgsrc_path(remapped_bin);
 	if (pkgsrc_path == NULL) {
-		/* XXX KEBE ALSO ASKS - better message? */
-		(void) fprintf(stderr, "Please install %s from pkgsrc.\n",
-		    remapped_bin);
+		(void) fprintf(stderr,
+		    gettext("Please install %s from pkgsrc.\n"), remapped_bin);
 		exit(1);
 	}
 
 	/* 4. If so, launch it with our exact arg[vc] (assume env goes thru?) */
 	if (execve(pkgsrc_path, argv, envp) == -1) {
-		/* XXX KEBE ALSO ASKS -- better message? */
-		(void) fprintf(stderr, "Failed to execute %s: %s.\n",
+		(void) fprintf(stderr,
+		    gettext("Failed to execute %s: %s.\n"),
 		    pkgsrc_path, strerror(errno));
 		exit(2);
 	}
 
 	/* We shouldn't return here... */
-	/* XXX KEBE ALSO ASKS -- better message? */
-	(void) fprintf(stderr, "execve bug with %s.\n", pkgsrc_path);
+	(void) fprintf(stderr,
+	    gettext("execve bug with %s.\n"), pkgsrc_path);
 	return (2);
 }
