@@ -61,10 +61,10 @@ remap_bin(const char *base_bin)
  * intentionally.
  */
 static const char *pkgsrc_paths[] = {
-	"/opt/local/bin",
-	"/opt/local/sbin",
 	"/opt/tools/bin",
 	"/opt/tools/sbin",
+	"/opt/local/bin",
+	"/opt/local/sbin",
 	NULL
 };
 

@@ -2929,6 +2929,7 @@ CSI	Enabled
 .BR ps (1),
 .BR sh (1),
 .BR shell_builtins (1),
+.BR tcsh (1),
 .BR which (1),
 .BR tset (1B),
 .BR access (2),
