@@ -117,7 +117,7 @@ generate_pkgsrc_path(const char *desired_bin)
 }
 
 /* Don't let us run ourselves. */
-static char *myname = "pkgsrc-wrapper";
+static char *myname = "altexec";
 
 int
 main(int argc, char *argv[], char *envp[])
@@ -141,8 +141,8 @@ main(int argc, char *argv[], char *envp[])
 	 * (Can use strcmp() because "myname" is bounded.)
 	 */
 	if (strcmp(myname, base_bin) == 0) {
-		(void) fprintf(stderr,
-		    gettext("%s should not be run directly.\n"), myname);
+		(void) fprintf(stderr, gettext("%s should not be run directly."
+		    " See altexec(8) for more information\n"), myname);
 		exit(3);
 	}
 
@@ -151,8 +151,8 @@ main(int argc, char *argv[], char *envp[])
 	/* 3. See if the binary name is in one of the pkgsrc paths. */
 	pkgsrc_path = generate_pkgsrc_path(remapped_bin);
 	if (pkgsrc_path == NULL) {
-		(void) fprintf(stderr,
-		    gettext("Please install %s from pkgsrc.\n"), remapped_bin);
+		(void) fprintf(stderr, gettext("Please install %s from pkgsrc."
+		    " See altexec(8) for more information.\n"), remapped_bin);
 		exit(1);
 	}
 
