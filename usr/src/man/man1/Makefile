@@ -424,6 +424,7 @@ MANLINKS=	batch.1		\
 		chdir.1		\
 		checkeq.1	\
 		continue.1	\
+		csh.1		\
 		ctags.1		\
 		decrypt.1	\
 		dirname.1	\
@@ -547,6 +548,8 @@ MANLINKS=	batch.1		\
 		whence.1	\
 		while.1		\
 		zcat.1
+
+csh.1		:= LINKSRC = ../../../has/man/man1has/csh.1has
 
 intro.1		:= LINKSRC = Intro.1
 
