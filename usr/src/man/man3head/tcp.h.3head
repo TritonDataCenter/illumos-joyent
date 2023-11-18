@@ -68,9 +68,22 @@ Avoid coalescing of small segments.
 
 .sp
 .LP
+\fB\fBTCP_INFO\fR\fR
+.ad
+.RS 15n
+Information about a socket's underlying TCP session may be retrieved by passing the read-only option
+TCP_INFO to getsockopt(2). It accepts a single argu ment: a pointer to an instance of struct tcp_info.
+.RE
+
+.sp
+.LP
 The macro is defined in the header. The implementation need not allow the value
 of the option to be set with \fBsetsockopt()\fR or retrieved with
 \fBgetsockopt()\fR.
+.sp
+.LP
+
+
 .SH ATTRIBUTES
 .sp
 .LP
