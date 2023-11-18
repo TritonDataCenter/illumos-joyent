@@ -25,6 +25,7 @@
  * Copyright (c) 2016 by Delphix. All rights reserved.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Carlos Neira <cneirabustos@gmail.com>
  */
 
 #include <sys/types.h>
@@ -46,8 +47,10 @@
 #include <inet/optcom.h>
 #include <inet/proto_set.h>
 #include <inet/tcp_impl.h>
+#include <sys/time.h>
 
 static int	tcp_opt_default(queue_t *, int, int, uchar_t *);
+static int	tcp_fill_info(tcp_t *tcp, tcp_info_t *ptr);
 
 /*
  * Table of all known options handled on a TCP protocol stack.
@@ -96,6 +99,10 @@ opdes_t	tcp_opt_arr[] = {
 
 { TCP_NODELAY,	IPPROTO_TCP, OA_RW, OA_RW, OP_NP, 0, sizeof (int), 0
 	},
+
+{ TCP_INFO,	IPPROTO_TCP, OA_RW, OA_RW, OP_NP, 0,
+	sizeof (struct tcp_info), -1 },
+
 { TCP_MAXSEG,	IPPROTO_TCP, OA_R, OA_R, OP_NP, 0, sizeof (uint_t),
 	536 },
 
@@ -421,6 +428,9 @@ tcp_opt_get(conn_t *connp, int level, int name, uchar_t *ptr)
 		case TCP_KEEPALIVE_THRESHOLD:
 			*i1 = tcp->tcp_ka_interval;
 			return (sizeof (int));
+		case TCP_INFO:
+			 tcp_fill_info(tcp, (tcp_info_t *)ptr);
+			return (sizeof (tcp_info_t));
 
 		/*
 		 * TCP_KEEPIDLE expects value in seconds, but
@@ -1273,4 +1283,30 @@ tcp_opt_set(conn_t *connp, uint_t optset_context, int level, int name,
 			proto_set_rx_oob_opt(connp, onoff);
 	}
 	return (0);
+}
+
+/*
+ * Export internal TCP state information via a struct tcp_info
+ * */
+int
+tcp_fill_info(tcp_t *tp, tcp_info_t *ti)
+{
+	ti->tcpi_state = tp->tcp_state;
+	ti->tcpi_rto = tp->tcp_rto_initial;
+	ti->tcpi_last_data_recv = tp->tcp_ts_recent;
+	ti->tcpi_rtt = NSEC2USEC(tp->tcp_rtt_sa);
+	ti->tcpi_rttvar = NSEC2USEC(tp->tcp_rtt_sd);
+	ti->tcpi_snd_ssthresh = tp->tcp_swnd;
+	ti->tcpi_snd_cwnd =  tp->tcp_cwnd;
+	ti->tcpi_snd_mss = tp->tcp_mss;
+
+	ti->tcpi_unacked = tp->tcp_suna;
+	ti->tcpi_sacked = tp->tcp_rack_cnt;
+	ti->tcpi_pmtu = tp->tcp_initial_pmtu;
+	ti->tcpi_total_retrans = tp->tcp_suna;
+	ti->tcpi_unacked  = tp->tcp_suna;
+	ti->tcpi_sacked  = tp->tcp_rack_cnt;
+	ti->tcpi_rcv_space = tp->tcp_rcv_ws;
+
+	return 0;
 }

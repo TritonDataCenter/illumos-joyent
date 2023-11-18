@@ -437,6 +437,22 @@ typedef struct lx_sockaddr_in6 {
 	/* one 32-bit field shorter than illumos */
 } lx_sockaddr_in6_t;
 
+enum {
+    LX_TCP_ESTABLISHED = 1,
+    LX_TCP_SYN_SENT,
+    LX_TCP_SYN_RECV,
+    LX_TCP_FIN_WAIT1,
+    LX_TCP_FIN_WAIT2,
+    LX_TCP_TIME_WAIT,
+    LX_TCP_CLOSE,
+    LX_TCP_CLOSE_WAIT,
+    LX_TCP_LAST_ACK,
+    LX_TCP_LISTEN,
+    LX_TCP_CLOSING,
+    LX_TCP_NEW_SYN_RECV,
+    LX_TCP_MAX_STATES
+};
+
 #ifdef	__cplusplus
 }
 #endif

@@ -23,6 +23,7 @@
  * Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011 Nexenta Systems, Inc. All rights reserved.
  * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Carlos Neira <cneirabustos@gmail.com>
  */
 
 /*
@@ -75,6 +76,9 @@ struct tcphdr {
 	uint16_t	th_urp;		/* urgent pointer */
 };
 
+
+
+
 #define	TCPOPT_EOL	0
 #define	TCPOPT_NOP	1
 #define	TCPOPT_MAXSEG	2
@@ -88,6 +92,8 @@ struct tcphdr {
  * With an IP MTU of 576, this is 536.
  */
 #define	TCP_MSS	536
+
+
 
 /*
  * Options for use with [gs]etsockopt at the TCP level.
@@ -109,6 +115,44 @@ struct tcphdr {
 #define	TCP_KEEPALIVE	0x8	/* set keepalive timer */
 #endif
 
+#ifndef TCP_INFO
+#define	TCP_INFO	0x09	/* retrieve tcp_info structure */
+#endif
+	typedef struct tcp_info {
+		uint8_t	tcpi_state;
+		uint8_t	tcpi_ca_state;
+		uint8_t	tcpi_retransmits;
+		uint8_t	tcpi_probes;
+		uint8_t	tcpi_backoff;
+		uint8_t	tcpi_options;
+		uint8_t	tcpi_snd_wscale : 4, tcpi_rcv_wscale : 4;
+		uint32_t	tcpi_rto;
+		uint32_t	tcpi_ato;
+		uint32_t	tcpi_snd_mss;
+		uint32_t	tcpi_rcv_mss;
+		uint32_t	tcpi_unacked;
+		uint32_t	tcpi_sacked;
+		uint32_t	tcpi_lost;
+		uint32_t	tcpi_retrans;
+		uint32_t	tcpi_fackets;
+		/* Times. */
+		uint32_t	tcpi_last_data_sent;
+		uint32_t	tcpi_last_ack_sent;
+		uint32_t	tcpi_last_data_recv;
+		uint32_t	tcpi_last_ack_recv;
+		/* Metrics. */
+		uint32_t	tcpi_pmtu;
+		uint32_t	tcpi_rcv_ssthresh;
+		uint32_t	tcpi_rtt;
+		uint32_t	tcpi_rttvar;
+		uint32_t	tcpi_snd_ssthresh;
+		uint32_t	tcpi_snd_cwnd;
+		uint32_t	tcpi_advmss;
+		uint32_t	tcpi_reordering;
+		uint32_t	tcpi_rcv_rtt;
+		uint32_t	tcpi_rcv_space;
+		uint32_t	tcpi_total_retrans;
+	} tcp_info_t;
 
 #define	TCP_NOTIFY_THRESHOLD		0x10
 #define	TCP_ABORT_THRESHOLD		0x11
