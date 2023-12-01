@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2022 Joyent, Inc.
+ * Copyright 2023 Carlos Neira <cneirabustos@gmail.com>
  */
 
 #include <sys/errno.h>
@@ -62,6 +63,7 @@
 #include <sys/lx_socket.h>
 #include <sys/lx_types.h>
 #include <sys/lx_impl.h>
+#include <sys/time.h>
 
 /* From uts/common/fs/sockfs/socksyscalls.c */
 extern int listen(int, int, int);
@@ -240,7 +242,34 @@ static const int stol_socktype[SOCK_SEQPACKET + 1] = {
 #define	STOL_SOCKTYPE(t)	\
 	((t) <= SOCK_SEQPACKET ? stol_socktype[(t)] : SOCK_INVAL)
 
+/* illumos represents tcp states with ranges between -6 to 6, where:
+ * tcp states > 0 define connections that have been stablished.
+ * tcp states < 0 define connections that have not yet stablished.
+ * Where Linux defines their tcp states as a range from 1 to 12.
+ * the macro STOL_TCPSTATE translate our illumos tcp states to a Linux one,
+ * in case there is no tcp state returned by OS that matches Linux, the state
+ * LX_TCP_CLOSE_WAIT will be returned.
+ * */
+static const int stol_tcp_state[LX_TCP_NEW_SYN_RECV + 1] = {
+        LX_TCP_ESTABLISHED,	// TCPS_ESTABLISHED
+        LX_TCP_CLOSE_WAIT,	// TCPS_CLOSE_WAIT
+        LX_TCP_FIN_WAIT1,	// TCPS_FIN_WAIT_1
+        LX_TCP_CLOSING,		// TCPS_CLOSING
+        LX_TCP_LAST_ACK,	// TCPS_LAST_ACK
+        LX_TCP_FIN_WAIT2,	// TCPS_FIN_WAIT_2
+        LX_TCP_TIME_WAIT,	// TCPS_TIME_WAIT
+        LX_TCP_SYN_RECV,	// TCPS_SYN_RCVD
+        LX_TCP_SYN_SENT,	// TCPS_SYN_SENT
+        LX_TCP_LISTEN,		// TCPS_LISTEN
+        LX_TCP_CLOSE_WAIT,	// TCPS_BOUND
+        LX_TCP_CLOSE_WAIT,	// TCPS_IDLE
+        LX_TCP_CLOSE		// TCPS_CLOSED
+};
 
+#define STOL_TCPSTATE(t)        \
+        (((t) <= LX_OS_MAX_TCP_STATE && (t) >= LX_OS_MIN_TCP_STATE )? \
+                ((t) < 0 ? stol_tcp_state[((t) * -1)  + 6] : \
+                        stol_tcp_state[(t)]) : LX_TCP_CLOSE_WAIT)
 /*
  * This string is used to prefix all abstract namespace Unix sockets, ie all
  * abstract namespace sockets are converted to regular sockets in the /tmp
@@ -2825,7 +2854,7 @@ static const lx_sockopt_map_t ltos_tcp_sockopts[LX_TCP_NOTSENT_LOWAT + 1] = {
 	{ TCP_LINGER2, sizeof (int) },		/* TCP_LINGER2		*/
 	{ OPTNOTSUP, 0 },			/* TCP_DEFER_ACCEPT - in code */
 	{ OPTNOTSUP, 0 },			/* TCP_WINDOW_CLAMP - in code */
-	{ OPTNOTSUP, 0 },			/* TCP_INFO		*/
+	{ OPTNOTSUP, 0 },			/* TCP_INFO - in code	*/
 	{ TCP_QUICKACK, sizeof (int) },		/* TCP_QUICKACK		*/
 	{ TCP_CONGESTION, CC_ALGO_NAME_MAX },	/* TCP_CONGESTION	*/
 	{ OPTNOTSUP, 0 },			/* TCP_MD5SIG		*/
@@ -3951,6 +3980,38 @@ lx_getsockopt_tcp(sonode_t *so, int optname, void *optval, socklen_t *optlen)
 		}
 		*optlen = sizeof (int);
 		goto out;
+
+	case LX_TCP_INFO:
+		/* We only try to fill in the fields, that we know
+		 * some applications expect.
+		*/
+		if (*optlen < sizeof (lx_tcp_info_t)) {
+			error = EINVAL;
+		} else {
+			*optlen = sizeof (lx_tcp_info_t);
+			bzero(optval, *optlen);
+
+			lx_tcp_info_t *ti = (lx_tcp_info_t*) optval;
+			conn_t *con = (struct conn_s*) so->so_proto_handle;
+			tcp_t *tp = con->conn_tcp;
+			ti->tcpi_state = STOL_TCPSTATE(tp->tcp_state);
+			ti->tcpi_rto = tp->tcp_rto_initial;
+			ti->tcpi_last_data_recv = tp->tcp_ts_recent;
+			ti->tcpi_rtt = NSEC2USEC(tp->tcp_rtt_sa);
+			ti->tcpi_rttvar = NSEC2USEC(tp->tcp_rtt_sd);
+			ti->tcpi_snd_ssthresh = tp->tcp_swnd;
+			ti->tcpi_snd_cwnd =  tp->tcp_cwnd;
+			ti->tcpi_snd_mss = tp->tcp_mss;
+			ti->tcpi_unacked = tp->tcp_suna;
+			ti->tcpi_sacked = tp->tcp_rack_cnt;
+			ti->tcpi_pmtu = tp->tcp_initial_pmtu;
+			ti->tcpi_total_retrans = tp->tcp_suna;
+			ti->tcpi_unacked  = tp->tcp_suna;
+			ti->tcpi_sacked  = tp->tcp_rack_cnt;
+			ti->tcpi_rcv_space = tp->tcp_rcv_ws;
+		}
+		goto out;
+
 	default:
 		break;
 	}
