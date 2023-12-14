@@ -460,12 +460,21 @@ typedef struct lx_sockaddr_in6 {
 } lx_sockaddr_in6_t;
 
 /*
+<<<<<<< HEAD
  * Other platforms like OpenBSD and FreeBSD only setup some of the values,
  * zeroing the rest. Also they add their  own extensions to the tcp_info struct.
  * We will not add custom extensions and use the current Linux version, as our
  * intent is just to lie to Linux applications requiring this syscall and this
  * lie should be "just good enough".
  */
+=======
+Other platforms like OpenBSD and FreeBSD only setup some of the values,
+zeroing the rest. Also they add their  own extensions to the tcp_info struct.
+We will not add custom extensions and use the current Linux version, as our intent
+is just to lie to Linux applications requiring this syscall and this lie should be
+"just good enough".
+*/
+>>>>>>> 3820e2ae9ad56b73a6981663814341a947f1494a
 
 typedef struct lx_tcp_info {
 	/* Current state in TCP state machine */

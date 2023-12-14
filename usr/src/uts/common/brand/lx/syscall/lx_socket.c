@@ -249,7 +249,7 @@ static const int stol_socktype[SOCK_SEQPACKET + 1] = {
  * Where Linux defines their tcp states as a range from 1 to 12.
  * the macro STOL_TCPSTATE translate our illumos tcp states to a Linux one,
  * in case there is no tcp state returned by OS that matches Linux, the state
- * LX_TCP_ESTABLISHED will be returned.
+ * LX_TCP_CLOSE will be returned.
  */
 
 /* Table based on -6 to 6 being mapped on to 0 to 13 */
@@ -271,7 +271,7 @@ static const int stol_tcp_state[LX_TCP_NEW_SYN_RECV + 1] = {
 
 #define	STOL_TCPSTATE(t)\
 (((t) <= LX_OS_MAX_TCP_STATE && (t) >= LX_OS_MIN_TCP_STATE) ? \
-	stol_tcp_state[(t) + 6] : LX_TCP_ESTABLISHED)
+	stol_tcp_state[(t) + 6] : LX_TCP_CLOSE)
 /*
  * This string is used to prefix all abstract namespace Unix sockets, ie all
  * abstract namespace sockets are converted to regular sockets in the /tmp
