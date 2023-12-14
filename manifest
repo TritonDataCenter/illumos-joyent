@@ -1179,8 +1179,10 @@ f kernel/misc/qlc/amd64/qlc_fw_2200 0755 root sys
 f kernel/misc/qlc/amd64/qlc_fw_2300 0755 root sys
 f kernel/misc/qlc/amd64/qlc_fw_2400 0755 root sys
 f kernel/misc/qlc/amd64/qlc_fw_2500 0755 root sys
+f kernel/misc/qlc/amd64/qlc_fw_2700 0755 root sys
 f kernel/misc/qlc/amd64/qlc_fw_6322 0755 root sys
 f kernel/misc/qlc/amd64/qlc_fw_8100 0755 root sys
+f kernel/misc/qlc/amd64/qlc_fw_8301fc 0755 root sys
 d kernel/misc/scsi_vhci 0755 root sys
 d kernel/misc/scsi_vhci/amd64 0755 root sys
 f kernel/misc/scsi_vhci/amd64/scsi_vhci_f_asym_emc 0755 root sys
@@ -2600,7 +2602,7 @@ s usr/bin/amd64/savecore=../savecore
 s usr/bin/amd64/size=../size
 s usr/bin/amd64/sort=../sort
 s usr/bin/amd64/strings=../strings
-f usr/bin/amd64/truss 0555 root bin
+s usr/bin/amd64/truss=../truss
 f usr/bin/amt 0555 root bin
 h usr/bin/apropos=usr/bin/man
 f usr/bin/ar 0555 root bin
@@ -2996,7 +2998,7 @@ f usr/bin/tput 0555 root bin
 f usr/bin/tr 0555 root bin
 f usr/bin/troff 0555 root bin
 f usr/bin/true 0555 root bin
-h usr/bin/truss=usr/lib/isaexec
+f usr/bin/truss 0555 root bin
 f usr/bin/tsort 0555 root bin
 f usr/bin/tty 0555 root bin
 h usr/bin/type=usr/bin/alias
@@ -17419,6 +17421,7 @@ f usr/share/man/man3proc/proc_get_auxv.3proc 0444 root bin
 f usr/share/man/man3proc/proc_get_cred.3proc 0444 root bin
 s usr/share/man/man3proc/proc_get_ldt.3proc=Pldt.3proc
 f usr/share/man/man3proc/proc_get_lwpsinfo.3proc 0444 root bin
+s usr/share/man/man3proc/proc_get_lwpstatus.3proc=proc_get_lwpsinfo.3proc
 f usr/share/man/man3proc/proc_get_priv.3proc 0444 root bin
 f usr/share/man/man3proc/proc_get_psinfo.3proc 0444 root bin
 f usr/share/man/man3proc/proc_get_status.3proc 0444 root bin
