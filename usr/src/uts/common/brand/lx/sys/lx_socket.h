@@ -466,7 +466,6 @@ typedef struct lx_sockaddr_in6 {
  * intent is just to lie to Linux applications requiring this syscall and this
  * lie should be "just good enough".
  */
-
 typedef struct lx_tcp_info {
 	/* Current state in TCP state machine */
 	uint8_t		tcpi_state;

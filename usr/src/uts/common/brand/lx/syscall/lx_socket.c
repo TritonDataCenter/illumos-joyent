@@ -249,13 +249,15 @@ static const int stol_socktype[SOCK_SEQPACKET + 1] = {
  * Where Linux defines their tcp states as a range from 1 to 12.
  * the macro STOL_TCPSTATE translate our illumos tcp states to a Linux one,
  * in case there is no tcp state returned by OS that matches Linux, the state
- * LX_TCP_ESTABLISHED will be returned.
+ * LX_TCP_ESTABLISHED will be returned, except for the following:
+ * for TCPS_BOUND we will return LX_TCP_LISTEN.
+ * for TCPS_IDLE we will return LX_TCP_LISTEN. 
  */
 
-/* Table based on -6 to 6 being mapped on to 0 to 13 */
+/* Table based on -6 to 6 being mapped on to 0 to 12 */
 static const int stol_tcp_state[LX_TCP_NEW_SYN_RECV + 1] = {
 	LX_TCP_CLOSE,		/* -6 ==> 0 */
-	LX_TCP_CLOSE,		/* -5 ==> 1, no TCPS_IDLE in Linux */
+	LX_TCP_ESTABLISHED,	/* -5 ==> 1, no TCPS_IDLE in Linux */
 	LX_TCP_LISTEN,		/* -4 ==> 2, no TCPS_BOUND in Linux */
 	LX_TCP_LISTEN,		/* -3 ==> 3 */
 	LX_TCP_SYN_SENT,	/* -2 ==> 4 */
@@ -3993,6 +3995,9 @@ lx_getsockopt_tcp(sonode_t *so, int optname, void *optval, socklen_t *optlen)
 		} else {
 			*optlen = sizeof (lx_tcp_info_t);
 			bzero(optval, *optlen);
+
+			if (so->so_type != SOCK_STREAM)
+			   goto out; 
 
 			lx_tcp_info_t *ti = (lx_tcp_info_t *)optval;
 			conn_t *con = (struct conn_s *)so->so_proto_handle;
