@@ -38,8 +38,10 @@ FWIMAGES         = 2200
 FWIMAGES        += 2300
 FWIMAGES        += 2400
 FWIMAGES        += 2500
+FWIMAGES        += 2700
 FWIMAGES        += 6322
 FWIMAGES        += 8100
+FWIMAGES        += 8301fc
 
 FWMODULES_SRC    = $(FWIMAGES:%=ql_fw_%.c)
 
