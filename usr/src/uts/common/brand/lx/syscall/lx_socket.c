@@ -4013,9 +4013,6 @@ lx_getsockopt_tcp(sonode_t *so, int optname, void *optval, socklen_t *optlen)
 			ti->tcpi_unacked = tp->tcp_suna;
 			ti->tcpi_sacked = tp->tcp_rack_cnt;
 			ti->tcpi_pmtu = tp->tcp_initial_pmtu;
-			ti->tcpi_total_retrans = tp->tcp_suna;
-			ti->tcpi_unacked  = tp->tcp_suna;
-			ti->tcpi_sacked  = tp->tcp_rack_cnt;
 			ti->tcpi_rcv_space = tp->tcp_rcv_ws;
 		}
 		goto out;

@@ -22,7 +22,7 @@
 # Copyright 2016 Nexenta Systems, Inc.
 # Copyright (c) 2019, Joyent, Inc.
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
-# Copyright 2023 Bill Sommerfeld
+# Copyright 2024 Bill Sommerfeld
 #
 
 from __future__ import print_function
@@ -97,10 +97,10 @@ def git(command):
 def git_root():
     """Return the root of the current git workspace"""
 
-    p = git('rev-parse --git-dir')
-    dir = p[0]
+    p = git('rev-parse --show-toplevel')
+    dir = p[0].strip()
 
-    return os.path.abspath(os.path.join(dir, os.path.pardir))
+    return os.path.abspath(dir)
 
 def git_branch():
     """Return the current git branch"""
@@ -137,8 +137,20 @@ def git_parent_branch(branch):
                 return remote
     return 'origin/master'
 
+def slices(strlist, sep):
+    """Yield start & end of each commit within the list of comments"""
+    low = 0
+    for i, v in enumerate(strlist):
+        if v == sep:
+            yield(low, i)
+            low = i+1
+
+    if low != len(strlist):
+        yield(low, len(strlist))
+
 def git_comments(parent):
-    """Return a list of any checkin comments on this git branch"""
+    """Return the checkin comments for each commit on this git branch,
+    structured as a list of lists of lines."""
 
     p = git('log --pretty=tformat:%%B:SEP: %s..' % parent)
 
@@ -146,7 +158,8 @@ def git_comments(parent):
         sys.stderr.write("No outgoing changesets found - missing -p option?\n");
         sys.exit(1)
 
-    return [x.strip() for x in p if x != ':SEP:\n']
+    return [ [line.strip() for line in p[a:b]]
+             for (a, b) in slices(p, ':SEP:\n')]
 
 def git_file_list(parent, paths=None):
     """Return the set of files which have ever changed on this branch.
@@ -163,10 +176,11 @@ def git_file_list(parent, paths=None):
 
     ret = set()
     for fname in p:
-        if fname and not fname.isspace() and fname not in ret:
-            ret.add(fname.strip())
+        fname = fname.strip()
+        if fname and not fname.isspace():
+            ret.add(fname)
 
-    return ret
+    return sorted(ret)
 
 def not_check(root, cmd):
     """Return a function which returns True if a file given as an argument
@@ -185,20 +199,12 @@ def gen_files(root, parent, paths, exclude, filter=None):
     if filter is None:
         filter = lambda x: os.path.isfile(x)
 
-    # Taken entirely from Python 2.6's os.path.relpath which we would use if we
-    # could.
-    def relpath(path, here):
-        c = os.path.abspath(os.path.join(root, path)).split(os.path.sep)
-        s = os.path.abspath(here).split(os.path.sep)
-        l = len(os.path.commonprefix((s, c)))
-        return os.path.join(*[os.path.pardir] * (len(s)-l) + c[l:])
-
     def ret(select=None):
         if not select:
             select = lambda x: True
 
         for abspath in git_file_list(parent, paths):
-            path = relpath(abspath, '.')
+            path = os.path.relpath(os.path.join(root, abspath), '.')
             try:
                 res = git("diff %s HEAD %s" % (parent, path))
             except GitError as e:
@@ -225,15 +231,24 @@ def comchk(root, parent, flist, output):
     output.write("Comments:\n")
 
     comments = git_comments(parent)
-    if len(comments) > 2:
-        if re.match('^Change-Id: I[0-9a-f]+', comments[-1]):
-            if comments[-2] == '':
-                print('Note: Gerrit Change Id present in comments')
-                comments = comments[:-2]
+    multi = len(comments) > 1
+    state = {}
 
-    return Comments.comchk(comments, check_db=True,
-                           output=output)
+    ret = 0
+    for commit in comments:
 
+        s = StringIO()
+
+        result = Comments.comchk(commit, check_db=True,
+                                 output=s, bugs=state)
+        ret |= result
+
+        if result != 0:
+            if multi:
+                output.write('\n%s\n' % commit[0])
+            output.write(s.getvalue())
+
+    return ret
 
 def mapfilechk(root, parent, flist, output):
     ret = 0
