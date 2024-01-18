@@ -4003,17 +4003,13 @@ lx_getsockopt_tcp(sonode_t *so, int optname, void *optval, socklen_t *optlen)
 			conn_t *con = (struct conn_s *)so->so_proto_handle;
 			tcp_t *tp = con->conn_tcp;
 			ti->tcpi_state = STOL_TCPSTATE(tp->tcp_state);
-			ti->tcpi_rto = tp->tcp_rto_initial;
-			ti->tcpi_last_data_recv = tp->tcp_ts_recent;
-			ti->tcpi_rtt = NSEC2USEC(tp->tcp_rtt_sa);
-			ti->tcpi_rttvar = NSEC2USEC(tp->tcp_rtt_sd);
-			ti->tcpi_snd_ssthresh = tp->tcp_swnd;
-			ti->tcpi_snd_cwnd =  tp->tcp_cwnd;
-			ti->tcpi_snd_mss = tp->tcp_mss;
-			ti->tcpi_unacked = tp->tcp_suna;
-			ti->tcpi_sacked = tp->tcp_rack_cnt;
-			ti->tcpi_pmtu = tp->tcp_initial_pmtu;
-			ti->tcpi_rcv_space = tp->tcp_rcv_ws;
+			ti->tcpi_rto = tp->tcp_rto * 1000;/* Round trip timeout */
+			ti->tcpi_rtt = NSEC2USEC(tp->tcp_rtt_sa);/* Round trip smoothed average */
+			ti->tcpi_rttvar = NSEC2USEC(tp->tcp_rtt_sd);/* Round trip smoothed deviation */
+			ti->tcpi_snd_cwnd =  tp->tcp_cwnd;/* Congestion window */
+			ti->tcpi_snd_mss = tp->tcp_mss;/* Max segment size */
+			ti->tcpi_unacked = tp->tcp_suna;/* Sender unacknowledged */
+			ti->tcpi_rcv_space = tp->tcp_rwnd;/* Current receive window */
 		}
 		goto out;
 
