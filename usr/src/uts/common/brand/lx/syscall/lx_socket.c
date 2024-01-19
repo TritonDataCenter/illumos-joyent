@@ -24,7 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2022 Joyent, Inc.
- * Copyright 2023 Carlos Neira <cneirabustos@gmail.com>
+ * Copyright 2024 Carlos Neira <cneirabustos@gmail.com>
  */
 
 #include <sys/errno.h>

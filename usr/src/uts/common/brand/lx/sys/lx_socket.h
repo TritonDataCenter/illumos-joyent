@@ -23,7 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2016 Joyent, Inc.
  * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2023 Carlos Neira <cneirabustos@gmail.com>
+ * Copyright 2024 Carlos Neira <cneirabustos@gmail.com>
  */
 
 #ifndef _SYS_LX_SOCKET_H
