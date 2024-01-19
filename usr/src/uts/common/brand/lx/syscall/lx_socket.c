@@ -24,7 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2022 Joyent, Inc.
- * Copyright 2023 Carlos Neira <cneirabustos@gmail.com>
+ * Copyright 2024 Carlos Neira <cneirabustos@gmail.com>
  */
 
 #include <sys/errno.h>
@@ -251,7 +251,7 @@ static const int stol_socktype[SOCK_SEQPACKET + 1] = {
  * in case there is no tcp state returned by OS that matches Linux, the state
  * LX_TCP_ESTABLISHED will be returned, except for the following:
  * for TCPS_BOUND we will return LX_TCP_LISTEN.
- * for TCPS_IDLE we will return LX_TCP_LISTEN. 
+ * for TCPS_IDLE we will return LX_TCP_LISTEN.
  */
 
 /* Table based on -6 to 6 being mapped on to 0 to 12 */
@@ -3997,19 +3997,26 @@ lx_getsockopt_tcp(sonode_t *so, int optname, void *optval, socklen_t *optlen)
 			bzero(optval, *optlen);
 
 			if (so->so_type != SOCK_STREAM)
-			   goto out; 
+				goto out;
 
 			lx_tcp_info_t *ti = (lx_tcp_info_t *)optval;
 			conn_t *con = (struct conn_s *)so->so_proto_handle;
 			tcp_t *tp = con->conn_tcp;
 			ti->tcpi_state = STOL_TCPSTATE(tp->tcp_state);
-			ti->tcpi_rto = tp->tcp_rto * 1000;/* Round trip timeout */
-			ti->tcpi_rtt = NSEC2USEC(tp->tcp_rtt_sa);/* Round trip smoothed average */
-			ti->tcpi_rttvar = NSEC2USEC(tp->tcp_rtt_sd);/* Round trip smoothed deviation */
-			ti->tcpi_snd_cwnd =  tp->tcp_cwnd;/* Congestion window */
-			ti->tcpi_snd_mss = tp->tcp_mss;/* Max segment size */
-			ti->tcpi_unacked = tp->tcp_suna;/* Sender unacknowledged */
-			ti->tcpi_rcv_space = tp->tcp_rwnd;/* Current receive window */
+			/* tcp_rto is kept in msec, but the API needs usec. */
+			ti->tcpi_rto = tp->tcp_rto * 1000;
+			/* Round trip smoothed average */
+			ti->tcpi_rtt = NSEC2USEC(tp->tcp_rtt_sa);
+			/* Round trip smoothed deviation */
+			ti->tcpi_rttvar = NSEC2USEC(tp->tcp_rtt_sd);
+			/* Congestion window */
+			ti->tcpi_snd_cwnd =  tp->tcp_cwnd;
+			/* Max segment size */
+			ti->tcpi_snd_mss = tp->tcp_mss;
+			/* Sender unacknowledged */
+			ti->tcpi_unacked = tp->tcp_suna;
+			/* Current receive window */
+			ti->tcpi_rcv_space = tp->tcp_rwnd;
 		}
 		goto out;
 
