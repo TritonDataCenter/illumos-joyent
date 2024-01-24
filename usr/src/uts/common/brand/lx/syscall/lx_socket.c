@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2022 Joyent, Inc.
+ * Copyright 2023 Carlos Neira <cneirabustos@gmail.com>
  */
 
 #include <sys/errno.h>
@@ -2825,7 +2826,7 @@ static const lx_sockopt_map_t ltos_tcp_sockopts[LX_TCP_NOTSENT_LOWAT + 1] = {
 	{ TCP_LINGER2, sizeof (int) },		/* TCP_LINGER2		*/
 	{ OPTNOTSUP, 0 },			/* TCP_DEFER_ACCEPT - in code */
 	{ OPTNOTSUP, 0 },			/* TCP_WINDOW_CLAMP - in code */
-	{ OPTNOTSUP, 0 },			/* TCP_INFO		*/
+	{ TCP_INFO, sizeof (tcp_info_t) },	/* TCP_INFO		*/
 	{ TCP_QUICKACK, sizeof (int) },		/* TCP_QUICKACK		*/
 	{ TCP_CONGESTION, CC_ALGO_NAME_MAX },	/* TCP_CONGESTION	*/
 	{ OPTNOTSUP, 0 },			/* TCP_MD5SIG		*/
@@ -3865,6 +3866,7 @@ lx_getsockopt_tcp(sonode_t *so, int optname, void *optval, socklen_t *optlen)
 	lx_proto_opts_t sockopts_tbl = PROTO_SOCKOPTS(ltos_tcp_sockopts);
 
 	switch (optname) {
+
 	case LX_TCP_WINDOW_CLAMP:
 		/*
 		 * We do not support these options but some apps rely on them.
