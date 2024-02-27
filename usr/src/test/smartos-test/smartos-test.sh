@@ -327,7 +327,7 @@ function nvme_test_check {
 
     # If we specify NVME_TEST_DEVICE, then run the non-destructive NVMe tests.
     if [[ -n "$NVME_TEST_DEVICE" ]]; then
-	log_testrunner nvme-tests /opt/nvme-tests/runfiles/non-destructive.run
+	log_testrunner nvme-tests /opt/nvme-tests/runfiles/non-destruct.run
     else
 	log "Skipping NVMe non-destructive tests"
     fi
