@@ -82,7 +82,7 @@ Notes on NVMe testing:
 
 NVMe is tested by unit tests and by non-destructive component tests.  The
 latter must specify NVME_TEST_DEVICE from nvme* names.  E.g. "nvme0".  If
-NVME_TEST_DEVICE is not run, the non-destructive component tests will not run.
+NVME_TEST_DEVICE is not set, the non-destructive component tests will not run.
 
 Notes on ZFS testing:
 
@@ -139,7 +139,7 @@ inconsistencies in the BHYVE/VMM results) which has:
 	Six 30GB disks for setting up in DISKS for ZFS testing.  (fewer
 	can cause ZFS test failures)
 
-	(optional) a Virtual NVMe drive of 20GB.
+	(optional) a Virtual NVMe drive of 20GB (or greater size).
 
 	An NIC that can reach the public Internet.
 
