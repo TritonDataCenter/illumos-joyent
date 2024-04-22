@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 #include <sys/systm.h>
@@ -390,6 +391,12 @@ lx_fcntl_lock_cmd_to_s(int lx_cmd)
 		return (F_SETLK64);
 	case LX_F_SETLKW64:
 		return (F_SETLKW64);
+	case LX_F_OFD_GETLK:
+		return (F_OFD_GETLK);
+	case LX_F_OFD_SETLK:
+		return (F_OFD_SETLK);
+	case LX_F_OFD_SETLKW:
+		return (F_OFD_SETLKW);
 	default:
 		VERIFY(0);
 		/*NOTREACHED*/
@@ -437,6 +444,9 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 	case F_GETLK:
 	case F_SETLK:
 	case F_SETLKW:
+	case F_OFD_GETLK:
+	case F_OFD_SETLK:
+	case F_OFD_SETLKW:
 		if (datamodel == DATAMODEL_NATIVE) {
 			if (copyin(arg, &lxflk, sizeof (lx_flock_t)) != 0) {
 				error = EFAULT;
@@ -465,16 +475,32 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 		if ((error = flock_check(vp, &bf, offset, maxoffset)) != 0)
 			break;
 
+		if (cmd == F_OFD_GETLK || cmd == F_OFD_SETLK ||
+		    cmd == F_OFD_SETLKW) {
+			if (bf.l_whence != 0 || bf.l_start != 0 ||
+			    bf.l_len != 0) {
+				error = EINVAL;
+				break;
+			}
+		}
+
 		if ((error = VOP_FRLOCK(vp, cmd, &bf, flag, offset, NULL,
 		    fp->f_cred, NULL)) != 0) {
-			if (cmd == F_SETLKW && error == EINTR) {
+			if ((cmd == F_SETLKW || cmd == F_OFD_SETLKW) &&
+			    error == EINTR) {
 				ttolxlwp(curthread)->br_syscall_restart =
 				    B_TRUE;
 			}
 			break;
 		}
 
-		if (cmd != F_GETLK)
+		if (cmd == F_OFD_GETLK || cmd == F_OFD_SETLK ||
+		    cmd == F_OFD_SETLKW) {
+			if ((error = ofdlock(fp, cmd, &bf, flag, offset)) != 0)
+				break;
+		}
+
+		if (cmd != F_GETLK && cmd != F_OFD_GETLK)
 			break;
 
 		/*
@@ -611,6 +637,9 @@ lx_fcntl(int fd, int cmd, intptr_t arg)
 	case LX_F_GETLK:
 	case LX_F_SETLK:
 	case LX_F_SETLKW:
+	case LX_F_OFD_GETLK:
+	case LX_F_OFD_SETLK:
+	case LX_F_OFD_SETLKW:
 		return (lx_fcntl_lock(fd, cmd, (void *)arg));
 
 	default:
@@ -628,6 +657,9 @@ lx_fcntl64(int fd, int cmd, intptr_t arg)
 	case LX_F_GETLK64:
 	case LX_F_SETLKW64:
 	case LX_F_SETLK64:
+	case LX_F_OFD_GETLK:
+	case LX_F_OFD_SETLKW:
+	case LX_F_OFD_SETLK:
 		return (lx_fcntl_lock(fd, cmd, (void *)arg));
 
 	default:
