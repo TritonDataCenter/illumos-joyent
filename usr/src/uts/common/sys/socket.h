@@ -142,6 +142,8 @@ typedef	void		*_RESTRICT_KYWD Psocklen_t;
 #define	SO_OOBINLINE	0x0100		/* leave received OOB data in line */
 #define	SO_DGRAM_ERRIND	0x0200		/* Application wants delayed error */
 #define	SO_RECVUCRED	0x0400		/* Application wants ucred of sender */
+#define	SO_REUSEPORT	0x2004		/* allow simultaneous port reuse */
+
 
 /*
  * Socket options are passed using a signed integer, but it is also rare

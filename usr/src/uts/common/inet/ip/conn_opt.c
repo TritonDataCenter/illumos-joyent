@@ -1139,6 +1139,30 @@ conn_opt_set_socket(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 	case SO_REUSEADDR:
 		connp->conn_reuseaddr = onoff;
 		break;
+
+	case SO_REUSEPORT:
+		if (!IPCL_IS_NONSTR(connp)) {
+			if (onoff) {
+				/*
+				 * SO_REUSEPORT cannot be enabled on sockets
+				 * which have fallen back to the STREAMS API.
+				 */
+				return (EINVAL);
+			} else {
+				/*
+				 * A connection with SO_REUSEPORT enabled
+				 * should be prevented from falling back to
+				 * STREAMS mode via logic in tcp_fallback.
+				 * It is legal, however, for fallen-back
+				 * connections to affirm the disabled state
+				 * of SO_REUSEPORT.
+				 */
+				ASSERT(connp->conn_reuseport == 0);
+				break;
+			}
+		}
+		connp->conn_reuseport = onoff;
+		break;	
 	case SO_DONTROUTE:
 		if (onoff)
 			ixa->ixa_flags |= IXAF_DONTROUTE;

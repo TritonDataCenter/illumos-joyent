@@ -1637,6 +1637,17 @@ ipcl_classify_v4(mblk_t *mp, uint8_t protocol, uint_t hdr_len,
 
 		if (connp != NULL) {
 			/* Have a listener at least */
+			if (connp->conn_rg_bind != NULL) {
+				/*
+				 * Have multiple bindings by SO_REUSEPORT,
+				 * do load balancing
+				 */
+				connp = conn_rg_lb_pick(
+				    connp->conn_rg_bind,
+				    ipha->ipha_src,
+				    ipha->ipha_dst,
+				    ports);
+			}
 			CONN_INC_REF(connp);
 			mutex_exit(&bind_connfp->connf_lock);
 			return (connp);
@@ -1671,6 +1682,17 @@ ipcl_classify_v4(mblk_t *mp, uint8_t protocol, uint_t hdr_len,
 		}
 
 		if (connp != NULL) {
+			if (connp->conn_rg_bind != NULL) {
+				/*
+				 * Have multiple bindings by SO_REUSEPORT,
+				 * do load balancing
+				 */
+				connp = conn_rg_lb_pick(
+				    connp->conn_rg_bind,
+				    ipha->ipha_src,
+				    ipha->ipha_dst,
+				    ports);
+			}
 			CONN_INC_REF(connp);
 			mutex_exit(&connfp->connf_lock);
 			return (connp);
@@ -1772,6 +1794,17 @@ ipcl_classify_v6(mblk_t *mp, uint8_t protocol, uint_t hdr_len,
 
 		if (connp != NULL) {
 			/* Have a listner at least */
+			if (connp->conn_rg_bind != NULL) {
+				/*
+				 * Have multiple SO_REUSEPORT bind,
+				 * do load balancing
+				 */
+				connp = conn_rg_lb_pick6(
+				    connp->conn_rg_bind,
+				    &ip6h->ip6_src,
+				    &ip6h->ip6_dst,
+				    ports);
+			}
 			CONN_INC_REF(connp);
 			mutex_exit(&bind_connfp->connf_lock);
 			return (connp);
@@ -1808,6 +1841,17 @@ ipcl_classify_v6(mblk_t *mp, uint8_t protocol, uint_t hdr_len,
 		}
 
 		if (connp != NULL) {
+			if (connp->conn_rg_bind != NULL) {
+				/*
+				 * Have multiple SO_REUSEPORT bind,
+				 * do load balancing
+				 */
+				connp = conn_rg_lb_pick6(
+				    connp->conn_rg_bind,
+				    &ip6h->ip6_src,
+				    &ip6h->ip6_dst,
+				    ports);
+			}
 			CONN_INC_REF(connp);
 			mutex_exit(&connfp->connf_lock);
 			return (connp);
@@ -2819,3 +2863,215 @@ conn_get_socket_info(conn_t *connp, mib2_socketInfoEntry_t *sie)
 
 	return (sie);
 }
+
+/*
+ * SO_REUSEPORT support
+ *
+ * The SO_REUSEPORT option allows multiple socket
+ * to be bound to an identical address, and incoming
+ * connections or datagrams will be distributed among
+ * all the sockets bound to the same address, as per
+ * Linux sematics.
+ *
+ * To support this behaviour, we add conn_rg_t, which
+ * is a local table of all the conn_t belonging to the
+ * same SO_REUSEPORT group. This table will be allocated
+ * when first conn_t gets bind (in tcp_bindi()/udp_do_bind()),
+ * and will be destroyed when the last member of the group
+ * is removed from the bind hash.
+ *
+ * In the ipclassifier, when we find a matching conn_t
+ * for the incoming packet, we check if it's in a SO_REUSEPORT
+ * group (i.e. it's conn_rg_bind pointer is not NULL). If
+ * true, then instead of dispatching the packet to the first
+ * matching conn_t, we try to do load-balancing by picing
+ * a connection from the group, based on a hash value of the
+ * IP 4-tuple.
+ *
+ * The conn_rg_t.connrg_lock is for protecting conn_rg_t
+ * structure, and should only be acquired inside conn_rg_*
+ * funcitons. The conn_rg_bind pointer in conn_t is protected
+ * in the same way as other fields in conn_t.
+ */
+/* Max number of members in TCP SO_REUSEPORT group */
+#define	CONN_RG_SIZE_MAX		256
+/* Step size when expanding members array */
+#define	CONN_RG_SIZE_STEP		4
+/* Initial size of members array */
+#define	CONN_RG_SIZE_INIT		4
+/* Initialize a conn_rg_t structure */
+conn_rg_t *
+conn_rg_init(conn_t *connp)
+{
+	conn_rg_t *rg;
+	rg = kmem_alloc(sizeof (conn_rg_t), KM_NOSLEEP|KM_NORMALPRI);
+	if (rg == NULL)
+		return (NULL);
+	rg->connrg_members = kmem_zalloc(CONN_RG_SIZE_INIT * sizeof (conn_t *),
+	    KM_NOSLEEP|KM_NORMALPRI);
+	if (rg->connrg_members == NULL) {
+		kmem_free(rg, sizeof (conn_rg_t));
+		return (NULL);
+	}
+	mutex_init(&rg->connrg_lock, NULL, MUTEX_DEFAULT, NULL);
+	rg->connrg_size = CONN_RG_SIZE_INIT;
+	/* insert connp as the first member */
+	rg->connrg_count = 1;
+	rg->connrg_members[0] = connp;
+	return (rg);
+}
+/*
+ * Destroy a conn_rg_t structure
+ * All conn_t in the group must be removed beforehand
+ */
+void
+conn_rg_destroy(conn_rg_t *rg)
+{
+	mutex_enter(&rg->connrg_lock);
+	ASSERT(rg->connrg_count == 0);
+	kmem_free(rg->connrg_members, rg->connrg_size * sizeof (conn_t *));
+	mutex_destroy(&rg->connrg_lock);
+	kmem_free(rg, sizeof (conn_rg_t));
+}
+/*
+ * Check if all the connections in rg have the same effective UID.
+ * If true, add connp into the connection group.
+ */
+int
+conn_rg_insert(conn_rg_t *rg, conn_t *connp)
+{
+	mutex_enter(&rg->connrg_lock);
+	VERIFY(rg->connrg_size > 0);
+	VERIFY(rg->connrg_count <= rg->connrg_size);
+	if (rg->connrg_count != 0) {
+		cred_t *oldcred = rg->connrg_members[0]->conn_cred;
+		cred_t *newcred = connp->conn_cred;
+		if (crgetuid(oldcred) != crgetuid(newcred) ||
+		    crgetzoneid(oldcred) != crgetzoneid(newcred)) {
+			mutex_exit(&rg->connrg_lock);
+			return (EADDRNOTAVAIL);
+		}
+	}
+	if (rg->connrg_count == rg->connrg_size) {
+		uint_t oldalloc = rg->connrg_size * sizeof (conn_t *);
+		uint_t newsize = rg->connrg_size + CONN_RG_SIZE_STEP;
+		conn_t **newmembers;
+		if (newsize > CONN_RG_SIZE_MAX) {
+			mutex_exit(&rg->connrg_lock);
+			return (EINVAL);
+		}
+		/* expand hash table */
+		newmembers = kmem_zalloc(newsize * sizeof (conn_t *),
+		    KM_NOSLEEP|KM_NORMALPRI);
+		if (newmembers == NULL) {
+			mutex_exit(&rg->connrg_lock);
+			return (ENOMEM);
+		}
+		bcopy(rg->connrg_members, newmembers, oldalloc);
+		kmem_free(rg->connrg_members, oldalloc);
+		rg->connrg_members = newmembers;
+		rg->connrg_size = newsize;
+	}
+	rg->connrg_members[rg->connrg_count] = connp;
+	rg->connrg_count++;
+	mutex_exit(&rg->connrg_lock);
+	return (0);
+}
+/*
+ * Remove a connection from the given group
+ * Returns number of connection left in the group
+ */
+uint_t
+conn_rg_remove(conn_rg_t *rg, conn_t *connp)
+{
+	uint_t i;
+	uint_t count_remaining;
+	mutex_enter(&rg->connrg_lock);
+	for (i = 0; i < rg->connrg_count; i++) {
+		if (rg->connrg_members[i] == connp)
+			break;
+	}
+	/* The item should be present */
+	ASSERT(i < rg->connrg_count);
+	/* Move the last member into this position */
+	rg->connrg_count--;
+	rg->connrg_members[i] = rg->connrg_members[rg->connrg_count];
+	rg->connrg_members[rg->connrg_count] = NULL;
+	count_remaining = rg->connrg_count;
+	mutex_exit(&rg->connrg_lock);
+	return (count_remaining);
+}
+/* Hash one uint32_t into hash value using DJBX33A */
+static uint32_t
+conn_rg_lb_hash_uint32(uint32_t value, uint32_t addr)
+{
+	value = (value << 5) + value + (addr & 0xFF);
+	value = (value << 5) + value + (addr >> 8) & 0xFF;
+	value = (value << 5) + value + (addr >> 16) & 0xFF;
+	value = (value << 5) + value + (addr >> 24);
+	return (value);
+}
+/* Hash one in6_addr_t into hash value using DJBX33A */
+static uint32_t
+conn_rg_lb_hash_in6_addr(uint32_t value, const in6_addr_t *addr)
+{
+	value = conn_rg_lb_hash_uint32(value, addr->_S6_un._S6_u32[0]);
+	value = conn_rg_lb_hash_uint32(value, addr->_S6_un._S6_u32[1]);
+	value = conn_rg_lb_hash_uint32(value, addr->_S6_un._S6_u32[2]);
+	value = conn_rg_lb_hash_uint32(value, addr->_S6_un._S6_u32[3]);
+	return (value);
+}
+/* Calculate DJBX33A Hash from a IPv4 4-tuple */
+static uint32_t
+conn_rg_lb_hash(ipaddr_t laddr, ipaddr_t faddr, uint32_t ports)
+{
+	uint32_t value = 0;
+	value = conn_rg_lb_hash_uint32(value, laddr);
+	value = conn_rg_lb_hash_uint32(value, faddr);
+	value = conn_rg_lb_hash_uint32(value, ports);
+	return (value);
+}
+/* Calculate DJBX33A Hash from a IPv6 4-tuple */
+static uint32_t
+conn_rg_lb_hash6(const in6_addr_t *laddr, const in6_addr_t *faddr,
+    uint32_t ports)
+{
+	uint32_t value = 0;
+	value = conn_rg_lb_hash_in6_addr(value, laddr);
+	value = conn_rg_lb_hash_in6_addr(value, faddr);
+	value = conn_rg_lb_hash_uint32(value, ports);
+	return (value);
+}
+/*
+ * Pick a connection from the given group, in a load-balaced way
+ * A DJBX33A Hash based algorithm is used here.
+ * We do not need a fancy hash algorithm here, since this is only
+ * for load-balacing (which is only best effort), and it's not cryptography
+ * related so there is no security concern.
+ */
+conn_t *
+conn_rg_lb_pick(conn_rg_t *rg, ipaddr_t src, ipaddr_t dst, uint32_t ports)
+{
+	uint32_t idx = conn_rg_lb_hash(src, dst, ports);
+	mutex_enter(&rg->connrg_lock);
+	idx %= rg->connrg_count;
+	conn_t *ret = rg->connrg_members[idx];
+	mutex_exit(&rg->connrg_lock);
+	return (ret);
+}
+/*
+ * Pick a connection from the given group, in a load-balaced way,
+ * utilizing IPv6 addresses.
+ */
+conn_t *
+conn_rg_lb_pick6(conn_rg_t *rg, const in6_addr_t *src, const in6_addr_t *dst,
+    uint32_t ports)
+{
+	uint32_t idx = conn_rg_lb_hash6(src, dst, ports);
+	mutex_enter(&rg->connrg_lock);
+	idx %= rg->connrg_count;
+	conn_t *ret = rg->connrg_members[idx];
+	mutex_exit(&rg->connrg_lock);
+	return (ret);
+}
+

@@ -201,3 +201,14 @@ post_user = root
 pre = tcpsig_init
 tests = ['tcpsig']
 post = tcpsig_fini
+
+[/opt/os-tests/tests/reuseport]
+user = root
+tests = ['rp_test_tcp',
+	 'rp_test_tcp_noopt',
+	 'rp_test_tcp_seteuid',
+	 'rp_test_tcp_toggle',
+	 'rp_test_udp',
+	 'rp_test_udp_noopt',
+	 'rp_test_udp_seteuid',
+	 'rp_test_udp_toggle']

@@ -2501,7 +2501,7 @@ ip_fanout_udp_multi_v6(mblk_t *mp, ip6_t *ip6h, uint16_t lport, uint16_t fport,
 
 	CONN_INC_REF(connp);
 
-	if (connp->conn_reuseaddr) {
+	if (connp->conn_reuseaddr || connp->conn_reuseport) {
 		conn_t		*first_connp = connp;
 		conn_t		*next_connp;
 		mblk_t		*mp1;

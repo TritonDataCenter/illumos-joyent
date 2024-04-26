@@ -137,7 +137,6 @@ typedef	struct tcphdra_s {
 
 struct conn_s;
 struct tcp_listen_cnt_s;
-struct tcp_rg_s;
 
 /*
  * Control structure for each open TCP stream,
@@ -408,13 +407,6 @@ typedef struct tcp_s {
 	struct tcp_s *tcp_bind_hash; /* Bind hash chain */
 	struct tcp_s *tcp_bind_hash_port; /* tcp_t's bound to the same lport */
 	struct tcp_s **tcp_ptpbhn;
-
-	/*
-	 * Group of tcp_t entries bound to the same adress and port via
-	 * SO_REUSEPORT.  The pointer itself is protected by tf_lock in the
-	 * containing tcps_bind_fanout slot.
-	 */
-	struct tcp_rg_s	*tcp_rg_bind;
 
 	uint_t		tcp_maxpsz_multiplier;
 

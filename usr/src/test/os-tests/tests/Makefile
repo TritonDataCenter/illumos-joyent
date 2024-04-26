@@ -32,6 +32,7 @@ SUBDIRS =       \
 		minttl \
 		pf_key \
 		poll \
+		reuseport \
 		portfs \
 		regression \
 		sdevfs \

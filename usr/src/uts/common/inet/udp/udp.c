@@ -489,6 +489,14 @@ udp_bind_hash_remove(udp_t *udp, boolean_t caller_holds_lock)
 		ASSERT(lockp != NULL);
 		mutex_enter(lockp);
 	}
+
+	if (connp->conn_rg_bind != NULL) {
+		if (conn_rg_remove(connp->conn_rg_bind, connp) == 0) {
+			conn_rg_destroy(connp->conn_rg_bind);
+		}
+		connp->conn_rg_bind = NULL;
+	}
+
 	if (udp->udp_ptpbhn != NULL) {
 		udpnext = udp->udp_bind_hash;
 		if (udpnext != NULL) {
@@ -5132,25 +5140,28 @@ udp_do_bind(conn_t *connp, struct sockaddr *sa, socklen_t len, cred_t *cr,
 	}
 
 	/*
-	 * If conn_reuseaddr is not set, then we have to make sure that
-	 * the IP address and port number the application requested
-	 * (or we selected for the application) is not being used by
-	 * another stream.  If another stream is already using the
-	 * requested IP address and port, the behavior depends on
-	 * "bind_to_req_port_only". If set the bind fails; otherwise we
-	 * search for any unused port to bind to the stream.
+	 * If neither conn_reuseaddr nor conn_reuseport is set,
+	 * then we have to make sure that the IP address and port number
+	 * the application requested (or we selected for the application)
+	 * is not being used by another stream. If another stream is
+	 * already using the requested IP address and port, the behavior
+	 * depends on "bind_to_req_port_only". If set the bind fails;
+	 * otherwise we search for any unused port to bind to the stream.
 	 *
 	 * As per the BSD semantics, as modified by the Deering multicast
 	 * changes, if conn_reuseaddr is set, then we allow multiple binds
 	 * to the same port independent of the local IP address.
+	 *
+	 * As per the Linux sematics, if conn_reuseport is set, then we
+	 * allow multiple duplicate binds to the same address.
 	 *
 	 * This is slightly different than in SunOS 4.X which did not
 	 * support IP multicast. Note that the change implemented by the
 	 * Deering multicast code effects all binds - not only binding
 	 * to IP multicast addresses.
 	 *
-	 * Note that when binding to port zero we ignore SO_REUSEADDR in
-	 * order to guarantee a unique port.
+	 * Note that when binding to port zero we ignore SO_REUSEADDR
+	 * or SO_REUSEPORT in order to guarantee a unique port.
 	 */
 
 	count = 0;
@@ -5270,7 +5281,8 @@ udp_do_bind(conn_t *connp, struct sockaddr *sa, socklen_t len, cred_t *cr,
 		}
 
 		if (!found_exclbind &&
-		    (connp->conn_reuseaddr && requested_port != 0)) {
+		    (connp->conn_reuseaddr &&
+		    !connp->conn_reuseport && requested_port != 0)) {
 			break;
 		}
 
@@ -5279,8 +5291,57 @@ udp_do_bind(conn_t *connp, struct sockaddr *sa, socklen_t len, cred_t *cr,
 			 * No other stream has this IP address
 			 * and port number. We can use it.
 			 */
+			if (connp->conn_reuseport &&
+			    (connp->conn_rg_bind == NULL)) {
+				/*
+				 * We are the first in this rg group,
+				 * set up conn_rg_bind
+				 */
+				conn_rg_t *rg = conn_rg_init(connp);
+				if (rg == NULL) {
+					mutex_exit(&udpf->uf_lock);
+					mutex_exit(&connp->conn_lock);
+					return (ENOMEM);
+				}
+				connp->conn_rg_bind = rg;
+			}
 			break;
 		}
+
+		if (!found_exclbind &&
+		    (connp->conn_reuseport && requested_port != 0)) {
+			/*
+			 * We have SO_REUSEPORT set, so attempt to
+			 * join the existing conn_rg_bind group
+			 */
+			ASSERT(udp1 != NULL);
+			ASSERT(connp1 != NULL);
+
+			int err = 0;
+
+			/* Reject reuse if not set on the first */
+			if (connp1->conn_rg_bind == NULL) {
+				err = -TADDRBUSY;
+				goto errout;
+			}
+
+			/* Attemp to join the group */
+			conn_rg_t *rg = connp1->conn_rg_bind;
+			err = conn_rg_insert(rg, connp);
+			if (err != 0) {
+				goto errout;
+			}
+			connp->conn_rg_bind = rg;
+			break;
+
+		errout:
+			if (err != 0) {
+				mutex_exit(&udpf->uf_lock);
+				mutex_exit(&connp->conn_lock);
+				return (err);
+			}
+		}
+
 		mutex_exit(&udpf->uf_lock);
 		if (bind_to_req_port_only) {
 			/*
@@ -6314,6 +6375,13 @@ udp_fallback(sock_lower_handle_t proto_handle, queue_t *q,
 	udp = connp->conn_udp;
 
 	stropt_mp = allocb_wait(sizeof (*stropt), BPRI_HI, STR_NOSIG, NULL);
+
+	/*
+	 * Do not allow fallback on connections making use of SO_REUSEPORT.
+	 */
+	if (connp->conn_rg_bind != NULL || connp->conn_reuseport) {
+		return (ENXIO);
+	}
 
 	/*
 	 * setup the fallback stream that was allocated

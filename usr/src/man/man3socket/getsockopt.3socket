@@ -107,6 +107,17 @@ enable/disable local address reuse
 
 .sp
 .ne 2
+\fB\fBSO_REUSEPORT\fR\fR
+.ad
+.RS 19n
+enable/disable multiple bindings to an identical socket address.
+.RE
+.sp
+.ne 2
+.na
+
+.sp
+.ne 2
 .na
 \fB\fBSO_KEEPALIVE\fR\fR
 .ad
@@ -264,6 +275,15 @@ socket are notified using a \fBSIGPIPE\fR signal. The \fBSO_DONTROUTE\fR option
 indicates that outgoing messages should bypass the standard routing facilities.
 Instead, messages are directed to the appropriate network interface according
 to the network portion of the destination address.
+.sp
+.LP
+The \fBSO_REUSEPORT\fR option enables multiple \fBAF_INET\fR or \fBAF_INET6\fR
+sockets to be bound to an identical address simutaneously. This option can be
+enabled on both TCP and UDP sockets. Incoming connections (on TCP) or packets
+(on UDP) will be distributed among sockets bound to the specific address. Enabling
+this option on each socket (including the first socket) prior to calling bind(3SOCKET)
+is required for this options to take effect. To prevent port hijacking, all of the
+processes binding to the same address must have the same effective UID.
 .sp
 .LP
 The \fBSO_LINGER\fR option controls the action taken when unsent messages are
