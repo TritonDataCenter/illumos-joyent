@@ -2533,7 +2533,7 @@ vnd_st_promiscoff(vnd_str_t *vsp)
 	/* We're successful, free the message we popped. */
 	freemsg(mp);
 	if (prim == DL_ERROR_ACK) {
-		cmn_err(CE_WARN, "!failed to disable promiscous mode during "
+		cmn_err(CE_WARN, "!failed to disable promiscuous mode during "
 		    "vnd teardown");
 	}
 }
