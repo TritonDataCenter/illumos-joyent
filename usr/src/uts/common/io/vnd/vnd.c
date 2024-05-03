@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 /*
@@ -2529,8 +2530,10 @@ vnd_st_promiscoff(vnd_str_t *vsp)
 		return;
 	}
 
+	/* We're successful, free the message we popped. */
+	freemsg(mp);
 	if (prim == DL_ERROR_ACK) {
-		cmn_err(CE_WARN, "!failed to disable promiscuos mode during "
+		cmn_err(CE_WARN, "!failed to disable promiscous mode during "
 		    "vnd teardown");
 	}
 }
@@ -2590,6 +2593,8 @@ vnd_st_unbind(vnd_str_t *vsp)
 		cmn_err(CE_WARN, "!failed to unbind stream during vnd "
 		    "teardown");
 	}
+	/* We're successful, free the message we popped. */
+	freemsg(mp);
 
 next:
 	vsp->vns_state = VNS_S_ZOMBIE;
