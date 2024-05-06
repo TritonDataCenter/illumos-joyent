@@ -22,6 +22,7 @@
 /*
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -37,11 +38,11 @@ BEGIN
 
 ERROR
 {
-	printf("sdt:::test failed.\n");
+	printf("sdt::sdt_test_args:test failed.\n");
 	exit(1);
 }
 
-sdt:::test
+sdt::sdt_test_args:test
 /arg0 != 1 || arg1 != 2 || arg2 != 3 || arg3 != 4 || arg4 != 5 || arg5 != 6 ||
     arg6 != 7/
 {
@@ -52,7 +53,7 @@ sdt:::test
 	exit(1);
 }
 
-sdt:::test
+sdt::sdt_test_args:test
 {
 	exit(0);
 }

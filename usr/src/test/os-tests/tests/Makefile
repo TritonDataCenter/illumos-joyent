@@ -29,6 +29,7 @@ SUBDIRS =       \
 		ksensor \
 		ksid \
 		libtopo \
+		minttl \
 		pf_key \
 		poll \
 		portfs \
@@ -42,6 +43,7 @@ SUBDIRS =       \
 		stackalign \
 		stress \
 		syscall \
+		tcpsig \
 		timer \
 		tmpfs \
 		uccid \
