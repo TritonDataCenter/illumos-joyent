@@ -454,7 +454,7 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 			}
 		}
 #if defined(_SYSCALL32_IMPL)
-		else {
+		else if (cmd == F_GETLK || cmd == F_SETLK || cmd == FSETLKW) {
 			lx_flock32_t lxflk32;
 
 			if (copyin(arg, &lxflk32, sizeof (lxflk32)) != 0) {
@@ -467,6 +467,33 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 			lxflk.l_start = (off64_t)lxflk32.l_start;
 			lxflk.l_len = (off64_t)lxflk32.l_len;
 			lxflk.l_pid = lxflk32.l_pid;
+		} else {
+			ASSERT(cmd == F_OFD_GETLK || cmd == F_OFD_SETLK ||
+			    cmd == F_OFD_SETLKW);
+			/*
+			 * Linux only allows the _OFD_ variants for 32-bit
+			 * apps on large-file ops, so there's no handling near
+			 * F_*64 below, and instead we do it here.  Oh and the
+			 * structure is SLIGHTLY different than the native
+			 * 64-bit one, so the copying mess needs to happen.
+			 */
+			/*
+			 * XXX KEBE ASKS DO WE NEED THIS CHECK OR CAN WE
+			 * VERIFY?
+			 */
+			if (datamodel != DATAMODEL_ILP32) {
+				error = EINVAL;
+				break;
+			}
+			if (copyin(arg, &lxflk64, sizeof (lxflk64)) != 0) {
+				error = EFAULT;
+				break;
+			}
+			lxflk.l_type = lxflk64.l_type;
+			lxflk.l_whence = lxflk64.l_whence;
+			lxflk.l_start = (off64_t)lxflk64.l_start;
+			lxflk.l_len = (off64_t)lxflk64.l_len;
+			lxflk.l_pid = lxflk64.l_pid;
 		}
 #endif /* _SYSCALL32_IMPL */
 
@@ -477,8 +504,19 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 
 		if (cmd == F_OFD_GETLK || cmd == F_OFD_SETLK ||
 		    cmd == F_OFD_SETLKW) {
+			/*
+			 * TBD OFD-style locking is currently limited to
+			 * covering the entire file.
+			 */
 			if (bf.l_whence != 0 || bf.l_start != 0 ||
 			    bf.l_len != 0) {
+				/*
+				 * This may be worse for Linux apps that expect
+				 * this to work, so put a DTrace probe here.
+				 */
+				DTRACE_PROBE3(lx__ofd__record__locking,
+				    uint16_t, bf.l_whence, long, bf.l_start,
+				    long, bf.l_len);
 				error = EINVAL;
 				break;
 			}
