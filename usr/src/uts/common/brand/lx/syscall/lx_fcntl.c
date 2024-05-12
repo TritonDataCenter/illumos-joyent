@@ -454,7 +454,7 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 			}
 		}
 #if defined(_SYSCALL32_IMPL)
-		else if (cmd == F_GETLK || cmd == F_SETLK || cmd == FSETLKW) {
+		else if (cmd == F_GETLK || cmd == F_SETLK || cmd == F_SETLKW) {
 			lx_flock32_t lxflk32;
 
 			if (copyin(arg, &lxflk32, sizeof (lxflk32)) != 0) {
