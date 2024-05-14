@@ -514,6 +514,10 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 				 * This may be worse for Linux apps that expect
 				 * this to work, so put a DTrace probe here.
 				 */
+				lx_unsupported("F_OFD_ fcntrl being sent with "
+				    "one or more non-zero whence (%d), start "
+				    "(%ld), or len (%ld).\n", bf.l_whence,
+				    bf.l_start, bf.l_len);
 				DTRACE_PROBE3(lx__ofd__record__locking,
 				    uint16_t, bf.l_whence, long, bf.l_start,
 				    long, bf.l_len);
