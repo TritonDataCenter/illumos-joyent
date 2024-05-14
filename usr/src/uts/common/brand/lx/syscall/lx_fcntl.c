@@ -510,15 +510,15 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 			 */
 			if (bf.l_whence != 0 || bf.l_start != 0 ||
 			    bf.l_len != 0) {
-				char unsupbuf[200];
+				char buf[200];
 				/*
 				 * This may be worse for Linux apps that expect
 				 * this to work, so put a DTrace probe here.
 				 */
-				(void) snprintf(unsupbuff, sizeof (unsupbuf),
-				    "F_OFD* fcntrl being sent with one or more "
-				    "nonzero whence (%d), start (%ld), or len ("
-				    "%ld).", bf.l_whence, bf.l_start, bf.l_len);
+				(void) snprintf(buf, sizeof (buf), "F_OFD_* "
+				    "fcntl being sent with one or more nonzero "
+				    "whence (%d), start (%ld), or len (%ld).",
+				    bf.l_whence, bf.l_start, bf.l_len);
 				lx_unsupported(unsupbuf);
 				DTRACE_PROBE3(lx__ofd__record__locking,
 				    uint16_t, bf.l_whence, long, bf.l_start,
