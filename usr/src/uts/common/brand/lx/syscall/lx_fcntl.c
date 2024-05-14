@@ -519,7 +519,7 @@ lx_fcntl_lock(int fd, int lx_cmd, void *arg)
 				    "fcntl being sent with one or more nonzero "
 				    "whence (%d), start (%ld), or len (%ld).",
 				    bf.l_whence, bf.l_start, bf.l_len);
-				lx_unsupported(unsupbuf);
+				lx_unsupported(buf);
 				DTRACE_PROBE3(lx__ofd__record__locking,
 				    uint16_t, bf.l_whence, long, bf.l_start,
 				    long, bf.l_len);
