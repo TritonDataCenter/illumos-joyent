@@ -84,11 +84,11 @@ ice_controlq_alloc(ice_t *ice, ice_controlq_t *cqp)
 {
 	size_t len;
 	uint_t i;
-	ddi_dma_attr_t attr; 
+	ddi_dma_attr_t attr;
 	ddi_device_acc_attr_t acc;
 
 	ASSERT3U(cqp->icq_nents, !=, 0);
-	ASSERT3U(cqp->icq_bufsize , !=, 0);
+	ASSERT3U(cqp->icq_bufsize, !=, 0);
 
 	mutex_init(&cqp->icq_lock, NULL, MUTEX_DRIVER, NULL);
 	cv_init(&cqp->icq_cv, NULL, CV_DRIVER, NULL);
@@ -97,7 +97,7 @@ ice_controlq_alloc(ice_t *ice, ice_controlq_t *cqp)
 	ice_dma_acc_attr(ice, &acc);
 	ice_dma_transfer_controlq_attr(ice, &attr);
 	if (!ice_dma_alloc(ice, &cqp->icq_dma, &attr, &acc, B_TRUE, len,
-	    B_FALSE)) { 
+	    B_FALSE)) {
 		ice_controlq_free(cqp);
 		ice_error(ice, "!failed to allocate controlq ring");
 		return (B_FALSE);
@@ -115,7 +115,7 @@ ice_controlq_alloc(ice_t *ice, ice_controlq_t *cqp)
 
 	for (i = 0; i < cqp->icq_nents; i++) {
 		if (!ice_dma_alloc(ice, &cqp->icq_data_dma[i], &attr, &acc,
-		    B_TRUE, cqp->icq_bufsize, B_FALSE)) { 
+		    B_TRUE, cqp->icq_bufsize, B_FALSE)) {
 			ice_error(ice, "!failed to allocate controlq buffer %u",
 			    i);
 			ice_controlq_free(cqp);
@@ -415,7 +415,7 @@ typedef enum {
 
 /*
  * Submit a command to the send queue, bump the register that indicates that we
- * own it, 
+ * own it,
  * XXX Indirect commands are being punted on, we're not properly copying things
  * out.
  */
@@ -478,8 +478,10 @@ ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
 		gen->iccg_data_low = LE_32(extra->idb_cookie.dmac_laddress &
 		    UINT32_MAX);
 
-		/* XXX Come back to this, if hw returns a bad value, we'll
-		 * overwrite our buffers, but this gets us off the ground */
+		/*
+		 * XXX Come back to this, if hw returns a bad value, we'll
+		 * overwrite our buffers, but this gets us off the ground
+		 */
 		bzero(extra->idb_va, extra->idb_len);
 		if ((copy & ICE_CMD_COPY_TO_DEV) != 0) {
 			bcopy(buf, extra->idb_va, LE_16(hwd->icqd_data_len));
@@ -570,7 +572,8 @@ ice_cmd_get_version(ice_t *ice, ice_fw_info_t *ifi)
 	ice_cq_cmd_get_version_t *gvp;
 
 	ice_cmd_direct_init(&desc, ICE_CQ_OP_GET_VER);
-	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL, ICE_CMD_COPY_NONE)) {
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
 		return (B_FALSE);
 	}
 
@@ -610,7 +613,8 @@ ice_cmd_queue_shutdown(ice_t *ice, boolean_t unload)
 		qsp->iccqs_flags |= ICE_CQ_CMD_QUEUE_SHUTDOWN_UNLOADING;
 	}
 
-	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL, ICE_CMD_COPY_NONE)) {
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
 		return (B_FALSE);
 	}
 
@@ -631,7 +635,8 @@ ice_cmd_clear_pf_config(ice_t *ice)
 	uint8_t hw;
 
 	ice_cmd_direct_init(&desc, ICE_CQ_OP_CLEAR_PF_CONFIGURATION);
-	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL, ICE_CMD_COPY_NONE)) {
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
 		return (B_FALSE);
 	}
 
@@ -657,7 +662,8 @@ ice_cmd_clear_pxe(ice_t *ice)
 	cpp = &desc.icqd_command.icc_clear_pxe;
 	cpp->icccp_flags = ICE_CQ_CLEAR_PXE_FLAG;
 
-	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL, ICE_CMD_COPY_NONE)) {
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
 		return (B_FALSE);
 	}
 
@@ -694,7 +700,8 @@ ice_cmd_release_nvm(ice_t *ice)
 	rsrc->iccrr_res_id = LE_16(ICE_CQ_RESOURCE_NVM);
 	rsrc->iccrr_res_number = 0;
 
-	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL, ICE_CMD_COPY_NONE)) {
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
 		return (B_FALSE);
 	}
 
@@ -737,7 +744,8 @@ ice_cmd_acquire_nvm(ice_t *ice, boolean_t write)
 	}
 	rsrc->iccrr_res_number = 0;
 
-	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL, ICE_CMD_COPY_NONE)) {
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
 		return (B_FALSE);
 	}
 
@@ -821,7 +829,7 @@ ice_cmd_nvm_read(ice_t *ice, uint16_t module, uint32_t offset, uint16_t *lenp,
  * We need to obtain all of the capabilities based on the type listed. We do
  * this in two pases. The first to get the exact number of capabilities, the
  * second to get all of them. We guess a given number of caps, but throw that
- * out 
+ * out
  */
 boolean_t
 ice_cmd_get_caps(ice_t *ice, boolean_t device, uint_t *ncapsp,
@@ -907,7 +915,8 @@ ice_cmd_mac_read(ice_t *ice, uint8_t *addr)
 
 	bzero(buf, sizeof (buf));
 
-	ice_cmd_indirect_init(&desc, ICE_CQ_OP_MANAGE_MAC_READ, sizeof (buf), B_FALSE);
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_MANAGE_MAC_READ, sizeof (buf),
+	    B_FALSE);
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
 	    ICE_CMD_COPY_FROM_DEV)) {
 		return (B_FALSE);
@@ -973,8 +982,8 @@ ice_cmd_get_phy_abilities(ice_t *ice, ice_phy_abilities_t *datap,
 	uint8_t hw;
 	uint16_t flags;
 
-	ice_cmd_indirect_init(&desc, ICE_CQ_OP_GET_PHY_ABILITIES, sizeof (*datap),
-	    B_FALSE);
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_GET_PHY_ABILITIES,
+	    sizeof (*datap), B_FALSE);
 	phy = &desc.icqd_command.icc_phy_abilities;
 	flags = ICE_CQ_GET_PHY_ABILITIES_REPORT_MEDIA;
 	if (modules) {
@@ -994,7 +1003,7 @@ ice_cmd_get_phy_abilities(ice_t *ice, ice_phy_abilities_t *datap,
 	}
 
 	/*
-	 * Fix up endian issues. 
+	 * Fix up endian issues.
 	 */
 	datap->ipa_eee = LE_16(datap->ipa_eee);
 	datap->ipa_eeer = LE_16(datap->ipa_eeer);
@@ -1028,7 +1037,7 @@ ice_cmd_get_link_status(ice_t *ice, ice_link_status_t *linkp, ice_lse_t lse)
 		return (B_FALSE);
 	}
 	status->iccgls_flags = LE_16(flags);
- 
+
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, linkp,
 	    ICE_CMD_COPY_FROM_DEV)) {
 		return (B_FALSE);
@@ -1058,7 +1067,8 @@ ice_cmd_set_event_mask(ice_t *ice, uint16_t mask)
 	emp = &desc.icqd_command.icc_set_event_mask;
 	emp->iccsem_mask = LE_16(mask);
 
-	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL, ICE_CMD_COPY_NONE)) {
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
 		return (B_FALSE);
 	}
 
@@ -1086,7 +1096,8 @@ ice_cmd_setup_link(ice_t *ice, boolean_t enable)
 		setup->iccsl_flags |= ICE_CQ_SETUP_LINK_ENABLE_LINK;
 	}
 
-	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL, ICE_CMD_COPY_NONE)) {
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
 		return (B_FALSE);
 	}
 
@@ -1119,7 +1130,7 @@ ice_cmd_get_switch_config(ice_t *ice, void *buf, size_t bufsize, uint16_t first,
 	    B_FALSE);
 	config = &desc.icqd_command.icc_get_switch_config;
 	config->iccgsc_next_elt = LE_16(first);
- 
+
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
 	    ICE_CMD_COPY_FROM_DEV)) {
 		return (B_FALSE);

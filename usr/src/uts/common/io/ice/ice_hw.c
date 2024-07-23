@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2019, Joyent, Inc. 
+ * Copyright 2019, Joyent, Inc.
  */
 
 /*
@@ -32,7 +32,7 @@ uint_t ice_hw_pf_reset_count = 100;
 typedef struct ice_context_map {
 	uint_t	icm_member;
 	uint_t	icm_memlen;
-	uint_t 	icm_minbit;
+	uint_t	icm_minbit;
 	uint_t	icm_maxbit;
 } ice_context_map_t;
 
@@ -86,7 +86,7 @@ const ice_context_map_t ice_txq_map[] = {
 	{ offsetof(ice_hw_txq_context_t, ihtc_pkg_shape), 1, 168, 170 }
 };
 
-static uintptr_t 
+static uintptr_t
 ice_rxq_context_register(uint_t queue, uint_t byteoff)
 {
 	uint_t index;

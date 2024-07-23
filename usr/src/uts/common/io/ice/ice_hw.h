@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 
-static inline uint8_t 
+static inline uint8_t
 ice_bitset8(uint8_t reg, uint_t high, uint_t low, uint8_t val)
 {
 	uint8_t mask;
@@ -71,7 +71,7 @@ ice_bitx32(uint32_t reg, uint_t high, uint_t low)
 	return (BITX(reg, high, low));
 }
 
-static inline uint16_t 
+static inline uint16_t
 ice_bitset16(uint16_t reg, uint_t high, uint_t low, uint16_t val)
 {
 	uint16_t mask;
@@ -89,7 +89,7 @@ ice_bitset16(uint16_t reg, uint_t high, uint_t low, uint16_t val)
 	return (reg);
 }
 
-static inline uint32_t 
+static inline uint32_t
 ice_bitset32(uint32_t reg, uint_t high, uint_t low, uint32_t val)
 {
 	uint32_t mask;
@@ -178,20 +178,20 @@ ice_bitset32(uint32_t reg, uint_t high, uint_t low, uint32_t val)
 #define	ICE_REG_GLINT_CTL	0x0016CC54
 
 #define	ICE_REG_GLINT_VECT2FUNC_BASE	0x00162000
-#define	ICE_REG_GLINT_VECT2FUNC_VF_NUM_SET(r, v)	ice_bitset32(r, 7, 0, v)
-#define	ICE_REG_GLINT_VECT2FUNC_PF_NUM_SET(r, v)	ice_bitset32(r, 14, 12, v)
-#define	ICE_REG_GLINT_VECT2FUNC_IS_PF_SET(r, v)		ice_bitset32(r, 16, 16, v)
+#define	ICE_REG_GLINT_VECT2FUNC_VF_NUM_SET(r, v) ice_bitset32(r, 7, 0, v)
+#define	ICE_REG_GLINT_VECT2FUNC_PF_NUM_SET(r, v) ice_bitset32(r, 14, 12, v)
+#define	ICE_REG_GLINT_VECT2FUNC_IS_PF_SET(r, v)	ice_bitset32(r, 16, 16, v)
 
 #define	ICE_REG_GLINT_DYN_CTL_BASE	0x00160000
 #define	ICE_REG_GLINT_DYN_CTL_INTENA_SET(r)	ice_bitset32(r, 0, 0, 1)
 #define	ICE_REG_GLINT_DYN_CTL_CLEARPBA_SET(r)	ice_bitset32(r, 1, 1, 1)
 #define	ICE_REG_GLINT_DYN_CTL_SWINT_TRIG_SET(r)	ice_bitset32(r, 2, 2, 1)
-#define	ICE_REG_GLINT_DYN_CTL_ITR_INDX_SET(r, v)	ice_bitset32(r, 4, 3, v)
-#define	ICE_REG_GLINT_DYN_CTL_INTERVAL_SET(r, v)	ice_bitset32(r, 16, 6, v)
-#define	ICE_REG_GLINT_DYN_CTL_SW_ITR_INDX_ENA_SET(r)	ice_bitset32(r, 24, 24, 1)
-#define	ICE_REG_GLINT_DYN_CTL_SW_ITR_INDXA_SET(r, v)	ice_bitset32(r, 26, 25, v)
-#define	ICE_REG_GLINT_DYN_CTL_SW_WB_ON_ITR_SET(r)	ice_bitset32(r, 30, 30, 1)
-#define	ICE_REG_GLINT_DYN_CTL_INTENA_MSK_SET(r)		ice_bitset32(r, 31, 31, 1)
+#define	ICE_REG_GLINT_DYN_CTL_ITR_INDX_SET(r, v) ice_bitset32(r, 4, 3, v)
+#define	ICE_REG_GLINT_DYN_CTL_INTERVAL_SET(r, v) ice_bitset32(r, 16, 6, v)
+#define	ICE_REG_GLINT_DYN_CTL_SW_ITR_INDX_ENA_SET(r) ice_bitset32(r, 24, 24, 1)
+#define	ICE_REG_GLINT_DYN_CTL_SW_ITR_INDXA_SET(r, v) ice_bitset32(r, 26, 25, v)
+#define	ICE_REG_GLINT_DYN_CTL_SW_WB_ON_ITR_SET(r) ice_bitset32(r, 30, 30, 1)
+#define	ICE_REG_GLINT_DYN_CTL_INTENA_MSK_SET(r)	ice_bitset32(r, 31, 31, 1)
 
 
 #define	ICE_REG_GLINT_ITR_BASE	0x00154000
@@ -296,9 +296,9 @@ typedef struct ice_capability {
 } ice_capability_t;
 
 typedef enum {
-	ICE_CAP_SWITCH_MODE 		= 0x1,
+	ICE_CAP_SWITCH_MODE		= 0x1,
 	ICE_CAP_MANAGEABILITY_MODE	= 0x2,
-	ICE_CAP_OS2BMC 			= 0x4,
+	ICE_CAP_OS2BMC			= 0x4,
 	ICE_CAP_FUNCTIONS_VALID		= 0x5,
 	ICE_CAP_ALTERNAME_RAM		= 0x6,
 	ICE_CAP_WOL			= 0x8,
@@ -566,12 +566,12 @@ typedef struct ice_hw_vsi_context {
 	 * Switching information
 	 */
 	uint8_t		ihvc_switch_id;
-	uint8_t 	ihvc_switch_flags;
-	uint8_t 	ihvc_switch_flags2;
+	uint8_t		ihvc_switch_flags;
+	uint8_t		ihvc_switch_flags2;
 	uint8_t		ihvc_switch_veb_stats;
 	/* Security */
-	uint8_t 	ihvc_sec_flags;
-	uint8_t 	ihvc_sec_rsvd;
+	uint8_t		ihvc_sec_flags;
+	uint8_t		ihvc_sec_rsvd;
 	/* VLAN Handling */
 	uint16_t	ihvc_vlan_id;
 	uint8_t		ihvc_vlan_rsvd[2];
@@ -677,15 +677,19 @@ typedef struct ice_hw_vsi_context {
 #define	ICE_HW_VSI_RSS_SCHEME_TOEPLITZ		0x00
 #define	ICE_HW_VSI_RSS_SCHEME_SYMTOEPLITZ	0x01
 #define	ICE_HW_VSI_RSS_SCHEME_SIMPLE_XOR	0x02
-#define	ICE_HW_VSI_RSS_SET_HASH_SCHEME(reg, val)	ice_bitset8(reg, 7, 6, val)
+#define	ICE_HW_VSI_RSS_SET_HASH_SCHEME(reg, val) ice_bitset8(reg, 7, 6, val)
 #define	ICE_HW_VSI_TC_SET_OVERRIDE(reg, val)	ice_bitset8(reg, 4, 0, val)
 #define	ICE_HW_VSI_TC_PROFILE_OVERRIDE		(1 << 7)
 #define	ICE_HW_VSI_PE_FILTER_ENABLE	(1 << 0)
 
-#define	ICE_HW_VSI_ACL_SET_RX_PROFILE_MISS(reg, val)	ice_bitset16(reg, 3, 0, val)
-#define	ICE_HW_VSI_ACL_SET_RX_TABLE_MISS(reg, val)	ice_bitset16(reg, 7, 4, val)
-#define	ICE_HW_VSI_ACL_SET_TX_PROFILE_MISS(reg, val)	ice_bitset16(reg, 11, 8, val)
-#define	ICE_HW_VSI_ACL_SET_TX_TABLE_MISS(reg, val)	ice_bitset16(reg, 15, 12, val)
+#define	ICE_HW_VSI_ACL_SET_RX_PROFILE_MISS(reg, val) \
+	ice_bitset16(reg, 3, 0, val)
+#define	ICE_HW_VSI_ACL_SET_RX_TABLE_MISS(reg, val) \
+	ice_bitset16(reg, 7, 4, val)
+#define	ICE_HW_VSI_ACL_SET_TX_PROFILE_MISS(reg, val) \
+	ice_bitset16(reg, 11, 8, val)
+#define	ICE_HW_VSI_ACL_SET_TX_TABLE_MISS(reg, val) \
+	ice_bitset16(reg, 15, 12, val)
 
 #define	ICE_HW_VSI_FD_ENABLE		(1 << 0)
 #define	ICE_HW_VSI_FD_TX_AUTO_EVICT	(1 << 1)
@@ -706,7 +710,7 @@ typedef struct ice_hw_vsi_context {
  * used.
  */
 #define	ICE_RSS_KEY_LENGTH		0x34
-#define	ICE_RSS_KEY_STANDARD_LENGTH	0x28	
+#define	ICE_RSS_KEY_STANDARD_LENGTH	0x28
 #define	ICE_RSS_LUT_SIZE_VSI		64
 
 /*

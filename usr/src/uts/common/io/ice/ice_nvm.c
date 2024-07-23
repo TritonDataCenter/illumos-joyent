@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2019, Joyent, Inc. 
+ * Copyright 2019, Joyent, Inc.
  */
 
 /*
@@ -128,7 +128,7 @@ ice_nvm_init(ice_t *ice)
 	nvm->in_size = (1 << ICE_REG_GLNVM_GENS_SR_SIZE(reg)) * 1024;
 	reg = ice_reg_read(ice, ICE_REG_GLNVM_FLA);
 	if (ICE_REG_GLNVM_FLA_LOCKED(reg) == 0) {
-		nvm->in_flags |= ICE_NVM_BLANK; 
+		nvm->in_flags |= ICE_NVM_BLANK;
 	}
 
 	if (!ice_nvm_read_uint16(ice, ICE_NVM_DEV_STARTER_VER,

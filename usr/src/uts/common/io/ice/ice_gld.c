@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2019, Joyent, Inc. 
+ * Copyright 2019, Joyent, Inc.
  */
 
 /*
@@ -372,7 +372,7 @@ ice_m_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 		    sizeof (link_flowctrl_t));
 		break;
 	case MAC_PROP_MTU:
-		ret = ENOTSUP;	
+		ret = ENOTSUP;
 		/* XXX Come back to me */
 		break;
 
@@ -418,7 +418,7 @@ static void
 ice_m_propinfo(void *arg, const char *pr_name, mac_prop_id_t pr_num,
     mac_prop_info_handle_t hdl)
 {
-	return;
+
 }
 
 static mac_callbacks_t ice_m_callbacks = {

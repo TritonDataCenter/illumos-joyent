@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2019, Joyent, Inc. 
+ * Copyright 2019, Joyent, Inc.
  */
 
 /*
@@ -108,8 +108,8 @@ ice_intr_hw_fini(ice_t *ice)
 
 	/*
 	 * Clear all other cause values. Note, there is no explicit
-	 * ice_intr_cause_disable required for this because the control for this is
-	 * all based in the OICR enable.
+	 * ice_intr_cause_disable required for this because the control for
+	 * this is all based in the OICR enable.
 	 */
 	ice_reg_write(ice, ICE_REG_PFINT_OICR_ENA, 0);
 	ice_intr_cause_disable(ice, ICE_REG_PFINT_FW_CTL);

@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2019, Joyent, Inc. 
+ * Copyright 2019, Joyent, Inc.
  */
 
 #ifndef _ICE_ADMINQ_H

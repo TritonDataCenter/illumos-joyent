@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2019, Joyent, Inc. 
+ * Copyright 2019, Joyent, Inc.
  */
 
 /*
@@ -266,7 +266,7 @@ ice_caps_fetch(ice_t *ice)
 	ice->ice_first_txq = cap->icap_physid;
 
 	if ((cap = ice_capability_find(ice, B_FALSE, ICE_CAP_MSI_X,
-	    ICE_CAP_MAJOR_MSI_X)) == NULL) { 
+	    ICE_CAP_MAJOR_MSI_X)) == NULL) {
 		ice_error(ice, "failed to find MSI-X capability");
 		goto err;
 	}
@@ -336,7 +336,7 @@ ice_intr_alloc_type(ice_t *ice, int type)
 	if ((ret = ddi_intr_get_nintrs(ice->ice_dip, type, &count)) !=
 	    DDI_SUCCESS) {
 		ice_error(ice, "failed to get number of interrupts of type %d: "
-		   "%d", type, ret); 
+		    "%d", type, ret);
 		return (B_FALSE);
 	} else if (count < min) {
 		ice_error(ice, "number of interrupts of type %d is %d, but "
@@ -347,7 +347,7 @@ ice_intr_alloc_type(ice_t *ice, int type)
 	if ((ret = ddi_intr_get_navail(ice->ice_dip, type, &count)) !=
 	    DDI_SUCCESS) {
 		ice_error(ice, "failed to get available interrupts of type %d: "
-		   "%d", type, ret); 
+		    "%d", type, ret);
 		return (B_FALSE);
 	} else if (count < min) {
 		ice_error(ice, "available interrupts of type %d is %d, but "
@@ -528,8 +528,8 @@ ice_intr_ddi_disable(ice_t *ice)
 	} else {
 		int i;
 		for (i = 0; i < ice->ice_nintrs; i++) {
-			if ((ret = ddi_intr_disable(ice->ice_intr_handles[i])) !=
-			    DDI_SUCCESS) {
+			ret = ddi_intr_disable(ice->ice_intr_handles[i]);
+			if (ret != DDI_SUCCESS) {
 				ice_error(ice, "failed to disable interrupt "
 				    "%d: %d", i, ret);
 				rval = B_FALSE;
@@ -797,7 +797,7 @@ start:
 
 	/*
 	 * At this point we believe that we have completed all of our work.
-	 * Indicate that we're no longer running and 
+	 * Indicate that we're no longer running and
 	 */
 	mutex_enter(&task->itk_lock);
 	task->itk_state &= ~ICE_TASK_S_RUNNING;
@@ -948,7 +948,7 @@ ice_vsi_context_fill(ice_t *ice, ice_vsi_t *vsi)
 	 */
 	table = 0;
 	for (uint_t i = 0; i < 8; i++) {
-		table = ICE_HW_VSI_UP_TABLE_SET(table, i, i); 
+		table = ICE_HW_VSI_UP_TABLE_SET(table, i, i);
 	}
 	ctx->ihvc_ingress_table = LE_32(table);
 	ctx->ihvc_egress_table = LE_32(table);
@@ -1100,7 +1100,8 @@ ice_pf_vsi_init(ice_t *ice)
 {
 	ice_vsi_t *vsi;
 
-	list_create(&ice->ice_vsi, sizeof (ice_vsi_t), offsetof(ice_vsi_t, ivsi_node));
+	list_create(&ice->ice_vsi, sizeof (ice_vsi_t),
+	    offsetof(ice_vsi_t, ivsi_node));
 
 	vsi = ice_vsi_alloc(ice, 0, ICE_VSI_TYPE_PF);
 	if (vsi == NULL) {
@@ -1124,7 +1125,7 @@ ice_cleanup(ice_t *ice)
 	}
 
 	if (ice->ice_seq & ICE_ATTACH_INTR_ENABLE) {
-		ice_intr_ddi_disable(ice);
+		(void) ice_intr_ddi_disable(ice);
 		ice->ice_seq &= ~ICE_ATTACH_INTR_ENABLE;
 	}
 
@@ -1263,7 +1264,7 @@ ice_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 		goto err;
 	}
 
-	if (!ice_nvm_init(ice)) { 
+	if (!ice_nvm_init(ice)) {
 		goto err;
 	}
 	ice->ice_seq |= ICE_ATTACH_NVM;

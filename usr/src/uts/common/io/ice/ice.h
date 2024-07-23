@@ -521,12 +521,13 @@ extern boolean_t ice_cmd_queue_shutdown(ice_t *, boolean_t);
 extern boolean_t ice_cmd_clear_pf_config(ice_t *);
 extern boolean_t ice_cmd_clear_pxe(ice_t *);
 /*
- * The NVM commands should not be used directly and instead the ice_nvm.c interfaces
- * mentioned below should be used.
+ * The NVM commands should not be used directly and instead the ice_nvm.c
+ * interfaces mentioned below should be used.
  */
 extern boolean_t ice_cmd_acquire_nvm(ice_t *, boolean_t);
 extern boolean_t ice_cmd_release_nvm(ice_t *);
-extern boolean_t ice_cmd_nvm_read(ice_t *, uint16_t, uint32_t, uint16_t *, uint16_t *, boolean_t);
+extern boolean_t ice_cmd_nvm_read(ice_t *, uint16_t, uint32_t, uint16_t *,
+    uint16_t *, boolean_t);
 
 extern boolean_t ice_cmd_get_caps(ice_t *, boolean_t, uint_t *,
     ice_capability_t **);
