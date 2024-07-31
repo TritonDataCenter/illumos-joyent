@@ -114,6 +114,7 @@ SYMBOL_SCOPE {
 	ddi_dma_free_handle		{ FLAGS = EXTERN };
 	ddi_dma_mem_alloc		{ FLAGS = EXTERN };
 	ddi_dma_mem_free		{ FLAGS = EXTERN };
+	ddi_dma_ncookies		{ FLAGS = EXTERN };
 	ddi_dma_nextcookie		{ FLAGS = EXTERN };
 	ddi_dma_sync			{ FLAGS = EXTERN };
 	ddi_dma_unbind_handle		{ FLAGS = EXTERN };
@@ -218,6 +219,10 @@ SYMBOL_SCOPE {
 	freemsgchain			{ FLAGS = EXTERN };
 	gethrtime			{ FLAGS = EXTERN };
 	kmem_alloc			{ FLAGS = EXTERN };
+	kmem_cache_alloc		{ FLAGS = EXTERN };
+	kmem_cache_create		{ FLAGS = EXTERN };
+	kmem_cache_destroy		{ FLAGS = EXTERN };
+	kmem_cache_free			{ FLAGS = EXTERN };
 	kmem_free			{ FLAGS = EXTERN };
 	kmem_zalloc			{ FLAGS = EXTERN };
 	kstat_create			{ FLAGS = EXTERN };

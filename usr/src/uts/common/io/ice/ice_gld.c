@@ -73,18 +73,6 @@ ice_group_remove_mac(void *arg, const uint8_t *mac_addr)
 /*
  * XXX Stub I/O related functions should probably move to their own file.
  */
-static int
-ice_ring_rx_start(mac_ring_driver_t rh, uint64_t gen_num)
-{
-	return (0);
-}
-
-static mblk_t *
-ice_ring_rx_poll(void *arg, int poll_bytes)
-{
-	return (NULL);
-}
-
 static mblk_t *
 ice_ring_tx(void *arg, mblk_t *mp)
 {
@@ -104,23 +92,12 @@ ice_ring_tx_stat(mac_ring_driver_t rh, uint_t stat, uint64_t *val)
 	return (ENOTSUP);
 }
 
-static int
-ice_ring_rx_intr_enable(mac_intr_handle_t intrh)
-{
-	return (0);
-}
-
-static int
-ice_ring_rx_intr_disable(mac_intr_handle_t intrh)
-{
-	return (0);
-}
-
 static void
 ice_fill_rx_ring(void *arg, mac_ring_type_t rtype, const int group_index,
     const int ring_index, mac_ring_info_t *infop, mac_ring_handle_t rh)
 {
 	infop->mri_start = ice_ring_rx_start;
+	infop->mri_stop = ice_ring_rx_stop;
 	infop->mri_poll = ice_ring_rx_poll;
 	infop->mri_stat = ice_ring_rx_stat;
 	infop->mri_intr.mi_enable = ice_ring_rx_intr_enable;

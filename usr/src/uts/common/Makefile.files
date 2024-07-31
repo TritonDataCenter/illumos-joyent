@@ -2392,7 +2392,7 @@ GPIO_SIM_OBJS +=	gpio_sim.o
 # ice(4D)
 #
 ICE_OBJS += ice.o ice_controlq.o ice_dma.o ice_hw.o ice_nvm.o ice_gld.o \
-		ice_intr.o
+		ice_intr.o ice_tx.o ice_rx.o
 
 IGC_CORE_OBJS += igc_api.o igc_base.o igc_i225.o igc_mac.o igc_nvm.o igc_phy.o
 IGC_OBJS += $(IGC_CORE_OBJS) igc.o igc_osdep.o igc_gld.o igc_ring.o igc_stat.o

@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019, Joyent, Inc.
+ * Copyright 2024 RackTop Systems, Inc.
  */
 
 #ifndef _ICE_HW_H
@@ -769,6 +770,9 @@ typedef struct ice_hw_rxq_context {
 
 #define	ICE_REG_RXQ_CONTEXT_BASE	0x00280000
 
+#define	ICE_REG_QRX_BASE		0x00290000ull
+#define	ICE_QRX_TAIL(idx) 		(ICE_REG_QRX_BASE + ((idx) * 4))
+
 typedef struct ice_hw_txq_context {
 	uint64_t	ihtc_base;
 	uint8_t		ihtc_port;
@@ -817,6 +821,9 @@ typedef struct ice_hw_txq_context {
 #define	ICE_HW_TXQ_CTX_LEGACY_LEGACY	0x01
 
 #define	ICE_HW_TXQ_CTX_PHYSICAL_SIZE	22
+
+#define	ICE_QTX_BASE			0x002C0000
+#define	ICE_QTX_TAIL(idx) 		(ICE_QTX_BASE + ((idx) * 4))
 
 /*
  * Scheduler Structures returned by hardware.

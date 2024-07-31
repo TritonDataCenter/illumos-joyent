@@ -289,7 +289,7 @@ ice_controlq_init(ice_t *ice)
 		ice_controlq_rq_desc_reset(&ice->ice_arq, i);
 
 	}
-	ICE_DMA_SYNC(ice->ice_arq.icq_dma, DDI_DMA_SYNC_FORDEV);
+	ICE_DMA_SYNC(&ice->ice_arq.icq_dma, DDI_DMA_SYNC_FORDEV);
 	ice_controlq_program(ice, &ice->ice_arq, ice->ice_arq.icq_nents - 1);
 
 	if ((ret = ice_regs_check(ice)) != DDI_FM_OK) {
@@ -486,10 +486,10 @@ ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
 		if ((copy & ICE_CMD_COPY_TO_DEV) != 0) {
 			bcopy(buf, extra->idb_va, LE_16(hwd->icqd_data_len));
 		}
-		ICE_DMA_SYNC(*extra, DDI_DMA_SYNC_FORDEV);
+		ICE_DMA_SYNC(extra, DDI_DMA_SYNC_FORDEV);
 	}
 
-	ICE_DMA_SYNC(ice->ice_arq.icq_dma, DDI_DMA_SYNC_FORDEV);
+	ICE_DMA_SYNC(&ice->ice_arq.icq_dma, DDI_DMA_SYNC_FORDEV);
 
 	cqp->icq_tail = ice_controlq_incr(cqp, cqp->icq_tail);
 	ice_reg_write(ice, cqp->icq_reg_tail, cqp->icq_tail);
@@ -516,7 +516,7 @@ ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
 		return (B_FALSE);
 	}
 
-	ICE_DMA_SYNC(ice->ice_arq.icq_dma, DDI_DMA_SYNC_FORKERNEL);
+	ICE_DMA_SYNC(&ice->ice_arq.icq_dma, DDI_DMA_SYNC_FORKERNEL);
 
 	/*
 	 * Verify that DD is set.
@@ -533,7 +533,7 @@ ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
 
 	bcopy(hwd, desc, sizeof (ice_cq_desc_t));
 	if ((copy & ICE_CMD_COPY_FROM_DEV) != 0) {
-		ICE_DMA_SYNC(*extra, DDI_DMA_SYNC_FORKERNEL);
+		ICE_DMA_SYNC(extra, DDI_DMA_SYNC_FORKERNEL);
 		bcopy(extra->idb_va, buf, LE_16(hwd->icqd_data_len));
 	}
 

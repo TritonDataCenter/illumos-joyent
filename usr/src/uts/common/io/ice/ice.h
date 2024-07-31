@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019, Joyent, Inc.
+ * Copyright 2024 RackTop Systems, Inc.
  */
 
 #ifndef _ICE_H
@@ -33,6 +34,7 @@
 #include <sys/disp.h>
 #include <sys/taskq_impl.h>
 #include <sys/random.h>
+#include <sys/stdbool.h>
 
 #include "ice_hw.h"
 #include "ice_controlq.h"
@@ -87,6 +89,41 @@ extern "C" {
 #define	ICE_MAX_TX_QUEUES	256
 
 /*
+ * The maximum size of a TX buffer the DMA engine supports (16KiB - 1).
+ */
+#define	ICE_TX_MAX_BUFSZ	0x0000000000003FFFull
+
+/*
+ * The maximum number of descriptors (including any tx context descriptors)
+ * used to transmit a single packet.
+ */
+#define	ICE_TX_MAX_COOKIE	8
+
+/*
+ * The maximum number of descriptors (including any tx context descriptors)
+ * used when transmitting an LSO packet. This is somewhat arbitrary since
+ * the hardware itself can do an unlimited number of descriptors as long
+ * as every MSS sized chunk of data fits within ICE_TX_MAX_COOKIE - 1
+ * descriptors (each segment consumes a descriptor for the header).
+ */
+#define	ICE_TX_LSO_MAX_COOKIE	32
+
+/*
+ * Minimum alignment for TX/RX descriptor rings
+ */
+#define	ICE_DESC_ALIGN	128
+
+/*
+ * Align allocated DMA resources to the smallest supported page size
+ * on the platform
+ */
+#if defined(__x86)
+#define	ICE_DMA_ALIGNMENT	0x1000
+#else
+#error	"unknown architecture for ice"
+#endif
+
+/*
  * These are the logical different kinds of types that a VSI can be.
  */
 typedef enum ice_vsi_type {
@@ -123,11 +160,11 @@ typedef enum ice_vsi_type {
  */
 #ifdef	DEBUG
 #define	ICE_DMA_SYNC(dma, flag)	VERIFY0(ddi_dma_sync( \
-					    (dma).idb_dma_handle, 0, 0, \
+					    (dma)->idb_dma_handle, 0, 0, \
 					    (flag)))
 #else
 #define	ICE_DMA_SYNC(dma, flag)	((void) ddi_dma_sync( \
-					    (dma).idb_dma_handle, 0, 0, \
+					    (dma)->idb_dma_handle, 0, 0, \
 					    (flag)))
 #endif
 
@@ -181,6 +218,11 @@ typedef enum ice_itr_index {
  * This is the default MTU that we'll enable on a link.
  */
 #define	ICE_MTU_DEFAULT		1500
+
+/*
+ * The size of a 'small' packet
+ */
+#define	ICE_TX_SMALL_PKT	512
 
 /*
  * This represents a single logical DMA allocation. At the moment we only use
@@ -251,6 +293,187 @@ typedef struct ice_controlq {
 	uint_t			icq_head;
 	uint_t			icq_tail;
 } ice_controlq_t;
+
+typedef enum ice_tcb_type {
+	ITCB_NOT_USED,
+	ITCB_SMALL_COPY,
+	ITCB_COPY,
+	ITCB_BIND,
+	ITCB_LSO_BIND,
+} ice_tcb_type_t;
+
+struct ice_tx_ring;
+typedef struct ice_tx_ctrl_block {
+	struct ice_tx_ring	*itcb_ring;
+	ice_tcb_type_t		itcb_type;
+	uint32_t		itcb_len;
+	ice_dma_buffer_t	*itcb_buf;
+	mblk_t			*itcb_mp;
+	ddi_dma_handle_t	itcb_dmah;
+	ddi_dma_handle_t	itcb_lso_dmah;
+} ice_tx_ctrl_block_t;
+
+#define	ICE_TX_MAX_DESC		8
+#define	ICE_TX_MAX_LSO_DESC	32
+
+struct ice;
+
+typedef struct ice_tx_desc {
+	uint64_t	itxd_qw0;
+	uint64_t	itxd_qw1;
+} ice_tx_desc_t;
+
+#define	ICE_TX_DESC_DTYPE_MASK		0x000000000000000Full
+
+#define	ICE_TX_DESC_DTYPE_DATA		0x00000000000000000000ull
+#define	ICE_TX_DESC_EOP				0x0000000000000010ull
+#define	ICE_TX_DESC_RS				0x0000000000000020ull
+#define	ICE_TX_DESC_CMD_IIPT_IPV6		0x0000000000000200ull
+#define	ICE_TX_DESC_CMD_IIPT_IPV4		0x0000000000000400ull
+#define	ICE_TX_DESC_CMD_IIPT_IPV4_CSUM		0x0000000000000600ull
+#define	ICE_TX_DESC_CMD_L4T_EOFT_TCP		0x0000000000010000ull
+#define	ICE_TX_DESC_CMD_L4T_EOFT_UDP		0x0000000000020000ull
+#define	ICE_TX_DESC_CMD_L4T_EOFT_SCTP		0x0000000000030000ull
+#define	ICE_TX_DESC_LENGTH_SHIFT		34
+#define	ICE_TX_DESC_LENGTH_MACLEN_SHIFT		16
+#define	ICE_TX_DESC_LENGTH_IPLEN_SHIFT		21
+#define	ICE_TX_DESC_LENGTH_L4_FC_LE_SHIFT	30
+
+#define	ICE_TX_DESC_DTYPE_CONTEXT	0x0000000000000001ull
+#define	ICE_TX_CTX_DESC_TSO		0x0000000000000010ull
+#define	ICE_TXD_QW1_TSO_LEN_SHIFT	30
+#define	ICE_TXD_QW1_TSO_MSS_SHIFT	50
+
+#define	ICE_TX_DESC_DTYPE_DONE		ICE_TX_DESC_DTYPE_MASK
+
+typedef struct ice_tx_ring {
+	struct ice		*itxr_ice;		/* RO */
+
+	kmutex_t		itxr_lock;
+	kcondvar_t		itxr_cv;
+	uint_t			itxr_active;
+	bool			itxr_quiesce;
+	bool			itxr_blocked;
+
+	mac_ring_handle_t	itxr_mactxring;
+
+	ice_tx_ctrl_block_t	**itxr_tcbs;
+	ice_tx_desc_t		*itxr_descs;
+	ice_dma_buffer_t	itxr_dma;
+
+	uint32_t		itxr_index;
+	uint16_t		itxr_size;
+	uint16_t		itxr_avail;
+	uint16_t		itxr_head;
+	uint16_t		itxr_tail;
+
+	kmutex_t		itxr_tcb_lock;
+	ice_tx_ctrl_block_t	**itxr_tcb_free_list;
+	uint16_t		itxr_tcb_nfree;
+} ice_tx_ring_t;
+
+/*
+ * Like i40e, ice supports both a 16 byte and 32 byte receive descriptor.
+ * We use the 32 byte descriptor in case we want to utilize the additional
+ * information in the future.
+ */
+typedef struct ice_rx_desc {
+	uint64_t	irxd_qw0;
+	uint64_t	irxd_qw1;
+	uint64_t	irxd_qw2;
+	uint64_t	irxd_qw3;
+} ice_rx_desc_t;
+
+/* RXD qword1 bits */
+#define	ICE_RXD_DONE	(1ULL << 0)
+#define	ICE_RXD_EOP	(1ULL << 1)
+#define	ICE_RXD_L3L4P	(1ULL << 3)
+
+
+#define	ICE_RXD_ERR_SHIFT	19
+#define	ICE_RXD_ERR		(1ULL << 0)
+#define	ICE_RXD_HBO		(1ULL << 2)
+#define	ICE_RXD_IPERR		(1ULL << 3)
+#define	ICE_RXD_L3ERR		(1ULL << 4)
+#define	ICE_RXD_EXTERR		(1ULL << 5)
+#define	ICE_RXD_OVERSIZE	(1ULL << 6)
+
+#define	ICE_RXD_LEN_SHIFT	38
+#define	ICE_RXD_LEN_MASK	((1ULL << 14) - 1)
+#define	ICE_RXD_HLEN_SHIFT	14
+#define	ICE_RXD_SPLIT		25
+
+/* The maximum number of descriptors that can be used for 1 packet */
+#define	ICE_RX_MAX_DESC		5
+
+/* The maximum size of a RX ring */
+#define	ICE_RX_RING_MAX_SIZE	0x1FE0
+
+struct ice_rx_ring;
+
+typedef enum ice_rx_ctrl_block_state {
+	IRXB_FREE,
+	IRXB_ONRING,
+	IRXB_ONLOAN,
+} ice_rx_ctrl_block_state_t;
+
+typedef struct ice_rx_ctrl_block {
+	mblk_t			*ircb_mp;
+	struct ice_rx_ring	*ircb_ring;
+	ice_dma_buffer_t	ircb_dma;
+	frtn_t			ircb_free_rtn;
+	ice_rx_ctrl_block_state_t ircb_state;
+} ice_rx_ctrl_block_t;
+
+typedef struct ice_rxq_stat {
+	kstat_named_t		icrxs_bytes;
+	kstat_named_t		icrxs_packets;
+
+	kstat_named_t		icrxs_bind_bytes;
+	kstat_named_t		icrxs_bind_segs;
+
+	kstat_named_t		icrxs_copy_bytes;
+	kstat_named_t		icrxs_copy_segs;
+
+	kstat_named_t		icrxs_desc_error;
+	kstat_named_t		icrxs_copy_nomem;
+	kstat_named_t		icrxs_intr_limit;
+	kstat_named_t		icrxs_bind_no_rcb;
+	kstat_named_t		icrxs_bind_no_mp;
+
+	kstat_named_t		icrxs_hck_unknown;
+	kstat_named_t		icrxs_hck_nol3l4p;
+	kstat_named_t		icrxs_hck_v6skip;
+	kstat_named_t		icrxs_hck_iperr;
+	kstat_named_t		icrxs_hck_eiperr;
+	kstat_named_t		icrxs_hck_v4hdrok;
+	kstat_named_t		icrxs_hck_l4err;
+	kstat_named_t		icrxs_hck_l4hdrok;
+	kstat_named_t		icrxs_hck_set;
+	kstat_named_t		icrxs_hck_miss;
+} ice_rxq_stat_t;
+
+typedef struct ice_rx_ring {
+	struct ice		*irxr_ice;
+	bool			irxr_shutdown;
+
+	kmutex_t		irxr_lock;
+
+	mac_ring_handle_t	irxr_macrxring;
+	uint64_t		irxr_rxgen;
+
+	ice_rx_desc_t		*irxr_descs;
+	ice_rx_ctrl_block_t	**irxr_rcbs;
+
+	uint32_t		irxr_index;
+	ice_dma_buffer_t	irxr_desc_dma;
+	uint16_t		irxr_size;
+	uint16_t		irxr_head;
+	uint16_t		irxr_tail;
+
+	kstat_t			*irxr_kstat;
+	ice_rxq_stat_t		irxr_stats;
+} ice_rx_ring_t;
 
 /*
  * Consolidated information about firmware all in one structure.
@@ -351,6 +574,13 @@ typedef enum ice_attach_seq {
 	ICE_ATTACH_INTR_ENABLE	= 0x1 << 13
 } ice_attach_seq_t;
 
+typedef enum ice_state {
+	ICE_UNKNOWN =		0,
+	ICE_INITIALIZED =	(1 << 0),
+	ICE_STARTED =		(1 << 1),
+	ICE_ERROR =		(1 << 2),
+} ice_state_t;
+
 /*
  * This structure is the primary per-physical function state.
  */
@@ -362,6 +592,9 @@ typedef struct ice {
 	 * This tracks how far we are in attach.
 	 */
 	ice_attach_seq_t	ice_seq;
+
+	ice_state_t		ice_state;
+	bool			ice_shutdown;
 
 	/*
 	 * FMA state
@@ -421,6 +654,15 @@ typedef struct ice {
 
 	uint_t			ice_mtu;
 	uint_t			ice_frame_size;
+	uint_t			ice_tx_dma_min;
+	bool			ice_tx_hcksum_enable;
+	bool			ice_tx_lso_enable;
+
+	uint_t			ice_rx_dma_min;
+	uint_t			ice_rx_limit_per_intr;
+	uint_t			ice_rx_maxloan;
+	uint_t			ice_rx_rsize;
+	bool			ice_rx_hcksum_enable;
 
 	uint32_t		ice_soc;
 	uint_t			ice_itr_gran;
@@ -485,8 +727,23 @@ typedef struct ice {
 	 * XXX Replace this with a tree or something of parsed info?
 	 */
 	uint16_t	ice_sched_nbranches;
-	uint8_t	ice_sched_buf[4096];
+	uint8_t		ice_sched_buf[4096];
+
+	kmutex_t		ice_rxbuf_lock;
+	uint_t			ice_rxbuf_onloan;
+
 } ice_t;
+
+static inline bool
+ice_is_running(const ice_t *ice)
+{
+	if (!(ice->ice_state & ICE_STARTED) ||
+	    (ice->ice_state & (ICE_ERROR)) != 0) {
+		return (false);
+	}
+
+	return (true);
+}
 
 /*
  * General functions
@@ -504,9 +761,24 @@ extern boolean_t ice_link_status_update(ice_t *);
  */
 extern void ice_dma_acc_attr(ice_t *, ddi_device_acc_attr_t *);
 extern void ice_dma_transfer_controlq_attr(ice_t *, ddi_dma_attr_t *);
+extern void ice_dma_ring_attr(ice_t *, ddi_dma_attr_t *);
 extern void ice_dma_free(ice_dma_buffer_t *);
 extern boolean_t ice_dma_alloc(ice_t *, ice_dma_buffer_t *, ddi_dma_attr_t *,
     ddi_device_acc_attr_t *, boolean_t, size_t, boolean_t);
+extern int ice_check_dma_handle(ddi_dma_handle_t);
+
+static inline bool
+ice_dma_sync(ice_t *ice, ice_dma_buffer_t *dma, uint_t flags)
+{
+	ICE_DMA_SYNC(dma, flags);
+	if (ice_check_dma_handle(dma->idb_dma_handle) != DDI_FM_OK) {
+		ddi_fm_service_impact(ice->ice_dip, DDI_SERVICE_DEGRADED);
+		atomic_or_32(&ice->ice_state, ICE_ERROR);
+		return (false);
+	}
+
+	return (true);
+}
 
 /*
  * Control Queue related functions.
@@ -587,6 +859,14 @@ extern void ice_intr_trigger_softint(ice_t *);
  */
 extern void ice_mac_unregister(ice_t *);
 extern boolean_t ice_mac_register(ice_t *);
+
+extern int ice_ring_rx_start(mac_ring_driver_t, uint64_t);
+extern void ice_ring_rx_stop(mac_ring_driver_t);
+extern mblk_t *ice_ring_rx_poll(void *, int);
+extern int ice_ring_rx_intr_enable(mac_intr_handle_t);
+extern int ice_ring_rx_intr_disable(mac_intr_handle_t);
+
+extern bool ice_tx_recycle_ring(ice_tx_ring_t *);
 
 #ifdef __cplusplus
 }
