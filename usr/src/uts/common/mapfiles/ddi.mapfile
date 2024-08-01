@@ -11,7 +11,7 @@
 
 #
 # Copyright 2020 Joyent, Inc.
-# Copyright 2020-2024 RackTop Systems, Inc.
+# Copyright 2020-2026 RackTop Systems, Inc.
 # Copyright 2026 Oxide Computer Company
 #
 
@@ -234,6 +234,7 @@ SYMBOL_SCOPE {
 	list_head			{ FLAGS = EXTERN };
 	list_insert_head		{ FLAGS = EXTERN };
 	list_insert_tail		{ FLAGS = EXTERN };
+	list_link_active		{ FLAGS = EXTERN };
 	list_next			{ FLAGS = EXTERN };
 	list_remove			{ FLAGS = EXTERN };
 	list_remove_head		{ FLAGS = EXTERN };
@@ -250,6 +251,7 @@ SYMBOL_SCOPE {
 	mod_info			{ FLAGS = EXTERN };
 	mod_install			{ FLAGS = EXTERN };
 	mod_remove			{ FLAGS = EXTERN };
+	msgdsize			{ FLAGS = EXTERN };
 	msgpullup			{ FLAGS = EXTERN };
 	msgpullup_pad			{ FLAGS = EXTERN };
 	msgsize				{ FLAGS = EXTERN };

@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019, Joyent, Inc.
+ * Copyright 2026 RackTop Systems, Inc.
  */
 
 /*
@@ -104,7 +105,7 @@ ice_rxq_context_register(uint_t queue, uint_t byteoff)
  * length that it will show up in dest. To do this, we end up trying to find a
  * number of bytes that this will fit in and memcpy and edit that.
  */
-static boolean_t
+static bool
 ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
     const ice_context_map_t *map)
 {
@@ -115,7 +116,7 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 	if (nbits > map->icm_memlen * 8) {
 		ice_error(ice, "invalid context entry, asked to use %u bits "
 		    "from a %u byte length member", nbits, map->icm_memlen);
-		return (B_FALSE);
+		return (false);
 	}
 
 	/*
@@ -126,7 +127,7 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 		ice_error(ice, "context entry starts at byte %u, but the "
 		    "buffer is %zu bytes long and we need space for 8 bytes",
 		    fbyte, destlen);
-		return (B_FALSE);
+		return (false);
 	}
 
 	/*
@@ -136,21 +137,21 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 	 */
 	switch (map->icm_memlen) {
 	case 1:
-		val = *(uint8_t *)src;
+		val = *((uint8_t *)src + map->icm_member);
 		break;
 	case 2:
-		val = *(uint16_t *)src;
+		val = *((uint16_t *)src + map->icm_member);
 		break;
 	case 4:
-		val = *(uint32_t *)src;
+		val = *((uint32_t *)src + map->icm_member);
 		break;
 	case 8:
-		val = *(uint64_t *)src;
+		val = *((uint64_t *)src + map->icm_member);
 		break;
 	default:
 		ice_error(ice, "context entry has invalid member legth: %u",
 		    map->icm_memlen);
-		return (B_FALSE);
+		return (false);
 	}
 
 	/*
@@ -165,7 +166,7 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 	if ((~mask & val) != 0) {
 		ice_error(ice, "found illegal bits set in context entry: "
 		    "have value %" PRIx64 " and mask %" PRIx64, val, mask);
-		return (B_FALSE);
+		return (false);
 	}
 
 	/*
@@ -181,10 +182,10 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 	tmp |= LE_64(val);
 	bcopy(&tmp, dest + fbyte, sizeof (tmp));
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_rxq_context_write(ice_t *ice, ice_hw_rxq_context_t *ctxt, uint_t index)
 {
 	uint_t i;
@@ -193,14 +194,14 @@ ice_rxq_context_write(ice_t *ice, ice_hw_rxq_context_t *ctxt, uint_t index)
 	if (index >= ICE_MAX_RX_QUEUES) {
 		ice_error(ice, "asked to write rxq context to illegal index: "
 		    "%u", index);
-		return (B_FALSE);
+		return (false);
 	}
 
 	bzero(buf, sizeof (buf));
 	for (i = 0; i < ARRAY_SIZE(ice_rxq_map); i++) {
 		if (!ice_context_write(ice, (uint8_t *)ctxt, buf, sizeof (buf),
 		    &ice_rxq_map[i])) {
-			return (B_FALSE);
+			return (false);
 		}
 	}
 
@@ -212,10 +213,27 @@ ice_rxq_context_write(ice_t *ice, ice_hw_rxq_context_t *ctxt, uint_t index)
 		ice_reg_write(ice, reg, val);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
+ice_txq_context_write(ice_t *ice, ice_hw_txq_context_t *ctxt, uint8_t *dest,
+    size_t len)
+{
+	uint_t i;
+
+	bzero(dest, len);
+	for (i = 0; i < ARRAY_SIZE(ice_txq_map); i++) {
+		if (!ice_context_write(ice, (uint8_t *)ctxt, dest, len,
+		    &ice_txq_map[i])) {
+			return (false);
+		}
+	}
+
+	return (true);
+}
+
+bool
 ice_pf_reset(ice_t *ice)
 {
 	uint_t i;
@@ -239,8 +257,105 @@ ice_pf_reset(ice_t *ice)
 
 	if (i == ice_hw_pf_reset_count) {
 		ice_error(ice, "failed to reset PF after 100ms");
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
+}
+
+/*
+ * Add a MAC address (any type) for the given VSI (by hw id).
+ * This needs to be called for every MAC address that will be accepted
+ * by the VSI (based on the FreeBSD source) -- so the main MAC address,
+ * the broadcast address, as well as anything else. This creates
+ * the appropriate switch rule to pass the traffic. On success, it
+ * sets *idxp to the rule index returned by the hardware.
+ */
+int
+ice_add_mac(ice_t *ice, uint_t vsi_id, const uint8_t *mac, uint16_t *idxp)
+{
+	/*
+	 * The datasheet in the definition of the rule format
+	 * (section 7.8.12.6.1.1) suggests that the header length (the
+	 * size of icswl_data) should be aligned to four bytes).
+	 *
+	 * the FreeBSD driver (in ice_fill_sw_rule()) uses 16 bytes to contain
+	 * the destination & source ethernet address as well as the ethertype
+	 * and vlan. It's unclear if we must always pass 16 bytes of data
+	 * for the recipe, or if we could get away with 8 bytes of data.
+	 *
+	 * Since we plan to eventually include vlan filtering support which
+	 * would require all 16 bytes, we follow what FreeBSD does since it
+	 * is known to work.
+	 */
+	union {
+		ice_sw_rule_t	rule;
+		uint64_t	buf[8];
+	} u;
+	ice_sw_rule_t	*rule = &u.rule;
+	ice_sw_lookup_t	*lk = &rule->iswr_data.iswr_lookup;
+
+	bzero(&u, sizeof (u));
+
+	rule->iswr_type = LE_16(ICE_SW_RULE_T_LOOKUP_TX);
+	lk->iswl_rid = LE_16(ICE_SW_RECIPE_MAC);
+	lk->iswl_source = LE_16(vsi_id);
+
+	lk->iswl_action = LE_32(
+	    ICE_SW_RULE_ACT_T_LOGICAL_PORT_FWD |
+	    ICE_SW_RULE_ACT_LAN_EN |
+	    (uint32_t)vsi_id << ICE_SW_RULE_ACT_VSI_SHIFT |
+	    ICE_SW_RULE_ACT_VSI_VALID);
+
+	lk->iswl_header_len = LE_16(16);
+
+	bcopy(mac, lk->iswl_data, ETHERADDRL);
+
+	/*
+	 * (Note for future), to support vlan filtering, we need to treat
+	 * lk->icswl_data as an ethernet header (we probably shouldn't use
+	 * struct ether_vlan_header since it includes the 'real' ethertype
+	 * at offsets 16 & 17, which would overrun the data and will probably
+	 * trigger compiler warnings) and set the ethertype to ETHERTYPE_VLAN
+	 * and set the VLAN value to the appropriate vlan (both being in
+	 * network byte order).
+	 */
+
+	if (!ice_cmd_switch_rules(ice, ICE_CQ_OP_ADD_SW_RULES, 1, rule)) {
+		return (EIO);
+	}
+
+	if (rule->iswr_status != 0) {
+		// TODO translate rule.status error code
+		// EACCES (not owned by pf)
+		// ENOSPC
+		// EINVAL
+		// ENOENT
+		return (EIO);
+	}
+
+	*idxp = LE_16(lk->iswl_index);
+
+	return (0);
+}
+
+/*
+ * This removes the switch rule given by the given rule index (set by the
+ * hardware when a rule is added). This is used both to remove MAC addresses
+ * as well as VLAN rules.
+ */
+int
+ice_remove_rule(ice_t *ice, uint16_t rule_idx)
+{
+	ice_sw_rule_t rule = {
+		.iswr_data.iswr_lookup = {
+			.iswl_index = LE_16(rule_idx),
+		},
+	};
+
+	if (!ice_cmd_switch_rules(ice, ICE_CQ_OP_REMOVE_SW_RULES, 1, &rule)) {
+		return (EIO);
+	}
+
+	return (true);
 }

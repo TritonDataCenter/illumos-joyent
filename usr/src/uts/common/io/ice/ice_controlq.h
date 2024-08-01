@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019, Joyent, Inc.
+ * Copyright 2026 RackTop Systems, Inc.
  */
 
 #ifndef _ICE_ADMINQ_H
@@ -60,6 +61,14 @@ typedef enum ice_cq_opcode {
 	 */
 	ICE_CQ_OP_GET_SWITCH_CONFIG = 0x200,
 	/*
+	 * Switch commands (needed for promisc/addmac/remmac)
+	 */
+	ICE_CQ_OP_ADD_SW_RULES = 0x2a0,
+	ICE_CQ_OP_UPDATE_SW_RULES = 0x2a1,
+	ICE_CQ_OP_REMOVE_SW_RULES = 0x2a2,
+	ICE_CQ_OP_GET_SW_RULES = 0x2a3,
+	ICE_CQ_OP_CLEAR_PF_CFG = 0x2a4,
+	/*
 	 * VSI commands
 	 */
 	ICE_CQ_OP_ADD_VSI = 0x0210,
@@ -97,7 +106,15 @@ typedef enum ice_cq_opcode {
 	 * RSS Commands
 	 */
 	ICE_CQ_OP_SET_RSS_KEY = 0xB02,
-	ICE_CQ_OP_SET_RSS_LUT = 0xB03
+	ICE_CQ_OP_SET_RSS_LUT = 0xB03,
+	/*
+	 * Transmit Queue Commands
+	 */
+	ICE_CQ_OP_ADD_TXQ = 0xC30,
+	ICE_CQ_OP_DISABLE_FLOW = 0xC31,
+	ICE_CQ_OP_MOVE_TXQ = 0xC32,
+	ICE_CQ_OP_ADD_RDMA_TQSET = 0xC33,
+	ICE_CQ_OP_MOVE_RDMA_TQSET = 0xC34,
 } ice_cq_opcode_t;
 
 /*
@@ -393,6 +410,31 @@ typedef struct ice_cq_cmd_query_default_scheduler {
 
 #define	ICE_CQ_QUERY_DEFAULT_SCHED_BUF_SIZE	4096
 
+typedef struct ice_cq_cmd_add_txq {
+	uint8_t		iccat_ngrp;
+	uint8_t		iccat_rsvd[7];
+	uint32_t	iccat_data_high;
+	uint32_t	iccat_data_low;
+} ice_cq_cmd_add_txq_t;
+
+typedef struct ice_cq_cmd_txq_disable_flow {
+	uint8_t		icctdf_flags;
+	uint8_t		icctdf_nqgrp;
+	uint8_t		icctdf_resv;
+	uint8_t		icctdf_timeout;
+	uint8_t		icctdf_blocked;
+	uint8_t		icctdf_resv2[3];
+	uint32_t	icctdf_data_high;
+	uint32_t	icctdf_data_low;
+} ice_cq_cmd_txq_disable_flow_t;
+
+typedef struct ice_cq_cmd_add_switch_rule {
+	uint16_t	iccasr_nrules;
+	uint8_t		iccasr_resv[6];
+	uint32_t	iccasr_data_high;
+	uint32_t	iccasr_data_low;
+} ice_cq_cmd_add_switch_rule_t;
+
 /*
  * This is a generic structure of a command that may be used.
  */
@@ -423,6 +465,9 @@ typedef union ice_cq_cmd {
 	ice_cq_cmd_set_rss_key_t icc_set_rss_key;
 	ice_cq_cmd_set_rss_lut_t icc_set_rss_lut;
 	ice_cq_cmd_query_default_scheduler_t icc_query_default_scheduler;
+	ice_cq_cmd_add_txq_t icc_add_txq;
+	ice_cq_cmd_txq_disable_flow_t icc_txq_disable_flow;
+	ice_cq_cmd_add_switch_rule_t icc_add_switch_rule;
 } ice_cq_cmd_t;
 
 /*

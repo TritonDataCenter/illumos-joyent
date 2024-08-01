@@ -251,8 +251,10 @@ ice_intr_misc_work(ice_t *ice)
 uint_t
 ice_intr_msix(caddr_t arg, caddr_t arg2)
 {
-	ice_t *ice = (ice_t *)arg;
-	uint_t vector = (uintptr_t)(void *)arg2;
+	ice_t			*ice = (ice_t *)arg;
+	list_t			*handlers;
+	ice_intr_handler_t	*h;
+	uint_t			vector = (uintptr_t)(void *)arg2;
 
 	if (vector == 0) {
 		ice_intr_misc_work(ice);
@@ -260,21 +262,68 @@ ice_intr_msix(caddr_t arg, caddr_t arg2)
 	}
 
 	ice_error(ice, "fired MSI-X interrupt %u", vector);
+
+	handlers = &ice->ice_intr_handlers[vector];
+	for (h = list_head(handlers); h != NULL; h = list_next(handlers, h)) {
+		h->iih_handler(ice, h);
+	}
+
 	return (DDI_INTR_CLAIMED);
 }
 
 uint_t
 ice_intr_msi(caddr_t arg, caddr_t arg2)
 {
-	ice_t *ice = (ice_t *)arg;
+	ice_t			*ice = (ice_t *)arg;
+	list_t			*handlers;
+	ice_intr_handler_t	*h;
+
 	ice_error(ice, "fired MSI interrupt");
+
+	handlers = &ice->ice_intr_handlers[0];
+	for (h = list_head(handlers); h != NULL; h = list_next(handlers, h)) {
+		h->iih_handler(ice, h);
+	}
+
 	return (DDI_INTR_CLAIMED);
 }
 
 uint_t
 ice_intr_intx(caddr_t arg, caddr_t arg2)
 {
-	ice_t *ice = (ice_t *)arg;
+	ice_t			*ice = (ice_t *)arg;
+	list_t			*handlers;
+	ice_intr_handler_t	*h;
+
 	ice_error(ice, "fired INT-X interrupt");
+
+	handlers = &ice->ice_intr_handlers[0];
+	for (h = list_head(handlers); h != NULL; h = list_next(handlers, h)) {
+		h->iih_handler(ice, h);
+	}
 	return (DDI_INTR_CLAIMED);
+}
+
+void
+ice_intr_add_handler(ice_t *ice, uint_t vector, ice_intr_handler_t *h)
+{
+	list_t *handlers;
+
+	ASSERT3U(vector, <, ice->ice_nintrs);
+	ASSERT(!list_link_active(&h->iih_node));
+
+	handlers = &ice->ice_intr_handlers[vector];
+	list_insert_tail(handlers, h);
+}
+
+void
+ice_intr_remove_handler(ice_t *ice, uint_t vector, ice_intr_handler_t *h)
+{
+	list_t *handlers;
+
+	ASSERT3U(vector, <, ice->ice_nintrs);
+	ASSERT(list_link_active(&h->iih_node));
+
+	handlers = &ice->ice_intr_handlers[vector];
+	list_remove(handlers, h);
 }

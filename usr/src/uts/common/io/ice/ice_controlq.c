@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019, Joyent, Inc.
+ * Copyright 2026 RackTop Systems, Inc.
  */
 
 /*
@@ -1390,4 +1391,125 @@ ice_cmd_get_default_scheduler(ice_t *ice, void *buf, size_t len,
 	*nbranches = LE_16(sched->iccqds_nbranches);
 
 	return (B_TRUE);
+}
+
+/*
+ * Add a TX queue to a VSI. Currently we only support adding one TX queue
+ * at a time.
+ */
+bool
+ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_hw_txq_context_t *ctx)
+{
+	ice_hw_txq_group_t	*grp;
+	ice_hw_txq_perq_t	*perq;
+	ice_cq_cmd_add_txq_t	*add_txq;
+	size_t			len;
+	ice_cq_desc_t		desc;
+	ice_cq_errno_t		err;
+	uint8_t			code;
+
+	CTASSERT(sizeof (ice_hw_txq_group_t) + sizeof (ice_hw_txq_perq_t) <=
+	    UINT16_MAX);
+
+	len = sizeof (ice_hw_txq_group_t) + sizeof (ice_hw_txq_perq_t);
+
+	grp = kmem_zalloc(len, KM_SLEEP);
+	perq = &grp->ihtg_perq[0];
+
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_ADD_TXQ, len, false);
+	add_txq = &desc.icqd_command.icc_add_txq;
+
+	add_txq->iccat_ngrp = 1;
+
+	// TODO fill out struct
+	grp->ihtg_nqueue = 1;
+
+	if (!ice_txq_context_write(ice, ctx, &perq->ihtp_ctx[0],
+	    sizeof (perq->ihtp_ctx))) {
+			kmem_free(grp, len);
+			return (false);
+	}
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, grp,
+	    ICE_CMD_COPY_TO_DEV)) {
+		kmem_free(grp, len);
+		ice_error(ice, "Failed to add TX queue to group");
+		return (false);
+	}
+
+	if (!ice_cmd_result(&desc, &err, &code)) {
+		kmem_free(grp, len);
+		ice_error(ice, "add TX queue command failed with 0x%x "
+		    "(fw private: %x)", err, code);
+		return (false);
+	}
+
+	kmem_free(grp, len);
+	return (true);
+}
+
+/* Add/Remove/Update switch rules */
+bool
+ice_cmd_switch_rules(ice_t *ice, ice_cq_opcode_t op, uint16_t nrules,
+    ice_sw_rule_t *rules)
+{
+	const char			*opstr = "";
+	ice_cq_cmd_add_switch_rule_t	*add_rule;
+	size_t				len;
+	ice_cq_desc_t			desc;
+	ice_cq_errno_t			err;
+	uint8_t				code;
+
+	switch (op) {
+	case ICE_CQ_OP_ADD_SW_RULES:
+		opstr = "add";
+		break;
+	case ICE_CQ_OP_UPDATE_SW_RULES:
+		opstr = "update";
+		break;
+	case ICE_CQ_OP_REMOVE_SW_RULES:
+		opstr = "remove";
+		break;
+	default:
+		dev_err(ice->ice_dip, CE_PANIC, "%s: invalid op 0x%x", __func__,
+		    op);
+	}
+
+	/*
+	 * It's not clear if we can use a large buf with this command.
+	 * So for now, we strongly disallow it.
+	 */
+	len = (size_t)nrules * sizeof (*rules);
+	VERIFY3U(len, <, ICE_CQ_LARGE_BUF);
+
+	/*
+	 * This seems like an indirect command, but examination of the
+	 * FreeBSD sources suggest that we shouldn't set all the flags
+	 * we normally set for an indirect command (see ice_aq_sw_fules())
+	 */
+	ice_cmd_direct_init(&desc, op);
+
+	desc.icqd_flags |= LE_16(ICE_CQ_DESC_FLAGS_RD);
+	desc.icqd_data_len = LE_16(len);
+
+	add_rule = &desc.icqd_command.icc_add_switch_rule;
+
+	add_rule->iccasr_nrules = LE_16(nrules);
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, rules,
+	    ICE_CMD_COPY_TO_DEV)) {
+		ice_error(ice, "failed switch %s operation", opstr);
+		return (false);
+	}
+
+	/* XXX: do we resync the data back from the device? the add
+	 * command at least updates the descriptor with the assigned index
+	 * from the hardware, which we need to later reference it.
+	 */
+	if (!ice_cmd_result(&desc, &err, &code)) {
+		ice_error(ice, "failed switch %s operation: %d", err);
+		return (false);
+	}
+
+	return (true);
 }
