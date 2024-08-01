@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -715,6 +715,116 @@ dld_str_destroy(dld_str_t *dsp)
 	ASSERT(dsp->ds_rx_arg == NULL);
 	ASSERT(dsp->ds_next == NULL);
 	ASSERT(dsp->ds_head == NULL);
+
+	/*
+	 * Free the dummy mblk if exists.
+	 */
+	if (dsp->ds_tx_flow_mp != NULL) {
+		freeb(dsp->ds_tx_flow_mp);
+		dsp->ds_tx_flow_mp = NULL;
+	}
+
+	(void) mod_hash_remove(str_hashp, STR_HASH_KEY(dsp->ds_minor), &val);
+	ASSERT(dsp == (dld_str_t *)val);
+
+	/*
+	 * Free the object back to the cache.
+	 */
+	kmem_cache_free(str_cachep, dsp);
+	atomic_dec_32(&str_count);
+}
+
+/*
+ * Create a new dld_str_t object without an attached STREAMS queue.
+ * This method is designed only for external, private, consumers to
+ * place a hold and send packets directly on an existing link, and
+ * must not be used otherwise.
+ * The dld_str_t is intended only for use with dls_open/dls_close and
+ * str_mdata_fastpath_put.
+ * This dld_str_t does not engage in capability exchange, nor should
+ * it register for callbacks via mac_notify_add.
+ */
+dld_str_t *
+dld_str_create_detached(void)
+{
+	dld_str_t	*dsp;
+	int		err;
+
+	/*
+	 * Allocate an object from the cache.
+	 */
+	atomic_inc_32(&str_count);
+	dsp = kmem_cache_alloc(str_cachep, KM_SLEEP);
+
+	/*
+	 * As we do not have a rq/wq, we do not allocate ds_tx_flow_mp.
+	 * Tx code which attempts to feed back flow-controlled packets
+	 * gates this behaviour on the existence of this dummy mblk,
+	 * which is optional.
+	 */
+	err = mod_hash_insert(str_hashp, STR_HASH_KEY(dsp->ds_minor),
+	    (mod_hash_val_t)dsp);
+	ASSERT(err == 0);
+	return (dsp);
+}
+
+/*
+ * Destroy a dld_str_t object allocated via dld_str_create_detached.
+ */
+void
+dld_str_destroy_detached(dld_str_t *dsp)
+{
+	mod_hash_val_t	val;
+
+	ASSERT3P(dsp->ds_rq, ==, NULL);
+	ASSERT3P(dsp->ds_wq, ==, NULL);
+
+	/*
+	 * Re-ordered from dld_str_destroy: this verifies that
+	 * dls_close has been called. We then carry out remaining
+	 * cleanup which dld_str_detach would be responsible for.
+	 */
+	ASSERT(dsp->ds_dlp == NULL);
+	ASSERT(dsp->ds_dmap == NULL);
+	ASSERT(dsp->ds_rx == NULL);
+	ASSERT(dsp->ds_rx_arg == NULL);
+	ASSERT(dsp->ds_next == NULL);
+	ASSERT(dsp->ds_head == NULL);
+
+	dsp->ds_sap = 0;
+	dsp->ds_mh = NULL;
+	dsp->ds_mch = NULL;
+	dsp->ds_mip = NULL;
+
+	if (dsp->ds_ddh != NULL) {
+		dls_devnet_rele(dsp->ds_ddh);
+		dsp->ds_ddh = NULL;
+	}
+
+	ASSERT(dsp->ds_dlstate == DL_UNATTACHED);
+	ASSERT(dsp->ds_promisc == 0);
+	ASSERT(dsp->ds_mph == NULL);
+	ASSERT(dsp->ds_mnh == NULL);
+
+	ASSERT(dsp->ds_polling == B_FALSE);
+	ASSERT(dsp->ds_direct == B_FALSE);
+	ASSERT(dsp->ds_lso == B_FALSE);
+	ASSERT(dsp->ds_lso_max == 0);
+	ASSERT(dsp->ds_passivestate != DLD_ACTIVE);
+
+	/*
+	 * Reinitialize all the flags.
+	 */
+	dsp->ds_notifications = 0;
+	dsp->ds_passivestate = DLD_UNINITIALIZED;
+	dsp->ds_mode = DLD_UNITDATA;
+	dsp->ds_native = B_FALSE;
+	dsp->ds_nonip = B_FALSE;
+
+	ASSERT(dsp->ds_datathr_cnt == 0);
+	ASSERT(dsp->ds_pending_head == NULL);
+	ASSERT(dsp->ds_pending_tail == NULL);
+	ASSERT(!dsp->ds_dlpi_pending);
 
 	/*
 	 * Free the dummy mblk if exists.
