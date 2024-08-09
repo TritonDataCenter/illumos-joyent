@@ -262,6 +262,7 @@ s dev/winlock=../devices/pseudo/winlock@0:winlock
 s dev/wscons=../devices/pseudo/wc@0:wscons
 s dev/zero=../devices/pseudo/mm@0:zero
 s dev/zfs=../devices/pseudo/zfs@0:zfs
+s dev/zut=../devices/pseudo/zut@0:zut
 d devices 0755 root sys
 d etc 0755 root sys
 f etc/.login 0644 root sys
