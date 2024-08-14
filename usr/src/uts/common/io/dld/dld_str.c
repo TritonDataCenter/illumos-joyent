@@ -845,6 +845,17 @@ dld_str_destroy_detached(dld_str_t *dsp)
 }
 
 /*
+ * Return the MAC client handle associated with a dld_str_t.
+ * This method is intended for external, private, consumers to
+ * send and receive packets directly on an existing link.
+ */
+mac_client_handle_t
+dld_str_mac_client_handle(dld_str_t *dsp)
+{
+	return (dsp->ds_mch);
+}
+
+/*
  * kmem_cache contructor function: see kmem_cache_create(9f).
  */
 /*ARGSUSED*/
