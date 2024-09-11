@@ -835,12 +835,30 @@ lxpr_readlink_fdnode(lxpr_node_t *lxpnp, char *bp, size_t len)
 		return (-1);
 	}
 
-	/* Fetch the inode of the underlying vnode */
-	if (VOP_GETATTR(rvp, &attr, 0, CRED(), NULL) != 0)
-		return (-1);
+	if (bp != NULL) {
+		/*
+		 * We assume the caller in this case does NOT have the target
+		 * process's lock held. The only caller that passes bp != NULL
+		 * is lxpr_readlink(), which does not hold the target process
+		 * lock.  This ensures VOP_GETATTR() doesn't wait on an
+		 * fd-related lock held by the target process.
+		 *
+		 * Fetch the inode of the underlying vnode.
+		 */
+		if (VOP_GETATTR(rvp, &attr, 0, CRED(), NULL) != 0)
+			return (-1);
 
-	if (bp != NULL)
 		(void) snprintf(bp, len, format, (ino_t)attr.va_nodeid);
+	}
+	/*
+	 * Otherwise we aren't using the VOP_GETATTR() data anyway.  This is
+	 * good, because the caller that passes (bp == NULL),
+	 * lxpr_lookup_fdnode() above, has the process locked down, which can
+	 * be hazardous if VOP_GETATTR() machinery locks down something held
+	 * by the target process. The target process MIGHT try and hold its
+	 * own process lock while we're blocked, holding the process lock.
+	 * See <BUG-LINK> for such a case.
+	 */
 	return (0);
 }
 
