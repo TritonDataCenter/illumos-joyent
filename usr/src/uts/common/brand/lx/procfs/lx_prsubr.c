@@ -857,7 +857,7 @@ lxpr_readlink_fdnode(lxpr_node_t *lxpnp, char *bp, size_t len)
 	 * be hazardous if VOP_GETATTR() machinery locks down something held
 	 * by the target process. The target process MIGHT try and hold its
 	 * own process lock while we're blocked, holding the process lock.
-	 * See <BUG-LINK> for such a case.
+	 * See OS-8575 for such a case.
 	 */
 	return (0);
 }
