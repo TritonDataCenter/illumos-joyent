@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 /*
@@ -803,7 +804,11 @@ lxpr_lookup_fdnode(vnode_t *dvp, const char *name)
 	 * bogus-named symlink.  If that's the case, report the type as
 	 * VNON to bypass link-following elsewhere in the vfs system.
 	 *
-	 * See lxpr_readlink for more details.
+	 * See lxpr_readlink for details about certain entries.
+	 *
+	 * Note that lxpr_readlink_fdnode() is being used here as a glorified
+	 * checker of lxfp here, and it will not acquire any further locks given
+	 * we hold the process lock currently.
 	 */
 	if (lxpr_readlink_fdnode(lxfp, NULL, 0) == 0)
 		vp->v_type = VNON;
