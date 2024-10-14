@@ -9,6 +9,7 @@
  * http://www.illumos.org/license/CDDL.
  *
  * Copyright 2018 Joyent, Inc.
+ * Copryight 2024 MNX Cloud, Inc.
  */
 
 #include <stdlib.h>
@@ -17,6 +18,7 @@
 #include <string.h>
 #include <ofmt.h>
 #include <err.h>
+#include <zone.h>
 
 #include <libppt.h>
 
@@ -100,6 +102,14 @@ print_field(ofmt_arg_t *arg, char *buf, uint_t bufsize)
 
 	(void) snprintf(buf, bufsize, "--");
 	return (B_TRUE);
+}
+
+static int
+driverless(int argc, char *argv[])
+{
+	(void) printf("Coming soon, argc = %d, argv[0] == %s\n",
+	    argc, argv[0]);
+	return (EXIT_SUCCESS);
 }
 
 static int
@@ -192,11 +202,17 @@ list(int argc, char *argv[])
 int
 main(int argc, char *argv[])
 {
+	/* Don't even bother unless we're in the global zone. */
+	if (getzoneid() != GLOBAL_ZONEID)
+		usage("pptadm(8) can only be used in the global zone.");
+
 	if (argc == 1)
 		return (list(argc - 1, argv));
 
 	if (strcmp(argv[1], "list") == 0) {
 		return (list(argc - 1, &argv[1]));
+	} else if (strcmp(argv[1], "driverless") == 0) {
+		return (driverless(argc - 1, &argv[1]));
 	} else {
 		usage("unknown sub-command");
 	}
