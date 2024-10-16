@@ -27,7 +27,7 @@ extern int ppt_devpath_to_dev(const char *, char *, size_t);
 
 extern nvlist_t *ppt_list_assigned(void);
 
-extern nvlist_t *ppt_list(void);
+extern nvlist_t *ppt_list(bool);
 
 #ifdef __cplusplus
 }

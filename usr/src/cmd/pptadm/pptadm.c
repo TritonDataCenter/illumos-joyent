@@ -14,6 +14,7 @@
 
 #include <stdlib.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <getopt.h>
 #include <string.h>
 #include <ofmt.h>
@@ -81,7 +82,7 @@ die(const char *fmt, ...)
 	va_end(ap);
 }
 
-static boolean_t
+static bool
 print_field(ofmt_arg_t *arg, char *buf, uint_t bufsize)
 {
 	nvlist_t *nvl = arg->ofmt_cbarg;
@@ -97,28 +98,21 @@ print_field(ofmt_arg_t *arg, char *buf, uint_t bufsize)
 			continue;
 
 		(void) snprintf(buf, bufsize, "%s", val);
-		return (B_TRUE);
+		return (true);
 	}
 
 	(void) snprintf(buf, bufsize, "--");
-	return (B_TRUE);
-}
-
-static int
-driverless(int argc, char *argv[])
-{
-	(void) printf("Coming soon, argc = %d, argv[0] == %s\n",
-	    argc, argv[0]);
-	return (EXIT_SUCCESS);
+	return (true);
 }
 
 static int
 list(int argc, char *argv[])
 {
 	const char *fields_str = NULL;
-	boolean_t parsable = B_FALSE;
-	boolean_t json = B_FALSE;
-	boolean_t all = B_FALSE;
+	bool parsable = false;
+	bool json = false;
+	bool all = false;
+	bool unknown = false;
 	uint_t ofmtflags = 0;
 	ofmt_status_t oferr;
 	ofmt_handle_t ofmt;
@@ -127,20 +121,24 @@ list(int argc, char *argv[])
 	while ((opt = getopt(argc, argv, "ahjo:p")) != -1) {
 		switch (opt) {
 		case 'a':
-			all = B_TRUE;
+			all = true;
 			break;
 		case 'h':
 			usage(NULL);
 			break;
 		case 'j':
-			json = B_TRUE;
+			json = true;
 			break;
 		case 'o':
 			fields_str = optarg;
 			break;
 		case 'p':
 			ofmtflags |= OFMT_PARSABLE;
-			parsable = B_TRUE;
+			parsable = true;
+			break;
+		case 'U':
+			unknown = true;
+			/* XXX KEBE SAYS FILL ME IN! */
 			break;
 		default:
 			usage("unrecognized option");
@@ -164,7 +162,7 @@ list(int argc, char *argv[])
 
 	ofmt_check(oferr, parsable, ofmt, die, warn);
 
-	nvlist_t *nvl = all ? ppt_list() : ppt_list_assigned();
+	nvlist_t *nvl = all ? ppt_list(unknown) : ppt_list_assigned();
 	nvpair_t *nvp = NULL;
 
 	if (json) {
@@ -212,7 +210,9 @@ main(int argc, char *argv[])
 	if (strcmp(argv[1], "list") == 0) {
 		return (list(argc - 1, &argv[1]));
 	} else if (strcmp(argv[1], "driverless") == 0) {
-		return (driverless(argc - 1, &argv[1]));
+		/* Make it an alias for "list -U" */
+		strcpy(argv[1], "-U");
+		return (list(argc - 1, &argv[1]));
 	} else {
 		usage("unknown sub-command");
 	}

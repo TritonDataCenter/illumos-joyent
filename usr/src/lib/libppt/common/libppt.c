@@ -26,6 +26,7 @@
 #include <strings.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <errno.h>
 #include <pcidb.h>
@@ -36,6 +37,7 @@ typedef struct node_data {
 	list_t nd_matches;
 	nvlist_t *nd_nvl;
 	int nd_err;
+	bool nd_seek_unknown;
 } node_data_t;
 
 typedef struct ppt_match {
@@ -45,14 +47,14 @@ typedef struct ppt_match {
 	char pm_device[5];
 } ppt_match_t;
 
-static boolean_t
+static bool
 is_pci(di_node_t di_node)
 {
 	char *svals;
 
 	if (di_prop_lookup_strings(DDI_DEV_T_ANY, di_parent_node(di_node),
 	    "device_type", &svals) != 1)
-		return (B_FALSE);
+		return (false);
 
 	return (strcmp(svals, "pci") == 0 || strcmp(svals, "pciex") == 0);
 }
@@ -337,7 +339,7 @@ out:
 	return (err);
 }
 
-static boolean_t
+static bool
 match_ppt(list_t *matches, nvlist_t *nvl)
 {
 	char *vendor;
@@ -347,23 +349,23 @@ match_ppt(list_t *matches, nvlist_t *nvl)
 	if (nvlist_lookup_string(nvl, "path", &path) != 0 ||
 	    nvlist_lookup_string(nvl, "vendor-id", &vendor) != 0 ||
 	    nvlist_lookup_string(nvl, "device-id", &device) != 0)
-		return (B_FALSE);
+		return (false);
 
 	for (ppt_match_t *pm = list_head(matches); pm != NULL;
 	    pm = list_next(matches, pm)) {
 		if (pm->pm_path[0] != '\0' && strcmp(pm->pm_path, path) == 0)
-			return (B_TRUE);
+			return (true);
 
 		if (pm->pm_vendor[0] != '\0' &&
 		    strcmp(pm->pm_vendor, vendor) == 0) {
 			if (pm->pm_device[0] == '\0')
-				return (B_TRUE);
+				return (true);
 			if (strcmp(pm->pm_device, device) == 0)
-				return (B_TRUE);
+				return (true);
 		}
 	}
 
-	return (B_FALSE);
+	return (false);
 }
 
 static int
@@ -398,8 +400,10 @@ inspect_node(di_node_t di_node, void *arg)
 	if (info_nvl == NULL)
 		goto out;
 
-	if (devname == NULL && !match_ppt(&data->nd_matches, info_nvl))
+	if (devname == NULL && (data.nd_seek_unknown ||
+	    !match_ppt(&data->nd_matches, info_nvl))) {
 		goto out;
+	}
 
 	data->nd_err = nvlist_add_nvlist(data->nd_nvl, path, info_nvl);
 
@@ -413,11 +417,17 @@ out:
 /*
  * Like ppt_list_assigned() output, but includes all devices that could be used
  * for passthrough, whether assigned or not.
+ *
+ * If `unknown` is specified, ALSO include devices not in ppt_matches,
+ * but also lacking any device drivers. This is useful for locating targets
+ * for future additions to ppt_matches, e.g. a new GPU with a previously
+ * unknown PCI ID.
  */
 nvlist_t *
-ppt_list(void)
+ppt_list(bool unknown)
 {
-	node_data_t nd = { NULL, };
+	/* Other fields SHOULD get zeroed... */
+	node_data_t nd = { nd_seek_unknown = unknown };
 	di_node_t di_root;
 	int err;
 
