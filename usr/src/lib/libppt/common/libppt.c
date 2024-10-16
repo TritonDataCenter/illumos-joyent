@@ -38,6 +38,7 @@ typedef struct node_data {
 	nvlist_t *nd_nvl;
 	int nd_err;
 	bool nd_seek_unknown;
+	bool nd_print_native_path;
 } node_data_t;
 
 typedef struct ppt_match {
@@ -382,11 +383,20 @@ inspect_node(di_node_t di_node, void *arg)
 
 	driver = di_driver_name(di_node);
 
-	if (driver != NULL && strcmp(driver, "ppt") == 0) {
-		if (asprintf(&devname, "/dev/ppt%d",
-		    di_instance(di_node)) < 0) {
-			data->nd_err = errno;
-			goto out;
+	if (driver != NULL) {
+		if (strcmp(driver, "ppt") == 0) {
+			if (asprintf(&devname, "/dev/ppt%d",
+			    di_instance(di_node)) < 0) {
+				data->nd_err = errno;
+				goto out;
+			}
+		} else if (data.nd_print_native_path) {
+			if (asprintf(&devname, "%s", dl_binding_name(di_node)) <
+			    0) {
+				data->nd_err = errno;
+				goto out;
+			}
+			    
 		}
 	}
 
@@ -400,7 +410,7 @@ inspect_node(di_node_t di_node, void *arg)
 	if (info_nvl == NULL)
 		goto out;
 
-	if (devname == NULL && (data.nd_seek_unknown ||
+	if (devname == NULL && (!data.nd_seek_unknown ||
 	    !match_ppt(&data->nd_matches, info_nvl))) {
 		goto out;
 	}
@@ -422,12 +432,16 @@ out:
  * but also lacking any device drivers. This is useful for locating targets
  * for future additions to ppt_matches, e.g. a new GPU with a previously
  * unknown PCI ID.
+ *
+ * If `nativepath` is specified, make sure that devices with native drivers
+ * that match get their native device path displayed.
  */
 nvlist_t *
-ppt_list(bool unknown)
+ppt_list(bool unknown, bool nativepath)
 {
 	/* Other fields SHOULD get zeroed... */
-	node_data_t nd = { nd_seek_unknown = unknown };
+	node_data_t nd = { nd_seek_unknown = unknown,
+		nd_print_native_path = nativepath };
 	di_node_t di_root;
 	int err;
 

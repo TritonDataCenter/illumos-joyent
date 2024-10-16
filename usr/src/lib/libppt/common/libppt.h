@@ -16,6 +16,7 @@
 #define	_LIBPPT_H
 
 #include <sys/types.h>
+#include <stdbool.h>
 
 #include <libnvpair.h>
 
@@ -27,7 +28,7 @@ extern int ppt_devpath_to_dev(const char *, char *, size_t);
 
 extern nvlist_t *ppt_list_assigned(void);
 
-extern nvlist_t *ppt_list(bool);
+extern nvlist_t *ppt_list(bool, bool);
 
 #ifdef __cplusplus
 }

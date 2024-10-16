@@ -49,7 +49,7 @@ static ofmt_cb_t print_field;
 
 static ofmt_field_t fields[] = {
 /* name,	field width, index, callback */
-{ "DEV",	sizeof ("/dev/pptXX"), PPT_DEV, print_field },
+{ "DEV",	40, PPT_DEV, print_field }, /* XXX KEBE SAYS FIX ME! */
 { "VENDOR",	sizeof ("VENDOR"), PPT_VENDOR, print_field },
 { "DEVICE",	sizeof ("DEVICE"), PPT_DEVICE, print_field },
 { "SUBVENDOR",	sizeof ("SUBVENDOR"), PPT_SUBVENDOR, print_field },
