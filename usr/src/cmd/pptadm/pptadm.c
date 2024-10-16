@@ -67,7 +67,7 @@ usage(const char *errmsg)
 		(void) fprintf(stderr, "pptadm: %s\n", errmsg);
 	(void) fprintf(errmsg != NULL ? stderr : stdout,
 	    "Usage:\n"
-	    "pptadm list [ -j ]\n"
+	    "pptadm list [ -j ] [ -a ]\n"
 	    "pptadm list [-ap] [-o fields]\n");
 	exit(errmsg != NULL ? EXIT_FAILURE : EXIT_SUCCESS);
 }
@@ -113,12 +113,13 @@ list(int argc, char *argv[])
 	bool json = false;
 	bool all = false;
 	bool unknown = false;
+	bool nativepath = false;
 	uint_t ofmtflags = 0;
 	ofmt_status_t oferr;
 	ofmt_handle_t ofmt;
 	int opt;
 
-	while ((opt = getopt(argc, argv, "ahjo:p")) != -1) {
+	while ((opt = getopt(argc, argv, "ahjo:pNU")) != -1) {
 		switch (opt) {
 		case 'a':
 			all = true;
@@ -136,15 +137,20 @@ list(int argc, char *argv[])
 			ofmtflags |= OFMT_PARSABLE;
 			parsable = true;
 			break;
+		case 'N':
+			nativepath = true;
+			break;
 		case 'U':
 			unknown = true;
-			/* XXX KEBE SAYS FILL ME IN! */
 			break;
 		default:
 			usage("unrecognized option");
 			break;
 		}
 	}
+
+	if (!all && (nativepath || unknown))
+		usage("-N and/or -U cannot be used without -a");
 
 	if (optind == (argc - 1))
 		usage("unused arguments");
@@ -162,7 +168,8 @@ list(int argc, char *argv[])
 
 	ofmt_check(oferr, parsable, ofmt, die, warn);
 
-	nvlist_t *nvl = all ? ppt_list(unknown) : ppt_list_assigned();
+	nvlist_t *nvl = all ? ppt_list(unknown, nativepath) :
+	    ppt_list_assigned();
 	nvpair_t *nvp = NULL;
 
 	if (json) {
