@@ -67,8 +67,8 @@ usage(const char *errmsg)
 		(void) fprintf(stderr, "pptadm: %s\n", errmsg);
 	(void) fprintf(errmsg != NULL ? stderr : stdout,
 	    "Usage:\n"
-	    "pptadm list [ -j ] [ -a ]\n"
-	    "pptadm list [-ap] [-o fields]\n");
+	    "pptadm list [ -j ] [ -a [-UN]]\n"
+	    "pptadm list [-ap [-UN]] [-o fields]\n");
 	exit(errmsg != NULL ? EXIT_FAILURE : EXIT_SUCCESS);
 }
 

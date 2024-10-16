@@ -9,8 +9,9 @@
 .\" http://www.illumos.org/license/CDDL.
 .\"
 .\" Copyright 2018 Joyent, Inc.
+.\" Copyright 2024 MNX Cloud, Inc.
 .\"
-.Dd April 10, 2018
+.Dd October 16, 2024
 .Dt PPTADM 8
 .Os
 .Sh NAME
@@ -18,11 +19,11 @@
 .Nd PPT administration utility
 .Sh SYNOPSIS
 .Nm
-.Cm list -j
-.Op Fl a
+.Cm list -j Op Fl a Op Fl UN
 .Nm
 .Cm list
-.Op Fl ap Op Fl o Ar fields
+.Op Fl ap Op Fl UN
+.Op Fl o Ar fields
 .Sh DESCRIPTION
 The
 .Nm
@@ -41,6 +42,13 @@ Specify fields to output, or "all". Available fields are
 dev,path,vendor,device,subvendor,subdevice,rev,label
 .It Fl p
 Output in a parsable format; this requires the -o option to be specified.
+.It Fl N
+Output native device paths on available devices if applicable; this requires
+the -a option to be specified.
+.It Fl U
+Output unavailable devices that have no native device driver, for use in
+populating /etc/ppt_matches (see below). This requires the -a option to be
+specified.
 .El
 .Sh JSON OUTPUT
 The JSON output consists of an array under the key "devices" with the fields:
@@ -68,7 +76,7 @@ Human-readable description from the PCI database.
 Containts the bindings of PPT devices in the same format as /etc/driver_aliases
 .It /etc/ppt_matches
 Identifies devices that PPT could be bound to, either by physical path, or by
-PCI ID.
+the device's PCI ID.
 .El
 .Sh EXIT STATUS
 .Ex -std
