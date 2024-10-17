@@ -390,8 +390,8 @@ inspect_node(di_node_t di_node, void *arg)
 				data->nd_err = errno;
 				goto out;
 			}
-		} else if (data.nd_print_native_path) {
-			if (asprintf(&devname, "%s", dl_binding_name(di_node)) <
+		} else if (data->nd_print_native_path) {
+			if (asprintf(&devname, "%s", di_binding_name(di_node)) <
 			    0) {
 				data->nd_err = errno;
 				goto out;
@@ -410,7 +410,7 @@ inspect_node(di_node_t di_node, void *arg)
 	if (info_nvl == NULL)
 		goto out;
 
-	if (devname == NULL && (!data.nd_seek_unknown ||
+	if (devname == NULL && (!data->nd_seek_unknown ||
 	    !match_ppt(&data->nd_matches, info_nvl))) {
 		goto out;
 	}
@@ -440,8 +440,8 @@ nvlist_t *
 ppt_list(bool unknown, bool nativepath)
 {
 	/* Other fields SHOULD get zeroed... */
-	node_data_t nd = { nd_seek_unknown = unknown,
-		nd_print_native_path = nativepath };
+	node_data_t nd = { .nd_seek_unknown = unknown,
+		.nd_print_native_path = nativepath };
 	di_node_t di_root;
 	int err;
 

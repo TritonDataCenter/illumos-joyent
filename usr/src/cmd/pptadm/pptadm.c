@@ -82,7 +82,8 @@ die(const char *fmt, ...)
 	va_end(ap);
 }
 
-static bool
+/* Has to use boolean_t because ofmt_cb_t needs it. */
+static boolean_t
 print_field(ofmt_arg_t *arg, char *buf, uint_t bufsize)
 {
 	nvlist_t *nvl = arg->ofmt_cbarg;
@@ -98,11 +99,11 @@ print_field(ofmt_arg_t *arg, char *buf, uint_t bufsize)
 			continue;
 
 		(void) snprintf(buf, bufsize, "%s", val);
-		return (true);
+		return (B_TRUE);
 	}
 
 	(void) snprintf(buf, bufsize, "--");
-	return (true);
+	return (B_TRUE);
 }
 
 static int
@@ -215,10 +216,6 @@ main(int argc, char *argv[])
 		return (list(argc - 1, argv));
 
 	if (strcmp(argv[1], "list") == 0) {
-		return (list(argc - 1, &argv[1]));
-	} else if (strcmp(argv[1], "driverless") == 0) {
-		/* Make it an alias for "list -U" */
-		strcpy(argv[1], "-U");
 		return (list(argc - 1, &argv[1]));
 	} else {
 		usage("unknown sub-command");
