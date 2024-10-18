@@ -22,9 +22,6 @@
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
 /*	  All Rights Reserved  	*/
 
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include "awk.h"
 
 struct tok
@@ -126,7 +123,7 @@ ptoken(int n)
 }
 
 char *
-tokname(n)
+tokname(int n)
 {
 	if (n <= 256 || n >= LASTTOKEN)
 		n = 257;

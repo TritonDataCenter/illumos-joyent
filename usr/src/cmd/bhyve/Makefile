@@ -10,162 +10,23 @@
 #
 
 #
-# Copyright 2014 Pluribus Networks Inc.
-# Copyright 2020 Joyent, Inc.
+# Copyright 2024 OmniOS Community Edition (OmniOSce) Association.
 #
 
-PROG =		bhyve
+include         $(SRC)/cmd/Makefile.cmd
 
-include ../Makefile.cmd
-include ../Makefile.cmd.64
-include ../Makefile.ctf
+SUBDIRS = $(MACH64) test
 
-SUBDIRS = test
-
-all	:=	TARGET = all
-install	:=	TARGET = install
-clean	:=	TARGET = clean
-clobber	:=	TARGET = clobber
-
-SRCS =	acpi.c			\
-	atkbdc.c		\
-	bhyvegc.c		\
-	bhyverun.c		\
-	block_if.c		\
-	bootrom.c		\
-	console.c		\
-	consport.c		\
-	dbgport.c		\
-	fwctl.c			\
-	gdb.c			\
-	inout.c			\
-	ioapic.c		\
-	mem.c			\
-	mevent.c		\
-	mptbl.c			\
-	net_utils.c		\
-	pci_ahci.c		\
-	pci_e82545.c		\
-	pci_emul.c		\
-	pci_fbuf.c		\
-	pci_hostbridge.c	\
-	pci_irq.c		\
-	pci_lpc.c		\
-	pci_nvme.c		\
-	pci_passthru.c		\
-	pci_uart.c		\
-	pci_virtio_block.c	\
-	pci_virtio_console.c	\
-	pci_virtio_net.c	\
-	pci_virtio_rnd.c	\
-	pci_virtio_viona.c	\
-	pci_xhci.c		\
-	pm.c			\
-	post.c			\
-	ps2kbd.c		\
-	ps2mouse.c		\
-	rfb.c			\
-	rtc.c			\
-	smbiostbl.c		\
-	sockstream.c		\
-	task_switch.c		\
-	uart_emul.c		\
-	usb_emul.c		\
-	usb_mouse.c		\
-	vga.c			\
-	virtio.c		\
-	vmm_instruction_emul.c	\
-	xmsr.c			\
-	spinup_ap.c		\
-	iov.c			\
-	bhyve_sol_glue.c
-
-# The virtio-scsi driver appears to include  a slew of materials from FreeBSD's
-# native SCSI implementation.  We will omit that complexity for now.
-	#ctl_util.c		\
-	#ctl_scsi_all.c		\
-	#pci_virtio_scsi.c	\
-
-# The audio backend in FreeBSD is different than the one found in audio_oss.h
-	#audio.c		\
-	#hda_codec.c		\
-	#pci_hda.c		\
-
-# The bhyve generic net-backend stuff has been ignored by us at the moment
-# because SmartOS users prefer to use viona for its superior network perf.
-	#net_backends.c		\
-
-
-OBJS = $(SRCS:.c=.o)
-
-CLOBBERFILES =	$(ROOTUSRSBINPROG) $(ZHYVE)
-
-ZHYVE_DIR =	$(ROOT)/usr/lib/brand/bhyve
-ZHYVE_PROG =	zhyve
-ZHYVE =		$(ZHYVE_DIR)/$(ZHYVE_PROG)
-
-MEVENT_TEST_PROG = mevent_test
-MEVENT_TEST_SRCS = mevent.c mevent_test.c
-MEVENT_TEST_OBJS = $(MEVENT_TEST_SRCS:.c=.o)
-
-CLEANFILES =	$(PROG) $(ZHYVE_PROG) $(MEVENT_TEST_PROG) $(MEVENT_TEST_OBJS)
-
-CFLAGS +=	$(CCVERBOSE) -_gcc=-Wimplicit-function-declaration -_gcc=-Wno-parentheses
-CPPFLAGS =	-I$(COMPAT)/bhyve -I$(CONTRIB)/bhyve \
-		-I$(COMPAT)/bhyve/amd64 -I$(CONTRIB)/bhyve/amd64 \
-		-I$(CONTRIB)/bhyve/dev/usb/controller \
-		-I$(CONTRIB)/bhyve/dev/mii \
-		-I$(SRC)/uts/common/io/e1000api \
-		$(CPPFLAGS.master) \
-		-I$(ROOT)/usr/platform/i86pc/include \
-		-I$(SRC)/uts/i86pc/io/vmm \
-		-I$(SRC)/uts/common \
-		-I$(SRC)/uts/i86pc \
-		-I$(SRC)/lib/libdladm/common \
-		-DWITHOUT_CAPSICUM
-
-pci_nvme.o := CERRWARN += -_gcc=-Wno-pointer-sign
-
-SMOFF += all_func_returns,leaks,no_if_block
-
-# Force c99 for everything
-CSTD=		$(CSTD_GNU99)
-C99MODE=	-xc99=%all
-
-$(PROG) := LDLIBS += -lsocket -lnsl -ldlpi -ldladm -lmd -lsunw_crypto -luuid \
-	-lvmmapi -lz
-$(ZHYVE_PROG) := LDLIBS += -lnvpair
-$(MEVENT_TEST_PROG) := LDLIBS += -lsocket
+all :=          TARGET = all
+clean :=        TARGET = clean
+clobber :=      TARGET = clobber
+install :=      TARGET = install
 
 .KEEP_STATE:
 
-all: $(PROG) $(MEVENT_TEST_PROG) $(ZHYVE_PROG) $(SUBDIRS)
-
-$(PROG): $(OBJS)
-	$(LINK.c) -o $@ $(OBJS) $(LDFLAGS) $(LDLIBS)
-	$(POST_PROCESS)
-
-$(MEVENT_TEST_PROG): $(MEVENT_TEST_OBJS)
-	$(LINK.c) -o $@ $(MEVENT_TEST_OBJS) $(LDFLAGS) $(LDLIBS)
-
-install: all $(ZHYVE) $(ROOTUSRSBINPROG) $(SUBDIRS)
-
-clean: $(SUBDIRS)
-	$(RM) $(OBJS) $(CLEANFILES)
-
-clobber: clean $(SUBDIRS)
-	$(RM) $(CLOBBERFILES)
+all clean clobber install: $(SUBDIRS)
 
 $(SUBDIRS): FRC
 	@cd $@; pwd; $(MAKE) $(TARGET)
 
 FRC:
-
-include ../Makefile.targ
-
-$(ZHYVE_DIR)/%: %
-	$(INS.file)
-
-%.o: $(SRC)/uts/i86pc/io/vmm/%.c
-	$(COMPILE.c) $<
-	$(POST_PROCESS_O)

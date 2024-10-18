@@ -137,8 +137,6 @@
 	VDEV_RAIDZ_64MUL_2((x), mask); \
 }
 
-#define	VDEV_LABEL_OFFSET(x)	(x + VDEV_LABEL_START_SIZE)
-
 void
 vdev_raidz_map_free(raidz_map_t *rm)
 {
@@ -1754,17 +1752,11 @@ vdev_raidz_dumpio(vdev_t *vd, caddr_t data, size_t size,
 		VERIFY3U(colsize, <=, rc->rc_size);
 		VERIFY3U(colskip, <=, rc->rc_size);
 
-		/*
-		 * Note that the child vdev will have a vdev label at the start
-		 * of its range of offsets, hence the need for
-		 * VDEV_LABEL_OFFSET().  See zio_vdev_child_io() for another
-		 * example of why this calculation is needed.
-		 */
 		if ((err = cvd->vdev_ops->vdev_op_dumpio(cvd,
 		    ((char *)abd_to_buf(rc->rc_abd)) + colskip, colsize,
-		    VDEV_LABEL_OFFSET(rc->rc_offset) + colskip, 0,
-		    doread, isdump)) != 0)
+		    rc->rc_offset + colskip, 0, doread, isdump)) != 0) {
 			break;
+		}
 	}
 
 	vdev_raidz_map_free(rm);
@@ -1968,7 +1960,7 @@ raidz_checksum_error(zio_t *zio, raidz_col_t *rc, abd_t *bad_data)
 		zbc.zbc_has_cksum = 0;
 		zbc.zbc_injected = rm->rm_ecksuminjected;
 
-		zfs_ereport_post_checksum(zio->io_spa, vd,
+		(void) zfs_ereport_post_checksum(zio->io_spa, vd,
 		    &zio->io_bookmark, zio, rc->rc_offset, rc->rc_size,
 		    rc->rc_abd, bad_data, &zbc);
 	}

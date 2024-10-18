@@ -22,6 +22,7 @@
 /*
  * Copyright 2013 Garrett D'Amore <garrett@damore.org>
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  *
  * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
@@ -47,6 +48,7 @@ extern "C" {
  *		199506L	    POSIX.1c-1995 compilation (POSIX Threads)
  *		200112L	    POSIX.1-2001 compilation (Austin Group Revision)
  *		200809L     POSIX.1-2008 compilation
+ *		202405L     POSIX.1-2024 compilation
  */
 #if defined(_POSIX_SOURCE) && !defined(_POSIX_C_SOURCE)
 #define	_POSIX_C_SOURCE 1
@@ -58,7 +60,7 @@ extern "C" {
  * compress common standards specified feature test macros for easier reading.
  * These macros should not be used by the application developer as
  * unexpected results may occur. Instead, the user should reference
- * standards(5) for correct usage of the standards feature test macros.
+ * standards(7) for correct usage of the standards feature test macros.
  *
  * __XOPEN_OR_POSIX     Used in cases where a symbol is defined by both
  *                      X/Open or POSIX or in the negative, when neither
@@ -86,6 +88,11 @@ extern "C" {
  *                      is 201112L indicating a compiler that compiles with
  *                      ISO/IEC 9899:2011, otherwise known as the C11 standard.
  *
+ * _STDC_C17		C17 (201710L) standard variant. C17 did not add features
+ *			relative to C11.
+ *
+ * _STDC_C23		C23 (202311L) standard variant.
+ *
  * _STRICT_SYMBOLS	Used in cases where symbol visibility is restricted
  *                      by the standards, and the user has not explicitly
  *                      relaxed the strictness via __EXTENSIONS__.
@@ -96,8 +103,8 @@ extern "C" {
 #endif
 
 /*
- * ISO/IEC 9899:1990 and it's revisions, ISO/IEC 9899:1999 and ISO/IEC
- * 99899:2011 specify the following predefined macro name:
+ * C90 (ISO/IEC 9899:1990) and its revisions, C99, C11, C17, C23, etc. specify
+ * the following predefined macro name:
  *
  * __STDC__	The integer constant 1, intended to indicate a conforming
  *		implementation.
@@ -148,8 +155,15 @@ extern "C" {
 #endif
 
 /*
- * Compiler complies with ISO/IEC 9899:1999 or ISO/IEC 9989:2011
+ * Compiler complies with various versions of ISO C.
  */
+#if __STDC_VERSION__ - 0 >= 202311L
+#define	_STDC_C23
+#endif
+
+#if __STDC_VERSION__ - 0 >= 201710L
+#define	_STDC_C17
+#endif
 
 #if __STDC_VERSION__ - 0 >= 201112L
 #define	_STDC_C11
@@ -165,6 +179,24 @@ extern "C" {
 #if (defined(_STRICT_STDC) || defined(__XOPEN_OR_POSIX)) && \
 	!defined(__EXTENSIONS__)
 #define	_STRICT_SYMBOLS
+#endif
+
+/*
+ * This is a variant of _STRICT_SYMBOLS that is meant to cover headers that are
+ * governed by POSIX, but have not been governed by ISO C. One can go two ways
+ * on what should happen if an application actively includes (not transitively)
+ * a header that isn't part of the ISO C spec, we opt to say that if someone has
+ * gone out of there way then they're doing it for a reason and that is an act
+ * of non-compliance and therefore it's not up to us to hide away every symbol.
+ *
+ * In general, prefer using _STRICT_SYMBOLS, but this is here in particular for
+ * cases where in the past we have only used a POSIX related check and we don't
+ * wish to make something stricter. Often applications are relying on the
+ * ability to, or more realistically unwittingly, have _STRICT_STDC declared and
+ * still use these interfaces.
+ */
+#if (defined(__XOPEN_OR_POSIX) && !defined(__EXTENSIONS__))
+#define	_STRICT_POSIX
 #endif
 
 /*
@@ -248,6 +280,8 @@ extern "C" {
  *    IEEE Std. 1003.1-2001 and ISO/IEC 9945:2002.
  * Open Group Technical Standard, Issue 7 (XPG7), also referred to as
  *    IEEE Std. 1003.1-2008 and ISO/IEC 9945:2009.
+ * Open Group Technical Standard, Issue 8 (XPG8), also referred to as
+ *    IEEE Std. 1003.1-2024.
  *
  * XPG4v2 is also referred to as UNIX 95 (SUS or SUSv1).
  * XPG5 is also referred to as UNIX 98 or the Single Unix Specification,
@@ -256,10 +290,11 @@ extern "C" {
  *     and as such is also referred to as IEEE Std. 1003.1-2001 in
  *     addition to UNIX 03 and SUSv3.
  * XPG7 is also referred to as UNIX 08 and SUSv4.
+ * XPG8 will probably be referred to as SUSv5.
  *
  * When writing a conforming X/Open application, as per the specification
  * requirements, the appropriate feature test macros must be defined at
- * compile time. These are as follows. For more info, see standards(5).
+ * compile time. These are as follows. For more info, see standards(7).
  *
  * Feature Test Macro				     Specification
  * ------------------------------------------------  -------------
@@ -269,6 +304,7 @@ extern "C" {
  * _XOPEN_SOURCE = 500                                   XPG5
  * _XOPEN_SOURCE = 600  (or POSIX_C_SOURCE=200112L)      XPG6
  * _XOPEN_SOURCE = 700  (or POSIX_C_SOURCE=200809L)      XPG7
+ * _XOPEN_SOURCE = 800  (or POSIX_C_SOURCE=202405L)      XPG8
  *
  * In order to simplify the guards within the headers, the following
  * implementation private test macros have been created. Applications
@@ -289,40 +325,29 @@ extern "C" {
  * _XPG5    X/Open CAE Specification, Issue 5 (XPG5/UNIX 98/SUSv2)
  * _XPG6    Open Group Technical Standard, Issue 6 (XPG6/UNIX 03/SUSv3)
  * _XPG7    Open Group Technical Standard, Issue 7 (XPG7/UNIX 08/SUSv4)
+ * _XPG8    Open Group Technical Standard, Issue 8 (XPG8/SUSv5)
  */
 
-/* X/Open Portability Guide, Issue 3 */
-#if defined(_XOPEN_SOURCE) && (_XOPEN_SOURCE - 0 < 500) && \
-	(_XOPEN_VERSION - 0 < 4) && !defined(_XOPEN_SOURCE_EXTENDED)
-#define	_XPG3
-/* X/Open CAE Specification, Issue 4 */
-#elif	(defined(_XOPEN_SOURCE) && _XOPEN_VERSION - 0 == 4)
-#define	_XPG4
-#define	_XPG3
-/* X/Open CAE Specification, Issue 4, Version 2 */
-#elif (defined(_XOPEN_SOURCE) && _XOPEN_SOURCE_EXTENDED - 0 == 1)
-#define	_XPG4_2
-#define	_XPG4
-#define	_XPG3
-/* X/Open CAE Specification, Issue 5 */
-#elif	(_XOPEN_SOURCE - 0 == 500)
-#define	_XPG5
-#define	_XPG4_2
-#define	_XPG4
-#define	_XPG3
-#undef	_POSIX_C_SOURCE
-#define	_POSIX_C_SOURCE			199506L
-/* Open Group Technical Standard , Issue 6 */
-#elif	(_XOPEN_SOURCE - 0 == 600) || (_POSIX_C_SOURCE - 0 == 200112L)
+/*
+ * Test for various versions of POSIX and X/Open. We do these in order from the
+ * newest standard to the oldest as the use of _XOPEN_SOURCE or _POSIX_C_SOURCE
+ * should take priority and we have found cases in the wild where
+ * _XOPEN_SOURCE_EXTENDED is set in the wild in addition to _XOPEN_SOURCE.
+ */
+
+/* Open Group Technical Standard, Issue 8 */
+#if	(_XOPEN_SOURCE - 0 == 800) || (_POSIX_C_SOURCE - 0 == 202405L)
+#define	_XPG8
+#define	_XPG7
 #define	_XPG6
 #define	_XPG5
 #define	_XPG4_2
 #define	_XPG4
 #define	_XPG3
 #undef	_POSIX_C_SOURCE
-#define	_POSIX_C_SOURCE			200112L
+#define	_POSIX_C_SOURCE			202405L
 #undef	_XOPEN_SOURCE
-#define	_XOPEN_SOURCE			600
+#define	_XOPEN_SOURCE			800
 
 /* Open Group Technical Standard, Issue 7 */
 #elif	(_XOPEN_SOURCE - 0 == 700) || (_POSIX_C_SOURCE - 0 == 200809L)
@@ -336,7 +361,44 @@ extern "C" {
 #define	_POSIX_C_SOURCE			200809L
 #undef	_XOPEN_SOURCE
 #define	_XOPEN_SOURCE			700
-#endif
+
+/* Open Group Technical Standard, Issue 6 */
+#elif	(_XOPEN_SOURCE - 0 == 600) || (_POSIX_C_SOURCE - 0 == 200112L)
+#define	_XPG6
+#define	_XPG5
+#define	_XPG4_2
+#define	_XPG4
+#define	_XPG3
+#undef	_POSIX_C_SOURCE
+#define	_POSIX_C_SOURCE			200112L
+#undef	_XOPEN_SOURCE
+#define	_XOPEN_SOURCE			600
+
+/* X/Open CAE Specification, Issue 5 */
+#elif	(_XOPEN_SOURCE - 0 == 500)
+#define	_XPG5
+#define	_XPG4_2
+#define	_XPG4
+#define	_XPG3
+#undef	_POSIX_C_SOURCE
+#define	_POSIX_C_SOURCE			199506L
+
+/* X/Open CAE Specification, Issue 4, Version 2 */
+#elif (defined(_XOPEN_SOURCE) && _XOPEN_SOURCE_EXTENDED - 0 == 1)
+#define	_XPG4_2
+#define	_XPG4
+#define	_XPG3
+
+/* X/Open CAE Specification, Issue 4 */
+#elif	(defined(_XOPEN_SOURCE) && _XOPEN_VERSION - 0 == 4)
+#define	_XPG4
+#define	_XPG3
+
+/* X/Open Portability Guide, Issue 3 */
+#elif defined(_XOPEN_SOURCE) && (_XOPEN_SOURCE - 0 < 500) && \
+	(_XOPEN_VERSION - 0 < 4) && !defined(_XOPEN_SOURCE_EXTENDED)
+#define	_XPG3
+#endif	/* XPG/POSIX detection */
 
 /*
  * _XOPEN_VERSION is defined by the X/Open specifications and is not
@@ -352,7 +414,9 @@ extern "C" {
  * defaults to 3 otherwise indicating support for XPG3 applications.
  */
 #ifndef _XOPEN_VERSION
-#if	defined(_XPG7)
+#if	defined(_XPG8)
+#define	_XOPEN_VERSION 800
+#elif	defined(_XPG7)
 #define	_XOPEN_VERSION 700
 #elif	defined(_XPG6)
 #define	_XOPEN_VERSION 600
@@ -363,7 +427,7 @@ extern "C" {
 #else
 #define	_XOPEN_VERSION  3
 #endif
-#endif
+#endif	/* !_XOPEN_VERSION */
 
 /*
  * ANSI C and ISO 9899:1990 say the type long long doesn't exist in strictly

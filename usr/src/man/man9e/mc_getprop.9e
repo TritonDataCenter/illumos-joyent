@@ -62,7 +62,7 @@ When the
 .Fn mc_getprop
 entry point is called, the driver needs to first identify the property.
 The set of possible properties and their meaning is listed in the
-.Sx PROPERTIES
+.Sy PROPERTIES
 section of
 .Xr mac 9E .
 It should identify the property based on the value of
@@ -96,7 +96,7 @@ identify which one it is.
 At this time, private properties are limited to being string based properties.
 If other types of property values are used, they will not be rendered
 correctly by
-.Xr dladm 1M .
+.Xr dladm 8 .
 .Pp
 The device
 driver can access its device soft state by casting the

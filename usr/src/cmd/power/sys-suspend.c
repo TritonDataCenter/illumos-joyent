@@ -22,6 +22,7 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2012 Milan Jurik. All rights reserved.
+ * Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*
@@ -119,7 +120,7 @@ static	void	pm_do_auth(adt_session_data_t *);
 /*
  *  External Declarations.
  */
-extern	int	pam_tty_conv(int, struct pam_message **,
+extern	int	pam_tty_conv(int, const struct pam_message **,
     struct pam_response **, void *);
 extern	char	*optarg;
 
@@ -173,7 +174,7 @@ change_audit_file(void)
 		int	retries = RETRY_COUNT;
 
 		/*
-		 * Wait for audit(1M) -n process to complete
+		 * Wait for audit(8) -n process to complete
 		 *
 		 */
 		do {
@@ -219,9 +220,9 @@ alarm_handler(int sig)
  */
 
 /*
- * pm_poweroff - similar to poweroff(1M)
- * This should do the same auditing as poweroff(1m) would do when it
- * becomes a libpower function.  Till then we use poweroff(1m).
+ * pm_poweroff - similar to poweroff(8)
+ * This should do the same auditing as poweroff(8) would do when it
+ * becomes a libpower function.  Till then we use poweroff(8).
  */
 static void
 pm_poweroff(void)
@@ -236,7 +237,7 @@ pm_poweroff(void)
 	closelog();
 
 	/*
-	 * Call poweroff(1m) to shut down the system.
+	 * Call poweroff(8) to shut down the system.
 	 */
 	(void) execl("/usr/sbin/poweroff", "poweroff", NULL);
 

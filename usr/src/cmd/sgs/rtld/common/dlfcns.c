@@ -169,12 +169,13 @@ hdl_add(Grp_hdl *ghp, Rt_map *lmp, uint_t dflags, int *alep)
 	gdp->gd_flags |= dflags;
 
 	if (DBG_ENABLED) {
-		if (ale == ALE_CREATE)
+		if (ale == ALE_CREATE) {
 			DBG_CALL(Dbg_file_hdl_action(ghp, lmp, DBG_DEP_ADD,
 			    gdp->gd_flags));
-		else if (gdp->gd_flags != oflags)
+		} else if (gdp->gd_flags != oflags) {
 			DBG_CALL(Dbg_file_hdl_action(ghp, lmp, DBG_DEP_UPDATE,
 			    gdp->gd_flags));
+		}
 	}
 
 	if (alep)
@@ -869,7 +870,7 @@ dlmopen_intn(Lm_list *lml, const char *path, int mode, Rt_map *clmp,
 	 *  LM_ID_NEWLM:	Create a new link-map.
 	 */
 	if (lml == (Lm_list *)LM_ID_NEWLM) {
-		if ((lml = calloc(sizeof (Lm_list), 1)) == NULL)
+		if ((lml = calloc(1, sizeof (Lm_list))) == NULL)
 			return (NULL);
 
 		/*

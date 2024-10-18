@@ -788,7 +788,7 @@ ses_create_contract(topo_mod_t *mod, ses_enum_target_t *stp)
 	else if ((rval = ct_tmpl_create(tfd, &stp->set_ctid)) != 0)
 		topo_mod_dprintf(mod, "failed to create ctid rval = %d", rval);
 	else
-		topo_mod_dprintf(mod, "created ctid=%d", stp->set_ctid);
+		topo_mod_dprintf(mod, "created ctid=%" _PRIdID, stp->set_ctid);
 	(void) close(tfd);
 }
 
@@ -807,10 +807,11 @@ ses_target_free(topo_mod_t *mod, ses_enum_target_t *stp)
 			int ctlfd;
 			char path[PATH_MAX];
 
-			topo_mod_dprintf(mod, "abandon old contract %d",
+			topo_mod_dprintf(mod, "abandon old contract %" _PRIdID,
 			    stp->set_ctid);
 			(void) snprintf(path, PATH_MAX,
-			    CTFS_ROOT "/device/%ld/ctl", stp->set_ctid);
+			    CTFS_ROOT "/device/%" _PRIdID "/ctl",
+			    stp->set_ctid);
 			ctlfd = open64(path, O_WRONLY);
 			(void) ct_ctl_abandon(ctlfd);
 			(void) close(ctlfd);
@@ -1491,7 +1492,7 @@ ses_create_generic(ses_enum_data_t *sdp, ses_enum_node_t *snp, tnode_t *pnode,
 	(void) nvlist_lookup_string(props, LIBSES_PROP_PART, &part);
 	(void) nvlist_lookup_string(props, LIBSES_PROP_SERIAL, &serial);
 
-	topo_mod_dprintf(mod, "adding %s %llu", nodename, instance);
+	topo_mod_dprintf(mod, "adding %s %" PRIu64, nodename, instance);
 
 	/*
 	 * Create the node.  The interesting information is all copied from the
@@ -1720,7 +1721,7 @@ ses_set_expander_props(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 			    TOPO_PROP_SMP_TARGET_PORT, TOPO_PROP_IMMUTABLE,
 			    dnode->ddn_target_port[i], &err) != 0) {
 				topo_mod_dprintf(mod, "ses_set_expander_props: "
-				    "set %S error %s\n", TOPO_PROP_SAS_ADDR,
+				    "set %s error %s\n", TOPO_PROP_SAS_ADDR,
 				    topo_strerror(err));
 			}
 			if (topo_prop_set_string(tnode, TOPO_PGROUP_SMP,
@@ -1784,7 +1785,7 @@ ses_set_expander_props(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 			    TOPO_PROP_SES_TARGET_PORT, TOPO_PROP_IMMUTABLE,
 			    sesdnode->ddn_target_port[i], &err) != 0) {
 				topo_mod_dprintf(mod, "ses_set_expander_props: "
-				    "set ses %S error %s\n", TOPO_PROP_SAS_ADDR,
+				    "set ses %s error %s\n", TOPO_PROP_SAS_ADDR,
 				    topo_strerror(err));
 			}
 			if (topo_prop_set_string(tnode, TOPO_PGROUP_SES,
@@ -1825,7 +1826,7 @@ ses_set_expander_props(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 		    TOPO_PROP_SAS_ADDR, TOPO_PROP_IMMUTABLE, sasaddr_str,
 		    &err) != 0) {
 			topo_mod_dprintf(mod, "ses_set_expander_props: "
-			    "set %S error %s\n", TOPO_PROP_SAS_ADDR,
+			    "set %s error %s\n", TOPO_PROP_SAS_ADDR,
 			    topo_strerror(err));
 		}
 
@@ -1859,7 +1860,7 @@ ses_set_expander_props(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 			    TOPO_PROP_PHY_COUNT, TOPO_PROP_IMMUTABLE, pcount,
 			    &err) != 0) {
 				topo_mod_dprintf(mod, "ses_set_expander_props: "
-				    "set %S error %s\n", TOPO_PROP_PHY_COUNT,
+				    "set %s error %s\n", TOPO_PROP_PHY_COUNT,
 				    topo_strerror(err));
 			}
 
@@ -1947,7 +1948,7 @@ ses_set_connector_props(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 		    TOPO_STORAGE_SAS_PHY_MASK, TOPO_PROP_IMMUTABLE,
 		    phymask_str, &err) != 0) {
 			topo_mod_dprintf(mod, "ses_set_expander_props: "
-			    "set %S error %s\n", TOPO_STORAGE_SAS_PHY_MASK,
+			    "set %s error %s\n", TOPO_STORAGE_SAS_PHY_MASK,
 			    topo_strerror(err));
 		}
 
@@ -1988,7 +1989,7 @@ ses_set_connector_props(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 			    TOPO_STORAGE_SAS_CONNECTOR_TYPE,
 			    TOPO_PROP_IMMUTABLE, conntype_str, &err) != 0) {
 				topo_mod_dprintf(mod, "ses_set_expander_props: "
-				    "set %S error %s\n", TOPO_PROP_PHY_COUNT,
+				    "set %s error %s\n", TOPO_PROP_PHY_COUNT,
 				    topo_strerror(err));
 			}
 		}
@@ -2046,8 +2047,8 @@ ses_create_esc_sasspecific(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 	if (!found)
 		return (0);
 
-	topo_mod_dprintf(mod, "%s Controller %d: creating "
-	    "%llu %s nodes", cp->sec_csn, index, max + 1, SASEXPANDER);
+	topo_mod_dprintf(mod, "%s Controller %" PRIu64 ": creating "
+	    "%" PRIu64 " %s nodes", cp->sec_csn, index, max + 1, SASEXPANDER);
 
 	/*
 	 * The max number represent the number of elements
@@ -2330,7 +2331,7 @@ ses_create_children(ses_enum_data_t *sdp, tnode_t *pnode, uint64_t type,
 	    (type == SES_ET_ARRAY_DEVICE && cp->sec_hasdev))
 		return (0);
 
-	topo_mod_dprintf(mod, "%s: creating %llu %s nodes",
+	topo_mod_dprintf(mod, "%s: creating %" PRIu64 " %s nodes",
 	    cp->sec_csn, max + 1, nodename);
 
 	if (dorange && topo_node_range_create(mod, pnode,
@@ -2637,8 +2638,8 @@ ses_construct_phys_tree(ses_enum_data_t *sdp, ses_enum_chassis_t *cp,
 			 */
 			topo_mod_dprintf(mod,
 			    "ses_construct_phys_tree(): Failed to find prop %s "
-			    "on ses element type %d and instance %d "
-			    "(CSN %s).", LIBSES_PROP_PHYS_PARENT,
+			    "on ses element type %" PRIu64 " and instance %"
+			    PRIu64 " (CSN %s).", LIBSES_PROP_PHYS_PARENT,
 			    snp->sen_type, snp->sen_instance, cp->sec_csn);
 			topo_mod_free(mod, child, sizeof (ses_phys_tree_t));
 			continue;
@@ -2647,8 +2648,8 @@ ses_construct_phys_tree(ses_enum_data_t *sdp, ses_enum_chassis_t *cp,
 			    LIBSES_PROP_FRU, &child->spt_isfru) != 0) {
 				topo_mod_dprintf(mod,
 				    "ses_construct_phys_tree(): Failed to "
-				    "find prop %s on ses element type %d "
-				    "and instance %d (CSN %s).",
+				    "find prop %s on ses element type %" PRIu64
+				    " and instance %" PRIu64 " (CSN %s).",
 				    LIBSES_PROP_FRU,
 				    snp->sen_type, snp->sen_instance,
 				    cp->sec_csn);
@@ -2745,8 +2746,8 @@ ses_construct_phys_tree(ses_enum_data_t *sdp, ses_enum_chassis_t *cp,
 		while (u_head) {
 			u_tail = u_head->spt_sibling;
 			topo_mod_dprintf(mod,
-			    "\telement type (%d) and instance (%d)",
-			    u_head->spt_senumnode->sen_type,
+			    "\telement type (%" PRIu64 ") and instance (%"
+			    PRIu64 ")", u_head->spt_senumnode->sen_type,
 			    u_head->spt_senumnode->sen_instance);
 			topo_mod_free(mod, u_head, sizeof (ses_phys_tree_t));
 			u_head = u_tail;
@@ -3183,14 +3184,14 @@ ses_create_chassis(ses_enum_data_t *sdp, tnode_t *pnode, ses_enum_chassis_t *cp)
 			goto error;
 
 		topo_mod_dprintf(mod, "created Subchassis node with "
-		    "instance %u\nand target (%s) under Chassis with CSN %s",
-		    scp->sec_instance, scp->sec_target->set_devpath,
-		    cp->sec_csn);
+		    "instance %" PRIu64 "\nand target (%s) under Chassis "
+		    "with CSN %s", scp->sec_instance,
+		    scp->sec_target->set_devpath, cp->sec_csn);
 
 		sc_count++;
 	}
 
-	topo_mod_dprintf(mod, "%s: created %llu %s nodes",
+	topo_mod_dprintf(mod, "%s: created %" PRIu64 " %s nodes",
 	    cp->sec_csn, sc_count, SUBCHASSIS);
 
 	cp->sec_target->set_refcount++;
@@ -3262,8 +3263,8 @@ ses_init_chassis(topo_mod_t *mod, ses_enum_data_t *sdp, ses_enum_chassis_t *pcp,
 	if (flags & (SES_NEW_SUBCHASSIS | SES_DUP_SUBCHASSIS))
 		assert(pcp != NULL);
 
-	topo_mod_dprintf(mod, "ses_init_chassis: %s: index %llu, flags (%d)",
-	    sdp->sed_name, subchassis, flags);
+	topo_mod_dprintf(mod, "ses_init_chassis: %s: index %" PRIu64
+	    ", flags (%d)", sdp->sed_name, subchassis, flags);
 
 	if (flags & (SES_NEW_CHASSIS | SES_NEW_SUBCHASSIS)) {
 
@@ -3364,7 +3365,7 @@ ses_enum_gather(ses_node_t *np, void *data)
 		    &subchassis);
 
 		topo_mod_dprintf(mod, "ses_enum_gather: Enclosure Node (%s) "
-		    "CSN (%s), subchassis (%llu)", sdp->sed_name, csn,
+		    "CSN (%s), subchassis (%" PRIu64 ")", sdp->sed_name, csn,
 		    subchassis);
 
 		/*
@@ -3424,7 +3425,7 @@ ses_enum_gather(ses_node_t *np, void *data)
 				/* 1.2 This is a new subchassis */
 
 				topo_mod_dprintf(mod, "%s: Initialize new "
-				    "subchassis with CSN %s and index %llu",
+				    "subchassis with CSN %s and index %" PRIu64,
 				    sdp->sed_name, csn, subchassis);
 
 				if ((scp = topo_mod_zalloc(mod,
@@ -3484,8 +3485,7 @@ ses_enum_gather(ses_node_t *np, void *data)
 					/* 2.3 This is a new subchassis */
 
 					topo_mod_dprintf(mod, "%s: Initialize "
-					    "new subchassis with CSN (%s) "
-					    "and LID (%s)",
+					    "new subchassis with CSN (%s)",
 					    sdp->sed_name, csn);
 
 					if ((scp = topo_mod_zalloc(mod,
@@ -3612,8 +3612,8 @@ ses_enum_gather(ses_node_t *np, void *data)
 			goto error;
 		}
 
-		topo_mod_dprintf(mod, "%s: adding node (%llu, %llu)",
-		    sdp->sed_name, type, instance);
+		topo_mod_dprintf(mod, "%s: adding node (%" PRIu64
+		    ", %" PRIu64 ")", sdp->sed_name, type, instance);
 		snp->sen_node = np;
 		snp->sen_type = type;
 		snp->sen_instance = instance;
@@ -3849,7 +3849,7 @@ ses_enum(topo_mod_t *mod, tnode_t *rnode, const char *name,
 			goto error;
 
 		/*
-		 * We search both the ses(7D) and sgen(7D) locations, so we are
+		 * We search both the ses(4D) and sgen(4D) locations, so we are
 		 * independent of any particular driver class bindings.
 		 */
 		if (ses_process_dir("/dev/es", data) != 0 ||

@@ -25,6 +25,7 @@
  * Copyright (c) 2013, Joyent, Inc. All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
  * Copyright 2020 Joshua M. Clulow <josh@sysmgr.org>
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <sys/note.h>
@@ -221,8 +222,7 @@ static int
 ndi_devi_config_obp_args(dev_info_t *parent, char *devnm,
     dev_info_t **childp, int flags);
 static void i_link_vhci_node(dev_info_t *);
-static void ndi_devi_exit_and_wait(dev_info_t *dip,
-    int circular, clock_t end_time);
+static void ndi_devi_exit_and_wait(dev_info_t *dip, clock_t end_time);
 static int ndi_devi_unbind_driver(dev_info_t *dip);
 
 static int i_ddi_check_retire(dev_info_t *dip);
@@ -397,6 +397,9 @@ sid:		devi->devi_node_attributes |= DDI_PERSISTENT;
 	devi->devi_ct_count = -1;	/* counter not in use if -1 */
 	list_create(&(devi->devi_ct), sizeof (cont_device_t),
 	    offsetof(cont_device_t, cond_next));
+	list_create(&devi->devi_unbind_cbs, sizeof (ddi_unbind_callback_t),
+	    offsetof(ddi_unbind_callback_t, ddiub_next));
+	mutex_init(&devi->devi_unbind_lock, NULL, MUTEX_DEFAULT, NULL);
 
 	i_ddi_set_node_state((dev_info_t *)devi, DS_PROTO);
 	da_log_enter((dev_info_t *)devi);
@@ -492,6 +495,9 @@ i_ddi_free_node(dev_info_t *dip)
 	/* free event data */
 	if (devi->devi_ev_path)
 		kmem_free(devi->devi_ev_path, MAXPATHLEN);
+
+	mutex_destroy(&devi->devi_unbind_lock);
+	list_destroy(&devi->devi_unbind_cbs);
 
 	kmem_cache_free(ddi_node_cache, devi);
 }
@@ -830,6 +836,7 @@ bind_node(dev_info_t *dip)
 static int
 unbind_node(dev_info_t *dip)
 {
+	ddi_unbind_callback_t *cb;
 	ASSERT(DEVI(dip)->devi_node_state == DS_BOUND);
 	ASSERT(DEVI(dip)->devi_major != DDI_MAJOR_T_NONE);
 
@@ -844,6 +851,11 @@ unbind_node(dev_info_t *dip)
 
 	DEVI(dip)->devi_major = DDI_MAJOR_T_NONE;
 	DEVI(dip)->devi_binding_name = DEVI(dip)->devi_node_name;
+
+	while ((cb = list_remove_head(&DEVI(dip)->devi_unbind_cbs)) != NULL) {
+		cb->ddiub_cb(cb->ddiub_arg, dip);
+	}
+
 	return (DDI_SUCCESS);
 }
 
@@ -1720,11 +1732,11 @@ i_ndi_unconfig_node(dev_info_t *dip, ddi_node_state_t state, uint_t flag)
 int
 ddi_initchild(dev_info_t *parent, dev_info_t *proto)
 {
-	int ret, circ;
+	int ret;
 
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 	ret = i_ndi_config_node(proto, DS_INITIALIZED, 0);
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 
 	return (ret);
 }
@@ -1735,13 +1747,13 @@ ddi_initchild(dev_info_t *parent, dev_info_t *proto)
 int
 ddi_uninitchild(dev_info_t *dip)
 {
-	int ret, circ;
+	int ret;
 	dev_info_t *parent = ddi_get_parent(dip);
 	ASSERT(parent);
 
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 	ret = i_ndi_unconfig_node(dip, DS_BOUND, 0);
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 
 	return (ret);
 }
@@ -1805,15 +1817,14 @@ i_ddi_detachchild(dev_info_t *dip, uint_t flags)
 dev_info_t *
 ddi_add_child(dev_info_t *pdip, char *name, uint_t nodeid, uint_t unit)
 {
-	int circ;
 	dev_info_t *dip;
 
 	/* allocate a new node */
 	dip = i_ddi_alloc_node(pdip, name, nodeid, (int)unit, NULL, KM_SLEEP);
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	(void) i_ndi_config_node(dip, DS_BOUND, 0);
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 	return (dip);
 }
 
@@ -1824,11 +1835,11 @@ int
 ddi_remove_child(dev_info_t *dip, int dummy)
 {
 	_NOTE(ARGUNUSED(dummy))
-	int circ, ret;
+	int ret;
 	dev_info_t *parent = ddi_get_parent(dip);
 	ASSERT(parent);
 
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 
 	/*
 	 * If we still have children, for example SID nodes marked
@@ -1837,14 +1848,14 @@ ddi_remove_child(dev_info_t *dip, int dummy)
 	if (DEVI(dip)->devi_child) {
 		ret = ndi_devi_unconfig(dip, NDI_DEVI_REMOVE);
 		if (ret != NDI_SUCCESS) {
-			ndi_devi_exit(parent, circ);
+			ndi_devi_exit(parent);
 			return (DDI_FAILURE);
 		}
 		ASSERT(DEVI(dip)->devi_child == NULL);
 	}
 
 	ret = i_ndi_unconfig_node(dip, DS_PROTO, 0);
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 
 	if (ret != DDI_SUCCESS)
 		return (ret);
@@ -1914,70 +1925,114 @@ ndi_rele_driver(dev_info_t *dip)
  * pathinfo, and minor). To verify in ASSERTS use DEVI_BUSY_OWNED macro.
  */
 void
-ndi_devi_enter(dev_info_t *dip, int *circular)
+ndi_devi_enter(dev_info_t *dip)
 {
-	struct dev_info *devi = DEVI(dip);
+	struct dev_info *devi;
 	ASSERT(dip != NULL);
 
-	/* for vHCI, enforce (vHCI, pHCI) ndi_deve_enter() order */
+	/* for vHCI, enforce (vHCI, pHCI) ndi_devi_enter() order */
 	ASSERT(!MDI_VHCI(dip) || (mdi_devi_pdip_entered(dip) == 0) ||
 	    DEVI_BUSY_OWNED(dip));
 
+	/*
+	 * If we're panicking, we are single-threaded and cannot
+	 * `mutex_enter`, so just return.
+	 */
+	if (panicstr != NULL)
+		return;
+
+	devi = DEVI(dip);
 	mutex_enter(&devi->devi_lock);
-	if (devi->devi_busy_thread == curthread) {
-		devi->devi_circular++;
-	} else {
-		while (DEVI_BUSY_CHANGING(devi) && !panicstr)
-			cv_wait(&(devi->devi_cv), &(devi->devi_lock));
-		if (panicstr) {
+	while (DEVI_BUSY_CHANGING(devi)) {
+		/*
+		 * If we are called when we are panicking, then we are
+		 * single-threaded, and would otherwise loop forever, so
+		 * we test for that here and early return if applicable.
+		 * Note that we also test for this in `ndi_devi_enter`;
+		 * regardless we must test again here in case we start
+		 * panicking while contended.
+		 */
+		if (panicstr != NULL) {
 			mutex_exit(&devi->devi_lock);
 			return;
 		}
-		devi->devi_flags |= DEVI_BUSY;
-		devi->devi_busy_thread = curthread;
+		if (devi->devi_busy_thread == curthread) {
+			devi->devi_circular++;
+			mutex_exit(&devi->devi_lock);
+			return;
+		}
+		cv_wait(&devi->devi_cv, &devi->devi_lock);
 	}
-	*circular = devi->devi_circular;
+	devi->devi_flags |= DEVI_BUSY;
+	devi->devi_busy_thread = curthread;
 	mutex_exit(&devi->devi_lock);
 }
 
 /*
  * Release ndi_devi_enter or successful ndi_devi_tryenter.
+ *
+ * Note that after we leave the critical section, if this is a pHCI exit we must
+ * broadcast to our vHCI, if one exists, as it may be blocked on a condvar in
+ * `ndi_devi_config_one`.
+ *
+ * It may seem odd that we do this after exiting the critical section, since we
+ * are no longer protected by the conditions surrounding it, but note that
+ * `ndi_devi_enter`/`ndi_devi_exit` and similar do not protect the `dip` itself.
+ * Rather, the `dip` is protected by a reference count that is maintained by
+ * calls to `ndi_hold_devi` and `ndi_rele_devi`.  If we're in this code path,
+ * there must necessarily be such a reference, so it is safe to access our `dip`
+ * any time here.
+ *
+ * Further, any pHCI or vHCI associated with this dip is effectively write-once
+ * at setup, and the pHCI maintains a reference count on the vHCI (indeed, the
+ * pHCI is what actually points to the vHCI), ensuring it lives at least as long
+ * as the pHCI.
+ *
+ * Finally, it is safe to access the pHCI outside of the critical section for
+ * the same reason we can access the dip: it is completely owned by the dip and
+ * only deallocated in the detach path, and we only get there when all
+ * references to the dip have been released.  Therefore, if we are in this code
+ * path, the pHCI and thus the vHCI, if they exist, are both necessarily valid.
  */
 void
-ndi_devi_exit(dev_info_t *dip, int circular)
+ndi_devi_exit(dev_info_t *dip)
 {
-	struct dev_info	*devi = DEVI(dip);
-	struct dev_info	*vdevi;
+	struct dev_info	*devi, *vdevi;
+	boolean_t phci;
+
 	ASSERT(dip != NULL);
 
-	if (panicstr)
+	/*
+	 * If we're panicking, we are single threaded, so just return.
+	 */
+	if (panicstr != NULL)
 		return;
 
-	mutex_enter(&(devi->devi_lock));
-	if (circular != 0) {
+	devi = DEVI(dip);
+	mutex_enter(&devi->devi_lock);
+	ASSERT(DEVI_BUSY_OWNED(devi));
+	if (devi->devi_circular > 0) {
 		devi->devi_circular--;
-	} else {
-		devi->devi_flags &= ~DEVI_BUSY;
-		ASSERT(devi->devi_busy_thread == curthread);
-		devi->devi_busy_thread = NULL;
-		cv_broadcast(&(devi->devi_cv));
+		mutex_exit(&devi->devi_lock);
+		return;
 	}
-	mutex_exit(&(devi->devi_lock));
+	devi->devi_flags &= ~DEVI_BUSY;
+	devi->devi_busy_thread = NULL;
+	cv_broadcast(&devi->devi_cv);
+	mutex_exit(&devi->devi_lock);
 
 	/*
-	 * For pHCI exit we issue a broadcast to vHCI for ndi_devi_config_one()
-	 * doing cv_wait on vHCI.
+	 * Note that `DEVI(mdi_devi_get_vdip(dip))` will be NULL if `dip` is
+	 * not a pHCI or the vHCI doest not exist.
 	 */
-	if (MDI_PHCI(dip)) {
-		vdevi = DEVI(mdi_devi_get_vdip(dip));
-		if (vdevi) {
-			mutex_enter(&(vdevi->devi_lock));
-			if (vdevi->devi_flags & DEVI_PHCI_SIGNALS_VHCI) {
-				vdevi->devi_flags &= ~DEVI_PHCI_SIGNALS_VHCI;
-				cv_broadcast(&(vdevi->devi_cv));
-			}
-			mutex_exit(&(vdevi->devi_lock));
+	vdevi = DEVI(mdi_devi_get_vdip(dip));
+	if (vdevi != NULL) {
+		mutex_enter(&vdevi->devi_lock);
+		if ((vdevi->devi_flags & DEVI_PHCI_SIGNALS_VHCI) != 0) {
+			vdevi->devi_flags &= ~DEVI_PHCI_SIGNALS_VHCI;
+			cv_broadcast(&vdevi->devi_cv);
 		}
+		mutex_exit(&vdevi->devi_lock);
 	}
 }
 
@@ -1986,56 +2041,72 @@ ndi_devi_exit(dev_info_t *dip, int circular)
  * possibility of missing broadcast before getting to cv_timedwait().
  */
 static void
-ndi_devi_exit_and_wait(dev_info_t *dip, int circular, clock_t end_time)
+ndi_devi_exit_and_wait(dev_info_t *dip, clock_t end_time)
 {
-	struct dev_info	*devi = DEVI(dip);
+	struct dev_info *devi;
+
 	ASSERT(dip != NULL);
 
+	/*
+	 * If we're panicking, we are single threaded, and cannot
+	 * call mutex_enter(), so just return.
+	 */
 	if (panicstr)
 		return;
 
+	/* like ndi_devi_exit with circular of zero */
+	devi = DEVI(dip);
+	mutex_enter(&devi->devi_lock);
 	/*
-	 * We are called to wait for of a new child, and new child can
+	 * We are called to wait for a new child, and new child can
 	 * only be added if circular is zero.
 	 */
-	ASSERT(circular == 0);
-
-	/* like ndi_devi_exit with circular of zero */
-	mutex_enter(&(devi->devi_lock));
+	ASSERT(devi->devi_circular == 0);
+	ASSERT(DEVI_BUSY_OWNED(devi));
 	devi->devi_flags &= ~DEVI_BUSY;
-	ASSERT(devi->devi_busy_thread == curthread);
 	devi->devi_busy_thread = NULL;
-	cv_broadcast(&(devi->devi_cv));
+	cv_broadcast(&devi->devi_cv);
 
 	/* now wait for new children while still holding devi_lock */
-	(void) cv_timedwait(&devi->devi_cv, &(devi->devi_lock), end_time);
-	mutex_exit(&(devi->devi_lock));
+	(void) cv_timedwait(&devi->devi_cv, &devi->devi_lock, end_time);
+	mutex_exit(&devi->devi_lock);
 }
 
 /*
  * Attempt to single thread entry into devinfo node for modifying its children.
  */
 int
-ndi_devi_tryenter(dev_info_t *dip, int *circular)
+ndi_devi_tryenter(dev_info_t *dip)
 {
-	int rval = 1;		   /* assume we enter */
-	struct dev_info *devi = DEVI(dip);
+	int entered;
+	struct dev_info *devi;
+
 	ASSERT(dip != NULL);
 
+	/*
+	 * If we're panicing, we are single threaded, and cannot
+	 * call mutex_enter(), so just return.
+	 */
+	if (panicstr != NULL)
+		return (0);
+
+	devi = DEVI(dip);
 	mutex_enter(&devi->devi_lock);
-	if (devi->devi_busy_thread == (void *)curthread) {
+	entered = 1;
+	if (!DEVI_BUSY_CHANGING(devi)) {
+		/* The uncontended case. */
+		devi->devi_flags |= DEVI_BUSY;
+		devi->devi_busy_thread = curthread;
+	} else if (devi->devi_busy_thread == curthread) {
+		/* Nested entry on the same thread. */
 		devi->devi_circular++;
 	} else {
-		if (!DEVI_BUSY_CHANGING(devi)) {
-			devi->devi_flags |= DEVI_BUSY;
-			devi->devi_busy_thread = (void *)curthread;
-		} else {
-			rval = 0;	/* devi is busy */
-		}
+		/* We fail on the contended case. */
+		entered = 0;
 	}
-	*circular = devi->devi_circular;
 	mutex_exit(&devi->devi_lock);
-	return (rval);
+
+	return (entered);
 }
 
 /*
@@ -2106,7 +2177,6 @@ int
 ndi_devi_bind_driver(dev_info_t *dip, uint_t flags)
 {
 	int ret = NDI_FAILURE;
-	int circ;
 	dev_info_t *pdip = ddi_get_parent(dip);
 	ASSERT(pdip);
 
@@ -2114,10 +2184,10 @@ ndi_devi_bind_driver(dev_info_t *dip, uint_t flags)
 	    "ndi_devi_bind_driver: %s%d (%p) flags: %x\n",
 	    ddi_driver_name(dip), ddi_get_instance(dip), (void *)dip, flags));
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	if (i_ndi_config_node(dip, DS_BOUND, flags) == DDI_SUCCESS)
 		ret = NDI_SUCCESS;
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	return (ret);
 }
@@ -3510,20 +3580,19 @@ walk_devs(dev_info_t *dip, int (*f)(dev_info_t *, void *), void *arg,
 
 	/* second pass */
 	while (head) {
-		int circ;
 		struct walk_elem *next = head->next;
 
 		if (do_locking)
-			ndi_devi_enter(head->dip, &circ);
+			ndi_devi_enter(head->dip);
 		if (walk_devs(ddi_get_child(head->dip), f, arg, do_locking) ==
 		    DDI_WALK_TERMINATE) {
 			if (do_locking)
-				ndi_devi_exit(head->dip, circ);
+				ndi_devi_exit(head->dip);
 			free_list(head);
 			return (DDI_WALK_TERMINATE);
 		}
 		if (do_locking)
-			ndi_devi_exit(head->dip, circ);
+			ndi_devi_exit(head->dip);
 		kmem_free(head, sizeof (*head));
 		head = next;
 	}
@@ -3908,7 +3977,7 @@ ddi_is_pci_dip(dev_info_t *dip)
  * to ioc's bus_config entry point.
  */
 int
-resolve_pathname(char *pathname, dev_info_t **dipp, dev_t *devtp,
+resolve_pathname(const char *pathname, dev_info_t **dipp, dev_t *devtp,
     int *spectypep)
 {
 	int			error;
@@ -3920,7 +3989,6 @@ resolve_pathname(char *pathname, dev_info_t **dipp, dev_t *devtp,
 	dev_t			devt = NODEV;
 	int			spectype;
 	struct ddi_minor_data	*dmn;
-	int			circ;
 
 	if (*pathname != '/')
 		return (EINVAL);
@@ -4007,7 +4075,7 @@ resolve_pathname(char *pathname, dev_info_t **dipp, dev_t *devtp,
 			 * Search for a default entry with an active
 			 * ndi_devi_enter to protect the devi_minor list.
 			 */
-			ndi_devi_enter(parent, &circ);
+			ndi_devi_enter(parent);
 			for (dmn = DEVI(parent)->devi_minor; dmn;
 			    dmn = dmn->next) {
 				if (dmn->type == DDM_DEFAULT) {
@@ -4034,7 +4102,7 @@ resolve_pathname(char *pathname, dev_info_t **dipp, dev_t *devtp,
 					spectype = S_IFCHR;
 				}
 			}
-			ndi_devi_exit(parent, circ);
+			ndi_devi_exit(parent);
 		}
 		if (devtp)
 			*devtp = devt;
@@ -4109,7 +4177,6 @@ i_ddi_prompath_to_devfspath(char *prompath, char *devfspath)
 	char		*minor_name = NULL;
 	int		spectype;
 	int		error;
-	int		circ;
 
 	error = resolve_pathname(prompath, &dip, &devt, &spectype);
 	if (error)
@@ -4121,7 +4188,7 @@ i_ddi_prompath_to_devfspath(char *prompath, char *devfspath)
 	 */
 	(void) ddi_pathname(dip, devfspath);
 
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	minor_name = i_ddi_devtspectype_to_minorname(dip, devt, spectype);
 	if (minor_name) {
 		(void) strcat(devfspath, ":");
@@ -4134,7 +4201,7 @@ i_ddi_prompath_to_devfspath(char *prompath, char *devfspath)
 		(void) snprintf(devfspath, MAXPATHLEN, "%s:%s",
 		    CLONE_PATH, ddi_driver_name(dip));
 	}
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 
 	/* release hold from resolve_pathname() */
 	ndi_rele_devi(dip);
@@ -4288,7 +4355,7 @@ quiesce_devices(dev_info_t *dip, void *arg)
 {
 	/*
 	 * if we're reached here, the device tree better not be changing.
-	 * so either devinfo_freeze better be set or we better be panicing.
+	 * so either devinfo_freeze better be set or we better be panicking.
 	 */
 	ASSERT(devinfo_freeze || panicstr);
 
@@ -4347,7 +4414,7 @@ reset_leaves(void)
 {
 	/*
 	 * if we're reached here, the device tree better not be changing.
-	 * so either devinfo_freeze better be set or we better be panicing.
+	 * so either devinfo_freeze better be set or we better be panicking.
 	 */
 	ASSERT(devinfo_freeze || panicstr);
 
@@ -4371,7 +4438,7 @@ devtree_freeze(void)
 {
 	int delayed = 0;
 
-	/* if we're panicing then the device tree isn't going to be changing */
+	/* if we're panicking then the device tree isn't going to be changing */
 	if (panicstr)
 		return;
 
@@ -4379,7 +4446,7 @@ devtree_freeze(void)
 	devinfo_freeze = gethrtime();
 
 	/*
-	 * if we're not panicing and there are on-going attach or detach
+	 * if we're not panicking and there are on-going attach or detach
 	 * operations, wait for up to 3 seconds for them to finish.  This
 	 * is a randomly chosen interval but this should be ok because:
 	 * - 3 seconds is very small relative to the deadman timer.
@@ -4475,7 +4542,6 @@ unbind_alias_dev_in_use(dev_info_t *dip, char *alias)
 static int
 unbind_children_by_alias(dev_info_t *dip, void *arg)
 {
-	int		circ;
 	dev_info_t	*cdip;
 	dev_info_t	*next;
 	unbind_data_t	*ub = (unbind_data_t *)(uintptr_t)arg;
@@ -4489,7 +4555,7 @@ unbind_children_by_alias(dev_info_t *dip, void *arg)
 	 * state of the driver binding files unchanged, except in
 	 * the case of -f.
 	 */
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	for (cdip = ddi_get_child(dip); cdip; cdip = next) {
 		next = ddi_get_next_sibling(cdip);
 		if ((ddi_driver_major(cdip) != ub->drv_major) ||
@@ -4507,7 +4573,7 @@ unbind_children_by_alias(dev_info_t *dip, void *arg)
 				(void) ddi_remove_child(cdip, 0);
 		}
 	}
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 
 	return (DDI_WALK_CONTINUE);
 }
@@ -4545,7 +4611,6 @@ i_ddi_unbind_devs_by_alias(major_t major, char *alias)
 static int
 unbind_children_by_driver(dev_info_t *dip, void *arg)
 {
-	int		circ;
 	dev_info_t	*cdip;
 	dev_info_t	*next;
 	major_t		major = (major_t)(uintptr_t)arg;
@@ -4559,7 +4624,7 @@ unbind_children_by_driver(dev_info_t *dip, void *arg)
 	 * may be invoked later to re-enumerate (new) driver.conf rebind
 	 * persistent nodes.
 	 */
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	for (cdip = ddi_get_child(dip); cdip; cdip = next) {
 		next = ddi_get_next_sibling(cdip);
 		if (ddi_driver_major(cdip) != major)
@@ -4573,7 +4638,7 @@ unbind_children_by_driver(dev_info_t *dip, void *arg)
 				(void) ddi_remove_child(cdip, 0);
 		}
 	}
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 
 	return (DDI_WALK_CONTINUE);
 }
@@ -4637,12 +4702,11 @@ int
 i_ndi_make_spec_children(dev_info_t *pdip, uint_t flags)
 {
 	extern struct hwc_spec *hwc_get_child_spec(dev_info_t *, major_t);
-	int			circ;
 	struct hwc_spec		*list, *spec;
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	if (DEVI(pdip)->devi_flags & DEVI_MADE_CHILDREN) {
-		ndi_devi_exit(pdip, circ);
+		ndi_devi_exit(pdip);
 		return (DDI_SUCCESS);
 	}
 
@@ -4655,7 +4719,7 @@ i_ndi_make_spec_children(dev_info_t *pdip, uint_t flags)
 	mutex_enter(&DEVI(pdip)->devi_lock);
 	DEVI(pdip)->devi_flags |= DEVI_MADE_CHILDREN;
 	mutex_exit(&DEVI(pdip)->devi_lock);
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 	return (DDI_SUCCESS);
 }
 
@@ -5157,13 +5221,12 @@ cleanup_br_events_on_grand_children(dev_info_t *dip, struct brevq_node **brevqp)
 	dev_info_t *child;
 	struct brevq_node *brevq, *brn, *prev_brn, *next_brn;
 	char *path;
-	int circ;
 
 	path = kmem_alloc(MAXPATHLEN, KM_SLEEP);
 	prev_brn = NULL;
 	brevq = *brevqp;
 
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	for (brn = brevq; brn != NULL; brn = next_brn) {
 		next_brn = brn->brn_sibling;
 		for (child = ddi_get_child(dip); child != NULL;
@@ -5211,7 +5274,7 @@ cleanup_br_events_on_grand_children(dev_info_t *dip, struct brevq_node **brevqp)
 		}
 	}
 
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 	kmem_free(path, MAXPATHLEN);
 }
 
@@ -5340,7 +5403,6 @@ static int
 config_immediate_children(dev_info_t *pdip, uint_t flags, major_t major)
 {
 	dev_info_t	*child, *next;
-	int		circ;
 
 	ASSERT(i_ddi_devi_attached(pdip));
 
@@ -5352,7 +5414,7 @@ config_immediate_children(dev_info_t *pdip, uint_t flags, major_t major)
 	    ddi_driver_name(pdip), ddi_get_instance(pdip),
 	    (void *)pdip, flags));
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 
 	if (flags & NDI_CONFIG_REPROBE) {
 		mutex_enter(&DEVI(pdip)->devi_lock);
@@ -5378,7 +5440,7 @@ config_immediate_children(dev_info_t *pdip, uint_t flags, major_t major)
 		child = next;
 	}
 
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	return (NDI_SUCCESS);
 }
@@ -5486,7 +5548,6 @@ devi_config_one(dev_info_t *pdip, char *devnm, dev_info_t **cdipp,
 	char		*drivername = NULL;
 	int		find_by_addr = 0;
 	char		*name, *addr;
-	int		v_circ, p_circ;
 	clock_t		end_time;	/* 60 sec */
 	int		probed;
 	dev_info_t	*cdip;
@@ -5537,14 +5598,14 @@ devi_config_one(dev_info_t *pdip, char *devnm, dev_info_t **cdipp,
 		 */
 		if (vdip) {
 			/* use mdi_devi_enter ordering */
-			ndi_devi_enter(vdip, &v_circ);
-			ndi_devi_enter(pdip, &p_circ);
+			ndi_devi_enter(vdip);
+			ndi_devi_enter(pdip);
 			cpip = mdi_pi_find(pdip, NULL, addr);
 			cdip = mdi_pi_get_client(cpip);
 			if (cdip)
 				break;
 		} else
-			ndi_devi_enter(pdip, &p_circ);
+			ndi_devi_enter(pdip);
 
 		/*
 		 * When not a  vHCI or not all pHCI devices are required to
@@ -5612,7 +5673,7 @@ again:			(void) i_ndi_make_spec_children(pdip, flags);
 			DEVI(vdip)->devi_flags |=
 			    DEVI_PHCI_SIGNALS_VHCI;
 			mutex_exit(&DEVI(vdip)->devi_lock);
-			ndi_devi_exit(pdip, p_circ);
+			ndi_devi_exit(pdip);
 
 			/*
 			 * NB: There is a small race window from above
@@ -5621,9 +5682,9 @@ again:			(void) i_ndi_make_spec_children(pdip, flags);
 			 * not immediately finding a new pHCI child
 			 * of a pHCI that uses NDI_MDI_FAILBACK.
 			 */
-			ndi_devi_exit_and_wait(vdip, v_circ, end_time);
+			ndi_devi_exit_and_wait(vdip, end_time);
 		} else {
-			ndi_devi_exit_and_wait(pdip, p_circ, end_time);
+			ndi_devi_exit_and_wait(pdip, end_time);
 		}
 	}
 
@@ -5637,9 +5698,9 @@ again:			(void) i_ndi_make_spec_children(pdip, flags);
 		*cdipp = cdip;
 	}
 
-	ndi_devi_exit(pdip, p_circ);
+	ndi_devi_exit(pdip);
 	if (vdip)
-		ndi_devi_exit(vdip, v_circ);
+		ndi_devi_exit(vdip);
 	return (*cdipp ? NDI_SUCCESS : NDI_FAILURE);
 }
 
@@ -6105,7 +6166,6 @@ unconfig_immediate_children(
 	major_t major)
 {
 	int rv = NDI_SUCCESS;
-	int circ, vcirc;
 	dev_info_t *child;
 	dev_info_t *vdip = NULL;
 	dev_info_t *next;
@@ -6118,7 +6178,7 @@ unconfig_immediate_children(
 	 * enter vHCI before parent(pHCI) to prevent deadlock with mpxio
 	 * Client power management operations.
 	 */
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	for (child = ddi_get_child(dip); child;
 	    child = ddi_get_next_sibling(child)) {
 		/* skip same nodes we skip below */
@@ -6134,11 +6194,11 @@ unconfig_immediate_children(
 			 * then enter in (vHCI, parent(pHCI)) order.
 			 */
 			if (vdip && (ddi_get_parent(vdip) != dip)) {
-				ndi_devi_exit(dip, circ);
+				ndi_devi_exit(dip);
 
 				/* use mdi_devi_enter ordering */
-				ndi_devi_enter(vdip, &vcirc);
-				ndi_devi_enter(dip, &circ);
+				ndi_devi_enter(vdip);
+				ndi_devi_enter(dip);
 				break;
 			} else
 				vdip = NULL;
@@ -6175,9 +6235,9 @@ unconfig_immediate_children(
 		child = next;
 	}
 
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 	if (vdip)
-		ndi_devi_exit(vdip, vcirc);
+		ndi_devi_exit(vdip);
 
 	return (rv);
 }
@@ -6333,12 +6393,11 @@ e_ddi_devi_unconfig(dev_info_t *dip, dev_info_t **dipp, int flags)
 static int
 devi_unconfig_one(dev_info_t *pdip, char *devnm, int flags)
 {
-	int		rv, circ;
+	int		rv;
 	dev_info_t	*child;
 	dev_info_t	*vdip = NULL;
-	int		v_circ;
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	child = ndi_devi_findchild(pdip, devnm);
 
 	/*
@@ -6349,11 +6408,11 @@ devi_unconfig_one(dev_info_t *pdip, char *devnm, int flags)
 	if (child && MDI_PHCI(child)) {
 		vdip = mdi_devi_get_vdip(child);
 		if (vdip && (ddi_get_parent(vdip) != pdip)) {
-			ndi_devi_exit(pdip, circ);
+			ndi_devi_exit(pdip);
 
 			/* use mdi_devi_enter ordering */
-			ndi_devi_enter(vdip, &v_circ);
-			ndi_devi_enter(pdip, &circ);
+			ndi_devi_enter(vdip);
+			ndi_devi_enter(pdip);
 			child = ndi_devi_findchild(pdip, devnm);
 		} else
 			vdip = NULL;
@@ -6367,9 +6426,9 @@ devi_unconfig_one(dev_info_t *pdip, char *devnm, int flags)
 		rv = NDI_SUCCESS;
 	}
 
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 	if (vdip)
-		ndi_devi_exit(vdip, v_circ);
+		ndi_devi_exit(vdip);
 
 	return (rv);
 }
@@ -6382,11 +6441,10 @@ ndi_devi_unconfig_one(
 	int flags)
 {
 	int		(*f)();
-	int		circ, rv;
+	int		rv;
 	int		pm_cookie;
 	dev_info_t	*child;
 	dev_info_t	*vdip = NULL;
-	int		v_circ;
 	struct brevq_node *brevq = NULL;
 
 	ASSERT(i_ddi_devi_attached(pdip));
@@ -6402,7 +6460,7 @@ ndi_devi_unconfig_one(
 	if (dipp)
 		*dipp = NULL;
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	child = ndi_devi_findchild(pdip, devnm);
 
 	/*
@@ -6413,11 +6471,11 @@ ndi_devi_unconfig_one(
 	if (child && MDI_PHCI(child)) {
 		vdip = mdi_devi_get_vdip(child);
 		if (vdip && (ddi_get_parent(vdip) != pdip)) {
-			ndi_devi_exit(pdip, circ);
+			ndi_devi_exit(pdip);
 
 			/* use mdi_devi_enter ordering */
-			ndi_devi_enter(vdip, &v_circ);
-			ndi_devi_enter(pdip, &circ);
+			ndi_devi_enter(vdip);
+			ndi_devi_enter(pdip);
 			child = ndi_devi_findchild(pdip, devnm);
 		} else
 			vdip = NULL;
@@ -6462,9 +6520,9 @@ ndi_devi_unconfig_one(
 	}
 
 out:
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 	if (vdip)
-		ndi_devi_exit(vdip, v_circ);
+		ndi_devi_exit(vdip);
 
 	pm_post_unconfig(pdip, pm_cookie, devnm);
 
@@ -6541,7 +6599,7 @@ ndi_devi_bind_driver_async(dev_info_t *dip, uint_t flags)
 int
 ndi_devi_online(dev_info_t *dip, uint_t flags)
 {
-	int circ, rv;
+	int rv;
 	dev_info_t *pdip = ddi_get_parent(dip);
 	int branch_event = 0;
 
@@ -6550,11 +6608,11 @@ ndi_devi_online(dev_info_t *dip, uint_t flags)
 	NDI_CONFIG_DEBUG((CE_CONT, "ndi_devi_online: %s%d (%p)\n",
 	    ddi_driver_name(dip), ddi_get_instance(dip), (void *)dip));
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	/* bind child before merging .conf nodes */
 	rv = i_ndi_config_node(dip, DS_BOUND, flags);
 	if (rv != NDI_SUCCESS) {
-		ndi_devi_exit(pdip, circ);
+		ndi_devi_exit(pdip);
 		return (rv);
 	}
 
@@ -6589,11 +6647,11 @@ ndi_devi_online(dev_info_t *dip, uint_t flags)
 			 * attached dip.
 			 */
 			ndi_hold_devi(dip);
-			ndi_devi_exit(pdip, circ);
+			ndi_devi_exit(pdip);
 
 			(void) ndi_devi_config(dip, flags);
 
-			ndi_devi_enter(pdip, &circ);
+			ndi_devi_enter(pdip);
 			ndi_rele_devi(dip);
 		}
 
@@ -6601,7 +6659,7 @@ ndi_devi_online(dev_info_t *dip, uint_t flags)
 			(void) i_log_devfs_branch_add(dip);
 	}
 
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	/*
 	 * Notify devfs that we have a new node. Devfs needs to invalidate
@@ -6656,10 +6714,9 @@ ndi_devi_online_async(dev_info_t *dip, uint_t flags)
 int
 ndi_devi_offline(dev_info_t *dip, uint_t flags)
 {
-	int		circ, rval = 0;
+	int		rval = 0;
 	dev_info_t	*pdip = ddi_get_parent(dip);
 	dev_info_t	*vdip = NULL;
-	int		v_circ;
 	struct brevq_node *brevq = NULL;
 
 	ASSERT(pdip);
@@ -6674,11 +6731,11 @@ ndi_devi_offline(dev_info_t *dip, uint_t flags)
 	if (MDI_PHCI(dip)) {
 		vdip = mdi_devi_get_vdip(dip);
 		if (vdip && (ddi_get_parent(vdip) != pdip))
-			ndi_devi_enter(vdip, &v_circ);
+			ndi_devi_enter(vdip);
 		else
 			vdip = NULL;
 	}
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 
 	if (i_ddi_devi_attached(dip)) {
 		/*
@@ -6690,9 +6747,9 @@ ndi_devi_offline(dev_info_t *dip, uint_t flags)
 		char *devname = kmem_alloc(MAXNAMELEN + 1, KM_SLEEP);
 		(void) ddi_deviname(dip, devname);
 
-		ndi_devi_exit(pdip, circ);
+		ndi_devi_exit(pdip);
 		if (vdip)
-			ndi_devi_exit(vdip, v_circ);
+			ndi_devi_exit(vdip);
 
 		/*
 		 * If we are explictly told to clean, then clean. If we own the
@@ -6719,8 +6776,8 @@ ndi_devi_offline(dev_info_t *dip, uint_t flags)
 			return (NDI_FAILURE);
 
 		if (vdip)
-			ndi_devi_enter(vdip, &v_circ);
-		ndi_devi_enter(pdip, &circ);
+			ndi_devi_enter(vdip);
+		ndi_devi_enter(pdip);
 	}
 
 	init_bound_node_ev(pdip, dip, flags);
@@ -6733,9 +6790,9 @@ ndi_devi_offline(dev_info_t *dip, uint_t flags)
 			free_brevq(brevq);
 	}
 
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 	if (vdip)
-		ndi_devi_exit(vdip, v_circ);
+		ndi_devi_exit(vdip);
 
 	return (rval);
 }
@@ -6748,15 +6805,14 @@ dev_info_t *
 ndi_devi_find(dev_info_t *pdip, char *cname, char *caddr)
 {
 	dev_info_t *child;
-	int circ;
 
 	if (pdip == NULL || cname == NULL || caddr == NULL)
 		return ((dev_info_t *)NULL);
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	child = find_sibling(ddi_get_child(pdip), cname, caddr,
 	    FIND_NODE_BY_NODENAME, NULL);
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 	return (child);
 }
 
@@ -6799,7 +6855,6 @@ static int
 reset_nexus_flags(dev_info_t *dip, void *arg)
 {
 	struct hwc_spec	*list;
-	int		circ;
 
 	if (((DEVI(dip)->devi_flags & DEVI_MADE_CHILDREN) == 0) ||
 	    ((list = hwc_get_child_spec(dip, (major_t)(uintptr_t)arg)) == NULL))
@@ -6808,11 +6863,11 @@ reset_nexus_flags(dev_info_t *dip, void *arg)
 	hwc_free_spec_list(list);
 
 	/* coordinate child state update */
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	mutex_enter(&DEVI(dip)->devi_lock);
 	DEVI(dip)->devi_flags &= ~(DEVI_MADE_CHILDREN | DEVI_ATTACHED_CHILDREN);
 	mutex_exit(&DEVI(dip)->devi_lock);
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 
 	return (DDI_WALK_CONTINUE);
 }
@@ -7175,7 +7230,7 @@ int
 i_ddi_attach_node_hierarchy(dev_info_t *dip)
 {
 	dev_info_t	*parent;
-	int		ret, circ;
+	int		ret;
 
 	/*
 	 * Recurse up until attached parent is found.
@@ -7190,10 +7245,10 @@ i_ddi_attach_node_hierarchy(dev_info_t *dip)
 	 * Come top-down, expanding .conf nodes under this parent
 	 * and driving attach.
 	 */
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 	(void) i_ndi_make_spec_children(parent, 0);
 	ret = i_ddi_attachchild(dip);
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 
 	return (ret);
 }
@@ -7357,16 +7412,15 @@ i_ddi_devs_attached(major_t major)
 int
 i_ddi_minor_node_count(dev_info_t *ddip, const char *node_type)
 {
-	int			circ;
 	struct ddi_minor_data	*dp;
 	int			count = 0;
 
-	ndi_devi_enter(ddip, &circ);
+	ndi_devi_enter(ddip);
 	for (dp = DEVI(ddip)->devi_minor; dp != NULL; dp = dp->next) {
 		if (strcmp(dp->ddm_node_type, node_type) == 0)
 			count++;
 	}
-	ndi_devi_exit(ddip, circ);
+	ndi_devi_exit(ddip);
 	return (count);
 }
 
@@ -7755,7 +7809,6 @@ mt_config_children(struct mt_config_handle *hdl)
 	dev_info_t		*pdip = hdl->mtc_pdip;
 	major_t			major = hdl->mtc_major;
 	dev_info_t		*dip;
-	int			circ;
 	struct brevq_node	*brn;
 	struct mt_config_data	*mcd_head = NULL;
 	struct mt_config_data	*mcd_tail = NULL;
@@ -7768,7 +7821,7 @@ mt_config_children(struct mt_config_handle *hdl)
 	hdl->total_time += time_diff_in_msec(hdl->start_time, end_time);
 #endif
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	dip = ddi_get_child(pdip);
 	while (dip) {
 		if (hdl->mtc_op == MT_UNCONFIG_OP && hdl->mtc_brevqp &&
@@ -7848,7 +7901,7 @@ mt_config_children(struct mt_config_handle *hdl)
 
 		dip = ddi_get_next_sibling(dip);
 	}
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	/* go through the list of held children */
 	for (mcd = mcd_head; mcd; mcd = mcd_head) {
@@ -8484,8 +8537,6 @@ e_ddi_retire_device(char *path, char **cons_array)
 {
 	dev_info_t	*dip;
 	dev_info_t	*pdip;
-	int		circ;
-	int		circ2;
 	int		constraint;
 	char		*devnm;
 
@@ -8525,7 +8576,7 @@ e_ddi_retire_device(char *path, char **cons_array)
 	(void) devfs_clean(pdip, devnm + 1, DV_CLEAN_FORCE);
 	kmem_free(devnm, MAXNAMELEN + 1);
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 
 	/* release hold from e_ddi_hold_devi_by_path */
 	ndi_rele_devi(dip);
@@ -8536,10 +8587,10 @@ e_ddi_retire_device(char *path, char **cons_array)
 	 */
 	(void) e_ddi_mark_retiring(dip, cons_array);
 	if (!is_leaf_node(dip)) {
-		ndi_devi_enter(dip, &circ2);
+		ndi_devi_enter(dip);
 		ddi_walk_devs(ddi_get_child(dip), e_ddi_mark_retiring,
 		    cons_array);
-		ndi_devi_exit(dip, circ2);
+		ndi_devi_exit(dip);
 	}
 	free_array(cons_array);
 
@@ -8551,10 +8602,10 @@ e_ddi_retire_device(char *path, char **cons_array)
 	constraint = 1;	/* assume constraints allow retire */
 	(void) e_ddi_retire_notify(dip, &constraint);
 	if (!is_leaf_node(dip)) {
-		ndi_devi_enter(dip, &circ2);
+		ndi_devi_enter(dip);
 		ddi_walk_devs(ddi_get_child(dip), e_ddi_retire_notify,
 		    &constraint);
-		ndi_devi_exit(dip, circ2);
+		ndi_devi_exit(dip);
 	}
 
 	/*
@@ -8562,10 +8613,10 @@ e_ddi_retire_device(char *path, char **cons_array)
 	 */
 	(void) e_ddi_retire_finalize(dip, &constraint);
 	if (!is_leaf_node(dip)) {
-		ndi_devi_enter(dip, &circ2);
+		ndi_devi_enter(dip);
 		ddi_walk_devs(ddi_get_child(dip), e_ddi_retire_finalize,
 		    &constraint);
-		ndi_devi_exit(dip, circ2);
+		ndi_devi_exit(dip);
 	}
 
 	if (!constraint) {
@@ -8574,7 +8625,7 @@ e_ddi_retire_device(char *path, char **cons_array)
 		RIO_DEBUG((CE_NOTE, "retire succeeded: path = %s", path));
 	}
 
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 	ndi_rele_devi(pdip);
 	return (constraint ? DDI_SUCCESS : DDI_FAILURE);
 }
@@ -8630,8 +8681,6 @@ find_dip_fcn(dev_info_t *dip, void *arg)
 int
 e_ddi_unretire_device(char *path)
 {
-	int		circ;
-	int		circ2;
 	char		*path2;
 	dev_info_t	*pdip;
 	dev_info_t	*dip;
@@ -8657,9 +8706,9 @@ e_ddi_unretire_device(char *path)
 
 	pdip = ddi_root_node();
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	ddi_walk_devs(ddi_get_child(pdip), find_dip_fcn, &find_dip);
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	kmem_free(find_dip.fd_buf, MAXPATHLEN);
 
@@ -8675,15 +8724,15 @@ e_ddi_unretire_device(char *path)
 
 	ndi_hold_devi(pdip);
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 
 	path2 = kmem_alloc(MAXPATHLEN, KM_SLEEP);
 
 	(void) unmark_and_unfence(dip, path2);
 	if (!is_leaf_node(dip)) {
-		ndi_devi_enter(dip, &circ2);
+		ndi_devi_enter(dip);
 		ddi_walk_devs(ddi_get_child(dip), unmark_and_unfence, path2);
-		ndi_devi_exit(dip, circ2);
+		ndi_devi_exit(dip);
 	}
 
 	kmem_free(path2, MAXPATHLEN);
@@ -8691,7 +8740,7 @@ e_ddi_unretire_device(char *path)
 	/* release hold from find_dip_fcn() */
 	ndi_rele_devi(dip);
 
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	ndi_rele_devi(pdip);
 
@@ -8744,7 +8793,6 @@ i_ddi_check_retire(dev_info_t *dip)
 {
 	char		*path;
 	dev_info_t	*pdip;
-	int		circ;
 	int		phci_only;
 	int		constraint;
 
@@ -8785,9 +8833,9 @@ i_ddi_check_retire(dev_info_t *dip)
 	RIO_DEBUG((CE_NOTE, "attach: Mark and fence subtree: path=%s", path));
 	(void) mark_and_fence(dip, path);
 	if (!is_leaf_node(dip)) {
-		ndi_devi_enter(dip, &circ);
+		ndi_devi_enter(dip);
 		ddi_walk_devs(ddi_get_child(dip), mark_and_fence, path);
-		ndi_devi_exit(dip, circ);
+		ndi_devi_exit(dip);
 	}
 
 	kmem_free(path, MAXPATHLEN);
@@ -9280,4 +9328,14 @@ ddi_mem_update(uint64_t addr, uint64_t size)
 	/*LINTED*/
 	;
 #endif
+}
+
+void
+e_ddi_register_unbind_callback(dev_info_t *dip, ddi_unbind_callback_t *cb)
+{
+	struct dev_info *devi = DEVI(dip);
+
+	mutex_enter(&devi->devi_unbind_lock);
+	list_insert_tail(&devi->devi_unbind_cbs, cb);
+	mutex_exit(&devi->devi_unbind_lock);
 }

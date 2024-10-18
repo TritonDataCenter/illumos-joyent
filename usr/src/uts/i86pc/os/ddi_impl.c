@@ -106,7 +106,7 @@ static int peek_mem(peekpoke_ctlops_t *in_args);
 
 static int kmem_override_cache_attrs(caddr_t, size_t, uint_t);
 
-#if defined(__amd64) && !defined(__xpv)
+#if !defined(__xpv)
 extern void immu_init(void);
 #endif
 
@@ -178,9 +178,6 @@ configure(void)
 {
 	extern void i_ddi_init_root();
 
-#if defined(__i386)
-	extern int fpu_pentium_fdivbug;
-#endif	/* __i386 */
 	extern int fpu_ignored;
 
 	/*
@@ -189,12 +186,6 @@ configure(void)
 
 	fpu_probe();
 
-#if defined(__i386)
-	if (fpu_pentium_fdivbug) {
-		printf("\
-FP hardware exhibits Pentium floating point divide problem\n");
-	}
-#endif	/* __i386 */
 
 	if (fpu_ignored) {
 		printf("FP hardware will not be used\n");
@@ -217,7 +208,7 @@ FP hardware exhibits Pentium floating point divide problem\n");
 	/* reprogram devices not set up by firmware (BIOS) */
 	impl_bus_reprobe();
 
-#if defined(__amd64) && !defined(__xpv)
+#if !defined(__xpv)
 	/*
 	 * Setup but don't startup the IOMMU
 	 * Startup happens later via a direct call
@@ -841,12 +832,6 @@ impl_ddi_sunbus_removechild(dev_info_t *dip)
 int ignore_hardware_nodes = 0;
 
 /*
- * Local data
- */
-static struct impl_bus_promops *impl_busp;
-
-
-/*
  * New DDI interrupt framework
  */
 
@@ -1433,7 +1418,8 @@ kalloca(size_t size, size_t align, int cansleep, int physcontig,
 	rsize = P2ROUNDUP_TYPED(size + align, KA_ALIGN, size_t);
 
 	if (physcontig && rsize > PAGESIZE) {
-		if (addr = contig_alloc(size, attr, align, cansleep)) {
+		if ((addr = contig_alloc(size, attr, align, cansleep)) !=
+		    NULL) {
 			if (!putctgas(addr, size))
 				contig_free(addr, size);
 			else
@@ -1523,7 +1509,7 @@ kfreea(void *addr)
 
 /*ARGSUSED*/
 void
-i_ddi_devacc_to_hatacc(ddi_device_acc_attr_t *devaccp, uint_t *hataccp)
+i_ddi_devacc_to_hatacc(const ddi_device_acc_attr_t *devaccp, uint_t *hataccp)
 {
 }
 
@@ -1610,7 +1596,7 @@ i_ddi_cacheattr_to_hatacc(uint_t flags, uint_t *hataccp)
 int
 i_ddi_mem_alloc(dev_info_t *dip, ddi_dma_attr_t *attr,
     size_t length, int cansleep, int flags,
-    ddi_device_acc_attr_t *accattrp, caddr_t *kaddrp,
+    const ddi_device_acc_attr_t *accattrp, caddr_t *kaddrp,
     size_t *real_length, ddi_acc_hdl_t *ap)
 {
 	caddr_t a;
@@ -2196,12 +2182,13 @@ x86_old_bootpath_name_addr_match(dev_info_t *cdip, char *caddr, char *naddr)
 		 *
 		 *  bootpath assumed to be of the form /bus/module@name_addr
 		 */
-		if (busp = strchr(bp1275, '/')) {
-			if (modp = strchr(busp + 1, '/')) {
-				if (atp = strchr(modp + 1, '@')) {
+		if ((busp = strchr(bp1275, '/')) != NULL) {
+			if ((modp = strchr(busp + 1, '/')) != NULL) {
+				if ((atp = strchr(modp + 1, '@')) != NULL) {
 					*atp = '\0';
 					addrp = atp + 1;
-					if (eoaddrp = strchr(addrp, '/'))
+					if ((eoaddrp = strchr(addrp, '/')) !=
+					    NULL)
 						*eoaddrp = '\0';
 				}
 			}
@@ -2231,12 +2218,13 @@ x86_old_bootpath_name_addr_match(dev_info_t *cdip, char *caddr, char *naddr)
 		 *  bootpath assumed to be of the form /bus/module@name_addr
 		 */
 		addrp = NULL;
-		if (busp = strchr(bp, '/')) {
-			if (modp = strchr(busp + 1, '/')) {
-				if (atp = strchr(modp + 1, '@')) {
+		if ((busp = strchr(bp, '/')) != NULL) {
+			if ((modp = strchr(busp + 1, '/')) != NULL) {
+				if ((atp = strchr(modp + 1, '@')) != NULL) {
 					*atp = '\0';
 					addrp = atp + 1;
-					if (eoaddrp = strchr(addrp, '/'))
+					if ((eoaddrp = strchr(addrp, '/')) !=
+					    NULL)
 						*eoaddrp = '\0';
 				}
 			}
@@ -2305,11 +2293,12 @@ e_ddi_copytodev(dev_info_t *devi,
 static int
 poke_mem(peekpoke_ctlops_t *in_args)
 {
-	int err = DDI_SUCCESS;
+	int err;
 	on_trap_data_t otd;
 
 	/* Set up protected environment. */
 	if (!on_trap(&otd, OT_DATA_ACCESS)) {
+		err = DDI_SUCCESS;
 		switch (in_args->size) {
 		case sizeof (uint8_t):
 			*(uint8_t *)(in_args->dev_addr) =
@@ -2335,8 +2324,9 @@ poke_mem(peekpoke_ctlops_t *in_args)
 			err = DDI_FAILURE;
 			break;
 		}
-	} else
+	} else {
 		err = DDI_FAILURE;
+	}
 
 	/* Take down protected environment. */
 	no_trap();
@@ -2348,10 +2338,11 @@ poke_mem(peekpoke_ctlops_t *in_args)
 static int
 peek_mem(peekpoke_ctlops_t *in_args)
 {
-	int err = DDI_SUCCESS;
+	int err;
 	on_trap_data_t otd;
 
 	if (!on_trap(&otd, OT_DATA_ACCESS)) {
+		err = DDI_SUCCESS;
 		switch (in_args->size) {
 		case sizeof (uint8_t):
 			*(uint8_t *)in_args->host_addr =
@@ -2377,8 +2368,9 @@ peek_mem(peekpoke_ctlops_t *in_args)
 			err = DDI_FAILURE;
 			break;
 		}
-	} else
+	} else {
 		err = DDI_FAILURE;
+	}
 
 	no_trap();
 	return (err);

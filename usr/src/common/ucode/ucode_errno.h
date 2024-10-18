@@ -22,12 +22,13 @@
 /*
  * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #ifndef _UCODE_ERRNO_H
 #define	_UCODE_ERRNO_H
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #ifdef	__cplusplus
 extern "C" {
@@ -40,13 +41,15 @@ typedef enum ucode_errno {
 	EM_FILEFORMAT,	/* Not a valid microcode file */
 	EM_HEADER,	/* File header is invalid */
 	EM_CHECKSUM,	/* Checksum is invalid */
+	EM_EXTCHECKSUM,	/* Extended signature table checksum is invalid */
+	EM_SIGCHECKSUM,	/* Extended signature checksum is invalid */
 	EM_INVALIDARG,	/* Invalid argument(s) */
 	EM_NOMATCH,	/* No matching microcode found */
 	EM_HIGHERREV,	/* File does not contain higher revision microcode */
 	EM_NOTSUP,	/* Processor does not support microcode operations */
 	EM_UPDATE,	/* Failed to update to the latest revision */
 	EM_SYS,		/* System call failed.  See errno */
-	EM_NOVENDOR,	/* File must start with vendor string */
+	EM_NOVENDOR,	/* Could not determine the type of the update file */
 	EM_NOMEM	/* Not enough memory */
 } ucode_errno_t;
 

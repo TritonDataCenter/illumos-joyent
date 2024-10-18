@@ -24,6 +24,7 @@
  */
 /*
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #ifndef _LIBTOPO_H
@@ -31,6 +32,7 @@
 
 #include <sys/nvpair.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <libdevinfo.h>
 
 #ifdef __cplusplus
@@ -42,6 +44,7 @@ extern "C" {
 typedef struct topo_hdl topo_hdl_t;
 typedef struct topo_node tnode_t;
 typedef struct topo_walk topo_walk_t;
+typedef struct topo_schema_walk topo_schema_walk_t;
 typedef uint64_t topo_instance_t;
 typedef uint32_t topo_version_t;
 
@@ -103,6 +106,28 @@ extern di_prom_handle_t topo_hdl_prominfo(topo_hdl_t *);
  */
 #define	TOPO_WALK_CHILD		0x0001
 #define	TOPO_WALK_SIBLING	0x0002
+
+/*
+ * Snapshot scheme walker support.
+ */
+
+typedef enum topo_scheme_type {
+	TOPO_SCHEME_TREE,
+	TOPO_SCHEME_DIGRAPH
+} topo_scheme_type_t;
+
+/*
+ * Callers should not copy this structure. It should be assumed that it will
+ * grow in the future.
+ */
+typedef struct topo_scheme_info {
+	const char *tsi_scheme;
+	topo_scheme_type_t tsi_type;
+} topo_scheme_info_t;
+
+typedef int (*topo_scheme_walk_cb_f)(topo_hdl_t *, const topo_scheme_info_t *,
+    void *);
+extern int topo_scheme_walk(topo_hdl_t *, topo_scheme_walk_cb_f, void *);
 
 /*
  * FMRI helper routines
@@ -318,7 +343,7 @@ extern void topo_debug_set(topo_hdl_t *, const char *, const char *);
 
 /*
  * Each topology node advertises the name and data stability of each of its
- * modules and properties. (see attributes(5)).
+ * modules and properties. (see attributes(7)).
  */
 
 /*
@@ -412,6 +437,10 @@ extern int topo_hdl_nvdup(topo_hdl_t *, nvlist_t *, nvlist_t **);
 extern char *topo_hdl_strdup(topo_hdl_t *, const char *);
 extern char *topo_hdl_strsplit(topo_hdl_t *, const char *, const char *,
     char **);
+extern int topo_hdl_vasprintf(topo_hdl_t *, char **, const char *,
+    va_list) __VPRINTFLIKE(3);
+extern int topo_hdl_asprintf(topo_hdl_t *, char **, const char *,
+    ...) __PRINTFLIKE(3);
 
 /*
  * Interfaces for interacting with directed graph topologies
@@ -434,11 +463,11 @@ extern topo_vertex_t *topo_node_vertex(tnode_t *);
  * Interfaces for converting sensor/indicator types, units, states, etc to
  * a string
  */
-void topo_sensor_type_name(uint32_t type, char *buf, size_t len);
-void topo_sensor_units_name(uint8_t type, char *buf, size_t len);
-void topo_led_type_name(uint8_t type, char *buf, size_t len);
-void topo_led_state_name(uint8_t type, char *buf, size_t len);
-void topo_sensor_state_name(uint32_t sensor_type, uint8_t state, char *buf,
+extern void topo_sensor_type_name(uint32_t, char *, size_t);
+extern void topo_sensor_units_name(uint32_t, char *, size_t);
+extern void topo_led_type_name(uint32_t, char *, size_t);
+extern void topo_led_state_name(uint32_t, char *, size_t);
+extern void topo_sensor_state_name(uint32_t, uint32_t, char *,
     size_t len);
 
 /*
@@ -590,7 +619,11 @@ typedef enum topo_sensor_unit {
 	TOPO_SENSOR_UNITS_FATAL_ERROR,
 	TOPO_SENSOR_UNITS_GRAMS,
 
-	TOPO_SENSOR_UNITS_PERCENT = 512
+	TOPO_SENSOR_UNITS_PERCENT = 512,
+	/*
+	 * This is used for a unitless control type sensor.
+	 */
+	TOPO_SENSOR_UNITS_NONE
 } topo_sensor_unit_t;
 
 /*
@@ -927,7 +960,7 @@ typedef enum topo_sensor_unit {
  * and sensor-specific codes into a single range.  Because there's overlap
  * between the two ranges we offset the generic type codes by 0x0100
  * which allows ample room in the hole for future expansion of the table to
- * accomodate either additions to the IPMI spec or to support new sensor types
+ * accommodate either additions to the IPMI spec or to support new sensor types
  * for alternate provider modules.
  */
 #define	TOPO_SENSOR_TYPE_THRESHOLD_STATE		0x0101
@@ -1028,6 +1061,13 @@ typedef enum topo_sensor_unit {
 
 #define	TOPO_SENSOR_STATE_GENERIC_OK_DEASSERTED		0x0001
 #define	TOPO_SENSOR_STATE_GENERIC_OK_ASSERTED		0x0002
+
+/*
+ * This represents a synthetic sensor that someone has created. That is, it has
+ * a value, but does not represent a true physical measurement of some kind. The
+ * most common example of this is a control-style measurement.
+ */
+#define	TOPO_SENSOR_TYPE_SYNTHETIC			0x10F
 
 /*
  * Indicator modes and types

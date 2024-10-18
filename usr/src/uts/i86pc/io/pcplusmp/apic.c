@@ -26,6 +26,7 @@
  * Copyright (c) 2010, Intel Corporation.
  * All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Oxide Computer Company
  */
 
 /*
@@ -58,6 +59,7 @@
 #include <sys/ddi_impldefs.h>
 #include <sys/pci.h>
 #include <sys/promif.h>
+#include <sys/prom_debug.h>
 #include <sys/x86_archext.h>
 #include <sys/cpc_impl.h>
 #include <sys/uadmin.h>
@@ -249,16 +251,23 @@ _info(struct modinfo *modinfop)
 static int
 apic_probe(void)
 {
+	PRM_POINT("apic_probe()");
+
 	/* check if apix is initialized */
-	if (apix_enable && apix_loaded())
+	if (apix_enable && apix_loaded()) {
+		PRM_POINT("apic_probe FAILURE: apix is loaded");
 		return (PSM_FAILURE);
+	}
 
 	/*
 	 * Check whether x2APIC mode was activated by BIOS. We don't support
 	 * that in pcplusmp as apix normally handles that.
 	 */
-	if (apic_local_mode() == LOCAL_X2APIC)
+	PRM_POINT("apic_local_mode()");
+	if (apic_local_mode() == LOCAL_X2APIC) {
+		PRM_POINT("apic_probe FAILURE: in x2apic mode");
 		return (PSM_FAILURE);
+	}
 
 	/* continue using pcplusmp PSM */
 	apix_enable = 0;
@@ -308,10 +317,6 @@ apic_init(void)
 
 	apic_pir_vect = apic_get_ipivect(XC_CPUPOKE_PIL, -1);
 
-#if !defined(__amd64)
-	if (cpuid_have_cr8access(CPU))
-		apic_have_32bit_cr8 = 1;
-#endif
 }
 
 static void
@@ -695,12 +700,6 @@ apic_post_cpu_start(void)
 
 	splx(ipltospl(LOCK_LEVEL));
 	apic_init_intr();
-
-	/*
-	 * since some systems don't enable the internal cache on the non-boot
-	 * cpus, so we have to enable them here
-	 */
-	setcr0(getcr0() & ~(CR0_CD | CR0_NW));
 
 	APIC_AV_PENDING_SET();
 

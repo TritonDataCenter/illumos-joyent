@@ -24,8 +24,6 @@
  * All rights reserved.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <memory.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -108,7 +106,7 @@ update_short(
 	double *in_buf = new double[size];
 	short2double(in_buf, in, size);
 	updateState(in_buf, size);
-	delete in_buf;
+	delete[] in_buf;
 }
 
 void Fir::
@@ -191,7 +189,7 @@ filter_noadjust(
 		*out_ptr++ =
 		    double2short(convolve(coef, state_ptr++, order + 1));
 	updateState(in_buf, size);
-	delete in_buf;
+	delete[] in_buf;
 	return (out_ptr - out);
 }
 
@@ -210,7 +208,7 @@ flush(short *out)		// zero input response of Fir
 		short *in = new short[num];
 		memset(in, 0, num * sizeof (short));
 		num = filter_noadjust(in, num, out);
-		delete in;
+		delete[] in;
 	}
 	return (num);
 }

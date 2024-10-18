@@ -77,7 +77,7 @@ extern "C" {
 #if !defined(__lint) && defined(__GNUC__)
 /* use GNU inline */
 	/* works for both i386 and amd64 */
-	extern __inline__ uint32_t dapls_byteswap32(uint32_t value)
+	static __inline__ uint32_t dapls_byteswap32(uint32_t value)
 	{
 		__asm__("bswap %0" : "+r" (value));
 		return (value);
@@ -85,7 +85,7 @@ extern "C" {
 
 #if defined(__amd64)
 
-	extern __inline__ uint64_t dapls_byteswap64(uint64_t value)
+	static __inline__ uint64_t dapls_byteswap64(uint64_t value)
 	{
 		__asm__("bswapq %0" : "+r" (value));
 		return (value);
@@ -93,7 +93,7 @@ extern "C" {
 
 #else /* defined(__i386) */
 
-	extern __inline__ uint64_t dapls_byteswap64(uint64_t value)
+	static __inline__ uint64_t dapls_byteswap64(uint64_t value)
 	{
 		union {
 			struct { uint32_t a, b; } s;
@@ -106,12 +106,6 @@ extern "C" {
 		return (v.u);
 	}
 #endif
-
-#else	/* !defined(__lint) && defined(__GNUC__) */
-/* use SUN inline with .il files */
-uint64_t dapls_byteswap64(uint64_t);
-uint32_t dapls_byteswap32(uint32_t);
-
 #endif	/* !defined(__lint) && defined(__GNUC__) */
 
 #define	HTOBE_64(x)	dapls_byteswap64(x)
@@ -1054,12 +1048,12 @@ dapl_pz_free(IN DAT_PZ_HANDLE);	/* pz_handle */
 
 extern DAT_RETURN dapl_lmr_sync_rdma_read(
 	IN	DAT_IA_HANDLE,		/* ia_handle		*/
-	IN 	const DAT_LMR_TRIPLET *, /* local_segments	*/
+	IN	const DAT_LMR_TRIPLET *, /* local_segments	*/
 	IN	DAT_VLEN);		/* num_segments		*/
 
 extern DAT_RETURN dapl_lmr_sync_rdma_write(
 	IN	DAT_IA_HANDLE,		/* ia_handle		*/
-	IN 	const DAT_LMR_TRIPLET *, /* local_segments	*/
+	IN	const DAT_LMR_TRIPLET *, /* local_segments	*/
 	IN	DAT_VLEN);		/* num_segments		*/
 
 /*
@@ -1071,7 +1065,7 @@ extern DAT_RETURN dapl_ep_create_with_srq(
 	IN	DAT_EVD_HANDLE,		/* recv_evd_handle	*/
 	IN	DAT_EVD_HANDLE,		/* request_evd_handle	*/
 	IN	DAT_EVD_HANDLE,		/* connect_evd_handle	*/
-	IN	DAT_SRQ_HANDLE,		/* srq_handle 		*/
+	IN	DAT_SRQ_HANDLE,		/* srq_handle		*/
 	IN	const DAT_EP_ATTR *,	/* ep_attributes	*/
 	OUT	DAT_EP_HANDLE *);	/* ep_handle		*/
 

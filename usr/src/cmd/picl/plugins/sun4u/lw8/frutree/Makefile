@@ -41,8 +41,8 @@ include	$(SRC)/cmd/picl/plugins/Makefile.com
 CPPFLAGS +=	-D_REENTRANT -I$(SRC)/uts/sun4u/serengeti
 CPPFLAGS +=	-I$(SRC)/uts/sun4u/serengeti
 CPPFLAGS +=	-I$(SRC)/uts/sun4u/lw8
-CPPFLAGS +=	-I$(SRC)/uts/sun4u -I$(CLOSED)/uts/sun4u
-CPPFLAGS +=	-I$(SRC)/uts/common -I$(CLOSED)/uts/common
+CPPFLAGS +=	-I$(SRC)/uts/sun4u
+CPPFLAGS +=	-I$(SRC)/uts/common
 
 SRCS =		$(OBJECTS:%.o=%.c)
 
@@ -57,8 +57,7 @@ LDLIBS +=	-L$(DEVTREE_SRC_DIR)
 LDLIBS +=	-L$(SRC)/lib/libpicltree/$(MACH)
 LDLIBS +=	-L$(SRC)/cmd/picl/plugins/common/devtree
 LDLIBS +=	-L$(ROOT)/usr/lib/picl/plugins
-LDLIBS +=	-lc -lpicldevtree -lpiclmemcfg
-LDLIBS +=	-lpicltree -lnvpair -lkstat -ldevice
+LDLIBS +=	-lpicltree -lnvpair -lkstat -ldevice -lc
 
 .KEEP_STATE:
 
@@ -89,8 +88,6 @@ $(LIBLINKS):	FRC
 # include library targets
 include $(SRC)/lib/Makefile.targ
 include	$(SRC)/cmd/picl/plugins/Makefile.targ
-
-lint:
 
 $(SUBDIRS): FRC
 	@cd $@; pwd; $(MAKE) $(TARGET)

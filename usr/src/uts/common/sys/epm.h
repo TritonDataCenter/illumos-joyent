@@ -23,6 +23,10 @@
  * Use is subject to license terms.
  */
 
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 #ifndef	_SYS_EPM_H
 #define	_SYS_EPM_H
 
@@ -132,7 +136,7 @@ typedef struct pm_scan {
  * as a struct assignment.
  */
 typedef struct pm_comp {
-	char 	*pmc_name;		/* name of component */
+	char	*pmc_name;		/* name of component */
 	int	pmc_numlevels;		/* number of power levels supported */
 	int	*pmc_lvals;		/* numerical values of levels */
 	int	*pmc_thresh;		/* thresholds in secs, last INT_MAX */
@@ -350,7 +354,7 @@ typedef struct power_req {
 		struct report_pmcap_req {
 			dev_info_t	*who;
 			int		cap;
-			void 		*arg;
+			void		*arg;
 		} report_pmcap_req;
 		/*
 		 * PMR_CHANGED_POWER
@@ -382,14 +386,12 @@ typedef struct power_req {
 		 */
 		struct ppm_lock_power_req {
 			dev_info_t	*who;
-			int		*circp;
 		} ppm_lock_power_req;
 		/*
 		 * PMR_PPM_UNLOCK_POWER
 		 */
 		struct ppm_unlock_power_req {
 			dev_info_t	*who;
-			int		circ;
 		} ppm_unlock_power_req;
 		/*
 		 * PMR_PPM_POWER_LOCK_OWNER
@@ -559,7 +561,7 @@ typedef struct pm_thresh_rec {
 	struct pm_thresh_rec	*ptr_next;
 	int			ptr_numcomps;	/* number of components */
 	size_t			ptr_size;	/* total size for kmem_free */
-	pm_pte_t 		*ptr_entries;
+	pm_pte_t		*ptr_entries;
 } pm_thresh_rec_t;
 
 /*
@@ -703,7 +705,7 @@ extern void	pm_log(const char *fmt, ...) __KPRINTFLIKE(1);
 #endif /* !__sparc */
 
 #ifdef PMDDEBUG
-#define	PMD(level, arglist) { 			\
+#define	PMD(level, arglist) {			\
 	if (pm_debug & (level)) {		\
 		pm_log arglist;			\
 	}					\
@@ -778,12 +780,12 @@ extern int	pm_power_up(dev_info_t *, int, int, int, pm_info_t *);
 extern int	pm_default_idle_threshold;
 extern void	pm_set_device_threshold(dev_info_t *, int, int);
 extern int	pm_valid_power(dev_info_t *, int, int);
-extern void	pm_lock_power(dev_info_t *, int *);
-extern void	pm_unlock_power(dev_info_t *, int);
-extern int	pm_try_locking_power(dev_info_t *, int *);
-extern void	pm_lock_power_single(dev_info_t *, int *);
-extern void	pm_unlock_power_single(dev_info_t *, int);
-extern int	pm_try_locking_power_single(dev_info_t *, int *);
+extern void	pm_lock_power(dev_info_t *);
+extern void	pm_unlock_power(dev_info_t *);
+extern int	pm_try_locking_power(dev_info_t *);
+extern void	pm_lock_power_single(dev_info_t *);
+extern void	pm_unlock_power_single(dev_info_t *);
+extern int	pm_try_locking_power_single(dev_info_t *);
 extern int	pm_isbc(dev_info_t *dip);
 extern int	pm_isdirect(dev_info_t *dip);
 extern int	pm_ctlops(dev_info_t *d, dev_info_t *r, ddi_ctl_enum_t o,
@@ -847,7 +849,7 @@ extern int	pm_cfb_is_up(void);
 #ifdef DIPLOCKDEBUG
 #define	PM_LOCK_DIP(dip)	{ PMD(PMD_LOCK, ("dip lock %s@%s(%s#%d) " \
 				    "%s %d\n", PM_DEVICE(dip),		  \
-				    __FILE__, __LINE__)) 		  \
+				    __FILE__, __LINE__))		  \
 				    mutex_enter(&DEVI(dip)->devi_pm_lock); }
 #define	PM_UNLOCK_DIP(dip)	{ PMD(PMD_LOCK, ("dip unlock %s@%s(%s#%d) " \
 				    "%s %d\n", PM_DEVICE(dip),		    \
@@ -863,9 +865,9 @@ extern int	pm_cfb_is_up(void);
  */
 #define	PM_LOCK_BUSY(dip)	mutex_enter(&DEVI(dip)->devi_pm_busy_lock)
 #define	PM_UNLOCK_BUSY(dip)	mutex_exit(&DEVI(dip)->devi_pm_busy_lock)
-#define	PM_LOCK_POWER(dip, circp)	pm_lock_power(dip, circp)
-#define	PM_UNLOCK_POWER(dip, circ)	pm_unlock_power(dip, circ)
-#define	PM_TRY_LOCK_POWER(dip, circp)	pm_try_locking_power(dip, circp)
+#define	PM_LOCK_POWER(dip)	pm_lock_power(dip)
+#define	PM_UNLOCK_POWER(dip)	pm_unlock_power(dip)
+#define	PM_TRY_LOCK_POWER(dip)	pm_try_locking_power(dip)
 #define	PM_IAM_LOCKING_DIP(dip)	(mutex_owned(&DEVI(dip)->devi_pm_lock))
 
 #define	PM_DEFAULT_SYS_IDLENESS	1800	/* 30 minutes */

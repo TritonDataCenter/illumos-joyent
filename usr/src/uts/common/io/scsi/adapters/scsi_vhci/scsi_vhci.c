@@ -24,6 +24,8 @@
 /*
  * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 RackTop Systems, Inc.
  */
 
 /*
@@ -97,7 +99,7 @@ static int	vhci_bus_config_debug = 0;
 
 /*
  * Bidirectional map of 'target-port' to port id <pid> for support of
- * iostat(1M) '-Xx' and '-Yx' output.
+ * iostat(8) '-Xx' and '-Yx' output.
  */
 static kmutex_t		vhci_targetmap_mutex;
 static uint_t		vhci_targetmap_pid = 1;
@@ -3807,6 +3809,7 @@ vhci_update_pathstates(void *arg)
 	struct scsi_pkt			*pkt;
 	struct buf			*bp;
 	struct scsi_vhci_priv		*svp_conflict = NULL;
+	size_t				blksize;
 
 	ASSERT(VHCI_LUN_IS_HELD(vlun));
 	dip  = vlun->svl_dip;
@@ -3820,6 +3823,8 @@ vhci_update_pathstates(void *arg)
 	if ((npip == NULL) || (sps != MDI_SUCCESS)) {
 		goto done;
 	}
+
+	blksize = vhci_get_blocksize(dip);
 
 	fo = vlun->svl_fops;
 	do {
@@ -3943,7 +3948,7 @@ vhci_update_pathstates(void *arg)
 			/* Check for Reservation Conflict */
 			bp = scsi_alloc_consistent_buf(
 			    &svp->svp_psd->sd_address, (struct buf *)NULL,
-			    DEV_BSIZE, B_READ, NULL, NULL);
+			    blksize, B_READ, NULL, NULL);
 			if (!bp) {
 				VHCI_DEBUG(1, (CE_NOTE, NULL,
 				    "!vhci_update_pathstates: No resources "
@@ -3956,8 +3961,8 @@ vhci_update_pathstates(void *arg)
 			    PKT_CONSISTENT, NULL, NULL);
 			if (pkt) {
 				(void) scsi_setup_cdb((union scsi_cdb *)
-				    (uintptr_t)pkt->pkt_cdbp, SCMD_READ, 1, 1,
-				    0);
+				    (uintptr_t)pkt->pkt_cdbp, SCMD_READ_G1, 1,
+				    1, 0);
 				pkt->pkt_time = 3 * 30;
 				pkt->pkt_flags = FLAG_NOINTR;
 				pkt->pkt_path_instance =
@@ -4966,14 +4971,14 @@ vhci_kstat_create_pathinfo(mdi_pathinfo_t *pip)
 	 *
 	 * We maintain a bidirectional 'target-port' to <pid> map,
 	 * called targetmap. All pathinfo nodes with the same
-	 * 'target-port' map to the same <pid>. The iostat(1M) code,
+	 * 'target-port' map to the same <pid>. The iostat(8) code,
 	 * when parsing a path oriented kstat name, uses the <pid> as
 	 * a SCSI_VHCI_GET_TARGET_LONGNAME ioctl argument in order
 	 * to get the 'target-port'. For KSTAT_FLAG_PERSISTENT kstats,
 	 * this ioctl needs to translate a <pid> to a 'target-port'
 	 * even after all pathinfo nodes associated with the
 	 * 'target-port' have been destroyed. This is needed to support
-	 * consistent first-iteration activity-since-boot iostat(1M)
+	 * consistent first-iteration activity-since-boot iostat(8)
 	 * output. Because of this requirement, the mapping can't be
 	 * based on pathinfo information in a devinfo snapshot.
 	 */
@@ -5003,7 +5008,7 @@ vhci_kstat_create_pathinfo(mdi_pathinfo_t *pip)
 		 * For this type of mapping we don't want the
 		 * <id> -> 'target-port' mapping to be made.  This
 		 * will cause the SCSI_VHCI_GET_TARGET_LONGNAME ioctl
-		 * to fail, and the iostat(1M) long '-n' output will
+		 * to fail, and the iostat(8) long '-n' output will
 		 * still use the <pid>.  We do this because we just
 		 * made up the 'target-port' using the guid, and we
 		 * don't want to expose that fact in iostat output.
@@ -6283,7 +6288,6 @@ vhci_get_phci_path_list(dev_info_t *pdip, sv_path_info_t *pibuf,
 	sv_path_info_t		*ret_pip;
 	int			status;
 	size_t			prop_size;
-	int			circular;
 
 	/*
 	 * Get the PHCI structure and retrieve the path information
@@ -6293,7 +6297,7 @@ vhci_get_phci_path_list(dev_info_t *pdip, sv_path_info_t *pibuf,
 	ret_pip = pibuf;
 	count = 0;
 
-	ndi_devi_enter(pdip, &circular);
+	ndi_devi_enter(pdip);
 
 	done = (count >= num_elems);
 	pip = mdi_get_next_client_path(pdip, NULL);
@@ -6343,7 +6347,7 @@ vhci_get_phci_path_list(dev_info_t *pdip, sv_path_info_t *pibuf,
 		done = (count >= num_elems);
 	}
 
-	ndi_devi_exit(pdip, circular);
+	ndi_devi_exit(pdip);
 
 	return (MDI_SUCCESS);
 }
@@ -6366,12 +6370,11 @@ vhci_get_client_path_list(dev_info_t *cdip, sv_path_info_t *pibuf,
 	sv_path_info_t		*ret_pip;
 	int			status;
 	size_t			prop_size;
-	int			circular;
 
 	ret_pip = pibuf;
 	count = 0;
 
-	ndi_devi_enter(cdip, &circular);
+	ndi_devi_enter(cdip);
 
 	done = (count >= num_elems);
 	pip = mdi_get_next_phci_path(cdip, NULL);
@@ -6421,7 +6424,7 @@ vhci_get_client_path_list(dev_info_t *cdip, sv_path_info_t *pibuf,
 		done = (count >= num_elems);
 	}
 
-	ndi_devi_exit(cdip, circular);
+	ndi_devi_exit(cdip);
 
 	return (MDI_SUCCESS);
 }
@@ -6850,6 +6853,7 @@ vhci_failover(dev_info_t *vdip, dev_info_t *cdip, int flags)
 	int			reserve_pending, check_condition, UA_condition;
 	struct scsi_pkt		*pkt;
 	struct buf		*bp;
+	size_t			blksize;
 
 	vhci = ddi_get_soft_state(vhci_softstate, ddi_get_instance(vdip));
 	sd = ddi_get_driver_private(cdip);
@@ -6860,6 +6864,8 @@ vhci_failover(dev_info_t *vdip, dev_info_t *cdip, int flags)
 	VHCI_DEBUG(1, (CE_NOTE, NULL, "!vhci_failover(1): guid %s\n", guid));
 	vhci_log(CE_NOTE, vdip, "!Initiating failover for device %s "
 	    "(GUID %s)", ddi_node_name(cdip), guid);
+
+	blksize = vhci_get_blocksize(cdip);
 
 	/*
 	 * Lets maintain a local copy of the vlun->svl_active_pclass
@@ -6963,7 +6969,7 @@ next_pathclass:
 		UA_condition = 0;
 
 		bp = scsi_alloc_consistent_buf(&svp->svp_psd->sd_address,
-		    (struct buf *)NULL, DEV_BSIZE, B_READ, NULL, NULL);
+		    (struct buf *)NULL, blksize, B_READ, NULL, NULL);
 		if (!bp) {
 			VHCI_DEBUG(1, (CE_NOTE, NULL,
 			    "vhci_failover !No resources (buf)\n"));
@@ -6975,7 +6981,7 @@ next_pathclass:
 		    PKT_CONSISTENT, NULL, NULL);
 		if (pkt) {
 			(void) scsi_setup_cdb((union scsi_cdb *)(uintptr_t)
-			    pkt->pkt_cdbp, SCMD_READ, 1, 1, 0);
+			    pkt->pkt_cdbp, SCMD_READ_G1, 1, 1, 0);
 			pkt->pkt_flags = FLAG_NOINTR;
 check_path_again:
 			pkt->pkt_path_instance = mdi_pi_get_path_instance(npip);
@@ -7183,7 +7189,6 @@ static void
 vhci_client_attached(dev_info_t *cdip)
 {
 	mdi_pathinfo_t	*pip;
-	int		circular;
 
 	/*
 	 * At this point the client has attached and it's instance number is
@@ -7192,11 +7197,11 @@ vhci_client_attached(dev_info_t *cdip)
 	 * case the call to vhci_kstat_create_pathinfo in vhci_pathinfo_online
 	 * was a noop.
 	 */
-	ndi_devi_enter(cdip, &circular);
+	ndi_devi_enter(cdip);
 	for (pip = mdi_get_next_phci_path(cdip, NULL); pip;
 	    pip = mdi_get_next_phci_path(cdip, pip))
 		vhci_kstat_create_pathinfo(pip);
-	ndi_devi_exit(cdip, circular);
+	ndi_devi_exit(cdip);
 }
 
 /*
@@ -7494,11 +7499,10 @@ vhci_quiesce_lun(struct scsi_vhci_lun *vlun)
 	struct scsi_vhci_priv	*svp;
 	mdi_pathinfo_state_t	pstate;
 	uint32_t		p_ext_state;
-	int			circular;
 
 	cdip = vlun->svl_dip;
 	pip = spip = NULL;
-	ndi_devi_enter(cdip, &circular);
+	ndi_devi_enter(cdip);
 	pip = mdi_get_next_phci_path(cdip, NULL);
 	while (pip != NULL) {
 		(void) mdi_pi_get_state2(pip, &pstate, &p_ext_state);
@@ -7508,7 +7512,7 @@ vhci_quiesce_lun(struct scsi_vhci_lun *vlun)
 			continue;
 		}
 		mdi_hold_path(pip);
-		ndi_devi_exit(cdip, circular);
+		ndi_devi_exit(cdip);
 		svp = (scsi_vhci_priv_t *)mdi_pi_get_vhci_private(pip);
 		mutex_enter(&svp->svp_mutex);
 		while (svp->svp_cmds != 0) {
@@ -7524,12 +7528,12 @@ vhci_quiesce_lun(struct scsi_vhci_lun *vlun)
 			}
 		}
 		mutex_exit(&svp->svp_mutex);
-		ndi_devi_enter(cdip, &circular);
+		ndi_devi_enter(cdip);
 		spip = pip;
 		pip = mdi_get_next_phci_path(cdip, spip);
 		mdi_rele_path(spip);
 	}
-	ndi_devi_exit(cdip, circular);
+	ndi_devi_exit(cdip);
 	return (1);
 }
 
@@ -8346,7 +8350,7 @@ vhci_uscsi_send_sense(struct scsi_pkt *pkt, mp_uscsi_cmd_t *mp_uscmdp)
 	rqpkt->pkt_private = mp_uscmdp;
 
 	/*
-	 * NOTE: This code path is related to MPAPI uscsi(7I), so path
+	 * NOTE: This code path is related to MPAPI uscsi(4I), so path
 	 * selection is not based on path_instance.
 	 */
 	if (scsi_pkt_allocated_correctly(rqpkt))
@@ -8577,7 +8581,7 @@ vhci_uscsi_iostart(struct buf *bp)
 	    (void *)bp, bp->b_bcount, (void *)mp_uscmdp->pip, stat_size));
 
 	/*
-	 * NOTE: This code path is related to MPAPI uscsi(7I), so path
+	 * NOTE: This code path is related to MPAPI uscsi(4I), so path
 	 * selection is not based on path_instance.
 	 */
 	if (scsi_pkt_allocated_correctly(pkt))
@@ -8819,4 +8823,53 @@ vhci_invalidate_mpapi_lu(struct scsi_vhci *vhci, scsi_vhci_lun_t *vlun)
 	}
 	VHCI_DEBUG(6, (CE_WARN, NULL, "vhci_invalidate_mpapi_lu: "
 	    "Could not find LU(%s) to invalidate.", svl_wwn));
+}
+
+/*
+ * Return the device's block size (as given by the 'device-blksize'
+ * property). If the property does not exist, the default DEV_BSIZE
+ * is returned.
+ */
+size_t
+vhci_get_blocksize(dev_info_t *dip)
+{
+	/*
+	 * Unfortunately, 'device-blksize' is typically implemented in
+	 * a device as a dynamic property managed by cmlb. As a result,
+	 * we cannot merely use ddi_prop_get_int() to get the value.
+	 * Instead, we must call the cb_prop_op on the device.
+	 * If that fails, we will attempt ddi_prop_get_int() in case
+	 * there is a device that defines it as a static property.
+	 * If all else fails, we return DEV_BSIZE.
+	 */
+	struct dev_ops *ops = DEVI(dip)->devi_ops;
+
+	/*
+	 * The DDI property interfaces don't recognize unsigned
+	 * values, so we have to cast it outself when we return the value.
+	 */
+	int blocksize = DEV_BSIZE;
+
+	/*
+	 * According to i_ldi_prop_op(), some nexus drivers apparently do not
+	 * always correctly set cb_prop_op, so we must check for
+	 * nodev, nulldev, and NULL.
+	 */
+	if (ops->devo_cb_ops->cb_prop_op != nodev &&
+	    ops->devo_cb_ops->cb_prop_op != nulldev &&
+	    ops->devo_cb_ops->cb_prop_op != NULL) {
+		int proplen = sizeof (blocksize);
+		int ret;
+
+		ret = cdev_prop_op(DDI_DEV_T_ANY, dip, PROP_LEN_AND_VAL_BUF,
+		    DDI_PROP_DONTPASS | DDI_PROP_NOTPROM | DDI_PROP_DYNAMIC,
+		    "device-blksize", (caddr_t)&blocksize, &proplen);
+		if (ret == DDI_PROP_SUCCESS && proplen == sizeof (blocksize) &&
+		    blocksize > 0)
+			return (blocksize);
+	}
+
+	blocksize = ddi_prop_get_int(DDI_DEV_T_ANY, dip, 0, "device-blksize",
+	    DEV_BSIZE);
+	return ((blocksize > 0) ? blocksize : DEV_BSIZE);
 }

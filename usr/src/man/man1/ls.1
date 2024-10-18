@@ -43,7 +43,7 @@
 .\" Copyright 1989 AT&T
 .\" Portions Copyright (c) 1992, X/Open Company Limited All Rights Reserved
 .\" Copyright (c) 2009, Sun Microsystems, Inc. All Rights Reserved
-.\" Copyright 2014 Nexenta Systems, Inc.  All Rights Reserved.
+.\" Copyright 2016 Nexenta Systems, Inc.  All Rights Reserved.
 .\"
 .TH LS 1 "Apr 25, 2020"
 .SH NAME
@@ -87,7 +87,7 @@ to a terminal is multi\(micolumn with entries sorted down the columns. The
 format. In order to determine output formats for the \fB-C\fR, \fB-x\fR, and
 \fB-m\fR options, \fBls\fR uses an environment variable, \fBCOLUMNS\fR, to
 determine the number of character positions available on one output line. If
-this variable is not set, the \fBterminfo\fR(4) database is used to determine
+this variable is not set, the \fBterminfo\fR(5) database is used to determine
 the number of columns, based on the environment variable, \fBTERM\fR. If this
 information cannot be obtained, 80 columns are assumed. If the \fB-w\fR option
 is used, the argument overrides any other column width.
@@ -1183,7 +1183,12 @@ Streams output format. Files are listed across the page, separated by commas.
 .sp .6
 .RS 4n
 The same as \fB-l\fR, except that the owner's \fBUID\fR and group's \fBGID\fR
-numbers are printed, rather than the associated character strings.
+numbers are printed, rather than the associated character strings. For files
+which owner and/or group is a Windows Security Identifier (\fBSID\fR), \fB-n\fR
+suppresses any lookups for the Windows Name string and prints only the raw SID.
+Moreover, a second instance of this flag (\fB-nn\fR) can be used to further
+suppress \fBidmapd\fR(8) lookups of the file's owner and/or group SID, thus
+forcing \fBls\fR into printing the raw ephemeral numeric identifiers.
 .RE
 
 .sp
@@ -2386,7 +2391,7 @@ diagnostic message is output on standard error.
 .RE
 
 .SH USAGE
-See \fBlargefile\fR(5) for the description of the behavior of \fBls\fR when
+See \fBlargefile\fR(7) for the description of the behavior of \fBls\fR when
 encountering files greater than or equal to 2 Gbyte ( 2^31 bytes).
 .SH EXAMPLES
 \fBExample 1 \fRViewing File Permissions
@@ -2635,7 +2640,7 @@ example% ls -%crtime -tl file*
 .LP
 In this example the files are sorted by creation time.
 .SH ENVIRONMENT VARIABLES
-See \fBenviron\fR(5) for descriptions of the following environment variables
+See \fBenviron\fR(7) for descriptions of the following environment variables
 that affect the execution of \fBls\fR: \fBLANG\fR, \fBLC_ALL\fR,
 \fBLC_COLLATE\fR, \fBLC_CTYPE\fR, \fBLC_TIME\fR, \fBLC_MESSAGES\fR,
 \fBNLSPATH\fR, and \fBTZ\fR.
@@ -2727,7 +2732,7 @@ terminal information database
 .RE
 
 .SH ATTRIBUTES
-See \fBattributes\fR(5) for descriptions of the following attributes:
+See \fBattributes\fR(7) for descriptions of the following attributes:
 .SS "/usr/bin/ls"
 
 .TS
@@ -2752,7 +2757,7 @@ For all options except \fB-A\fR, \fB-b\fR, \fB-e\fR, \fB-E,\fR \fB-h\fR,
 \fB--escape\fR, \fB--file-type\fR, \fB--full-time\fR, \fB--human-readable\fR,
 \fB--ignore-backups\fR, \fB--inode\fR, \fB--no-group\fR,
 \fB--numeric-uid-gid\fR, \fB--reverse\fR, \fB--recursive\fR, \fB--si\fR,
-\fB--size\fR, and \fB--time-style\fR, see \fBstandards\fR(5).
+\fB--size\fR, and \fB--time-style\fR, see \fBstandards\fR(7).
 .SS "/usr/xpg4/bin/ls"
 
 .TS
@@ -2777,7 +2782,7 @@ For all options except \fB-A\fR, \fB-b\fR, \fB-e\fR, \fB-E,\fR \fB-h\fR,
 \fB--escape\fR, \fB--file-type\fR, \fB--full-time\fR, \fB--human-readable\fR,
 \fB--ignore-backups\fR, \fB--inode\fR, \fB--no-group\fR,
 \fB--numeric-uid-gid\fR, \fB--reverse\fR, \fB--recursive\fR, \fB--si\fR,
-\fB--size\fR, and \fB--time-style\fR, see \fBstandards\fR(5).
+\fB--size\fR, and \fB--time-style\fR, see \fBstandards\fR(7).
 .SS "/usr/xpg6/bin/ls"
 
 .TS
@@ -2802,11 +2807,20 @@ For all options except \fB-A\fR, \fB-b\fR, \fB-e\fR, \fB-E,\fR \fB-h\fR,
 \fB--escape\fR, \fB--file-type\fR, \fB--full-time\fR, \fB--human-readable\fR,
 \fB--ignore-backups\fR, \fB--inode\fR, \fB--no-group\fR,
 \fB--numeric-uid-gid\fR, \fB--reverse\fR, \fB--recursive\fR, \fB--si\fR,
-\fB--size\fR, and \fB--time-style\fR, see \fBstandards\fR(5).
+\fB--size\fR, and \fB--time-style\fR, see \fBstandards\fR(7).
 .SH SEE ALSO
-\fBchmod\fR(1), \fBcp\fR(1), \fBsetfacl\fR(1), \fBfgetattr\fR(3C),
-\fBstrftime\fR(3C), \fBterminfo\fR(4), \fBacl\fR(5), \fBattributes\fR(5),
-\fBenviron\fR(5), \fBfsattr\fR(5), \fBlargefile\fR(5), \fBstandards\fR(5)
+.BR chmod (1),
+.BR cp (1),
+.BR setfacl (1),
+.BR fgetattr (3C),
+.BR strftime (3C),
+.BR terminfo (5),
+.BR acl (7),
+.BR attributes (7),
+.BR environ (7),
+.BR fsattr (7),
+.BR largefile (7),
+.BR standards (7)
 .SH NOTES
 Unprintable characters in file names can confuse the columnar output options.
 .sp
@@ -2820,3 +2834,9 @@ overridden by the \fBLC_COLLATE\fR environment variable. For example, if
 beginning with upper-case letters, then followed by names beginning with
 lower-case letters. But if \fBLC_COLLATE\fR equals \fBen_US.ISO8859-1\fR, then
 leading dots as well as case are ignored in determining the sort order.
+.sp
+.LP
+For additional information regarding Windows Security Identifiers, consult
+Microsoft support document, \fIWell-known security identifiers in Windows
+operating systems\fR, which can be found at Microsoft's support site:
+https://support.microsoft.com/en-us/kb/243330/.

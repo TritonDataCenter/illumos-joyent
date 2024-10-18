@@ -23,8 +23,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include	<sysexits.h>
 #include	<stdlib.h>
 #include	<stdio.h>
@@ -32,6 +30,44 @@
 #include	"gprof.h"
 #include	"profile.h"
 
+bool		aflag;
+bool		bflag;
+bool		Bflag;
+bool		cflag;
+bool		Cflag;
+bool		dflag;
+bool		Dflag;
+bool		eflag;
+bool		Eflag;
+bool		fflag;
+bool		Fflag;
+bool		lflag;
+bool		sflag;
+bool		zflag;
+bool		nflag;
+bool		rflag;
+bool		first_file;
+bool		old_style;
+double		scale;
+double		totime;
+Size		n_pcsamples;
+mod_info_t	modules;
+pctype		s_lowpc;
+pctype		s_highpc;
+sztype		n_modules;
+sztype		sampbytes;
+sztype		nsamples;
+unsigned short	*samples;
+fl_info_t	aout_info;
+fl_info_t	gmonout_info;
+long		hz;
+struct hdr	h;
+unsigned char	*textspace;
+int		debug;
+int		number_funcs_toprint;
+char		*a_outname;
+char		*prog_name;
+char		*gmonname;
 char		*whoami = "gprof";
 static pctype	lowpc, highpc;		/* range profiled, in UNIT's */
 
@@ -799,7 +835,8 @@ assign_pcsamples(mod_info_t *module, Address *pcsmpl, size_t n_samples)
 	while ((pcptr < pcse) && (*pcptr < module->load_end)) {
 
 		/* Update the corresponding function's time */
-		if (fnl = nllookup(module, (pctype) *pcptr, &nxt_func)) {
+		fnl = nllookup(module, (pctype) *pcptr, &nxt_func);
+		if (fnl != NULL) {
 			/*
 			 * Collect all pc-hits in this function. Each
 			 * pc-hit counts as 1 tick.
@@ -1018,7 +1055,7 @@ process_cgraph(ProfCallGraph *cgp)
 	}
 
 #ifdef DEBUG
-	puts("\n");
+	(void) puts("\n");
 #endif /* DEBUG */
 }
 
@@ -1896,7 +1933,7 @@ main(int argc, char **argv)
 		int i;
 		(void) printf(" Name, pc_entry_pt, svalue, tix_in_routine, "
 		    "#calls, selfcalls, index \n");
-		for (i = 0; i < modules.nname; i++) { 	/* Print each symbol */
+		for (i = 0; i < modules.nname; i++) {	/* Print each symbol */
 			if (timesortnlp[i]->name)
 				(void) printf(" %s ", timesortnlp[i]->name);
 			else

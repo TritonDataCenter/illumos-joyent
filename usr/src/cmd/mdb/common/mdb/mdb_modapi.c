@@ -24,6 +24,9 @@
  * Copyright (c) 2013 by Delphix. All rights reserved.
  * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
+ * Copyright 2023 RackTop Systems, Inc.
+ * Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #include <mdb/mdb_modapi.h>
@@ -37,6 +40,7 @@
 #include <mdb/mdb_lex.h>
 #include <mdb/mdb_frame.h>
 #include <mdb/mdb.h>
+#include <inttypes.h>
 
 /*
  * Private callback structure for implementing mdb_walk_dcmd, below.
@@ -102,6 +106,62 @@ mdb_nicenum(uint64_t num, char *buf)
 		(void) mdb_snprintf(buf, MDB_NICENUM_BUFLEN, "%llu%s",
 		    (u_longlong_t)n, u);
 	}
+}
+
+void
+mdb_nicetime(int64_t delta, char *buf, size_t buflen)
+{
+	const char	*sign = (delta < 0) ? "-" : "+";
+	char		daybuf[32] = { 0 };
+	char		fracbuf[32] = { 0 };
+
+	if (delta < 0)
+		delta = -delta;
+
+	if (delta == 0) {
+		(void) mdb_snprintf(buf, buflen, "0ns");
+		return;
+	}
+
+	/* Handle values < 1s */
+	if (delta < NANOSEC) {
+		static const char f_units[] = "num";
+
+		uint_t idx = 0;
+		while (delta >= 1000) {
+			delta /= 1000;
+			idx++;
+		}
+
+		(void) mdb_snprintf(buf, buflen, "t%s%lld%cs",
+		    sign, delta, f_units[idx]);
+		return;
+	}
+
+	uint64_t days, hours, mins, secs, frac;
+
+	frac = delta % NANOSEC;
+	delta /= NANOSEC;
+
+	secs = delta % 60;
+	delta /= 60;
+
+	mins = delta % 60;
+	delta /= 60;
+
+	hours = delta % 24;
+	delta /= 24;
+
+	days = delta;
+
+	if (days > 0)
+		(void) mdb_snprintf(daybuf, sizeof (daybuf), "%llud ", days);
+
+	if (frac > 0)
+		(void) mdb_snprintf(fracbuf, sizeof (fracbuf), ".%llu", frac);
+
+	(void) mdb_snprintf(buf, buflen, "t%s%s%02llu:%02llu:%02llu%s",
+	    sign, daybuf, hours, mins, secs, fracbuf);
 }
 
 ssize_t
@@ -262,11 +322,15 @@ mdb_getareg(mdb_tid_t tid, const char *rname, mdb_reg_t *rp)
 	return (mdb_tgt_getareg(mdb.m_target, tid, rname, rp));
 }
 
-u_longlong_t
-mdb_strtoull(const char *s)
+int
+mdb_thread_name(mdb_tid_t tid, char *buf, size_t bufsize)
 {
-	int radix = mdb.m_radix;
+	return (mdb_tgt_thread_name(mdb.m_target, tid, buf, bufsize));
+}
 
+static u_longlong_t
+mdb_strtoull_int(const char *s, int radix)
+{
 	if (s[0] == '0') {
 		switch (s[1]) {
 		case 'I':
@@ -293,6 +357,32 @@ mdb_strtoull(const char *s)
 	}
 
 	return (mdb_strtonum(s, radix));
+}
+
+u_longlong_t
+mdb_strtoullx(const char *s, mdb_strtoull_flags_t flags)
+{
+	int radix;
+
+	if ((flags & ~MDB_STRTOULL_F_BASE_C) != 0) {
+		mdb_warn("invalid options specified: 0x%lx" PRIx64 "\n",
+		    (uint64_t)flags);
+		return ((uintmax_t)ULLONG_MAX);
+	}
+
+	if ((flags & MDB_STRTOULL_F_BASE_C) != 0) {
+		radix = 10;
+	} else {
+		radix = mdb.m_radix;
+	}
+
+	return (mdb_strtoull_int(s, radix));
+}
+
+u_longlong_t
+mdb_strtoull(const char *s)
+{
+	return (mdb_strtoull_int(s, mdb.m_radix));
 }
 
 size_t
@@ -645,9 +735,9 @@ walk_dcmd(uintptr_t addr, const void *ignored, dcmd_walk_arg_t *dwp)
 	return (WALK_NEXT);
 }
 
-int
-mdb_pwalk_dcmd(const char *wname, const char *dcname,
-    int argc, const mdb_arg_t *argv, uintptr_t addr)
+static int
+i_mdb_pwalk_dcmd(const char *wname, const char *dcname,
+    int argc, const mdb_arg_t *argv, uintptr_t addr, uint_t flags)
 {
 	mdb_argvec_t args;
 	dcmd_walk_arg_t dw;
@@ -669,7 +759,7 @@ mdb_pwalk_dcmd(const char *wname, const char *dcname,
 
 	mdb_argvec_create(&dw.dw_argv);
 	mdb_argvec_copy(&dw.dw_argv, &args);
-	dw.dw_flags = DCMD_LOOP | DCMD_LOOPFIRST | DCMD_ADDRSPEC;
+	dw.dw_flags = flags | DCMD_LOOP | DCMD_LOOPFIRST | DCMD_ADDRSPEC;
 
 	wcb = mdb_wcb_create(iwp, (mdb_walk_cb_t)walk_dcmd, &dw, addr);
 	status = walk_common(wcb);
@@ -681,10 +771,25 @@ mdb_pwalk_dcmd(const char *wname, const char *dcname,
 }
 
 int
+mdb_pwalk_dcmd(const char *wname, const char *dcname,
+    int argc, const mdb_arg_t *argv, uintptr_t addr)
+{
+	return (i_mdb_pwalk_dcmd(wname, dcname, argc, argv, addr, 0));
+}
+
+int
+mdb_fpwalk_dcmd(const char *wname, const char *dcname,
+    int argc, const mdb_arg_t *argv, uintptr_t addr, uint_t flags)
+{
+	return (i_mdb_pwalk_dcmd(wname, dcname, argc, argv, addr, flags));
+}
+
+
+int
 mdb_walk_dcmd(const char *wname, const char *dcname,
     int argc, const mdb_arg_t *argv)
 {
-	return (mdb_pwalk_dcmd(wname, dcname, argc, argv, 0));
+	return (i_mdb_pwalk_dcmd(wname, dcname, argc, argv, 0, 0));
 }
 
 /*ARGSUSED*/

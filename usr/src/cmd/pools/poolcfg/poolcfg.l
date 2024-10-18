@@ -24,7 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 #pragma       error_messages(off, E_STATEMENT_NOT_REACHED)
 
 /*
@@ -61,7 +60,7 @@
  * matched, the stored state is entered and the additional state specific
  * matching regular expressions become available. Once a state specific
  * token is matched, the default state is restored.
- * 
+ *
  */
 #include <stdlib.h>
 #include <sys/types.h>
@@ -77,7 +76,7 @@
 
 static int lex_lineno = 1;		/* line-number for error reporting */
 static int state = INITIAL;		/* state to be used */
-extern void yyerror(char *s);
+extern int yyerror(const char *s);
 extern int dofile;			/* are we processing a file? */
 %}
 
@@ -160,8 +159,8 @@ system			{ return PCE_SYSTEM; }
 \)			{ return PCK_CLOSELST; }
 
 =			{
-   				 BEGIN state;
-				 return PCK_ASSIGN;
+				BEGIN state;
+				return PCK_ASSIGN;
 			}
 
 \;			{ return PCK_SEPLST; }
@@ -171,7 +170,8 @@ system			{ return PCE_SYSTEM; }
 <ISTATE>-?[0-9]+	{
 				yylval.ival = strtoll(yytext, NULL, 0);
 				if (errno == EINVAL || errno == ERANGE) {
-					yyerror(gettext("Invalid value"));
+					(void) yyerror(gettext(
+					    "Invalid value"));
 					exit(E_ERROR);
 				}
 				BEGIN INITIAL;
@@ -181,7 +181,8 @@ system			{ return PCE_SYSTEM; }
 <USTATE>[0-9]+		{
 				yylval.uval = strtoull(yytext, NULL, 0);
 				if (errno == EINVAL || errno == ERANGE) {
-					yyerror(gettext("Invalid value"));
+					(void) yyerror(gettext(
+					    "Invalid value"));
 					exit(E_ERROR);
 				}
 				BEGIN INITIAL;
@@ -200,7 +201,8 @@ system			{ return PCE_SYSTEM; }
 
 <SSTATE>\"[^\"\n]*[\"\n] {
 				if((yylval.sval = strdup(yytext+1)) == NULL) {
-					yyerror(gettext("Out of memory"));
+					(void) yyerror(gettext(
+					    "Out of memory"));
 					exit(E_ERROR);
 				}
 				if (yylval.sval[yyleng-2] =='"')
@@ -212,7 +214,8 @@ system			{ return PCE_SYSTEM; }
 <DSTATE>([0-9]+|([0-9]*\.[0-9]+)([eE][-+]?[0-9]+)?) {
 				yylval.dval = strtod(yytext, (char **)NULL);
 				if (errno == EINVAL || errno == ERANGE) {
-					yyerror(gettext("Invalid value"));
+					(void) yyerror(gettext(
+					    "Invalid value"));
 					exit(E_ERROR);
 				}
 				BEGIN INITIAL;
@@ -221,44 +224,46 @@ system			{ return PCE_SYSTEM; }
 
 [A-Za-z][A-Za-z0-9,._-]*	{
 				if ((yylval.sval = strdup(yytext)) == NULL) {
-					yyerror(gettext("Out of memory"));
+					(void) yyerror(gettext(
+					    "Out of memory"));
 					exit(E_ERROR);
 				}
- 				return PCV_SYMBOL;
+				return PCV_SYMBOL;
 			}
 
 <CPUSTATE>[0-9]+	{
 				if ((yylval.sval = strdup(yytext)) == NULL) {
-					yyerror(gettext("Out of memory"));
+					(void) yyerror(gettext(
+					    "Out of memory"));
 					exit(E_ERROR);
 				}
 				BEGIN INITIAL;
- 				return PCV_SYMBOL;
+				return PCV_SYMBOL;
 			}
 .			{
-				yyerror(gettext("Illegal character"));
+				(void) yyerror(gettext("Illegal character"));
 				exit(E_ERROR);
 			}
 
 %%
 
-void
-yyerror(char *s)
+int
+yyerror(const char *s)
 {
 	if (dofile == PO_TRUE) {
 		if (yytext[0] == '\0') {
 			(void) warn(gettext("line %d, %s, token expected\n"),
 			    lex_lineno, s);
-			return;
+			return (0);
 		}
 		(void) warn(gettext("line %d, %s at '%s'\n"), lex_lineno, s,
 		    yytext);
 	} else {
 		if (yytext[0] == '\0') {
 			(void) warn(gettext("%s, token expected\n"), s);
-			return;
+			return (0);
 		}
 		(void) warn(gettext("%s at '%s'\n"), s, yytext);
 	}
+	return (0);
 }
-

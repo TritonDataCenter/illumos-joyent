@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2022-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -30,6 +31,8 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#include <ucred.h>
+#include <priv.h>
 
 #include <smbsrv/libsmb.h>
 #include <smbsrv/libmlsvc.h>
@@ -231,7 +234,7 @@ pipesvc_listener(void *varg)
 		if (np == NULL) {
 			smbd_report("pipesvc_listener, alloc1 failed");
 			(void) close(newfd);
-			continue;
+			smbd_nomem();
 		}
 
 		rc = pthread_create(&tid, NULL, pipesvc_worker, np);
@@ -239,7 +242,7 @@ pipesvc_listener(void *varg)
 			smbd_report("pipesvc_listener, pthread_create: %d",
 			    errno);
 			np_free(np);
-			continue;
+			smbd_nomem();
 		}
 		(void) pthread_detach(tid);
 
@@ -252,6 +255,61 @@ out:
 	pl->tid = 0;
 	return (NULL);
 }
+
+#ifndef FKSMBD
+/*
+ * Decide whether we should trust the (in-band) user information
+ * that the client sends us over the named pipe.  The (in-kernel)
+ * SMB service calls this with the credential of the logged-on
+ * SMB user.  The privileges are normally:
+ *	  effective: basic,file_dac_search
+ *	inheritable: basic
+ *	  permitted: basic,file_dac_search,sys_smb
+ *	      limit: all
+ * This tests the permitted set for the presence of PRIV_SYS_SMB,
+ * which should only be granted to the SMB server.
+ */
+static boolean_t
+pipe_has_priv(ndr_pipe_t *np)
+{
+	ucred_t *uc = NULL;
+	const priv_set_t *ps = NULL;
+	boolean_t ret = B_FALSE;
+	pid_t  clpid;
+
+	if (getpeerucred(np->np_fid, &uc) != 0) {
+		smbd_report("pipesvc: getpeerucred err %d", errno);
+		return (B_FALSE);
+	}
+	clpid = ucred_getpid(uc);
+	ps = ucred_getprivset(uc, PRIV_PERMITTED);
+	if (ps == NULL) {
+		smbd_report("pipesvc: ucred_getprivset failed");
+		goto out;
+	}
+
+	/*
+	 * Require sys_smb priv.
+	 */
+	if (priv_ismember(ps, PRIV_SYS_SMB)) {
+		ret = B_TRUE;
+		goto out;
+	}
+
+	if (smbd.s_debug) {
+		smbd_report("pipesvc: non-privileged client "
+		    "PID = %d UID = %d",
+		    (int)clpid, ucred_getruid(uc));
+	}
+
+out:
+	/* ps is free'd with the ucred */
+	if (uc != NULL)
+		ucred_free(uc);
+
+	return (ret);
+}
+#endif
 
 static void *
 pipesvc_worker(void *varg)
@@ -313,6 +371,16 @@ pipesvc_worker(void *varg)
 		smbd_report("pipesvc_worker, bad uinfo");
 		goto out_free_buf;
 	}
+
+	/*
+	 * Don't trust the netuserinfo unless the client side
+	 * has the necessary privileges
+	 */
+#ifndef FKSMBD
+	if (!pipe_has_priv(np)) {
+		np->np_user->ui_flags = SMB_ATF_ANON;
+	}
+#endif
 
 	/*
 	 * Later, could disallow opens of some pipes by

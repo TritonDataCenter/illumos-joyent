@@ -1,4 +1,4 @@
-#!@TOOLS_PYTHON@
+#!@TOOLS_PYTHON@ -Es
 #
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License version 2
@@ -21,7 +21,8 @@
 # Copyright (c) 2015, 2016 by Delphix. All rights reserved.
 # Copyright 2016 Nexenta Systems, Inc.
 # Copyright (c) 2019, Joyent, Inc.
-# Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2024 Bill Sommerfeld
 #
 
 from __future__ import print_function
@@ -33,6 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 
 if sys.version_info[0] < 3:
     from cStringIO import StringIO
@@ -57,6 +59,7 @@ sys.path.insert(2, os.path.join(os.path.dirname(__file__), ".."))
 from onbld.Scm import Ignore
 from onbld.Checks import Comments, Copyright, CStyle, HdrChk, WsCheck
 from onbld.Checks import JStyle, Keywords, ManLint, Mapfile, SpellCheck
+from onbld.Checks import ShellLint, PkgFmt
 
 class GitError(Exception):
     pass
@@ -95,10 +98,10 @@ def git(command):
 def git_root():
     """Return the root of the current git workspace"""
 
-    p = git('rev-parse --git-dir')
-    dir = p[0]
+    p = git('rev-parse --show-toplevel')
+    dir = p[0].strip()
 
-    return os.path.abspath(os.path.join(dir, os.path.pardir))
+    return os.path.abspath(dir)
 
 def git_branch():
     """Return the current git branch"""
@@ -135,8 +138,20 @@ def git_parent_branch(branch):
                 return remote
     return 'origin/master'
 
+def slices(strlist, sep):
+    """Yield start & end of each commit within the list of comments"""
+    low = 0
+    for i, v in enumerate(strlist):
+        if v == sep:
+            yield(low, i)
+            low = i+1
+
+    if low != len(strlist):
+        yield(low, len(strlist))
+
 def git_comments(parent):
-    """Return a list of any checkin comments on this git branch"""
+    """Return the checkin comments for each commit on this git branch,
+    structured as a list of lists of lines."""
 
     p = git('log --pretty=tformat:%%B:SEP: %s..' % parent)
 
@@ -144,7 +159,8 @@ def git_comments(parent):
         sys.stderr.write("No outgoing changesets found - missing -p option?\n");
         sys.exit(1)
 
-    return [x.strip() for x in p if x != ':SEP:\n']
+    return [ [line.strip() for line in p[a:b]]
+             for (a, b) in slices(p, ':SEP:\n')]
 
 def git_file_list(parent, paths=None):
     """Return the set of files which have ever changed on this branch.
@@ -161,17 +177,18 @@ def git_file_list(parent, paths=None):
 
     ret = set()
     for fname in p:
-        if fname and not fname.isspace() and fname not in ret:
-            ret.add(fname.strip())
+        fname = fname.strip()
+        if fname and not fname.isspace():
+            ret.add(fname)
 
-    return ret
+    return sorted(ret)
 
 def not_check(root, cmd):
     """Return a function which returns True if a file given as an argument
     should be excluded from the check named by 'cmd'"""
 
     ignorefiles = list(filter(os.path.exists,
-                         [os.path.join(root, ".git", "%s.NOT" % cmd),
+                         [os.path.join(root, ".git/info", "%s.NOT" % cmd),
                           os.path.join(root, "exception_lists", cmd)]))
     return Ignore.ignore(root, ignorefiles)
 
@@ -183,20 +200,12 @@ def gen_files(root, parent, paths, exclude, filter=None):
     if filter is None:
         filter = lambda x: os.path.isfile(x)
 
-    # Taken entirely from Python 2.6's os.path.relpath which we would use if we
-    # could.
-    def relpath(path, here):
-        c = os.path.abspath(os.path.join(root, path)).split(os.path.sep)
-        s = os.path.abspath(here).split(os.path.sep)
-        l = len(os.path.commonprefix((s, c)))
-        return os.path.join(*[os.path.pardir] * (len(s)-l) + c[l:])
-
     def ret(select=None):
         if not select:
             select = lambda x: True
 
         for abspath in git_file_list(parent, paths):
-            path = relpath(abspath, '.')
+            path = os.path.relpath(os.path.join(root, abspath), '.')
             try:
                 res = git("diff %s HEAD %s" % (parent, path))
             except GitError as e:
@@ -219,16 +228,149 @@ def gen_links(root, parent, paths, exclude):
 
     return gen_files(root, parent, paths, exclude, lambda x: os.path.islink(x))
 
+def gen_none(root, parent, paths, exclude):
+    """ Return a function returning the empty list """
+    return lambda x: []
+
+# The list of possible checks.   Each is recorded as two-function pair; the
+# first is the actual checker, and the second is the generator which creates
+# the list of things that the checker works on.
+
+checks = {}
+nits_checks = []
+all_checks = []
+
+def add_check(fn, gen):
+    """ Define a checker and add it to the appropriate lists """
+    name = fn.__name__
+    if fn.__doc__ is None:
+        raise ValueError('Check function lacks a documentation string',
+                         name)
+    checks[name] = (fn, gen)
+    all_checks.append(name)
+    if gen != gen_none:
+        nits_checks.append(name)
+    return fn
+
+def filechecker(fn):
+    """ Decorator which identifies a function as being a file-checker """
+    return add_check(fn, gen_files)
+
+def linkchecker(fn):
+    """ Decorator which identifies a function as being a symlink-checker """
+    return add_check(fn, gen_links)
+
+def wschecker(fn):
+    """ Decorator which identifies a function as being a workspace checker """
+    return add_check(fn, gen_none)
+
+@wschecker
 def comchk(root, parent, flist, output):
+    "Check that putback comments follow the prescribed format"
     output.write("Comments:\n")
 
-    return Comments.comchk(git_comments(parent), check_db=True,
-                           output=output)
+    comments = git_comments(parent)
+    multi = len(comments) > 1
+    state = {}
 
-
-def mapfilechk(root, parent, flist, output):
     ret = 0
+    for commit in comments:
 
+        s = StringIO()
+
+        result = Comments.comchk(commit, check_db=True,
+                                 output=s, bugs=state)
+        ret |= result
+
+        if result != 0:
+            if multi:
+                output.write('\n%s\n' % commit[0])
+            output.write(s.getvalue())
+
+    return ret
+
+@filechecker
+def copyright(root, parent, flist, output):
+    """Check that each source file contains a copyright notice for the current
+year. You don't need to fix this if you, the potential new copyright holder,
+chooses not to."""
+    ret = 0
+    output.write("Copyrights:\n")
+    for f in flist():
+        with io.open(f, encoding='utf-8', errors='replace') as fh:
+            ret |= Copyright.copyright(fh, output=output)
+    return ret
+
+@filechecker
+def cstyle(root, parent, flist, output):
+    "Check that C source files conform to the illumos C style rules"
+    ret = 0
+    output.write("C style:\n")
+    for f in flist(lambda x: x.endswith('.c') or x.endswith('.h')):
+        with io.open(f, mode='rb') as fh:
+            ret |= CStyle.cstyle(fh, output=output, picky=True,
+                             check_posix_types=True,
+                             check_continuation=True)
+    return ret
+
+@filechecker
+def hdrchk(root, parent, flist, output):
+    "Check that C header files conform to the illumos header style rules"
+    ret = 0
+    output.write("Header format:\n")
+    for f in flist(lambda x: x.endswith('.h')):
+        with io.open(f, encoding='utf-8', errors='replace') as fh:
+            ret |= HdrChk.hdrchk(fh, lenient=True, output=output)
+    return ret
+
+@filechecker
+def jstyle(root, parent, flist, output):
+    """Check that Java source files conform to the illumos Java style rules
+(which differ from the traditionally recommended Java style)"""
+
+    ret = 0
+    output.write("Java style:\n")
+    for f in flist(lambda x: x.endswith('.java')):
+        with io.open(f, mode='rb') as fh:
+            ret |= JStyle.jstyle(fh, output=output, picky=True)
+    return ret
+
+@filechecker
+def keywords(root, parent, flist, output):
+    """Check that no source files contain unexpanded SCCS keywords.
+It is possible that this check may false positive on certain inputs.
+It is generally obvious when this is the case.
+
+This check does not check for expanded SCCS keywords, though the common
+'ident'-style lines should be removed regardless of whether they are
+expanded."""
+
+    ret = 0
+    output.write("SCCS Keywords:\n")
+    for f in flist():
+        with io.open(f, encoding='utf-8', errors='replace') as fh:
+            ret |= Keywords.keywords(fh, output=output)
+    return ret
+
+@filechecker
+def manlint(root, parent, flist, output):
+    "Check for problems with man pages."
+
+    ret = 0
+    output.write("Man page format/spelling:\n")
+    ManfileRE = re.compile(r'.*\.[0-9][a-z]*$', re.IGNORECASE)
+    for f in flist(lambda x: ManfileRE.match(x)):
+        with io.open(f, mode='rb') as fh:
+            ret |= ManLint.manlint(fh, output=output, picky=True)
+            ret |= SpellCheck.spellcheck(fh, output=output)
+    return ret
+
+@filechecker
+def mapfilechk(root, parent, flist, output):
+    """Check that linker mapfiles contain a comment directing anyone
+editing to read the directions in usr/lib/README.mapfiles."""
+
+    ret = 0
     # We are interested in examining any file that has the following
     # in its final path segment:
     #    - Contains the word 'mapfile'
@@ -250,72 +392,38 @@ def mapfilechk(root, parent, flist, output):
             ret |= Mapfile.mapfilechk(fh, output=output)
     return ret
 
-def copyright(root, parent, flist, output):
+@filechecker
+def shelllint(root, parent, flist, output):
+    """Check shell scripts for common errors."""
     ret = 0
-    output.write("Copyrights:\n")
-    for f in flist():
-        with io.open(f, encoding='utf-8', errors='replace') as fh:
-            ret |= Copyright.copyright(fh, output=output)
-    return ret
+    output.write("Shell lint:\n")
 
-def hdrchk(root, parent, flist, output):
-    ret = 0
-    output.write("Header format:\n")
-    for f in flist(lambda x: x.endswith('.h')):
-        with io.open(f, encoding='utf-8', errors='replace') as fh:
-            ret |= HdrChk.hdrchk(fh, lenient=True, output=output)
-    return ret
+    def isshell(x):
+        (_, ext) = os.path.splitext(x)
+        if ext in ['.sh', '.ksh']:
+            return True
+        if ext == '':
+            with io.open(x, mode='r', errors='ignore') as fh:
+                if re.match(r'^#.*\bk?sh\b', fh.readline()):
+                    return True
+        return False
 
-def cstyle(root, parent, flist, output):
-    ret = 0
-    output.write("C style:\n")
-    for f in flist(lambda x: x.endswith('.c') or x.endswith('.h')):
+    for f in flist(isshell):
         with io.open(f, mode='rb') as fh:
-            ret |= CStyle.cstyle(fh, output=output, picky=True,
-                             check_posix_types=True,
-                             check_continuation=True)
+            ret |= ShellLint.lint(fh, output=output)
+
     return ret
 
-def jstyle(root, parent, flist, output):
+@filechecker
+def pkgfmt(root, parent, flist, output):
+    """Check package manifests for common errors."""
     ret = 0
-    output.write("Java style:\n")
-    for f in flist(lambda x: x.endswith('.java')):
+    output.write("Package manifests:\n")
+
+    for f in flist(lambda x: x.endswith('.p5m')):
         with io.open(f, mode='rb') as fh:
-            ret |= JStyle.jstyle(fh, output=output, picky=True)
-    return ret
+            ret |= PkgFmt.check(fh, output=output)
 
-def manlint(root, parent, flist, output):
-    ret = 0
-    output.write("Man page format/spelling:\n")
-    ManfileRE = re.compile(r'.*\.[0-9][a-z]*$', re.IGNORECASE)
-    for f in flist(lambda x: ManfileRE.match(x)):
-        with io.open(f, mode='rb') as fh:
-            ret |= ManLint.manlint(fh, output=output, picky=True)
-            ret |= SpellCheck.spellcheck(fh, output=output)
-    return ret
-
-def keywords(root, parent, flist, output):
-    ret = 0
-    output.write("SCCS Keywords:\n")
-    for f in flist():
-        with io.open(f, encoding='utf-8', errors='replace') as fh:
-            ret |= Keywords.keywords(fh, output=output)
-    return ret
-
-def wscheck(root, parent, flist, output):
-    ret = 0
-    output.write("white space nits:\n")
-    for f in flist():
-        with io.open(f, encoding='utf-8', errors='replace') as fh:
-            ret |= WsCheck.wscheck(fh, output=output)
-    return ret
-
-def symlinks(root, parent, flist, output):
-    ret = 0
-    output.write("Symbolic links:\n")
-    for f in flist():
-        output.write("  "+f+"\n")
-        ret |= 1
     return ret
 
 def iswinreserved(name):
@@ -338,7 +446,9 @@ def haswinspecial(name):
             return True
     return False
 
+@filechecker
 def winnames(root, parent, flist, output):
+    "Check for filenames which can't be used in a Windows filesystem."
     ret = 0
     output.write("Illegal filenames (Windows):\n")
     for f in flist():
@@ -356,33 +466,44 @@ def winnames(root, parent, flist, output):
 
     return ret
 
-def run_checks(root, parent, cmds, scmds, paths='', opts={}):
-    """Run the checks given in 'cmds', expected to have well-known signatures,
+@filechecker
+def wscheck(root, parent, flist, output):
+    "Check for whitespace issues such as mixed tabs/spaces in source files."
+    ret = 0
+    output.write("white space nits:\n")
+    for f in flist():
+        with io.open(f, encoding='utf-8', errors='replace') as fh:
+            ret |= WsCheck.wscheck(fh, output=output)
+    return ret
+
+@linkchecker
+def symlinks(root, parent, flist, output):
+    "Check for committed symlinks (there shouldn't be any)."
+    ret = 0
+    output.write("Symbolic links:\n")
+    for f in flist():
+        output.write("  "+f+"\n")
+        ret |= 1
+    return ret
+
+def run_checks(root, parent, checklist, paths=''):
+    """Run the checks named in 'checklist',
     and report results for any which fail.
 
     Return failure if any of them did.
 
-    NB: the function name of the commands passed in is used to name the NOT
+    NB: the check names also name the NOT
     file which excepts files from them."""
 
     ret = 0
 
-    for cmd in cmds:
+    for check in checklist:
+        (cmd, gen) = checks[check]
+
         s = StringIO()
 
-        exclude = not_check(root, cmd.__name__)
-        result = cmd(root, parent, gen_files(root, parent, paths, exclude),
-                     output=s)
-        ret |= result
-
-        if result != 0:
-            print(s.getvalue())
-
-    for cmd in scmds:
-        s = StringIO()
-
-        exclude = not_check(root, cmd.__name__)
-        result = cmd(root, parent, gen_links(root, parent, paths, exclude),
+        exclude = not_check(root, check)
+        result = cmd(root, parent, gen(root, parent, paths, exclude),
                      output=s)
         ret |= result
 
@@ -391,69 +512,53 @@ def run_checks(root, parent, cmds, scmds, paths='', opts={}):
 
     return ret
 
-def nits(root, parent, paths):
-    cmds = [copyright,
-            cstyle,
-            hdrchk,
-            jstyle,
-            keywords,
-            manlint,
-            mapfilechk,
-            winnames,
-            wscheck]
-    scmds = [symlinks]
-    run_checks(root, parent, cmds, scmds, paths)
+def print_checks():
 
-def pbchk(root, parent, paths):
-    cmds = [comchk,
-            copyright,
-            cstyle,
-            hdrchk,
-            jstyle,
-            keywords,
-            manlint,
-            mapfilechk,
-            winnames,
-            wscheck]
-    scmds = [symlinks]
-    run_checks(root, parent, cmds, scmds)
+    for c in all_checks:
+        print(textwrap.fill(
+            "%-11s %s" % (c, checks[c][0].__doc__),
+            width=78,
+            subsequent_indent=' '*12), '\n')
 
 def main(cmd, args):
     parent_branch = None
-    checkname = None
+
+    checklist = []
 
     try:
-        opts, args = getopt.getopt(args, 'b:c:p:')
+        opts, args = getopt.getopt(args, 'lb:c:p:')
     except getopt.GetoptError as e:
         sys.stderr.write(str(e) + '\n')
-        sys.stderr.write("Usage: %s [-c check] [-p branch] [path...]\n" % cmd)
+        sys.stderr.write("Usage: %s [-l] [-c check] [-p branch] [path...]\n"
+                         % cmd)
         sys.exit(1)
 
     for opt, arg in opts:
+        if opt == '-l':
+            print_checks()
+            sys.exit(0)
         # We accept "-b" as an alias of "-p" for backwards compatibility.
-        if opt == '-p' or opt == '-b':
+        elif opt == '-p' or opt == '-b':
             parent_branch = arg
         elif opt == '-c':
-            checkname = arg
+            if arg not in checks:
+                sys.stderr.write("Unknown check '%s'\n" % arg)
+                sys.exit(1)
+            checklist.append(arg)
 
     if not parent_branch:
         parent_branch = git_parent_branch(git_branch())
 
-    if checkname is None:
+    if len(checklist) == 0:
         if cmd == 'git-pbchk':
-            checkname = 'pbchk'
+            if args:
+                sys.stderr.write("only complete workspaces may be pbchk'd\n");
+                sys.exit(1)
+            checklist = all_checks
         else:
-            checkname = 'nits'
+            checklist = nits_checks
 
-    if checkname == 'pbchk':
-        if args:
-            sys.stderr.write("only complete workspaces may be pbchk'd\n");
-            sys.exit(1)
-        pbchk(git_root(), parent_branch, None)
-    elif checkname == 'nits':
-        nits(git_root(), parent_branch, args)
-    else:
-        run_checks(git_root(), parent_branch, [eval(checkname)], args)
+    run_checks(git_root(), parent_branch, checklist, args)
 
 if __name__ == '__main__':
     try:

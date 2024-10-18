@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright (c) 2018 Joyent, Inc.
+ * Copyright 2021 Joyent, Inc.
  */
 
 /*
@@ -20,18 +20,19 @@
  * truly understand its purpose and how it fits into things, you should read the
  * overlay big theory statement in uts/common/io/overlay/overlay.c.
  *
- * varod's purpose it to provide a means for looking up the destination on the
+ * varpd's purpose it to provide a means for looking up the destination on the
  * underlay network for a host on an overlay network and to also be a door
- * server such that dladm(1M) via libdladm can configure and get useful status
+ * server such that dladm(8) via libdladm can configure and get useful status
  * information. The heavy lifting is all done by libvarpd and the various lookup
  * plugins.
  *
- * When varpd first starts up, we take of chdiring into /var/run/varpd, which is
- * also where we create /var/run/varpd.door, our door server. After that we
- * daemonize and only after we daemonize do we go ahead and load plugins. The
- * reason that we don't load plugins before daemonizing is that they could very
- * well be creating threads and thus lose them all. In general, we want to make
- * things easier on our children and not require them to be fork safe.
+ * When varpd first starts up, we take care of chdiring into /var/run/varpd,
+ * which is also where we create /var/run/varpd/varpd.door, our door server.
+ * After that we daemonize and only after we daemonize do we go ahead and load
+ * plugins. The reason that we don't load plugins before daemonizing is that
+ * they could very well be creating threads and thus lose them all. In general,
+ * we want to make things easier on our children and not require them to be
+ * fork safe.
  *
  * Once it's spun up, the main varpd thread sits in sigsuspend and really just
  * hangs out waiting for something, libvarpd handles everything else.
@@ -315,8 +316,7 @@ varpd_setup_lookup_threads(void)
 	for (i = 0; i < ncpus; i++) {
 		thread_t thr;
 
-		ret = thr_create(NULL, 0,
-		    (void *(*)(void *))libvarpd_overlay_lookup_run,
+		ret = thr_create(NULL, 0, libvarpd_overlay_lookup_run,
 		    varpd_handle, THR_DETACHED | THR_DAEMON, &thr);
 		if (ret != 0)
 			return (ret);
@@ -326,7 +326,7 @@ varpd_setup_lookup_threads(void)
 }
 
 static void
-varpd_cleanup(void)
+varpd_cleanup(int signal __unused)
 {
 	varpd_exit = B_TRUE;
 }
@@ -335,7 +335,7 @@ varpd_cleanup(void)
  * Load default information from SMF and apply any of if necessary. We recognize
  * the following properties:
  *
- * 	varpd/include_path		Treat these as a series of -i options.
+ *	varpd/include_path		Treat these as a series of -i options.
  *
  * If we're not under SMF, just move on.
  */
@@ -482,7 +482,7 @@ main(int argc, char *argv[])
 		    doorpath, strerror(err));
 
 	/*
-	 * At this point, finish up signal intialization and finally go ahead,
+	 * At this point, finish up signal initialization and finally go ahead,
 	 * notify the parent that we're okay, and enter the sigsuspend loop.
 	 */
 	bzero(&act, sizeof (struct sigaction));

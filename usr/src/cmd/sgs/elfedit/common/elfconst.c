@@ -22,6 +22,8 @@
 /*
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2022 Oxide Computer Company
  */
 
 #include	<stdlib.h>
@@ -294,6 +296,9 @@ libconv_fill_iter(sym_table_ent_t *sym, conv_iter_osabi_t osabi, Half mach,
 		(void) (* sym->ste_conv_func.osabi_mach)(osabi, mach,
 		    CONV_FMT_ALT_NF, func, uvalue);
 		break;
+
+	case STE_STATIC:
+		break;
 	}
 }
 
@@ -411,6 +416,7 @@ init_libconv_strings(conv_iter_osabi_t *osabi, Half *mach)
 	LC_MACH(ELFEDIT_CONST_HW1_SUNW,		conv_iter_cap_val_hw1);
 	LC(ELFEDIT_CONST_SF1_SUNW,		conv_iter_cap_val_sf1);
 	LC_MACH(ELFEDIT_CONST_HW2_SUNW,		conv_iter_cap_val_hw2);
+	LC_MACH(ELFEDIT_CONST_HW3_SUNW,		conv_iter_cap_val_hw3);
 
 #undef LC
 #undef LC_OS
@@ -465,6 +471,10 @@ invalidate_libconv_strings(conv_iter_osabi_t *osabi, Half *mach)
 			continue;
 
 		switch (sym->ste_type) {
+		case STE_STATIC:
+		case STE_LC:
+			break;
+
 		case STE_LC_OS:
 			if (osabi_change)
 				sym->ste_arr = NULL;

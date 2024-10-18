@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Nexenta by DDN, Inc. All rights reserved.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 /*
@@ -83,12 +84,12 @@ smb_idmap_getsid(uid_t id, int idtype, smb_sid_t **sid)
 
 	switch (idtype) {
 	case SMB_IDMAP_USER:
-		sim.sim_stat = kidmap_getsidbyuid(global_zone, id,
+		sim.sim_stat = kidmap_getsidbyuid(curzone, id,
 		    (const char **)&sim.sim_domsid, &sim.sim_rid);
 		break;
 
 	case SMB_IDMAP_GROUP:
-		sim.sim_stat = kidmap_getsidbygid(global_zone, id,
+		sim.sim_stat = kidmap_getsidbygid(curzone, id,
 		    (const char **)&sim.sim_domsid, &sim.sim_rid);
 		break;
 
@@ -150,17 +151,17 @@ smb_idmap_getid(smb_sid_t *sid, uid_t *id, int *idtype)
 
 	switch (*idtype) {
 	case SMB_IDMAP_USER:
-		sim.sim_stat = kidmap_getuidbysid(global_zone, sim.sim_domsid,
+		sim.sim_stat = kidmap_getuidbysid(curzone, sim.sim_domsid,
 		    sim.sim_rid, sim.sim_id);
 		break;
 
 	case SMB_IDMAP_GROUP:
-		sim.sim_stat = kidmap_getgidbysid(global_zone, sim.sim_domsid,
+		sim.sim_stat = kidmap_getgidbysid(curzone, sim.sim_domsid,
 		    sim.sim_rid, sim.sim_id);
 		break;
 
 	case SMB_IDMAP_UNKNOWN:
-		sim.sim_stat = kidmap_getpidbysid(global_zone, sim.sim_domsid,
+		sim.sim_stat = kidmap_getpidbysid(curzone, sim.sim_domsid,
 		    sim.sim_rid, sim.sim_id, &sim.sim_idtype);
 		break;
 
@@ -186,7 +187,7 @@ smb_idmap_batch_create(smb_idmap_batch_t *sib, uint16_t nmap, int flags)
 
 	bzero(sib, sizeof (smb_idmap_batch_t));
 
-	sib->sib_idmaph = kidmap_get_create(global_zone);
+	sib->sib_idmaph = kidmap_get_create(curzone);
 
 	sib->sib_flags = flags;
 	sib->sib_nmap = nmap;
@@ -358,28 +359,6 @@ smb_idmap_batch_getsid(idmap_get_handle_t *idmaph, smb_idmap_t *sim,
 	return (idm_stat);
 }
 
-static void
-smb_idmap_bgm_report(smb_idmap_batch_t *sib, smb_idmap_t *sim)
-{
-
-	if ((sib->sib_flags & SMB_IDMAP_ID2SID) != 0) {
-		/*
-		 * Note: The ID and type we asked idmap to map
-		 * were saved in *sim_id and sim_idtype.
-		 */
-		uint_t id = (sim->sim_id == NULL) ?
-		    0 : (uint_t)*sim->sim_id;
-		cmn_err(CE_WARN, "Can't get SID for "
-		    "ID=%u type=%d, status=%d",
-		    id, sim->sim_idtype, sim->sim_stat);
-	}
-
-	if ((sib->sib_flags & SMB_IDMAP_SID2ID) != 0) {
-		cmn_err(CE_WARN, "Can't get ID for SID %s-%u, status=%d",
-		    sim->sim_domsid, sim->sim_rid, sim->sim_stat);
-	}
-}
-
 /*
  * smb_idmap_batch_getmappings
  *
@@ -391,7 +370,8 @@ smb_idmap_bgm_report(smb_idmap_batch_t *sib, smb_idmap_t *sim)
  * binary SIDs from returned (domsid, rid) pairs.
  */
 idmap_stat
-smb_idmap_batch_getmappings(smb_idmap_batch_t *sib)
+smb_idmap_batch_getmappings(smb_idmap_batch_t *sib,
+    smb_idmap_batch_errcb_t errcb)
 {
 	idmap_stat idm_stat = IDMAP_SUCCESS;
 	smb_idmap_t *sim;
@@ -406,7 +386,9 @@ smb_idmap_batch_getmappings(smb_idmap_batch_t *sib)
 	 */
 	for (i = 0, sim = sib->sib_maps; i < sib->sib_nmap; i++, sim++) {
 		if (sim->sim_stat != IDMAP_SUCCESS) {
-			smb_idmap_bgm_report(sib, sim);
+			sib->sib_nerr++;
+			if (errcb != NULL)
+				errcb(sib, sim);
 			if ((sib->sib_flags & SMB_IDMAP_SKIP_ERRS) == 0) {
 				return (sim->sim_stat);
 			}

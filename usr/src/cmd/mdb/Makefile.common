@@ -23,6 +23,8 @@
 # Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2016 Joyent, Inc.
 # Copyright 2018 Nexenta Systems, Inc.
+# Copyright 2021 Tintri by DDN, Inc. All rights reserved.
+# Copyright 2022 Garrett D'Amore
 #
 
 #
@@ -34,21 +36,26 @@ COMMON_MODULES_PROC = \
 	dof \
 	libavl \
 	libc \
-	libcmdutils \
 	libfknsmb \
 	libfksmbfs \
 	libfksmbsrv \
 	libmlsvc \
 	libnvpair \
 	libproc \
-	libpython \
 	libsysevent \
 	libtopo \
 	libumem \
 	libuutil \
 	libzpool \
+	list \
 	mdb_ds \
 	mdb_test
+
+#
+# MDB modules used for debugging user processes which are only 64-bit
+#
+COMMON_MODULES_PROC_64BIT = \
+	libpython
 
 #
 # MDB modules used for debugging user processes which are only 32-bit
@@ -76,6 +83,7 @@ COMMON_MODULES_KVM = \
 	ip \
 	ipc \
 	ipp \
+	klmmod \
 	krtld \
 	lofs \
 	logindmux \
@@ -83,7 +91,7 @@ COMMON_MODULES_KVM = \
 	mm \
 	mpt_sas \
 	mr_sas \
-	nca \
+	nfs \
 	nsmb \
 	pmcs \
 	ptm \
@@ -93,6 +101,7 @@ COMMON_MODULES_KVM = \
 	scsi_vhci \
 	sctp \
 	sd \
+	smartpqi \
 	smbfs \
 	smbsrv \
 	sockfs \
@@ -105,9 +114,5 @@ COMMON_MODULES_KVM = \
 	usba \
 	xhci \
 	zfs
-
-CLOSED_COMMON_MODULES_KVM = \
-	mpt \
-	nfs
 
 include $(SRC)/Makefile.master

@@ -22,6 +22,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2017 Joyent, Inc.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 #ifndef _SMB_IOCTL_H_
@@ -51,7 +52,8 @@ extern "C" {
 #define	SMB_IOC_STOP		_IOW(SMB_IOC_BASE, 10, int)
 #define	SMB_IOC_EVENT		_IOW(SMB_IOC_BASE, 11, int)
 #define	SMB_IOC_SHAREINFO	_IOW(SMB_IOC_BASE, 12, int)
-#define	SMB_IOC_SPOOLDOC	_IOW(SMB_IOC_BASE, 13, int)
+#define	SMB_IOC_SHAREACCESS	_IOW(SMB_IOC_BASE, 13, int)
+#define	SMB_IOC_SPOOLDOC	_IOW(SMB_IOC_BASE, 14, int)
 
 typedef struct smb_ioc_header {
 	uint32_t	version;
@@ -84,6 +86,13 @@ typedef struct smb_ioc_shareinfo {
 	char		shrname[MAXNAMELEN];
 	uint32_t	shortnames;
 } smb_ioc_shareinfo_t;
+
+typedef struct smb_ioc_shareaccess {
+	smb_ioc_header_t hdr;
+	uint64_t	session_id;
+	uint64_t	user_id;
+	char		shrname[MAXNAMELEN];
+} smb_ioc_shareaccess_t;
 
 typedef	struct smb_ioc_start {
 	smb_ioc_header_t hdr;
@@ -171,11 +180,14 @@ typedef struct smb_ioc_cfg {
 	int32_t		ipv6_enable;
 	int32_t		print_enable;
 	int32_t		traverse_mounts;
+	int32_t		short_names;
 	uint32_t	max_protocol;
 	uint32_t	min_protocol;
 	uint32_t	encrypt;
+	uint32_t	encrypt_ciphers;
 	uint32_t	exec_flags;
 	uint32_t	negtok_len;
+	uint32_t	max_opens;	/* per client */
 	smb_version_t	version;
 	uint16_t	initial_credits;
 	uint16_t	maximum_credits;
@@ -201,6 +213,7 @@ typedef union smb_ioc {
 	smb_ioc_session_t	ioc_session;
 	smb_ioc_fileid_t	ioc_fileid;
 	smb_ioc_share_t		ioc_share;
+	smb_ioc_shareaccess_t	ioc_shareaccess;
 	smb_ioc_shareinfo_t	ioc_shareinfo;
 	smb_ioc_spooldoc_t	ioc_spooldoc;
 } smb_ioc_t;

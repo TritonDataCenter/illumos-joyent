@@ -10,13 +10,16 @@
 .\"
 .\"
 .\" Copyright 2019, Joyent, Inc.
+.\" Copyright 2022 Oxide Computer Company
+.\" Copyright 2022 RackTop Systems, Inc.
 .\"
-.Dd June 03, 2019
+.Dd January 29, 2022
 .Dt SCSI_HBA_TGTMAP_CREATE 9F
 .Os
 .Sh NAME
 .Nm scsi_hba_tgtmap_create ,
 .Nm scsi_hba_tgtmap_destroy ,
+.Nm scsi_hba_tgtmap_scan_luns ,
 .Nm scsi_hba_tgtmap_set_begin ,
 .Nm scsi_hba_tgtmap_set_add ,
 .Nm scsi_hba_tgtmap_set_end ,
@@ -55,6 +58,11 @@
 .Fa "scsi_tgtmap_tgt_type_t type"
 .Fa "void *tgt_priv"
 .Fa "scsi_tgtmap_deact_rsn_t deact"
+.Fc
+.Ft void
+.Fo scsi_hba_tgtmap_scan_luns
+.Fa "scsi_hba_tgtmap_t *tgtmap"
+.Fa "char *tgt_addr"
 .Fc
 .Ft int
 .Fo scsi_hba_tgtmap_set_begin
@@ -173,8 +181,9 @@ argument.
 .Pp
 The
 .Fa dip
-argument should correspond to the HBA driver's device node or one of its
-iports.
+argument should correspond to one of the HBA driver's iports.
+The overall driver instance cannot be used here.
+Target maps are only supported on iports.
 .Pp
 The
 .Fa mode
@@ -198,7 +207,7 @@ argument to
 and use the
 .Fn scsi_hba_tgtmap_tgt_add
 and
-.Fn scsi_hba_tgtmap_tgt_destroy
+.Fn scsi_hba_tgtmap_tgt_remove
 functions.
 See the section
 .Sx Per-Address Reporting
@@ -229,9 +238,9 @@ arguments are optional function pointers that will be run in the context
 of devices being added and removed from the system.
 This allows the HBA driver to perform any required operations prior to
 the system attaching a target driver such as
-.Xr sd 7D
+.Xr sd 4D
 or
-.Xr ses 7D
+.Xr ses 4D
 in the activate case and after the system has detached the driver, in
 the removal case.
 .Pp
@@ -423,6 +432,20 @@ and
 arguments match those that were used when calling the
 .Fn scsi_hba_tgtmap_tgt_add
 function.
+.Ss Scanning for Logical Units
+SCSI targets may contain logical units
+.Pq LUNS
+that are created or destroyed by the target dynamically.
+In order to facilitate discovery of logical units, the HBA may call
+.Fn scsi_hba_tgtmap_scan_luns
+using the address of a target that has been registered using the given
+.Fa tgt_addr .
+.Pp
+This will cause the framework to issue a
+.Sy REPORT_LUNS
+command, to enumerate any present logical units.
+Logical units that are no longer present will be pruned from the system,
+and any new ones will be created.
 .Sh CONTEXT
 The
 .Fn scsi_hba_tgtmap_create
@@ -448,6 +471,7 @@ functions for a target map will be called into the driver from
 context.
 .Pp
 The
+.Fn scsi_hba_tgtmap_scan_luns ,
 .Fn scsi_hba_tgtmap_set_begin ,
 .Fn scsi_hba_tgtmap_set_add ,
 .Fn scsi_hba_tgtmap_set_end ,
@@ -460,13 +484,12 @@ functions may be called from
 or
 .Sy kernel
 context.
-It is recommended that device drivers do not call these functions from
+Device drivers should not call these functions from
 .Sy interrupt
-context and instead should schedule deferred work with a task queue
+context and should instead schedule deferred work with a task queue
 or with
 .Xr timeout 9F
-if they receive notifications during an interrupt that causes them to
-need to call these functions.
+if a need to call these arises while handling an interrupt.
 .Sh RETURN VALUES
 Upon successful completion, the
 .Fn scsi_hba_tgtmap_create ,
@@ -484,8 +507,8 @@ Otherwise,
 .Dv DDI_FAILURE
 is returned.
 .Sh SEE ALSO
-.Xr sd 7D ,
-.Xr ses 7D ,
+.Xr sd 4D ,
+.Xr ses 4D ,
 .Xr tgtmap 9 ,
 .Xr attach 9E ,
 .Xr detach 9E ,

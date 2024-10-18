@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2020 Oxide Computer Company
  */
 
 /*
@@ -93,7 +94,7 @@ main(int argc, char **argv)
 {
 	int		rv = FWFLASH_SUCCESS;
 	int		i;
-	char		ch;
+	int		ch;
 	char		*read_file;
 	extern char	*optarg;
 	char		*devclass = NULL;
@@ -303,16 +304,6 @@ flash_load_plugins()
 		return (errno);
 	}
 
-	if ((plugdir = calloc(1, sizeof (struct dirent) + MAXPATHLEN + 1))
-	    == NULL) {
-		logmsg(MSG_ERROR,
-		    gettext("Unable to malloc %d bytes while "
-		    "trying to load plugins: %s\n"),
-		    MAXPATHLEN + 1 + sizeof (struct dirent),
-		    strerror(errno));
-		return (FWFLASH_FAILURE);
-	}
-
 	if ((fw_pluginlist = calloc(1, sizeof (struct fw_plugin)))
 	    == NULL) {
 		logmsg(MSG_ERROR,
@@ -324,7 +315,7 @@ flash_load_plugins()
 
 	TAILQ_INIT(fw_pluginlist);
 
-	while ((readdir_r(dirp, plugdir, &plugdir) == 0) && (plugdir != NULL)) {
+	while ((plugdir = readdir(dirp)) != NULL) {
 
 		errno = 0; /* remove chance of false results */
 
@@ -440,8 +431,7 @@ flash_load_plugins()
 			continue;
 		}
 
-		if ((sym = dlsym(tmpplug->handle, "plugin_version"))
-		    != NULL) {
+		if ((sym = dlsym(tmpplug->handle, "plugin_version")) != NULL) {
 			if ((*(int *)sym) >= FWPLUGIN_VERSION_2) {
 				if ((sym = dlsym(tmpplug->handle,
 				    "fw_cleanup")) != NULL) {
@@ -504,7 +494,6 @@ flash_load_plugins()
 	}
 
 	free(fwplugdirpath);
-	free(plugdir);
 	(void) closedir(dirp);
 	return (rval);
 }
@@ -1095,8 +1084,8 @@ static void
 fwflash_intr(int sig)
 {
 
-	struct devicelist *thisdev;
-	struct pluginlist *thisplug;
+	struct devicelist *thisdev, *tmpdev;
+	struct pluginlist *thisplug, *tmpplug;
 
 	(void) signal(SIGINT, SIG_IGN);
 	(void) signal(SIGTERM, SIG_IGN);
@@ -1120,7 +1109,8 @@ fwflash_intr(int sig)
 	 * call the plugin closure routines
 	 */
 	if (fw_devices != NULL) {
-		TAILQ_FOREACH(thisdev, fw_devices, nextdev) {
+		TAILQ_FOREACH_SAFE(thisdev, fw_devices, nextdev, tmpdev) {
+			TAILQ_REMOVE(fw_devices, thisdev, nextdev);
 			if (thisdev->plugin->fw_cleanup != NULL) {
 				/*
 				 * If we've got a cleanup routine, it
@@ -1137,14 +1127,15 @@ fwflash_intr(int sig)
 				/* We don't free address[] for old plugins */
 				thisdev->ident = NULL;
 				thisdev->plugin = NULL;
+				free(thisdev);
 			}
-			/* CONSTCOND */
-			TAILQ_REMOVE(fw_devices, thisdev, nextdev);
 		}
 	}
 
 	if (fw_pluginlist != NULL) {
-		TAILQ_FOREACH(thisplug, fw_pluginlist, nextplugin) {
+		TAILQ_FOREACH_SAFE(thisplug, fw_pluginlist, nextplugin,
+		    tmpplug) {
+			TAILQ_REMOVE(fw_pluginlist, thisplug, nextplugin);
 			free(thisplug->filename);
 			free(thisplug->drvname);
 			free(thisplug->plugin->filename);
@@ -1162,8 +1153,7 @@ fwflash_intr(int sig)
 			thisplug->plugin->handle = NULL;
 			free(thisplug->plugin);
 			thisplug->plugin = NULL;
-			/* CONSTCOND */
-			TAILQ_REMOVE(fw_pluginlist, thisplug, nextplugin);
+			free(thisplug);
 		}
 	}
 

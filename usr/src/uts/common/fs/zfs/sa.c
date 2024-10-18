@@ -24,9 +24,9 @@
  * Portions Copyright 2011 iXsystems, Inc
  * Copyright (c) 2013, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
- * Copyright (c) 2015 Joyent, Inc.  All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 #include <sys/zfs_context.h>
@@ -371,7 +371,7 @@ sa_attr_op(sa_handle_t *hdl, sa_bulk_attr_t *bulk, int count,
 			if (bulk[i].sa_data) {
 				SA_COPY_DATA(bulk[i].sa_data_func,
 				    bulk[i].sa_addr, bulk[i].sa_data,
-				    bulk[i].sa_size);
+				    MIN(bulk[i].sa_size, bulk[i].sa_length));
 			}
 			continue;
 
@@ -1521,9 +1521,9 @@ sa_add_projid(sa_handle_t *hdl, dmu_tx_t *tx, uint64_t projid)
 	if (zp->z_acl_cached == NULL) {
 		zfs_acl_t *aclp;
 
-		mutex_enter(&zp->z_acl_lock);
+		rw_enter(&zp->z_acl_lock, RW_WRITER);
 		err = zfs_acl_node_read(zp, B_FALSE, &aclp, B_FALSE);
-		mutex_exit(&zp->z_acl_lock);
+		rw_exit(&zp->z_acl_lock);
 		if (err != 0 && err != ENOENT)
 			return (err);
 	}

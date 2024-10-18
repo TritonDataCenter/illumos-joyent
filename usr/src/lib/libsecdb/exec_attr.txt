@@ -20,10 +20,12 @@
 #
 
 # Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright 2022 Garrett D'Amore <garrett@damore.org>
+# Copyright 2024 Oxide Computer Company
 #
 # /etc/security/exec_attr
 #
-# execution attributes for profiles. see exec_attr(4)
+# execution attributes for profiles. see exec_attr(5)
 #
 #
 All:suser:cmd:::*:
@@ -192,7 +194,6 @@ Network Management:solaris:cmd:::/sbin/ipadm:euid=netadm;egid=netadm;\
 Network Management:suser:cmd:::/usr/bin/netstat:uid=0
 Network Management:suser:cmd:::/usr/bin/rup:euid=0
 Network Management:suser:cmd:::/usr/bin/ruptime:euid=0
-Network Management:suser:cmd:::/usr/bin/setuname:euid=0
 Network Management:suser:cmd:::/usr/sbin/asppp2pppd:euid=0
 Network Management:suser:cmd:::/usr/sbin/ifconfig:uid=0
 Network Management:suser:cmd:::/usr/sbin/ipaddrsel:euid=0
@@ -202,6 +203,7 @@ Network Management:suser:cmd:::/usr/sbin/route:uid=0
 Network Management:suser:cmd:::/usr/sbin/snoop:uid=0
 Network Management:solaris:cmd:::/usr/sbin/snoop:privs=net_observability
 Network Management:suser:cmd:::/usr/sbin/spray:euid=0
+Network TCP Key Management:suser:cmd:::/usr/sbin/tcpkey:privs=sys_ip_config
 Network Observability:solaris:cmd:::/usr/sbin/snoop:privs=net_observability
 Network Link Security:solaris:cmd:::/sbin/dladm:euid=dladm;egid=sys;\
 	privs=sys_dl_config,net_rawaccess,proc_audit
@@ -224,7 +226,6 @@ Network IPsec Management:suser:cmd:::/usr/sbin/ikecert:euid=0
 Network IPsec Management:suser:cmd:::/usr/sbin/ipsecconf:euid=0
 Network IPsec Management:suser:cmd:::/usr/sbin/ipseckey:uid=0
 Network IPsec Management:suser:cmd:::/usr/sbin/ipsecalgs:euid=0
-Network Security:solaris:cmd:::/usr/sbin/ksslcfg:euid=0
 Network Security:suser:cmd:::/usr/bin/ssh-keygen:uid=0;gid=sys
 Object Access Management:solaris:cmd:::/usr/bin/chgrp:privs=file_chown
 Object Access Management:solaris:cmd:::/usr/bin/chmod:privs=file_owner
@@ -236,7 +237,7 @@ Object Access Management:suser:cmd:::/usr/bin/chown:euid=0
 Object Access Management:suser:cmd:::/usr/bin/getfacl:euid=0
 Object Access Management:suser:cmd:::/usr/bin/setfacl:euid=0
 Primary Administrator:solaris:cmd:::*:uid=0;gid=0
-Printer Management:suser:cmd:::/usr/lib/lp/local/lpadmin:uid=lp;gid=lp 
+Printer Management:suser:cmd:::/usr/lib/lp/local/lpadmin:uid=lp;gid=lp
 Printer Management:suser:cmd:::/usr/sbin/lpfilter:euid=lp;uid=lp
 Printer Management:suser:cmd:::/usr/sbin/lpforms:euid=lp
 Printer Management:suser:cmd:::/usr/sbin/lpusers:euid=lp

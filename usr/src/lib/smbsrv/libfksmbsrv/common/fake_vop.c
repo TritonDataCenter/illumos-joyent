@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2024 RackTop Systems, Inc.
  */
 
 #include <sys/types.h>
@@ -38,6 +39,8 @@
 #include <sys/fcntl.h>
 #include <sys/poll.h>
 #include <sys/time.h>
+#include <sys/mman.h>
+#include <sys/sysmacros.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -54,6 +57,15 @@ int fop__getxvattr(vnode_t *, xvattr_t *);
 int fop__setxvattr(vnode_t *, xvattr_t *);
 
 static void fake_inactive_xattrdir(vnode_t *);
+
+typedef struct fake_xuio {
+	off_t map_foff;		// file offset at start of mapping
+	char *map_addr;		// mapped address
+	size_t map_len;		// length of mapping
+	iovec_t iovec[2];
+} fake_xuio_t;
+
+int fake_xuio_blksz = 4096;
 
 /* ARGSUSED */
 int
@@ -120,16 +132,57 @@ fop_read(
 	ssize_t resid;
 	size_t cnt;
 	int n;
+	int fd = vncache_getfd(vp);
 
 	/*
 	 * If that caller asks for read beyond end of file,
 	 * that causes the pread call to block.  (Ugh!)
 	 * Get the file size and return what we can.
 	 */
-	(void) fstat(vp->v_fd, &st);
+	(void) fstat(fd, &st);
 	resid = uio->uio_resid;
 	if ((uio->uio_loffset + resid) > st.st_size)
 		resid = st.st_size - uio->uio_loffset;
+	if (resid == 0)
+		return (0);
+
+	/*
+	 * Simulating zero-copy support with mmap.  See:
+	 * fop_reqzcbuf(), fop_retzcbuf()
+	 */
+	if ((uio->uio_extflg == UIO_XUIO) &&
+	    (((xuio_t *)uio)->xu_type == UIOTYPE_ZEROCOPY)) {
+		xuio_t *xuio = (xuio_t *)uio;
+		int poff;
+
+		fake_xuio_t *priv = XUIO_XUZC_PRIV(xuio);
+
+		/*
+		 * Sanity check mapped range overlaps this I/O:
+		 * uio_offset >= mapped base
+		 * uio_resid <= (mapped length - page offset)
+		 */
+		if (uio->uio_loffset < priv->map_foff)
+			return (EINVAL);
+		poff = uio->uio_loffset - priv->map_foff;
+		if ((uio->uio_resid + poff) > priv->map_len)
+			return (EINVAL);
+
+		/*
+		 * Setup the uio with our loaned buffers,
+		 * and update offset, resid.
+		 */
+		uio->uio_iovcnt = 1;
+		uio->uio_iov = &priv->iovec[0];
+		iov = uio->uio_iov;
+		iov->iov_base = priv->map_addr + poff;
+		iov->iov_len = priv->map_len - poff;
+
+		uio->uio_loffset += iov->iov_len;
+		uio->uio_resid   -= iov->iov_len;
+
+		return (0);
+	}
 
 	while (resid > 0) {
 
@@ -145,7 +198,7 @@ fop_read(
 		if (cnt > resid)
 			cnt = resid;
 
-		n = pread(vp->v_fd, iov->iov_base, cnt, uio->uio_loffset);
+		n = pread(fd, iov->iov_base, cnt, uio->uio_loffset);
 		if (n < 0)
 			return (errno);
 
@@ -173,6 +226,7 @@ fop_write(
 	struct iovec *iov;
 	size_t cnt;
 	int n;
+	int fd = vncache_getfd(vp);
 
 	while (uio->uio_resid > 0) {
 
@@ -188,7 +242,7 @@ fop_write(
 		if (cnt > uio->uio_resid)
 			cnt = uio->uio_resid;
 
-		n = pwrite(vp->v_fd, iov->iov_base, iov->iov_len,
+		n = pwrite(fd, iov->iov_base, iov->iov_len,
 		    uio->uio_loffset);
 		if (n < 0)
 			return (errno);
@@ -201,7 +255,7 @@ fop_write(
 	}
 
 	if (ioflag == FSYNC) {
-		(void) fsync(vp->v_fd);
+		(void) fsync(fd);
 	}
 
 	return (0);
@@ -220,13 +274,14 @@ fop_ioctl(
 {
 	off64_t off;
 	int rv, whence;
+	int fd = vncache_getfd(vp);
 
 	switch (cmd) {
 	case _FIO_SEEK_DATA:
 	case _FIO_SEEK_HOLE:
 		whence = (cmd == _FIO_SEEK_DATA) ? SEEK_DATA : SEEK_HOLE;
 		bcopy((void *)arg, &off, sizeof (off));
-		off = lseek(vp->v_fd, off, whence);
+		off = lseek(fd, off, whence);
 		if (off == (off64_t)-1) {
 			rv = errno;
 		} else {
@@ -265,10 +320,11 @@ fop_getattr(
 	cred_t *cr,
 	caller_context_t *ct)
 {
-	int error;
 	struct stat st;
+	int error;
+	int fd = vncache_getfd(vp);
 
-	if (fstat(vp->v_fd, &st) == -1)
+	if (fstat(fd, &st) == -1)
 		return (errno);
 	error = stat_to_vattr(&st, vap);
 
@@ -289,9 +345,10 @@ fop_setattr(
 {
 	timespec_t times[2];
 	int err;
+	int fd = vncache_getfd(vp);
 
 	if (vap->va_mask & AT_SIZE) {
-		if (ftruncate(vp->v_fd, vap->va_size) == -1) {
+		if (ftruncate(fd, vap->va_size) == -1) {
 			err = errno;
 			if (err == EBADF)
 				err = EACCES;
@@ -318,7 +375,7 @@ fop_setattr(
 			times[1].tv_nsec = UTIME_OMIT;
 		}
 
-		(void) futimens(vp->v_fd, times);
+		(void) futimens(fd, times);
 	}
 
 	return (0);
@@ -338,6 +395,9 @@ fop_access(
 
 /*
  * Conceptually like xattr_dir_lookup()
+ *
+ * Once we've looked up the XATTRDIR for some vp, we keep it in
+ * v_xattrdir until this vp goes inactive. See: vncache_inactive()
  */
 static int
 fake_lookup_xattrdir(
@@ -347,6 +407,7 @@ fake_lookup_xattrdir(
 	int len, fd;
 	int omode = O_RDWR | O_NOFOLLOW;
 	vnode_t *vp;
+	int dfd = vncache_getfd(dvp);
 
 	*vpp = NULL;
 
@@ -360,6 +421,9 @@ fake_lookup_xattrdir(
 	if (dvp->v_flag & V_SYSATTR)
 		return (EINVAL);
 
+	/*
+	 * We may already have the XATTR dir.
+	 */
 	mutex_enter(&dvp->v_lock);
 	if (dvp->v_xattrdir != NULL) {
 		*vpp = dvp->v_xattrdir;
@@ -369,13 +433,21 @@ fake_lookup_xattrdir(
 	}
 	mutex_exit(&dvp->v_lock);
 
+	/*
+	 * Need to "create" the XATTR dir vnode.
+	 */
 	omode = O_RDONLY|O_XATTR;
-	fd = openat(dvp->v_fd, ".", omode);
+	fd = openat(dfd, ".", omode);
 	if (fd < 0)
 		return (errno);
 
+	/*
+	 * Normally vn_alloc() is called by vncache_enter(), but
+	 * we don't enter the special xattr dir into the cache.
+	 * These are only found via the parent's v_xattrdir field.
+	 */
 	vp = vn_alloc(KM_SLEEP);
-	vp->v_fd = fd;
+	vncache_setfd(vp, fd);
 	vp->v_flag = V_XATTRDIR|V_SYSATTR;
 	vp->v_type = VDIR;
 	vp->v_vfsp = dvp->v_vfsp;
@@ -385,20 +457,17 @@ fake_lookup_xattrdir(
 	vp->v_path = kmem_alloc(len, KM_SLEEP);
 	(void) snprintf(vp->v_path, len, "%s/@", dvp->v_path);
 
-	/*
-	 * Keep a pointer to the parent and a hold on it.
-	 * Both are cleaned up in fake_inactive_xattrdir
-	 */
-	vp->v_data = dvp;
-	vn_hold(dvp);
-
 	mutex_enter(&dvp->v_lock);
 	if (dvp->v_xattrdir == NULL) {
-		*vpp = dvp->v_xattrdir = vp;
-		mutex_exit(&dvp->v_lock);
-	} else {
-		*vpp = dvp->v_xattrdir;
-		mutex_exit(&dvp->v_lock);
+		dvp->v_xattrdir = vp;
+		vp = NULL;
+	}
+	*vpp = dvp->v_xattrdir;
+	VN_HOLD(*vpp);
+	mutex_exit(&dvp->v_lock);
+
+	if (vp != NULL) {
+		/* Lost race filling in v_xattrdir */
 		fake_inactive_xattrdir(vp);
 	}
 
@@ -419,10 +488,11 @@ fop_lookup(
 	int *deflags,		/* Returned per-dirent flags */
 	pathname_t *ppnp)	/* Returned case-preserved name in directory */
 {
-	int fd;
+	int err, fd;
 	int omode = O_RDWR | O_NOFOLLOW;
 	vnode_t *vp;
 	struct stat st;
+	int dfd = vncache_getfd(dvp);
 
 	if (flags & LOOKUP_XATTR)
 		return (fake_lookup_xattrdir(dvp, vpp));
@@ -431,12 +501,12 @@ fop_lookup(
 	 * If lookup is for "", just return dvp.
 	 */
 	if (name[0] == '\0') {
-		vn_hold(dvp);
+		VN_HOLD(dvp);
 		*vpp = dvp;
 		return (0);
 	}
 
-	if (fstatat(dvp->v_fd, name, &st, AT_SYMLINK_NOFOLLOW) == -1)
+	if (fstatat(dfd, name, &st, AT_SYMLINK_NOFOLLOW) == -1)
 		return (errno);
 
 	vp = vncache_lookup(&st);
@@ -450,14 +520,18 @@ fop_lookup(
 		omode = O_RDONLY | O_NOFOLLOW;
 
 again:
-	fd = openat(dvp->v_fd, name, omode, 0);
-	if (fd < 0) {
+	err = 0;
+	fd = openat(dfd, name, omode, 0);
+	if (fd < 0)
+		err = errno;
+	DTRACE_PROBE3(openat, int, dfd, char *, name, int, err);
+	if (err != 0) {
 		if ((omode & O_RWMASK) == O_RDWR) {
 			omode &= ~O_RWMASK;
 			omode |= O_RDONLY;
 			goto again;
 		}
-		return (errno);
+		return (err);
 	}
 
 	if (fstat(fd, &st) == -1) {
@@ -488,17 +562,18 @@ fop_create(
 	struct stat st;
 	vnode_t *vp;
 	int err, fd, omode;
+	int dfd = vncache_getfd(dvp);
 
 	/*
 	 * If creating "", just return dvp.
 	 */
 	if (name[0] == '\0') {
-		vn_hold(dvp);
+		VN_HOLD(dvp);
 		*vpp = dvp;
 		return (0);
 	}
 
-	err = fstatat(dvp->v_fd, name, &st, AT_SYMLINK_NOFOLLOW);
+	err = fstatat(dfd, name, &st, AT_SYMLINK_NOFOLLOW);
 	if (err != 0)
 		err = errno;
 
@@ -520,14 +595,18 @@ fop_create(
 		if (excl == EXCL)
 			omode |= O_EXCL;
 	open_again:
-		fd = openat(dvp->v_fd, name, omode, mode);
-		if (fd < 0) {
+		err = 0;
+		fd = openat(dfd, name, omode, mode);
+		if (fd < 0)
+			err = errno;
+		DTRACE_PROBE3(openat, int, dfd, char *, name, int, err);
+		if (err != 0) {
 			if ((omode & O_RWMASK) == O_RDWR) {
 				omode &= ~O_RWMASK;
 				omode |= O_RDONLY;
 				goto open_again;
 			}
-			return (errno);
+			return (err);
 		}
 		(void) fstat(fd, &st);
 
@@ -566,8 +645,9 @@ fop_remove(
 	caller_context_t *ct,
 	int flags)
 {
+	int dfd = vncache_getfd(dvp);
 
-	if (unlinkat(dvp->v_fd, name, 0))
+	if (unlinkat(dfd, name, 0))
 		return (errno);
 
 	return (0);
@@ -583,13 +663,14 @@ fop_link(
 	caller_context_t *ct,
 	int flags)
 {
+	int to_dfd = vncache_getfd(to_dvp);
 	int err;
 
 	/*
 	 * Would prefer to specify "from" as the combination:
-	 * (fr_vp->v_fd, NULL) but linkat does not permit it.
+	 * (fr_vp, NULL) but linkat does not permit it.
 	 */
-	err = linkat(AT_FDCWD, fr_vp->v_path, to_dvp->v_fd, to_name,
+	err = linkat(AT_FDCWD, fr_vp->v_path, to_dfd, to_name,
 	    AT_SYMLINK_FOLLOW);
 	if (err == -1)
 		err = errno;
@@ -611,8 +692,10 @@ fop_rename(
 	struct stat st;
 	vnode_t *vp;
 	int err;
+	int from_dfd = vncache_getfd(from_dvp);
+	int to_dfd = vncache_getfd(to_dvp);
 
-	if (fstatat(from_dvp->v_fd, from_name, &st,
+	if (fstatat(from_dfd, from_name, &st,
 	    AT_SYMLINK_NOFOLLOW) == -1)
 		return (errno);
 
@@ -620,7 +703,7 @@ fop_rename(
 	if (vp == NULL)
 		return (ENOENT);
 
-	err = renameat(from_dvp->v_fd, from_name, to_dvp->v_fd, to_name);
+	err = renameat(from_dfd, from_name, to_dfd, to_name);
 	if (err == -1)
 		err = errno;
 	else
@@ -645,14 +728,21 @@ fop_mkdir(
 {
 	struct stat st;
 	int err, fd;
+	int dfd = vncache_getfd(dvp);
 
 	mode_t mode = vap->va_mode & 0777;
 
-	if (mkdirat(dvp->v_fd, name, mode) == -1)
+	if (mkdirat(dfd, name, mode) == -1)
 		return (errno);
 
-	if ((fd = openat(dvp->v_fd, name, O_RDONLY)) == -1)
-		return (errno);
+	err = 0;
+	fd = openat(dfd, name, O_RDONLY);
+	if (fd < 0)
+		err = errno;
+	DTRACE_PROBE3(openat, int, dfd, char *, name, int, err);
+	if (err != 0)
+		return (err);
+
 	if (fstat(fd, &st) == -1) {
 		err = errno;
 		(void) close(fd);
@@ -679,8 +769,9 @@ fop_rmdir(
 	caller_context_t *ct,
 	int flags)
 {
+	int dfd = vncache_getfd(dvp);
 
-	if (unlinkat(dvp->v_fd, name, AT_REMOVEDIR) == -1)
+	if (unlinkat(dfd, name, AT_REMOVEDIR) == -1)
 		return (errno);
 
 	return (0);
@@ -699,7 +790,7 @@ fop_readdir(
 	struct iovec *iov;
 	int cnt;
 	int error = 0;
-	int fd = vp->v_fd;
+	int fd = vncache_getfd(vp);
 
 	if (eofp) {
 		*eofp = 0;
@@ -767,8 +858,9 @@ fop_fsync(
 	cred_t *cr,
 	caller_context_t *ct)
 {
+	int fd = vncache_getfd(vp);
 
-	if (fsync(vp->v_fd) == -1)
+	if (fsync(fd) == -1)
 		return (errno);
 
 	return (0);
@@ -791,32 +883,18 @@ fop_inactive(
 /*
  * The special xattr directories are not in the vncache AVL, but
  * hang off the parent's v_xattrdir field.  When vn_rele finds
- * an xattr dir at v_count == 1 it calls here, but until we
- * take locks on both the parent and the xattrdir, we don't
- * know if we're really at the last reference.  So in here we
- * take both locks, re-check the count, and either bail out
- * or proceed with "inactive" vnode cleanup.  Part of that
- * cleanup includes releasing the hold on the parent and
- * clearing the parent's v_xattrdir field, which were
- * setup in fake_lookup_xattrdir()
+ * an xattr dir at v_count == 1 it calls here via fop_inactive().
  */
 static void
 fake_inactive_xattrdir(vnode_t *vp)
 {
-	vnode_t *dvp = vp->v_data; /* parent */
-	mutex_enter(&dvp->v_lock);
 	mutex_enter(&vp->v_lock);
 	if (vp->v_count > 1) {
 		/* new ref. via v_xattrdir */
 		mutex_exit(&vp->v_lock);
-		mutex_exit(&dvp->v_lock);
 		return;
 	}
-	ASSERT(dvp->v_xattrdir == vp);
-	dvp->v_xattrdir = NULL;
 	mutex_exit(&vp->v_lock);
-	mutex_exit(&dvp->v_lock);
-	vn_rele(dvp);
 	vn_free(vp);
 }
 
@@ -896,6 +974,7 @@ fop_frlock(
 #else
 #error "unsupported env."
 #endif
+	int fd = vncache_getfd(vp);
 
 	/* See fs_frlock */
 
@@ -933,7 +1012,7 @@ fop_frlock(
 	if (bfp->l_len > (maxoffset - bfp->l_start + 1))
 		bfp->l_len = (maxoffset - bfp->l_start + 1);
 
-	if (fcntl(vp->v_fd, cmd, bfp) == -1)
+	if (fcntl(fd, cmd, bfp) == -1)
 		return (errno);
 
 	return (0);
@@ -950,6 +1029,8 @@ fop_space(
 	cred_t *cr,
 	caller_context_t *ct)
 {
+	int fd = vncache_getfd(vp);
+
 	/* See fs_frlock */
 
 	switch (cmd) {
@@ -960,7 +1041,7 @@ fop_space(
 		return (EINVAL);
 	}
 
-	if (fcntl(vp->v_fd, cmd, bfp) == -1)
+	if (fcntl(fd, cmd, bfp) == -1)
 		return (errno);
 
 	return (0);
@@ -1289,6 +1370,7 @@ fop_shrlock(
 	cred_t *cr,
 	caller_context_t *ct)
 {
+	int fd = vncache_getfd(vp);
 
 	switch (cmd) {
 	case F_SHARE:
@@ -1302,7 +1384,7 @@ fop_shrlock(
 	if (!fop_shrlock_enable)
 		return (0);
 
-	if (fcntl(vp->v_fd, cmd, shr) == -1)
+	if (fcntl(fd, cmd, shr) == -1)
 		return (errno);
 
 	return (0);
@@ -1318,17 +1400,85 @@ fop_vnevent(vnode_t *vp, vnevent_t vnevent, vnode_t *dvp, char *fnm,
 
 /* ARGSUSED */
 int
-fop_reqzcbuf(vnode_t *vp, enum uio_rw ioflag, xuio_t *uiop, cred_t *cr,
+fop_reqzcbuf(vnode_t *vp, enum uio_rw ioflag, xuio_t *xuio, cred_t *cr,
     caller_context_t *ct)
 {
-	return (ENOSYS);
+	fake_xuio_t *priv;
+	uio_t *uio = &xuio->xu_uio;
+	int blksz = fake_xuio_blksz;
+	off_t foff, moff;
+	size_t flen, mlen;
+	int poff;
+	char *ma;
+	struct stat st;
+	int fd = vncache_getfd(vp);
+
+	if (xuio->xu_type != UIOTYPE_ZEROCOPY)
+		return (EINVAL);
+
+	foff = uio->uio_loffset;
+	flen = uio->uio_resid;
+
+	if (fstat(fd, &st) == -1)
+		return (errno);
+
+	if (foff >= st.st_size)
+		return (EINVAL);
+	if ((foff + flen) > st.st_size)
+		flen = st.st_size - foff;
+
+	switch (ioflag) {
+	case UIO_READ:
+		if (flen < blksz/2)
+			return (EINVAL);
+		break;
+
+	case UIO_WRITE:
+	default:
+		return (EINVAL);
+	}
+
+	/*
+	 * See if we can map the file for read.
+	 * Round down start offset for mmap.
+	 */
+	poff = P2PHASE((int)foff, blksz);
+	moff = foff - poff;
+	mlen = flen + poff;
+
+	ma = mmap(NULL, mlen, PROT_READ, MAP_SHARED, fd, moff);
+	if (ma == MAP_FAILED) {
+		/* Can't use loaned buffers. */
+		return (EINVAL);
+	}
+
+	priv = kmem_zalloc(sizeof (*priv), KM_SLEEP);
+	priv->map_foff = foff;
+	priv->map_addr = ma;
+	priv->map_len = mlen;
+
+	XUIO_XUZC_PRIV(xuio) = priv;
+	XUIO_XUZC_RW(xuio) = ioflag;
+	uio->uio_extflg = UIO_XUIO;
+
+	return (0);
 }
 
 /* ARGSUSED */
 int
-fop_retzcbuf(vnode_t *vp, xuio_t *uiop, cred_t *cr, caller_context_t *ct)
+fop_retzcbuf(vnode_t *vp, xuio_t *xuio, cred_t *cr, caller_context_t *ct)
 {
-	return (ENOSYS);
+	fake_xuio_t *priv = XUIO_XUZC_PRIV(xuio);
+	int ioflag = XUIO_XUZC_RW(xuio);
+
+	ASSERT(xuio->xu_type == UIOTYPE_ZEROCOPY);
+	ASSERT(ioflag == UIO_READ);
+
+	munmap(priv->map_addr, priv->map_len);
+	kmem_free(priv, sizeof (fake_xuio_t));
+	XUIO_XUZC_PRIV(xuio) = NULL;
+
+	return (0);
 }
 
 
@@ -1420,17 +1570,11 @@ stat_to_vattr(const struct stat *st, vattr_t *vap)
 /* ARGSUSED */
 void
 flk_init_callback(flk_callback_t *flk_cb,
-	callb_cpr_t *(*cb_fcn)(flk_cb_when_t, void *), void *cbdata)
+    callb_cpr_t *(*cb_fcn)(flk_cb_when_t, void *), void *cbdata)
 {
 }
 
-void
-vn_hold(vnode_t *vp)
-{
-	mutex_enter(&vp->v_lock);
-	vp->v_count++;
-	mutex_exit(&vp->v_lock);
-}
+/* See: VN_HOLD / VN_RELE */
 
 void
 vn_rele(vnode_t *vp)

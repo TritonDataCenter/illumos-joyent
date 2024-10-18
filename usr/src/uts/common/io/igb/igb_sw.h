@@ -27,6 +27,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2014 Pluribus Networks Inc.
  * Copyright (c) 2017, Joyent, Inc.
+ * Copyright 2020 Oxide Computer Company
  */
 
 #ifndef	_IGB_SW_H
@@ -71,8 +72,10 @@ extern "C" {
 #include <sys/fm/protocol.h>
 #include <sys/fm/util.h>
 #include <sys/fm/io/ddi.h>
+#include <sys/ddi_ufm.h>
 #include "e1000_api.h"
 #include "e1000_82575.h"
+#include "e1000_illumos.h"
 
 
 #define	MODULE_NAME			"igb"	/* module name */
@@ -191,6 +194,7 @@ extern "C" {
 #define	ATTACH_PROGRESS_MAC		0x0800	/* MAC registered */
 #define	ATTACH_PROGRESS_ENABLE_INTR	0x1000	/* DDI interrupts enabled */
 #define	ATTACH_PROGRESS_FMINIT		0x2000	/* FMA initialized */
+#define	ATTACH_PROGRESS_UFM		0x4000	/* UFM enabled */
 
 #define	PROP_ADV_AUTONEG_CAP		"adv_autoneg_cap"
 #define	PROP_ADV_1000FDX_CAP		"adv_1000fdx_cap"
@@ -558,6 +562,44 @@ typedef struct igb_rx_group {
 	struct igb		*igb;		/* Pointer to igb struct */
 } igb_rx_group_t;
 
+typedef enum {
+	IGB_ETS_INDEX_INTERNAL		= 0,
+	IGB_ETS_INDEX_EXTERNAL_1	= 1,
+	IGB_ETS_INDEX_EXTERNAL_2	= 2,
+	IGB_ETS_INDEX_EXTERNAL_3	= 3
+} igb_ets_index_t;
+
+typedef enum {
+	IGB_ETS_LOC_NA		= 0,
+	IGB_ETS_LOC_HOT_SPOT	= 2,
+	IGB_ETS_LOC_PCIE	= 3,
+	IGB_ETS_LOC_BULKHEAD	= 4,
+	IGB_ETS_LOC_BOARD	= 5,
+	IGB_ETS_LOC_INLET	= 7
+} igb_ets_loc_t;
+
+/*
+ * Sensor data
+ */
+typedef struct igb_ets {
+	igb_ets_index_t	iet_index;
+	igb_ets_loc_t	iet_loc;
+	uint8_t		iet_thresh;
+	id_t		iet_ksensor;
+} igb_ets_t;
+
+/*
+ * There are only four words defined for sensors.
+ */
+#define	IGB_ETS_MAX	4
+
+typedef struct igb_sensors {
+	boolean_t isn_valid;
+	id_t isn_reg_ksensor;
+	uint_t isn_nents;
+	igb_ets_t isn_ets[IGB_ETS_MAX];
+} igb_sensors_t;
+
 typedef struct igb {
 	int			instance;
 	mac_handle_t		mac_hdl;
@@ -733,6 +775,8 @@ typedef struct igb {
 	int			fm_capabilities;
 
 	ulong_t			page_size;
+	ddi_ufm_handle_t	*igb_ufmh;
+	igb_sensors_t		igb_sensors;
 } igb_t;
 
 typedef struct igb_stat {
@@ -871,6 +915,12 @@ mblk_t *igb_rx_ring_poll(void *, int);
 mblk_t *igb_tx_ring_send(void *, mblk_t *);
 int igb_rx_ring_stat(mac_ring_driver_t, uint_t, uint64_t *);
 int igb_tx_ring_stat(mac_ring_driver_t, uint_t, uint64_t *);
+
+/*
+ * Function prootypes in igb_sesnor.c
+ */
+void igb_init_sensors(igb_t *);
+void igb_fini_sensors(igb_t *);
 
 #ifdef __cplusplus
 }

@@ -34,6 +34,7 @@
 
 #if defined(_STANDALONE)
 #include <sys/cdefs.h>
+#include <stdint.h>
 #define	_RESTRICT_KYWD	restrict
 #else
 #if !defined(_KERNEL) && !defined(_BOOT)
@@ -46,6 +47,9 @@
 #endif	/* _STANDALONE */
 
 #include <sys/types.h>
+#if !defined(_STANDALONE)
+#include <sys/inttypes.h>
+#endif
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/sysmacros.h>
@@ -81,7 +85,7 @@ static void Encode(uint8_t *, const uint32_t *, size_t);
 		(ctx)->state[3], (ctx)->state[4], (ctx), (in))
 
 static void SHA1Transform(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
-    SHA1_CTX *, const uint8_t *);
+    SHA1_CTX *, const uint8_t [64]);
 
 #elif	defined(__amd64)
 
@@ -95,7 +99,7 @@ void sha1_block_data_order(SHA1_CTX *ctx, const void *inpp, size_t num_blocks);
 
 #define	SHA1_TRANSFORM(ctx, in) SHA1Transform((ctx), (in))
 
-static void SHA1Transform(SHA1_CTX *, const uint8_t *);
+static void SHA1Transform(SHA1_CTX *, const uint8_t [64]);
 
 #endif
 
@@ -108,28 +112,6 @@ static uint8_t PADDING[64] = { 0x80, /* all zeros */ };
 #define	F(b, c, d)	(((b) & (c)) | ((~b) & (d)))
 #define	G(b, c, d)	((b) ^ (c) ^ (d))
 #define	H(b, c, d)	(((b) & (c)) | (((b)|(c)) & (d)))
-
-/*
- * ROTATE_LEFT rotates x left n bits.
- */
-
-#if	defined(__GNUC__) && defined(_LP64)
-static __inline__ uint64_t
-ROTATE_LEFT(uint64_t value, uint32_t n)
-{
-	uint32_t t32;
-
-	t32 = (uint32_t)value;
-	return ((t32 << n) | (t32 >> (32 - n)));
-}
-
-#else
-
-#define	ROTATE_LEFT(x, n)	\
-	(((x) << (n)) | ((x) >> ((sizeof (x) * NBBY)-(n))))
-
-#endif
-
 
 /*
  * SHA1Init()
@@ -200,9 +182,10 @@ extern void SHA1TransformVIS(uint64_t *, uint32_t *, uint32_t *, uint64_t *);
 void
 SHA1Update(SHA1_CTX *ctx, const void *inptr, size_t input_len)
 {
-	uint32_t i, buf_index, buf_len;
+	size_t i, buf_index, buf_len;
 	uint64_t X0[40], input64[8];
 	const uint8_t *input = inptr;
+	uint32_t il;
 #ifdef _KERNEL
 	int usevis = 0;
 #else
@@ -216,8 +199,17 @@ SHA1Update(SHA1_CTX *ctx, const void *inptr, size_t input_len)
 	/* compute number of bytes mod 64 */
 	buf_index = (ctx->count[1] >> 3) & 0x3F;
 
+	/*
+	 * Extract low 32 bits of input_len; when we adjust
+	 * count[0] we must fold in the carry from the
+	 * addition of the low bits along with the nonzero
+	 * upper bits (if any) from input_len.
+	 */
+	il = input_len & UINT32_MAX;
+	il = il << 3;
+
 	/* update number of bits */
-	if ((ctx->count[1] += (input_len << 3)) < (input_len << 3))
+	if ((ctx->count[1] += il) < il)
 		ctx->count[0]++;
 
 	ctx->count[0] += (input_len >> 29);
@@ -231,7 +223,7 @@ SHA1Update(SHA1_CTX *ctx, const void *inptr, size_t input_len)
 		kfpu_t *fpu;
 		if (fpu_exists) {
 			uint8_t fpua[sizeof (kfpu_t) + GSR_SIZE + VIS_ALIGN];
-			uint32_t len = (input_len + buf_index) & ~0x3f;
+			size_t len = (input_len + buf_index) & ~0x3f;
 			int svfp_ok;
 
 			fpu = (kfpu_t *)P2ROUNDUP((uintptr_t)fpua, 64);
@@ -347,10 +339,11 @@ SHA1Update(SHA1_CTX *ctx, const void *inptr, size_t input_len)
 void
 SHA1Update(SHA1_CTX *ctx, const void *inptr, size_t input_len)
 {
-	uint32_t i, buf_index, buf_len;
+	size_t i, buf_index, buf_len;
 	const uint8_t *input = inptr;
+	uint32_t il;
 #if defined(__amd64)
-	uint32_t	block_count;
+	size_t	block_count;
 #endif	/* __amd64 */
 
 	/* check for noop */
@@ -360,8 +353,17 @@ SHA1Update(SHA1_CTX *ctx, const void *inptr, size_t input_len)
 	/* compute number of bytes mod 64 */
 	buf_index = (ctx->count[1] >> 3) & 0x3F;
 
+	/*
+	 * Extract low 32 bits of input_len; when we adjust
+	 * count[0] we must fold in the carry from the
+	 * addition of the low bits along with the nonzero
+	 * upper bits (if any) from input_len.
+	 */
+	il = input_len & UINT32_MAX;
+	il = il << 3;
+
 	/* update number of bits */
-	if ((ctx->count[1] += (input_len << 3)) < (input_len << 3))
+	if ((ctx->count[1] += il) < il)
 		ctx->count[0]++;
 
 	ctx->count[0] += (input_len >> 29);
@@ -455,6 +457,25 @@ SHA1Final(void *digest, SHA1_CTX *ctx)
 
 
 #if !defined(__amd64)
+
+/*
+ * ROTATE_LEFT rotates x left n bits.
+ */
+
+#if	defined(__GNUC__) && defined(_LP64)
+static __inline__ uint64_t
+ROTATE_LEFT(uint64_t value, uint32_t n)
+{
+	uint32_t t32;
+
+	t32 = (uint32_t)value;
+	return ((t32 << n) | (t32 >> (32 - n)));
+}
+
+#else
+#define	ROTATE_LEFT(x, n)	\
+	(((x) << (n)) | ((x) >> ((sizeof (x) * NBBY)-(n))))
+#endif
 
 typedef uint32_t sha1word;
 

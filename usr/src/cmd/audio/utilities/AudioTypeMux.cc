@@ -24,8 +24,6 @@
  * All rights reserved.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdlib.h>
 #include <memory.h>
 #include <math.h>
@@ -128,7 +126,8 @@ Convert(
 				err = AUDIO_UNIXERROR;
 				goto cleanup;
 			}
-			if (err = multibuf[i]->SetHeader(outhdr)) {
+			err = multibuf[i]->SetHeader(outhdr);
+			if (err != AUDIO_SUCCESS) {
 				delete multibuf[i];
 cleanup:			while (--i >= 0) {
 					delete multibuf[i];
@@ -171,7 +170,8 @@ cleanup:			while (--i >= 0) {
 		    "(Multiplex conversion buffer)");
 		if (outbuf == 0)
 			return (AUDIO_UNIXERROR);
-		if (err = outbuf->SetHeader(outhdr)) {
+		err = outbuf->SetHeader(outhdr);
+		if (err != AUDIO_SUCCESS) {
 			delete outbuf;
 			return (err);
 		}

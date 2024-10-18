@@ -25,7 +25,7 @@
 # Use is subject to license terms.
 #
 
-# This file brings down all that is needed to build just 
+# This file brings down all that is needed to build just
 # 1394 drivers.
 #
 
@@ -36,26 +36,22 @@ find_files "s.*.h"	\
 	usr/src/uts/common/sys
 
 find_files "s.*.h"	\
-	usr/src/uts/sparc/sys 
+	usr/src/uts/sparc/sys
 
 find_files "s.*.h"	\
-	usr/src/uts/sparc/v7/sys 
+	usr/src/uts/sparc/v7/sys
 
 find_files "s.*.h"	\
-	usr/src/uts/sparc/v9/sys 
+	usr/src/uts/sparc/v9/sys
 
 find_files "s.*.h"	\
-	usr/src/uts/sun/sys 
+	usr/src/uts/sun/sys
 
 find_files "s.*.h"	\
-	usr/src/uts/sun4u/sys 
+	usr/src/uts/sun4u/sys
 
 find_files "s.*.h"	\
-	usr/src/uts/common/vm 
-
-find_files "s.*"	\
-	usr/src/uts/sparc/hci1394	\
-	usr/src/uts/sparc/s1394
+	usr/src/uts/common/vm
 
 echo_file  usr/src/Makefile.master
 echo_file  usr/src/Makefile.master.64
@@ -65,16 +61,7 @@ echo_file  usr/src/Makefile.psm.targ
 echo_file  usr/src/uts/Makefile
 echo_file  usr/src/uts/Makefile.targ
 echo_file  usr/src/uts/Makefile.uts
-echo_file  usr/src/uts/sun/Makefile.files
-echo_file  usr/src/uts/sun/Makefile.rules
 echo_file  usr/src/uts/common/Makefile.files
 echo_file  usr/src/uts/common/Makefile.rules
 echo_file  usr/src/uts/common/sys/Makefile
-echo_file  usr/src/uts/sparc/Makefile
-echo_file  usr/src/uts/sparc/Makefile.files
-echo_file  usr/src/uts/sparc/Makefile.rules
-echo_file  usr/src/uts/sparc/Makefile.sparc
-echo_file  usr/src/uts/sparc/Makefile.targ
-echo_file  usr/src/uts/sparc/ml/sparc.il
 echo_file  usr/src/uts/sparc/req.flg
-

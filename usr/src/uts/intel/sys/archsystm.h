@@ -124,7 +124,7 @@ extern void getfpregs32(klwp_t *, fpregset32_t *);
 
 struct fpu_ctx;
 
-extern void fp_free(struct fpu_ctx *, int);
+extern void fp_free(struct fpu_ctx *);
 extern void fp_save(struct fpu_ctx *);
 extern void fp_restore(struct fpu_ctx *);
 
@@ -133,8 +133,8 @@ extern int fpu_pentium_fdivbug;
 extern void sep_save(void *);
 extern void sep_restore(void *);
 
-extern void brand_interpositioning_enable(void);
-extern void brand_interpositioning_disable(void);
+extern void brand_interpositioning_enable(void *);
+extern void brand_interpositioning_disable(void *);
 
 struct regs;
 
@@ -186,7 +186,7 @@ extern void *plat_traceback(void *);
  * The following two macros are the four byte instruction sequence of stac, nop
  * and clac, nop. These are used in startup_smap() and hotinline_smap() as a
  * part of properly setting up the valid instructions. For more information on
- * SMAP, see uts/intel/ia32/ml/copy.s, uts/i86pc/os/machdep.c and
+ * SMAP, see uts/intel/ml/copy.s, uts/i86pc/os/machdep.c and
  * uts/common/os/modctl.c.
  *
  * Note that smap_disable and smap_enable are resolved to stubs at compile time,

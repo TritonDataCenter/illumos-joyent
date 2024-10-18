@@ -23,6 +23,8 @@
  * Copyright 2015 Joyent, Inc.
  * Copyright (c) 2011 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2014, 2017 by Delphix. All rights reserved.
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 /* Copyright (c) 1990 Mentat Inc. */
 
@@ -246,12 +248,14 @@ typedef struct tcp_s {
 		tcp_accept_error : 1,	/* Error during TLI accept */
 		tcp_send_discon_ind : 1, /* TLI accept err, send discon ind */
 		tcp_cork : 1,		/* tcp_cork option */
+		tcp_quickack : 1,	/* Send acks immediately */
 		tcp_tconnind_started : 1, /* conn_ind message is being sent */
 
 		tcp_lso :1,		/* Lower layer is capable of LSO */
 		tcp_is_wnd_shrnk : 1,	/* Window has shrunk */
+		tcp_md5sig : 1,		/* Add MD5 signature option */
 
-		tcp_pad_to_bit_31 : 18;
+		tcp_pad_to_bit_31 : 16;
 
 	uint32_t	tcp_initial_pmtu; /* Initial outgoing Path MTU. */
 
@@ -377,6 +381,7 @@ typedef struct tcp_s {
 
 	int		tcp_ipsec_overhead;
 
+	uint_t		tcp_recvtos;	/* Last received IP_RECVTOS */
 	uint_t		tcp_recvifindex; /* Last received IPV6_RCVPKTINFO */
 	uint_t		tcp_recvhops;	/* Last received IPV6_RECVHOPLIMIT */
 	uint_t		tcp_recvtclass;	/* Last received IPV6_RECVTCLASS */
@@ -501,6 +506,13 @@ typedef struct tcp_s {
 	uint32_t		tcp_fin_wait_2_flush_interval;
 
 	tcp_conn_stats_t	tcp_cs;
+
+	/*
+	 * The cached inbound and outbound security associations (SAs) for the
+	 * TCP signature (TCP_MD5SIG).
+	 */
+	void		*tcp_sig_sa_in;
+	void		*tcp_sig_sa_out;
 
 #ifdef DEBUG
 	pc_t			tcmp_stk[15];

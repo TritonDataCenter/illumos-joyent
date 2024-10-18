@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  *
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -92,7 +93,7 @@
  *          +------------------------------+
  *
  * The MDB execution control model is based upon the synchronous debugging
- * model exported by Solaris proc(4).  A target program is set running or the
+ * model exported by Solaris proc(5).  A target program is set running or the
  * debugger is attached to a running target.  On ISTOP (stop on event of
  * interest), one target thread is selected as the representative.  The
  * algorithm for selecting the representative is target-specific, but we assume
@@ -506,7 +507,7 @@ ssize_t
 mdb_tgt_readstr(mdb_tgt_t *t, mdb_tgt_as_t as, char *buf,
     size_t nbytes, mdb_tgt_addr_t addr)
 {
-	ssize_t n, nread = mdb_tgt_aread(t, as, buf, nbytes, addr);
+	ssize_t n = -1, nread = mdb_tgt_aread(t, as, buf, nbytes, addr);
 	char *p;
 
 	if (nread >= 0) {
@@ -1793,6 +1794,12 @@ mdb_tgt_putareg(mdb_tgt_t *t, mdb_tgt_tid_t tid,
     const char *rname, mdb_tgt_reg_t r)
 {
 	return (t->t_ops->t_putareg(t, tid, rname, r));
+}
+
+int
+mdb_tgt_thread_name(mdb_tgt_t *t, mdb_tgt_tid_t tid, char *buf, size_t bufsize)
+{
+	return (t->t_ops->t_thread_name(t, tid, buf, bufsize));
 }
 
 int

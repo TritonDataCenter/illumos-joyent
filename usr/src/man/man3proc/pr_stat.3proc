@@ -11,7 +11,7 @@
 .\"
 .\" Copyright 2015 Joyent, Inc.
 .\"
-.Dd May 11, 2016
+.Dd November 27, 2023
 .Dt PR_STAT 3PROC
 .Os
 .Sh NAME
@@ -22,8 +22,9 @@
 .Nm pr_stat ,
 .Nm pr_stat64
 .Nd inject stat system call into victim process
-.Sh SYNOPSIS
+.Sh LIBRARY
 .Lb libproc
+.Sh SYNOPSIS
 .In libproc.h
 .Ft int
 .Fo pr_fstat
@@ -150,7 +151,7 @@ and
 respectively; however, rather than having the stat information be subject to the
 data model of the target process, they always provide 64-bit stat information.
 See
-.Xr lf64 5
+.Xr lf64 7
 for more information.
 .Sh RETURN VALUES
 Upon successful completion, the
@@ -192,5 +193,5 @@ in
 .Sh SEE ALSO
 .Xr stat 2 ,
 .Xr libproc 3LIB ,
-.Xr proc 4 ,
-.Xr lf64 5
+.Xr proc 5 ,
+.Xr lf64 7

@@ -59,7 +59,7 @@ typedef struct overlay_mux {
 	int			omux_domain;	/* RO: socket domain */
 	int			omux_family;	/* RO: socket family */
 	int			omux_protocol;	/* RO: socket protocol */
-	struct sockaddr 	*omux_addr;	/* RO: socket address */
+	struct sockaddr		*omux_addr;	/* RO: socket address */
 	socklen_t		omux_alen;	/* RO: sockaddr len */
 	kmutex_t		omux_lock;	/* Protects everything below */
 	uint_t			omux_count;	/* Active instances */
@@ -145,6 +145,9 @@ typedef struct overlay_target_entry {
 
 
 #define	OVERLAY_CTL	"overlay"
+
+#define	OVERLAY_FREEMSG(mp, reason) \
+    DTRACE_PROBE2(overlay__freemsg, mblk_t *, mp, char *, reason)
 
 extern dev_info_t *overlay_dip;
 

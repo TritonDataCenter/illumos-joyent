@@ -40,10 +40,7 @@ SGSCOMMONOBJ=	alist.o
 OBJS=		$(BLTOBJ) $(COMOBJ) $(SGSCOMMONOBJ)
 
 MAPFILE=	$(MAPFILE.NGB)
-MAPOPT=		$(MAPFILE:%=-M%)
-
-# not linted
-SMATCH=off
+MAPOPT=		$(MAPFILE:%=-Wl,-M%)
 
 CPPFLAGS +=	-I$(SRC)/common/sgsrtcid -I$(SRC)/uts/$(ARCH)/sys \
 		-D__EXTENSIONS__

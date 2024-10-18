@@ -27,7 +27,7 @@
 
 include		../../Makefile.lib
 
-$(INTEL_BLD)SUBDIRS =	$(MACH) $(BUILD64) $(MACH64)
+SUBDIRS =	$(MACH) $(BUILD64) $(MACH64)
 
 all :=		TARGET= all
 clean :=	TARGET= clean
@@ -36,9 +36,6 @@ delete :=	TARGET= delete
 install :=	TARGET= install
 _msg :=		TARGET= _msg
 package :=	TARGET= package
-
-SED=	sed
-GREP=	grep
 
 .KEEP_STATE:
 

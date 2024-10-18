@@ -24,8 +24,6 @@
  * All rights reserved.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <sys/isa_defs.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -37,10 +35,10 @@
  * fcntl() system call -- executed by subject process.
  */
 int
-pr_fcntl(struct ps_prochandle *Pr, int fd, int cmd, void *argp)
+pr_fcntl(struct ps_prochandle *Pr, int fd, int cmd, void *argp, void *argp1)
 {
 	sysret_t rval;			/* return value from fcntl() */
-	argdes_t argd[3];		/* arg descriptors for fcntl() */
+	argdes_t argd[4];		/* arg descriptors for fcntl() */
 	argdes_t *adp;
 	int error;
 
@@ -130,7 +128,14 @@ pr_fcntl(struct ps_prochandle *Pr, int fd, int cmd, void *argp)
 		}
 	}
 
-	error = Psyscall(Pr, &rval, SYS_fcntl, 3, &argd[0]);
+	adp++;			/* argp1 argument */
+	adp->arg_value = (intptr_t)argp1;
+	adp->arg_object = NULL;
+	adp->arg_type = AT_BYVAL;
+	adp->arg_inout = AI_INPUT;
+	adp->arg_size = 0;
+
+	error = Psyscall(Pr, &rval, SYS_fcntl, 4, &argd[0]);
 
 	if (error) {
 		errno = (error > 0)? error : ENOSYS;

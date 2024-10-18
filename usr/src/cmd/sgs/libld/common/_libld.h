@@ -24,6 +24,7 @@
  *	  All Rights Reserved
  *
  * Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -300,19 +301,6 @@ typedef struct sym_s_list {
 } Sym_s_list;
 
 /*
- * ld heap management structure
- */
-typedef struct _ld_heap Ld_heap;
-struct _ld_heap {
-	Ld_heap		*lh_next;
-	void		*lh_free;
-	void		*lh_end;
-};
-
-#define	HEAPBLOCK	0x800000	/* default allocation block size */
-#define	HEAPALIGN	0x8		/* heap blocks alignment requirement */
-
-/*
  * Dynamic per-symbol filtee string table descriptor.  This associates filtee
  * strings that will be created in the .dynstr, with .dynamic entries.
  */
@@ -460,6 +448,7 @@ typedef struct {
 #define	AL_CNT_SEGMENTS		20	/* ofl_segs */
 
 #define	AL_CNT_ASSDEFLIB	4	/* ofl_assdeflib exceptions count */
+#define	AL_CNT_MAPASSERT	10	/* mapfile assertions */
 
 /*
  * Return codes for {tls|got}_fixups() routines
@@ -649,7 +638,6 @@ typedef struct {
 extern char		*Plibpath;
 extern char		*Llibdir;
 extern char		*Ulibdir;
-extern Ld_heap		*ld_heap;
 extern APlist		*lib_support;
 extern int		demangle_flag;
 extern const Msg	reject[];
@@ -666,11 +654,17 @@ extern int		cap_names_match(Alist *, Alist *);
 
 extern void		lds_atexit(Ofl_desc *, int);
 
-extern void		libld_free(void *);
-extern void		*libld_malloc(size_t);
-extern void		*libld_realloc(void *, size_t);
+/*
+ * Note that libld has a long history of assuming that all allocations are
+ * 0-initialized.  libld_malloc must maintain this.
+ */
+#define	libld_free(x)		free(x)
+#define	libld_malloc(x)		calloc(1, x)
+#define	libld_realloc(x, s)	realloc(x, s)
+#define	libld_calloc(n, s)	calloc(n, s)
 
 extern int		isdavl_compare(const void *, const void *);
+extern int		osdesc_compare(const Os_desc *, const Os_desc *);
 
 extern Sdf_desc		*sdf_add(const char *, APlist **);
 extern Sdf_desc		*sdf_find(const char *, APlist *);

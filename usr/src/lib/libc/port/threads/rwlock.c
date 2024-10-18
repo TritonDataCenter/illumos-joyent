@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include "lint.h"
@@ -198,9 +199,8 @@ rw_write_held(rwlock_t *rwlp)
 }
 
 #pragma weak _rwlock_init = rwlock_init
-/* ARGSUSED2 */
 int
-rwlock_init(rwlock_t *rwlp, int type, void *arg)
+rwlock_init(rwlock_t *rwlp, int type, void *arg __unused)
 {
 	ulwp_t *self = curthread;
 
@@ -505,7 +505,6 @@ shared_rwlock_lock(rwlock_t *rwlp, timespec_t *tsp, int rd_wr)
 {
 	volatile uint32_t *rwstate = (volatile uint32_t *)&rwlp->rwlock_readers;
 	mutex_t *mp = &rwlp->mutex;
-	uint32_t readers;
 	int try_flag;
 	int error;
 
@@ -536,8 +535,12 @@ shared_rwlock_lock(rwlock_t *rwlp, timespec_t *tsp, int rd_wr)
 			}
 		}
 		atomic_or_32(rwstate, URW_HAS_WAITERS);
+
+#ifdef DEBUG
+		uint32_t readers;
 		readers = *rwstate;
 		ASSERT_CONSISTENT_STATE(readers);
+#endif
 		/*
 		 * The calls to __lwp_rwlock_*() below will release the mutex,
 		 * so we need a dtrace probe here.  The owner field of the
@@ -781,13 +784,22 @@ lrw_rdlock(rwlock_t *rwlp)
 }
 
 int
-pthread_rwlock_reltimedrdlock_np(pthread_rwlock_t *_RESTRICT_KYWD rwlp,
-    const struct timespec *_RESTRICT_KYWD reltime)
+pthread_rwlock_relclockrdlock_np(pthread_rwlock_t *restrict rwlp,
+    clockid_t clock, const struct timespec *restrict reltime)
 {
 	timespec_t tslocal = *reltime;
 	int error;
 
 	ASSERT(!curthread->ul_critical || curthread->ul_bindflags);
+
+	switch (clock) {
+	case CLOCK_REALTIME:
+	case CLOCK_HIGHRES:
+		break;
+	default:
+		return (EINVAL);
+	}
+
 	error = rw_rdlock_impl((rwlock_t *)rwlp, &tslocal);
 	if (error == ETIME)
 		error = ETIMEDOUT;
@@ -795,18 +807,42 @@ pthread_rwlock_reltimedrdlock_np(pthread_rwlock_t *_RESTRICT_KYWD rwlp,
 }
 
 int
-pthread_rwlock_timedrdlock(pthread_rwlock_t *_RESTRICT_KYWD rwlp,
-    const struct timespec *_RESTRICT_KYWD abstime)
+pthread_rwlock_reltimedrdlock_np(pthread_rwlock_t *restrict rwlp,
+    const struct timespec *restrict reltime)
+{
+	return (pthread_rwlock_relclockrdlock_np(rwlp, CLOCK_REALTIME,
+	    reltime));
+}
+
+int
+pthread_rwlock_clockrdlock(pthread_rwlock_t *restrict rwlp, clockid_t clock,
+    const struct timespec *restrict abstime)
 {
 	timespec_t tslocal;
 	int error;
 
 	ASSERT(!curthread->ul_critical || curthread->ul_bindflags);
-	abstime_to_reltime(CLOCK_REALTIME, abstime, &tslocal);
+
+	switch (clock) {
+	case CLOCK_REALTIME:
+	case CLOCK_HIGHRES:
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	abstime_to_reltime(clock, abstime, &tslocal);
 	error = rw_rdlock_impl((rwlock_t *)rwlp, &tslocal);
 	if (error == ETIME)
 		error = ETIMEDOUT;
 	return (error);
+}
+
+int
+pthread_rwlock_timedrdlock(pthread_rwlock_t *restrict rwlp,
+    const struct timespec *restrict abstime)
+{
+	return (pthread_rwlock_clockrdlock(rwlp, CLOCK_REALTIME, abstime));
 }
 
 int
@@ -879,13 +915,54 @@ lrw_wrlock(rwlock_t *rwlp)
 }
 
 int
-pthread_rwlock_reltimedwrlock_np(pthread_rwlock_t *_RESTRICT_KYWD rwlp,
-    const struct timespec *_RESTRICT_KYWD reltime)
+pthread_rwlock_relclockwrlock_np(pthread_rwlock_t *restrict rwlp,
+    clockid_t clock, const struct timespec *restrict reltime)
 {
 	timespec_t tslocal = *reltime;
 	int error;
 
 	ASSERT(!curthread->ul_critical || curthread->ul_bindflags);
+
+	switch (clock) {
+	case CLOCK_REALTIME:
+	case CLOCK_HIGHRES:
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	error = rw_wrlock_impl((rwlock_t *)rwlp, &tslocal);
+	if (error == ETIME)
+		error = ETIMEDOUT;
+	return (error);
+}
+
+int
+pthread_rwlock_reltimedwrlock_np(pthread_rwlock_t *restrict rwlp,
+    const struct timespec *restrict reltime)
+{
+	return (pthread_rwlock_relclockwrlock_np(rwlp, CLOCK_REALTIME,
+	    reltime));
+}
+
+int
+pthread_rwlock_clockwrlock(pthread_rwlock_t *rwlp, clockid_t clock,
+    const timespec_t *abstime)
+{
+	timespec_t tslocal;
+	int error;
+
+	ASSERT(!curthread->ul_critical || curthread->ul_bindflags);
+
+	switch (clock) {
+	case CLOCK_REALTIME:
+	case CLOCK_HIGHRES:
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	abstime_to_reltime(clock, abstime, &tslocal);
 	error = rw_wrlock_impl((rwlock_t *)rwlp, &tslocal);
 	if (error == ETIME)
 		error = ETIMEDOUT;
@@ -895,15 +972,7 @@ pthread_rwlock_reltimedwrlock_np(pthread_rwlock_t *_RESTRICT_KYWD rwlp,
 int
 pthread_rwlock_timedwrlock(pthread_rwlock_t *rwlp, const timespec_t *abstime)
 {
-	timespec_t tslocal;
-	int error;
-
-	ASSERT(!curthread->ul_critical || curthread->ul_bindflags);
-	abstime_to_reltime(CLOCK_REALTIME, abstime, &tslocal);
-	error = rw_wrlock_impl((rwlock_t *)rwlp, &tslocal);
-	if (error == ETIME)
-		error = ETIMEDOUT;
-	return (error);
+	return (pthread_rwlock_clockwrlock(rwlp, CLOCK_REALTIME, abstime));
 }
 
 #pragma weak pthread_rwlock_tryrdlock = rw_tryrdlock

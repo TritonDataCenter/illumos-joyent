@@ -37,6 +37,8 @@
 #define	LINK(l, r)	dt_node_link(l, r)
 #define	DUP(s)		strdup(s)
 
+extern int yylex(void);
+
 %}
 
 %union {
@@ -302,7 +304,6 @@ provider_probe:
 			$$ = dt_node_probe($2, 1, $3, NULL);
 		}
 	;
-	
 
 probe_definition:
 		probe_specifiers {
@@ -312,7 +313,7 @@ probe_definition:
 			 * it.  This can only occur if the next token is EOF or
 			 * an ambiguous predicate was slurped up as a comment.
 			 * We cannot perform this check if input() is a string
-			 * because dtrace(1M) [-fmnP] also use the compiler and
+			 * because dtrace(8) [-fmnP] also use the compiler and
 			 * things like dtrace -n BEGIN have to be accepted.
 			 */
 			if (yypcb->pcb_fileptr != NULL) {
@@ -427,11 +428,11 @@ postfix_expression:
 	|	postfix_expression DT_TOK_SUBSUB {
 			$$ = OP1(DT_TOK_POSTDEC, $1);
 		}
-	|	DT_TOK_OFFSETOF DT_TOK_LPAR type_name DT_TOK_COMMA 
+	|	DT_TOK_OFFSETOF DT_TOK_LPAR type_name DT_TOK_COMMA
 		    DT_TOK_IDENT DT_TOK_RPAR {
 			$$ = dt_node_offsetof($3, $5);
 		}
-	|	DT_TOK_OFFSETOF DT_TOK_LPAR type_name DT_TOK_COMMA 
+	|	DT_TOK_OFFSETOF DT_TOK_LPAR type_name DT_TOK_COMMA
 		    DT_TOK_TNAME DT_TOK_RPAR {
 			$$ = dt_node_offsetof($3, $5);
 		}
@@ -740,6 +741,7 @@ struct_declarator:
 
 enum_specifier:
 		enum_definition enumerator_list '}' { $$ = dt_scope_pop(); }
+	|	enum_definition enumerator_list DT_TOK_COMMA '}' { $$ = dt_scope_pop(); }
 	|	DT_KEY_ENUM DT_TOK_IDENT { $$ = dt_decl_spec(CTF_K_ENUM, $2); }
 	|	DT_KEY_ENUM DT_TOK_TNAME { $$ = dt_decl_spec(CTF_K_ENUM, $2); }
 	;
@@ -842,7 +844,7 @@ array:		DT_TOK_LBRAC { dt_scope_push(NULL, CTF_ERR); }
 	;
 
 array_parameters:
-		/* empty */ 		{ $$ = NULL; }
+		/* empty */		{ $$ = NULL; }
 	|	constant_expression	{ $$ = $1; }
 	|	parameter_type_list	{ $$ = $1; }
 	;
@@ -855,7 +857,7 @@ function:	DT_TOK_LPAR { dt_scope_push(NULL, CTF_ERR); }
 	;
 
 function_parameters:
-		/* empty */ 		{ $$ = NULL; }
+		/* empty */		{ $$ = NULL; }
 	|	parameter_type_list	{ $$ = $1; }
 	;
 

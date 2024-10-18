@@ -29,6 +29,7 @@
 /*
  * Copyright (c) 2013, OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*	Copyright (c) 1988 AT&T	*/
@@ -241,6 +242,10 @@ extern void *valloc(size_t);
 #endif /* !defined(_XPG6) || defined(__EXTENSIONS__) */
 #endif /* defined(__EXTENSIONS__) || ... || defined(_XPG4_2) */
 
+#if !defined(_STRICT_SYMBOLS) || defined(_XPG8)
+extern int ptsname_r(int, char *, size_t);
+#endif	/* _STRICT_SYMBOLS || _XPG8 */
+
 #if defined(__EXTENSIONS__) || \
 	(!defined(_STRICT_STDC) && !defined(__XOPEN_OR_POSIX)) || \
 	defined(_XPG6)
@@ -311,7 +316,7 @@ extern char *ulltostr(unsigned long long, char *);
 
 #endif /* defined(__EXTENSIONS__) || !defined(_STRICT_STDC) ... */
 
-/* OpenBSD compatibility functions */
+/* OpenBSD and misc. compatibility functions */
 #if !defined(_STRICT_SYMBOLS)
 
 #include <inttypes.h>
@@ -322,8 +327,12 @@ extern void freezero(void *, size_t);
 extern void *reallocarray(void *, size_t, size_t);
 extern void *recallocarray(void *, size_t, size_t, size_t);
 extern long long strtonum(const char *, long long, long long, const char **);
+extern long long strtonumx(const char *, long long, long long, const char **,
+    int);
 extern void *reallocf(void *, size_t);
 
+extern void qsort_r(void *, size_t, size_t,
+    int (*)(const void *, const void *, void *), void *);
 #endif	/* !_STRICT_SYBMOLS */
 
 

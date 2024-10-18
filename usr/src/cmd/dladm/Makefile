@@ -22,7 +22,6 @@
 # Use is subject to license terms.
 # Copyright 2018 Joyent, Inc.
 #
-# Copyright (c) 2018, Joyent, Inc.
 
 PROG=		dladm
 ROOTFS_PROG=	$(PROG)
@@ -43,14 +42,8 @@ LDLIBS +=	$(ZLAZYLOAD) -lrstp $(ZNOLAZYLOAD) -lnsl -lumem -lcustr
 
 CERRWARN +=	-_gcc=-Wno-switch
 CERRWARN +=	-_gcc=-Wno-unused-label
-CERRWARN +=	$(CNOWARN_UNINIT)
 
 SMOFF += snprintf_overflow
-
-# For headers from librstp.
-LINTFLAGS +=	-erroff=E_TRAILING_COMMA_IN_ENUM
-lint :=		ZLAZYLOAD=
-lint :=		ZNOLAZYLOAD=
 
 $(ROOTCFGDIR)/secobj.conf := FILEMODE= 660
 
@@ -68,8 +61,6 @@ clean:
 install:	all $(ROOTSBINPROG) $(ROOTCFGDIR) $(ROOTCFGFILES)
 		$(RM) $(ROOTUSRSBINPROG)
 		-$(SYMLINK) ../../sbin/$(PROG) $(ROOTUSRSBINPROG)
-
-lint:		lint_PROG
 
 $(ROOTCFGDIR):
 		$(INS.dir)

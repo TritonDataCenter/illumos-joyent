@@ -1,4 +1,5 @@
 /*
+ * Copyright 2023 Bill Sommerfeld <sommerfeld@hamachi.org>
  * Copyright 2013 Garrett D'Amore <garrett@damore.org>
  * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
  * Copyright 2012 Milan Jurik. All rights reserved.
@@ -86,6 +87,7 @@ struct parse {
 	sopno ssize;		/* malloced strip size (allocated) */
 	sopno slen;		/* malloced strip length (used) */
 	int ncsalloc;		/* number of csets allocated */
+	wint_t nc;		/* size of small-char bitmap in cset */
 	struct re_guts *g;
 #define	NPAREN	10		/* we need to remember () 1-9 for back refs */
 	sopno pbegin[NPAREN];	/* -> ( ([0] unused) */
@@ -132,7 +134,7 @@ static void freeset(struct parse *p, cset *cs);
 static void CHadd(struct parse *p, cset *cs, wint_t ch);
 static void CHaddrange(struct parse *p, cset *cs, wint_t min, wint_t max);
 static void CHaddtype(struct parse *p, cset *cs, wctype_t wct);
-static wint_t singleton(cset *cs);
+static wint_t singleton(struct parse *p, cset *cs);
 static sopno dupl(struct parse *p, sopno start, sopno finish);
 static void doemit(struct parse *p, sop op, size_t opnd);
 static void doinsert(struct parse *p, sop op, size_t opnd, sopno pos);
@@ -210,6 +212,19 @@ regcomp(regex_t *_RESTRICT_KYWD preg, const char *_RESTRICT_KYWD pattern,
 #define	GOODFLAGS(f)	((f)&~REG_DUMP)
 #endif
 
+	/*
+	 * Which character values are kept in cset bitmaps?
+	 *
+	 * Character sets store their members as a bitmap (for low-codepoint
+	 * characters) or as elements of an array; pa.nc sets the dividing
+	 * point between them.
+	 *
+	 * The value of MB_CUR_MAX depends on the current locale; fetching the
+	 * current locale can be expensive, so we pick a value now and stick
+	 * with it for the lifetime of the compiled regex.
+	 */
+	pa.nc = ((MB_CUR_MAX) == 1 ? (NC_MAX) : (NC_WIDE));
+
 	/* We had REG_INVARG, but we don't have that on Solaris. */
 	cflags = GOODFLAGS(cflags);
 	if ((cflags&REG_EXTENDED) && (cflags&REG_NOSPEC))
@@ -226,6 +241,7 @@ regcomp(regex_t *_RESTRICT_KYWD preg, const char *_RESTRICT_KYWD pattern,
 	g = (struct re_guts *)malloc(sizeof (struct re_guts));
 	if (g == NULL)
 		return (REG_ESPACE);
+	g->mb_cur_max = MB_CUR_MAX;
 	/*
 	 * Limit the pattern space to avoid a 32-bit overflow on buffer
 	 * extension.  Also avoid any signed overflow in case of conversion
@@ -868,7 +884,7 @@ p_bracket(struct parse *p)
 	if (cs->invert && p->g->cflags&REG_NEWLINE)
 		cs->bmp['\n' >> 3] |= 1 << ('\n' & 7);
 
-	if ((ch = singleton(cs)) != OUT) {	/* optimize singleton sets */
+	if ((ch = singleton(p, cs)) != OUT) {	/* optimize singleton sets */
 		ordinary(p, ch);
 		freeset(p, cs);
 	} else
@@ -1283,21 +1299,36 @@ freeset(struct parse *p, cset *cs)
  * returning it if so, otherwise returning OUT.
  */
 static wint_t
-singleton(cset *cs)
+singleton(struct parse *p, cset *cs)
 {
 	wint_t i, s, n;
 
-	for (i = n = 0; i < NC; i++)
-		if (CHIN(cs, i)) {
+	/* Exclude the complicated cases we don't want to deal with */
+	if (cs->nranges != 0 || cs->ntypes != 0 || cs->icase != 0)
+		return (OUT);
+
+	if (cs->nwides > 1)
+		return (OUT);
+
+	/* Count the number of characters present in the bitmap */
+	for (i = n = 0; i < p->nc; i++)
+		if (CHIN(p->nc, cs, i)) {
 			n++;
 			s = i;
 		}
-	if (n == 1)
-		return (s);
-	if (cs->nwides == 1 && cs->nranges == 0 && cs->ntypes == 0 &&
-	    cs->icase == 0)
+
+	if (n > 1)
+		return (OUT);
+
+	if (n == 1) {
+		if (cs->nwides == 0)
+			return (s);
+		else
+			return (OUT);
+	}
+	if (cs->nwides == 1)
 		return (cs->wides[0]);
-	/* Don't bother handling the other cases. */
+
 	return (OUT);
 }
 
@@ -1309,7 +1340,7 @@ CHadd(struct parse *p, cset *cs, wint_t ch)
 {
 	wint_t nch, *newwides;
 	assert(ch >= 0);
-	if (ch < NC)
+	if (ch < p->nc)
 		cs->bmp[ch >> 3] |= 1 << (ch & 7);
 	else {
 		newwides = realloc(cs->wides, (cs->nwides + 1) *
@@ -1322,9 +1353,9 @@ CHadd(struct parse *p, cset *cs, wint_t ch)
 		cs->wides[cs->nwides++] = ch;
 	}
 	if (cs->icase) {
-		if ((nch = towlower(ch)) < NC)
+		if ((nch = towlower(ch)) < p->nc)
 			cs->bmp[nch >> 3] |= 1 << (nch & 7);
-		if ((nch = towupper(ch)) < NC)
+		if ((nch = towupper(ch)) < p->nc)
 			cs->bmp[nch >> 3] |= 1 << (nch & 7);
 	}
 }
@@ -1337,7 +1368,7 @@ CHaddrange(struct parse *p, cset *cs, wint_t min, wint_t max)
 {
 	crange *newranges;
 
-	for (; min < NC && min <= max; min++)
+	for (; min < p->nc && min <= max; min++)
 		CHadd(p, cs, min);
 	if (min >= max)
 		return;
@@ -1362,7 +1393,7 @@ CHaddtype(struct parse *p, cset *cs, wctype_t wct)
 	wint_t i;
 	wctype_t *newtypes;
 
-	for (i = 0; i < NC; i++)
+	for (i = 0; i < p->nc; i++)
 		if (iswctype(i, wct))
 			CHadd(p, cs, i);
 	newtypes = realloc(cs->types, (cs->ntypes + 1) *
@@ -1541,7 +1572,7 @@ findmust(struct parse *p, struct re_guts *g)
 	 * multibyte character strings, but it's safe for at least
 	 * UTF-8 (see RFC 3629).
 	 */
-	if (MB_CUR_MAX > 1 &&
+	if (g->mb_cur_max > 1 &&
 	    strcmp(loc->runelocale->__encoding, "UTF-8") != 0)
 		return;
 

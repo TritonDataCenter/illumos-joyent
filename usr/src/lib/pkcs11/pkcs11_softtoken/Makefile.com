@@ -22,9 +22,8 @@
 # Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
 #
 # Copyright 2010 Nexenta Systems, Inc.  All rights reserved.
-# Copyright 2018, Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
 #
-# Copyright (c) 2018, Joyent, Inc.
 
 LIBRARY = pkcs11_softtoken.a
 VERS= .1
@@ -65,7 +64,7 @@ LCL_OBJECTS = \
 	softBlowfishCrypt.o	\
 	softEC.o
 
-ASFLAGS = $(AS_PICFLAGS) -P -D__STDC__ -D_ASM $(CPPFLAGS)
+ASFLAGS = $(AS_PICFLAGS) -D__STDC__ -D_ASM $(CPPFLAGS)
 
 ECC_COBJECTS = \
 	ec.o ec2_163.o ec2_mont.o ecdecode.o ecl_mult.o ecp_384.o \
@@ -121,7 +120,7 @@ SRCS =	\
 
 # libelfsign needs a static pkcs11_softtoken
 LIBS    =       $(DYNLIB)
-LDLIBS  +=      -lc -lmd -lcryptoutil -lsoftcrypto -lgen
+LDLIBS  +=      -lc -lmd -lcryptoutil -lsoftcrypto -lgen -lavl
 
 CSTD =	$(CSTD_GNU99)
 

@@ -10,7 +10,8 @@
  */
 
 /*
- * Copyright 2019 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 /*
@@ -148,9 +149,19 @@ smb2_write(smb_request_t *sr)
 		    &vdb->vdb_uio, &XferCount, stability);
 		if (rc)
 			break;
-		of->f_written = B_TRUE;
 		/* This revokes read cache delegations. */
 		(void) smb_oplock_break_WRITE(of->f_node, of);
+		/*
+		 * Don't want the performance cost of generating
+		 * change notify events on every write.  Instead:
+		 * Keep track of the fact that we have written
+		 * data via this handle, and do change notify
+		 * work on the first write, and during close.
+		 */
+		if (of->f_written == B_FALSE) {
+			of->f_written = B_TRUE;
+			smb_node_notify_modified(of->f_node);
+		}
 		break;
 
 	case STYPE_IPC:

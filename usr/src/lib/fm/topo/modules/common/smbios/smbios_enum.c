@@ -81,6 +81,8 @@ smbios2topotype(topo_mod_t *mod, uint8_t type)
 		return (topo_mod_strdup(mod, TOPO_DIMM_TYPE_DDR3));
 	case (SMB_MDT_DDR4):
 		return (topo_mod_strdup(mod, TOPO_DIMM_TYPE_DDR4));
+	case (SMB_MDT_DDR5):
+		return (topo_mod_strdup(mod, TOPO_DIMM_TYPE_DDR5));
 	case (SMB_MDT_LPDDR):
 		return (topo_mod_strdup(mod, TOPO_DIMM_TYPE_LPDDR));
 	case (SMB_MDT_LPDDR2):
@@ -89,6 +91,8 @@ smbios2topotype(topo_mod_t *mod, uint8_t type)
 		return (topo_mod_strdup(mod, TOPO_DIMM_TYPE_LPDDR3));
 	case (SMB_MDT_LPDDR4):
 		return (topo_mod_strdup(mod, TOPO_DIMM_TYPE_LPDDR4));
+	case (SMB_MDT_LPDDR5):
+		return (topo_mod_strdup(mod, TOPO_DIMM_TYPE_LPDDR5));
 	default:
 		return (topo_mod_strdup(mod, TOPO_DIMM_TYPE_UNKNOWN));
 	}
@@ -147,15 +151,15 @@ smbios_make_slot(smb_enum_data_t *smed, smbios_memdevice_t *smb_md)
 
 	if (topo_node_label_set(slotnode, (char *)smb_md->smbmd_dloc, &err) !=
 	    0) {
-		topo_mod_dprintf(mod, "failed to set label on %s=%d: %s",
-		    SLOT, smed->sme_slot_inst, topo_strerror(err));
+		topo_mod_dprintf(mod, "failed to set label on %s=%" PRIu64
+		    ": %s", SLOT, smed->sme_slot_inst, topo_strerror(err));
 		(void) topo_mod_seterrno(mod, err);
 		return (NULL);
 	}
 	if (topo_node_fru(smed->sme_pnode, &fmri, NULL, &err) != 0 ||
 	    topo_node_fru_set(slotnode, fmri, 0, &err) != 0) {
-		topo_mod_dprintf(mod, "failed to set FRU on %s=%d: %s", SLOT,
-		    smed->sme_slot_inst, topo_strerror(err));
+		topo_mod_dprintf(mod, "failed to set FRU on %s=%" PRIu64 ": %s",
+		    SLOT, smed->sme_slot_inst, topo_strerror(err));
 		nvlist_free(fmri);
 		(void) topo_mod_seterrno(mod, err);
 		return (NULL);
@@ -164,7 +168,7 @@ smbios_make_slot(smb_enum_data_t *smed, smbios_memdevice_t *smb_md)
 
 	if (topo_method_register(mod, slotnode, slot_methods) != 0) {
 		topo_mod_dprintf(mod, "topo_method_register() failed on "
-		    "%s=%d: %s", SLOT, smed->sme_slot_inst,
+		    "%s=%" PRIu64 ": %s", SLOT, smed->sme_slot_inst,
 		    topo_mod_errmsg(mod));
 		/* errno set */
 		return (NULL);
@@ -313,15 +317,15 @@ smbios_make_dimm(smb_enum_data_t *smed, smbios_memdevice_t *smb_md)
 	if (rc == 0 && smb_md->smbmd_maxvolt != 0)
 		rc += topo_prop_set_double(dimmnode, TOPO_PGROUP_DIMM_PROPS,
 		    "maximum-voltage", TOPO_PROP_IMMUTABLE,
-		    (smb_md->smbmd_maxvolt / 1000), &err);
+		    (smb_md->smbmd_maxvolt / 1000.0), &err);
 	if (rc == 0 && smb_md->smbmd_minvolt != 0)
 		rc += topo_prop_set_double(dimmnode, TOPO_PGROUP_DIMM_PROPS,
 		    "minimum-voltage", TOPO_PROP_IMMUTABLE,
-		    (smb_md->smbmd_minvolt / 1000), &err);
+		    (smb_md->smbmd_minvolt / 1000.0), &err);
 	if (rc == 0 && smb_md->smbmd_confvolt != 0)
 		rc += topo_prop_set_double(dimmnode, TOPO_PGROUP_DIMM_PROPS,
 		    "configured-voltage", TOPO_PROP_IMMUTABLE,
-		    (smb_md->smbmd_confvolt / 1000), &err);
+		    (smb_md->smbmd_confvolt / 1000.0), &err);
 	if (rc == 0 && manuf != NULL)
 		rc += topo_prop_set_string(dimmnode, TOPO_PGROUP_DIMM_PROPS,
 		    "manufacturer", TOPO_PROP_IMMUTABLE, manuf, &err);
@@ -562,7 +566,7 @@ smbios_enum_motherboard(smbios_hdl_t *shp, smb_enum_data_t *smed)
 			nvlist_free(extra);
 			goto err;
 		}
-		(void) topo_mod_create_ufm(mod, mbnode, "BIOS", &slotinfo);
+		(void) topo_mod_create_ufm(mod, mbnode, 0, "BIOS", &slotinfo);
 		nvlist_free(extra);
 	}
 

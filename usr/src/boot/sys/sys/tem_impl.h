@@ -58,14 +58,13 @@ extern "C" {
  * 21-31  attributes
  */
 
-typedef uint32_t tem_char_t;	/* 32bit char to support UTF-8 */
 #define	TEM_ATTR_MASK		0x7FF
 #define	TEM_CHAR(c)		((c) & 0x1fffff)
 #define	TEM_CHAR_ATTR(c)	(((c) >> 21) & TEM_ATTR_MASK)
 #define	TEM_ATTR(c)		(((c) & TEM_ATTR_MASK) << 21)
+#define	TEM_ATTR_ISSET(c, a)	((TEM_CHAR_ATTR(c) & (a)) == (a))
 
-#define	TEM_MAXPARAMS	5	/* maximum number of ANSI paramters */
-#define	TEM_MAXTAB	40	/* maximum number of tab stops */
+#define	TEM_MAXPARAMS	32	/* maximum number of ANSI paramters */
 #define	TEM_MAXFKEY	30	/* max length of function key with <ESC>Q */
 #define	MAX_TEM		2	/* max number of loadable terminal emulators */
 
@@ -85,6 +84,8 @@ typedef uint32_t tem_char_t;	/* 32bit char to support UTF-8 */
 #define	TEM_ATTR_BRIGHT_BG	0x0040
 #define	TEM_ATTR_TRANSPARENT	0x0080
 #define	TEM_ATTR_IMAGE		0x0100
+#define	TEM_ATTR_RGB_FG		0x0200
+#define	TEM_ATTR_RGB_BG		0x0400
 
 #define	ANSI_COLOR_BLACK	0
 #define	ANSI_COLOR_RED		1
@@ -128,7 +129,16 @@ typedef uint32_t tem_char_t;	/* 32bit char to support UTF-8 */
 
 #define	BUF_LEN		160 /* Two lines of data can be processed at a time */
 
-typedef uint8_t text_color_t;
+typedef uint32_t tem_char_t;	/* 32bit char to support UTF-8 */
+typedef union {
+	uint32_t n;
+	struct bgra {
+		uint8_t b;
+		uint8_t g;
+		uint8_t r;
+		uint8_t a;
+	} rgb;
+} text_color_t;
 typedef uint16_t text_attr_t;
 
 typedef struct tem_color {
@@ -160,19 +170,28 @@ typedef struct term_char {
 } term_char_t;
 
 /*
+ * Values for tvs_stateflags.
+ */
+#define	TVS_AUTOWRAP	0x00000001	/* autowrap is on by default */
+#define	TVS_WRAPPED	0x00000002	/* line wrap in progress */
+
+/*
  * State structure for each virtual terminal emulator
  */
 struct tem_vt_state {
 	uint8_t		tvs_fbmode;	/* framebuffer mode */
+	uint8_t		tvs_alpha;	/* rgb alpha channel */
 	text_attr_t	tvs_flags;	/* flags for this x3.64 terminal */
 	int		tvs_state;	/* state in output esc seq processing */
+	uint_t		tvs_stateflags; /* state of some features */
 	bool		tvs_gotparam;	/* does output esc seq have a param */
 
 	int	tvs_curparam;	/* current param # of output esc seq */
 	int	tvs_paramval;	/* value of current param */
 	int	tvs_params[TEM_MAXPARAMS];  /* parameters of output esc seq */
-	screen_pos_t	tvs_tabs[TEM_MAXTAB];	/* tab stops */
-	int	tvs_ntabs;		/* number of tabs used */
+	screen_pos_t	*tvs_tabs;	/* tab stops */
+	size_t	tvs_maxtab;		/* maximum number of tab stops */
+	size_t	tvs_ntabs;		/* number of tabs used */
 	int	tvs_nscroll;		/* number of lines to scroll */
 
 	struct tem_char_pos tvs_s_cursor;	/* start cursor position */
@@ -182,9 +201,11 @@ struct tem_vt_state {
 	term_char_t	*tvs_outbuf;	/* place to keep incomplete lines */
 	int		tvs_outindex;	/* index into a_outbuf */
 	void		*tvs_pix_data;	/* pointer to tmp bitmap area */
-	int		tvs_pix_data_size;
-	text_color_t	tvs_fg_color;
-	text_color_t	tvs_bg_color;
+	unsigned	tvs_pix_data_size;
+
+	text_color_t	tvs_fg_color;	/* console foreground */
+	text_color_t	tvs_bg_color;	/* console background */
+
 	int		tvs_first_line;	/* kernel console output begins */
 
 	term_char_t	*tvs_screen_buf;	/* whole screen buffer */
@@ -193,6 +214,7 @@ struct tem_vt_state {
 
 	bool		tvs_isactive;
 	bool		tvs_initialized;	/* initialization flag */
+	bool		tvs_cursor_hidden;
 
 	list_node_t	tvs_list_node;
 };
@@ -204,7 +226,7 @@ typedef struct tem_callbacks {
 	    screen_pos_t, screen_pos_t, screen_pos_t, screen_pos_t,
 	    screen_pos_t, screen_pos_t);
 	void (*tsc_cursor)(struct tem_vt_state *, short);
-	void (*tsc_bit2pix)(struct tem_vt_state *, term_char_t);
+	void (*tsc_bit2pix)(struct tem_vt_state *, term_char_t *);
 	void (*tsc_cls)(struct tem_vt_state *, int, screen_pos_t, screen_pos_t);
 } tem_callbacks_t;
 
@@ -225,7 +247,7 @@ typedef struct tem_state {
 	struct tem_size ts_p_dimension;	/* screen dimensions in pixels */
 	struct tem_pix_pos ts_p_offset;	/* pix offset to center the display */
 
-	int	ts_pix_data_size;	/* size of bitmap data areas */
+	unsigned ts_pix_data_size;	/* size of bitmap data areas */
 	int	ts_pdepth;		/* pixel depth */
 	struct font	ts_font;	/* font table */
 	bool	update_font;		/* flag the font change */
@@ -265,7 +287,7 @@ void	tem_write(tem_vt_state_t, uint8_t *, ssize_t);
 void	tem_get_size(uint16_t *, uint16_t *, uint16_t *, uint16_t *);
 void	tem_save_state(void);
 void	tem_register_modechg_cb(tem_modechg_cb_t, tem_modechg_cb_arg_t);
-void	tem_activate(tem_vt_state_t, boolean_t);
+void	tem_activate(tem_vt_state_t, bool);
 void	tem_get_colors(tem_vt_state_t, text_color_t *, text_color_t *);
 void	tem_image_display(struct tem_vt_state *, screen_pos_t, screen_pos_t,
 	screen_pos_t, screen_pos_t);

@@ -164,6 +164,9 @@ i_dladm_part_info_persist(dladm_handle_t handle, datalink_id_t linkid,
 	datalink_class_t class;
 	boolean_t force = B_FALSE;
 
+	conf.ds_readonly = B_FALSE;
+	conf.ds_confid = DLADM_INVALID_CONF;
+
 	/* Get the IB partition's datalink ID */
 	if ((status = dladm_datalink_id2info(handle, linkid, NULL, &class,
 	    NULL, NULL, 0)) != DLADM_STATUS_OK)
@@ -244,10 +247,9 @@ dladm_part_info(dladm_handle_t handle, datalink_id_t linkid,
  * Get the configuration information for the IB Phys link given by the datalink
  * ID 'linkid'.
  */
-/* ARGSUSED */
 dladm_status_t
 dladm_ib_info(dladm_handle_t handle, datalink_id_t linkid,
-    dladm_ib_attr_t *attrp, uint32_t flags)
+    dladm_ib_attr_t *attrp, uint32_t flags __unused)
 {
 	uint_t instance;
 	ibport_ioctl_t ioc;
@@ -362,7 +364,7 @@ dladm_part_persist_conf(dladm_handle_t handle, const char *pname,
 
 	dladm_conf_t	conf;
 	dladm_status_t	status;
-	char 		linkover[MAXLINKNAMELEN];
+	char		linkover[MAXLINKNAMELEN];
 	uint64_t	u64;
 
 	status = dladm_create_conf(handle, pname, pattr->dia_partlinkid,
@@ -425,7 +427,7 @@ dladm_part_create(dladm_handle_t handle, datalink_id_t physlinkid,
     ib_pkey_t pkey, uint32_t flags, char *pname, datalink_id_t *partlinkid,
     dladm_arg_list_t *proplist)
 {
-	int			i;
+	uint_t			i;
 	dladm_status_t		status;
 	uint_t			media;
 	boolean_t		part_created = B_FALSE;
@@ -604,9 +606,9 @@ dladm_part_delete(dladm_handle_t handle, datalink_id_t partid, int flags)
  * Call into the IP over IB driver to create the active instances of one or all
  * IB partitions present in the persistent configuration.
  */
-/* ARGSUSED */
 static int
-i_dladm_part_up(dladm_handle_t handle, datalink_id_t plinkid, void *arg)
+i_dladm_part_up(dladm_handle_t handle, datalink_id_t plinkid,
+    void *arg __unused)
 {
 	dladm_conf_t	conf;
 	datalink_id_t	linkid;
@@ -691,9 +693,9 @@ done:
  * database. If we need to bring up one IB Partition, its datalink ID is
  * provided in 'linkid'.
  */
-/* ARGSUSED */
 dladm_status_t
-dladm_part_up(dladm_handle_t handle, datalink_id_t linkid, uint32_t flags)
+dladm_part_up(dladm_handle_t handle, datalink_id_t linkid,
+    uint32_t flags __unused)
 {
 	dladm_status_t status = DLADM_STATUS_OK;
 

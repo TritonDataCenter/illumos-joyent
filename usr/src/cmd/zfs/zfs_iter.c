@@ -334,9 +334,9 @@ zfs_sort(const void *larg, const void *rarg, void *data)
 			rstr = rbuf;
 		} else {
 			lvalid = zfs_prop_valid_for_type(psc->sc_prop,
-			    zfs_get_type(l));
+			    zfs_get_type(l), B_FALSE);
 			rvalid = zfs_prop_valid_for_type(psc->sc_prop,
-			    zfs_get_type(r));
+			    zfs_get_type(r), B_FALSE);
 
 			if (lvalid)
 				(void) zfs_prop_get_numeric(l, psc->sc_prop,
@@ -445,13 +445,13 @@ zfs_for_each(int argc, char **argv, int flags, zfs_type_t types,
 
 		/*
 		 * If we're recursive, then we always allow filesystems as
-		 * arguments.  If we also are interested in snapshots, then we
-		 * can take volumes as well.
+		 * arguments.  If we also are interested in snapshots or
+		 * bookmarks, then we can take volumes as well.
 		 */
 		argtype = types;
 		if (flags & ZFS_ITER_RECURSE) {
 			argtype |= ZFS_TYPE_FILESYSTEM;
-			if (types & ZFS_TYPE_SNAPSHOT)
+			if (types & (ZFS_TYPE_SNAPSHOT | ZFS_TYPE_BOOKMARK))
 				argtype |= ZFS_TYPE_VOLUME;
 		}
 

@@ -351,9 +351,13 @@ zprop_values(int prop, zfs_type_t type)
 
 /*
  * Returns TRUE if the property applies to any of the given dataset types.
+ *
+ * If headcheck is set, the check is being made against the head dataset
+ * type of a snapshot which requires to return B_TRUE when the property
+ * is only valid for snapshots.
  */
 boolean_t
-zprop_valid_for_type(int prop, zfs_type_t type)
+zprop_valid_for_type(int prop, zfs_type_t type, boolean_t headcheck)
 {
 	zprop_desc_t *prop_tbl;
 
@@ -362,6 +366,8 @@ zprop_valid_for_type(int prop, zfs_type_t type)
 
 	ASSERT(prop < zprop_get_numprops(type));
 	prop_tbl = zprop_get_proptable(type);
+	if (headcheck && prop_tbl[prop].pd_types == ZFS_TYPE_SNAPSHOT)
+		return (B_TRUE);
 	return ((prop_tbl[prop].pd_types & type) != 0);
 }
 
@@ -410,6 +416,12 @@ zprop_width(int prop, boolean_t *fixed, zfs_type_t type)
 		 */
 		if (prop == ZFS_PROP_CREATION)
 			*fixed = B_FALSE;
+		/*
+		 * 'health' is handled specially because it's a number
+		 * internally, but displayed as a fixed 8 character string.
+		 */
+		if (prop == ZPOOL_PROP_HEALTH)
+			ret = 8;
 		break;
 	case PROP_TYPE_INDEX:
 		idx = prop_tbl[prop].pd_table;

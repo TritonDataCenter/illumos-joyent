@@ -12,6 +12,7 @@
 /*
  * Copyright 2013 Pluribus Networks Inc.
  * Copyright 2017 Joyent, Inc.
+ * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #ifndef _COMPAT_FREEBSD_SYS_CDEFS_H_
@@ -37,8 +38,6 @@
 #define __GNUC_PREREQ__(ma, mi) 0
 #endif
 
-#define	__FBSDID(s)
-
 #ifdef	__GNUC__
 #define	asm		__asm
 #define	inline		__inline
@@ -54,6 +53,18 @@
 #endif
 
 #if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 201112L || defined(lint)
+
+#if defined(__cplusplus) && __cplusplus >= 201103L
+#define	_Alignof(x)		alignof(x)
+#else
+#define	_Alignof(x)		__alignof(x)
+#endif
+
+#if defined(__cplusplus) && __cplusplus >= 201103L
+#define	_Noreturn		[[noreturn]]
+#else
+#define	_Noreturn		__dead2
+#endif
 
 #if !__has_extension(c_static_assert)
 #if (defined(__cplusplus) && __cplusplus >= 201103L) || \
@@ -73,5 +84,23 @@
 #define	static_assert(x, y)	_Static_assert(x, y)
 
 #endif /* __STDC_VERSION__ || __STDC_VERSION__ < 201112L */
+
+#if __GNUC_PREREQ__(4, 1)
+#define	__offsetof(type, field)	 __builtin_offsetof(type, field)
+#else
+#ifndef __cplusplus
+#define	__offsetof(type, field) \
+	((__size_t)(__uintptr_t)((const volatile void *)&((type *)0)->field))
+#else
+#define	__offsetof(type, field)					\
+  (__offsetof__ (reinterpret_cast <__size_t>			\
+                 (&reinterpret_cast <const volatile char &>	\
+                  (static_cast<type *> (0)->field))))
+#endif
+#endif
+
+#ifndef __DECONST
+#define	__DECONST(type, var)	((type)(uintptr_t)(const void *)(var))
+#endif
 
 #endif	/* _COMPAT_FREEBSD_SYS_CDEFS_H_ */

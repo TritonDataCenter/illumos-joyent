@@ -1,6 +1,9 @@
 .\" Copyright (c) 1992, 1993
 .\"     The Regents of the University of California.  All rights reserved.
 .\"
+.\" Copyright 2011 Nexenta Systems, Inc. All rights reserved.
+.\" Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+.\"
 .\" This code is derived from software contributed to Berkeley by
 .\" the Institute of Electrical and Electronics Engineers, Inc.
 .\"
@@ -28,7 +31,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.TH SED 1 "Feb 14, 2015"
+.TH SED 1 "Aug 21, 2020"
 .SH NAME
 \fBsed\fP
 \- stream editor
@@ -53,7 +56,7 @@ are specified, modifying the input as specified by a list of commands.
 The input is then written to the standard output.
 
 A single command may be specified as the first argument to
-\fB.\fP
+\fBsed\fP.
 Multiple commands may be specified by using the
 \fB\-e\fP
 or
@@ -68,7 +71,7 @@ The following options are available:
 Interpret regular expressions as extended (modern) regular expressions
 rather than basic regular expressions (BRE's).
 The
-\fBregex\fP(5)
+\fBregex\fP(7)
 manual page fully describes both formats.
 .TP
 \fB\-a\fP
@@ -152,7 +155,7 @@ option suppresses this behavior.
 Same as
 \fB\-E\fP
 for compatibility with GNU sed.
-
+.PP
 The form of a
 \fBsed\fP
 command is as follows:
@@ -177,6 +180,10 @@ deletes the pattern space.
 Some of the functions use a
 .IR "hold space"
 to save all or part of the pattern space for subsequent retrieval.
+
+If an input file is growing while sed is running, the
+``$''
+address match may be unreliable.
 .SH "Sed Addresses"
 An address is not required, but if specified must have one of the
 following formats:
@@ -237,7 +244,7 @@ function.
 The regular expressions used in
 \fB,\fP
 by default, are basic regular expressions (BREs, see
-\fBregex\fP(5)
+\fBregex\fP(7)
 for more information), but extended (modern) regular expressions can be used
 instead if the
 \fB\-E\fP
@@ -504,7 +511,7 @@ where
 ``#''
 is a digit, is replaced by the text matched
 by the corresponding backreference expression (see
-\fBregex\fP(5)) .
+\fBregex\fP(7)) .
 
 A line can be split by substituting a newline character into it.
 To specify a newline character in the replacement string, precede it with
@@ -617,14 +624,14 @@ and
 environment variables affect the execution of
 \fBsed\fP
 as described in
-\fBenviron\fP(5).
+\fBenviron\fP(7).
 .SH EXIT STATUS
 The \fBsed\fP utility exits 0 on success, and >0 if an error occurs.
 .SH SEE ALSO
 \fBawk\fP(1),
 \fBed\fP(1),
 \fBgrep\fP(1),
-\fBregex\fP(5)
+\fBregex\fP(7)
 .SH STANDARDS
 The
 \fBsed\fP

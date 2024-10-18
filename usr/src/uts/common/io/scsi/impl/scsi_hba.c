@@ -23,6 +23,8 @@
  * Copyright (c) 1994, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2014 Garrett D'Amore <garrett@damore.org>
  * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <sys/note.h>
@@ -546,7 +548,8 @@ scsi_hba_log(int level, const char *func, dev_info_t *self, dev_info_t *child,
 	/* augment message with 'information' */
 	info = scsi_hba_log_i;
 	*info = '\0';
-	if ((scsi_hba_log_info & 0x0001) && curproc && PTOU(curproc)->u_comm) {
+	if ((scsi_hba_log_info & 0x0001) && curproc != NULL &&
+	    PTOU(curproc)->u_comm[0] != '\0') {
 		(void) sprintf(info, "%s[%d]%p ",
 		    PTOU(curproc)->u_comm, curproc->p_pid, (void *)curthread);
 		info += strlen(info);
@@ -644,44 +647,44 @@ scsi_enumeration_failed(dev_info_t *child, scsi_enum_t se,
  * is a PHCI, and chooses mdi/ndi locking implementation.
  */
 static void
-scsi_hba_devi_enter(dev_info_t *self, int *circp)
+scsi_hba_devi_enter(dev_info_t *self, boolean_t *enteredvp)
 {
 	if (MDI_PHCI(self))
-		mdi_devi_enter(self, circp);
+		mdi_devi_enter(self, enteredvp);
 	else
-		ndi_devi_enter(self, circp);
+		ndi_devi_enter(self);
 }
 
 static int
-scsi_hba_devi_tryenter(dev_info_t *self, int *circp)
+scsi_hba_devi_tryenter(dev_info_t *self, boolean_t *enteredvp)
 {
 	if (MDI_PHCI(self))
-		return (mdi_devi_tryenter(self, circp));
+		return (mdi_devi_tryenter(self, enteredvp));
 	else
-		return (ndi_devi_tryenter(self, circp));
+		return (ndi_devi_tryenter(self));
 }
 
 static void
-scsi_hba_devi_exit(dev_info_t *self, int circ)
+scsi_hba_devi_exit(dev_info_t *self, boolean_t enteredv)
 {
 	if (MDI_PHCI(self))
-		mdi_devi_exit(self, circ);
+		mdi_devi_exit(self, enteredv);
 	else
-		ndi_devi_exit(self, circ);
+		ndi_devi_exit(self);
 }
 
 static void
-scsi_hba_devi_enter_phci(dev_info_t *self, int *circp)
+scsi_hba_devi_enter_phci(dev_info_t *self)
 {
 	if (MDI_PHCI(self))
-		mdi_devi_enter_phci(self, circp);
+		mdi_devi_enter_phci(self);
 }
 
 static void
-scsi_hba_devi_exit_phci(dev_info_t *self, int circ)
+scsi_hba_devi_exit_phci(dev_info_t *self)
 {
 	if (MDI_PHCI(self))
-		mdi_devi_exit_phci(self, circ);
+		mdi_devi_exit_phci(self);
 }
 
 static int
@@ -1670,27 +1673,27 @@ int
 smp_hba_bus_config(dev_info_t *self, char *addr, dev_info_t **childp)
 {
 	dev_info_t	*child;
-	int		circ;
+	boolean_t	enteredv;
 
 	ASSERT(self && addr && childp);
 	*childp = NULL;
 
 	/* Search for "smp" child. */
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 	if ((child = smp_findchild(self, addr)) == NULL) {
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 		return (NDI_FAILURE);
 	}
 
 	/* Attempt online. */
 	if (ndi_devi_online(child, 0) != NDI_SUCCESS) {
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 		return (NDI_FAILURE);
 	}
 
 	/* On success, return with active hold. */
 	ndi_hold_devi(child);
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 	*childp = child;
 	return (NDI_SUCCESS);
 }
@@ -1702,7 +1705,7 @@ int
 smp_hba_bus_config_taddr(dev_info_t *self, char *addr)
 {
 	dev_info_t		*child;
-	int			circ;
+	boolean_t		enteredv;
 
 	/*
 	 * NOTE: If we ever uses a generic node name (.vs. a driver name)
@@ -1712,7 +1715,7 @@ smp_hba_bus_config_taddr(dev_info_t *self, char *addr)
 	 */
 
 	/* Search for "smp" child. */
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 	child = smp_findchild(self, addr);
 	if (child) {
 		/* Child exists, note if this was a new reinsert. */
@@ -1720,7 +1723,7 @@ smp_hba_bus_config_taddr(dev_info_t *self, char *addr)
 			SCSI_HBA_LOG((_LOGCFG, self, NULL,
 			    "devinfo smp@%s device_reinsert", addr));
 
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 		return (NDI_SUCCESS);
 	}
 
@@ -1733,14 +1736,14 @@ smp_hba_bus_config_taddr(dev_info_t *self, char *addr)
 	if (ndi_prop_update_string(DDI_DEV_T_NONE, child,
 	    SCSI_ADDR_PROP_TARGET_PORT, addr) != DDI_PROP_SUCCESS) {
 		(void) ndi_devi_free(child);
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 		return (NDI_FAILURE);
 	}
 
 	/* Attempt to online the new "smp" node. */
 	(void) ndi_devi_online(child, 0);
 
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 	return (NDI_SUCCESS);
 }
 
@@ -3092,7 +3095,7 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 	scsi_hba_tran_t		*tran;
 	uint_t			bus_state;
 	int			rv = 0;
-	int			circ;
+	boolean_t		enteredv;
 	char			*name;
 	char			*addr;
 
@@ -3139,14 +3142,14 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 		 * Find child with name@addr - might find a devinfo
 		 * child (child), a pathinfo child (path), or nothing.
 		 */
-		scsi_hba_devi_enter(self, &circ);
+		scsi_hba_devi_enter(self, &enteredv);
 
 		(void) scsi_findchild(self, name, addr, 1, &child, &path, NULL);
 		if (path) {
 			/* Found a pathinfo */
 			ASSERT(path && (child == NULL));
 			mdi_hold_path(path);
-			scsi_hba_devi_exit_phci(self, circ);
+			scsi_hba_devi_exit_phci(self);
 			sd = NULL;
 		} else if (child) {
 			/* Found a devinfo */
@@ -3159,7 +3162,7 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 				sd = NULL;
 		} else {
 			ASSERT((path == NULL) && (child == NULL));
-			scsi_hba_devi_exit(self, circ);
+			scsi_hba_devi_exit(self, enteredv);
 			rv = ENXIO;			/* found nothing */
 			goto out;
 		}
@@ -3173,7 +3176,7 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 		 * be a enhancement for the future - for now, we fall back to
 		 * BUS_RESET.
 		 */
-		scsi_hba_devi_enter(self, &circ);
+		scsi_hba_devi_enter(self, &enteredv);
 		child = ddi_get_child(self);
 		sd = NULL;
 		while (child) {
@@ -3190,7 +3193,8 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 			}
 			child = ddi_get_next_sibling(child);
 		}
-		scsi_hba_devi_exit(self, circ);
+		if (child == NULL)
+			scsi_hba_devi_exit(self, enteredv);
 		break;
 	}
 
@@ -3229,7 +3233,7 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 		    (bus_state == BUS_QUIESCED))
 			rv = EALREADY;
 		else if (tran->tran_quiesce == NULL)
-			rv = ENOTSUP; /* man ioctl(7I) says ENOTTY */
+			rv = ENOTSUP; /* man ioctl(2) says ENOTTY */
 		else if (tran->tran_quiesce(self) != 0)
 			rv = EIO;
 		else if (ndi_set_bus_state(self, BUS_QUIESCED) != NDI_SUCCESS)
@@ -3241,7 +3245,7 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 		    (bus_state == BUS_ACTIVE))
 			rv = EALREADY;
 		else if (tran->tran_unquiesce == NULL)
-			rv = ENOTSUP; /* man ioctl(7I) says ENOTTY */
+			rv = ENOTSUP; /* man ioctl(2) says ENOTTY */
 		else if (tran->tran_unquiesce(self) != 0)
 			rv = EIO;
 		else if (ndi_set_bus_state(self, BUS_ACTIVE) != NDI_SUCCESS)
@@ -3250,7 +3254,7 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 
 	case DEVCTL_BUS_RESET:
 		if (tran->tran_bus_reset == NULL)
-			rv = ENOTSUP; /* man ioctl(7I) says ENOTTY */
+			rv = ENOTSUP; /* man ioctl(2) says ENOTTY */
 		else if (tran->tran_bus_reset(self, RESET_BUS) != 1)
 			rv = EIO;
 		break;
@@ -3261,7 +3265,7 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 			break;		/* reset all worked */
 		}
 		if (tran->tran_bus_reset == NULL) {
-			rv = ENOTSUP; /* man ioctl(7I) says ENOTTY */
+			rv = ENOTSUP; /* man ioctl(2) says ENOTTY */
 			break;
 		}
 		if (tran->tran_bus_reset(self, RESET_BUS) != 1)
@@ -3314,7 +3318,7 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 		if (path) {
 			/* NOTE: don't pass NDI_DEVI_REMOVE to mdi_pi_offline */
 			if (mdi_pi_offline(path, NDI_USER_REQ) == MDI_SUCCESS) {
-				scsi_hba_devi_enter_phci(self, &circ);
+				scsi_hba_devi_enter_phci(self);
 				mdi_rele_path(path);
 
 				/* ... here is the DEVICE_REMOVE part. */
@@ -3340,11 +3344,11 @@ scsi_hba_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
 out:
 	/* release hold on what we found */
 	if (path) {
-		scsi_hba_devi_enter_phci(self, &circ);
+		scsi_hba_devi_enter_phci(self);
 		mdi_rele_path(path);
 	}
 	if (path || child)
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 
 	if (dcp)
 		ndi_dc_freehdl(dcp);
@@ -3917,7 +3921,7 @@ scsi_hba_ident_nodename_compatible_get(struct scsi_inquiry *inq,
 	csp = compatp;
 	p = (char *)(compatp + NCOMPAT);
 
-	/* ( 0) driver (optional, not documented in scsi(4)) */
+	/* ( 0) driver (optional, not documented in scsi(5)) */
 	if (compat0) {
 		*csp++ = p;
 		(void) snprintf(p, tlen, "%s", compat0);
@@ -4006,7 +4010,7 @@ scsi_hba_ident_nodename_compatible_get(struct scsi_inquiry *inq,
 		tlen -= len;
 	}
 
-	/* (8.5) scsa,DD.bB (not documented in scsi(4)) */
+	/* (8.5) scsa,DD.bB (not documented in scsi(5)) */
 	if (binding_set) {
 		*csp++ = p;
 		(void) snprintf(p, tlen, "scsa,%02x.b%s",
@@ -5422,7 +5426,7 @@ out:	if (have_devid)
  */
 static dev_info_t *
 scsi_device_configchild(dev_info_t *self, char *addr, scsi_enum_t se,
-    struct scsi_device *sdprobe, int *circp, int *ppi)
+    struct scsi_device *sdprobe, int *ppi)
 {
 	int		child_type;
 	dev_info_t	*dchild;
@@ -5459,11 +5463,11 @@ scsi_device_configchild(dev_info_t *self, char *addr, scsi_enum_t se,
 		 */
 		ASSERT(MDI_PHCI(self));
 		mdi_hold_path(pchild);
-		scsi_hba_devi_exit_phci(self, *circp);
+		scsi_hba_devi_exit_phci(self);
 
 		rval = mdi_pi_online(pchild, 0);
 
-		scsi_hba_devi_enter_phci(self, circp);
+		scsi_hba_devi_enter_phci(self);
 		mdi_rele_path(pchild);
 
 		if (rval != MDI_SUCCESS) {
@@ -5609,7 +5613,7 @@ scsi_hba_pkt_comp(struct scsi_pkt *pkt)
 			pkt->pkt_stmp = scsi_lunchg1_list;
 			scsi_lunchg1_list = pkt;
 			if (pkt->pkt_stmp == NULL)
-				(void) cv_signal(&scsi_lunchg1_cv);
+				cv_signal(&scsi_lunchg1_cv);
 			mutex_exit(&scsi_lunchg1_mutex);
 			return;
 		}
@@ -5719,7 +5723,7 @@ scsi_hba_barrier_add(dev_info_t *probe, int seconds)
 	nb->barrier_probe = probe;
 	*bp = nb;
 	if (bp == &scsi_hba_barrier_list)
-		(void) cv_signal(&scsi_hba_barrier_cv);
+		cv_signal(&scsi_hba_barrier_cv);
 	mutex_exit(&scsi_hba_barrier_mutex);
 }
 
@@ -5733,12 +5737,12 @@ scsi_hba_remove_node(dev_info_t *child)
 {
 	dev_info_t		*self = ddi_get_parent(child);
 	struct scsi_device	*sd;
-	int			circ;
+	boolean_t		enteredv;
 	int			remove = 1;
 	int			ret = 0;
 	char			na[SCSI_MAXNAMELEN];
 
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 
 	/* Honor sd_uninit_prevent on barrier nodes */
 	if (scsi_hba_devi_is_barrier(child)) {
@@ -5761,7 +5765,7 @@ scsi_hba_remove_node(dev_info_t *child)
 	} else {
 		SCSI_HBA_LOG((_LOG(4), NULL, child, "remove_node prevented"));
 	}
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 	return (ret);
 }
 
@@ -5776,7 +5780,7 @@ scsi_hba_barrier_daemon(void *arg)
 	struct scsi_hba_barrier	*b;
 	dev_info_t		*probe;
 	callb_cpr_t		cprinfo;
-	int			circ;
+	boolean_t		enteredv;
 	dev_info_t		*self;
 
 	CALLB_CPR_INIT(&cprinfo, &scsi_hba_barrier_mutex,
@@ -5799,7 +5803,8 @@ again:	mutex_enter(&scsi_hba_barrier_mutex);
 				 */
 				probe = b->barrier_probe;
 				self = ddi_get_parent(probe);
-				if (scsi_hba_devi_tryenter(self, &circ) == 0) {
+				if (scsi_hba_devi_tryenter(self,
+				    &enteredv) == 0) {
 delay:					mutex_exit(&scsi_hba_barrier_mutex);
 					delay_random(5);
 					goto again;
@@ -5810,12 +5815,12 @@ delay:					mutex_exit(&scsi_hba_barrier_mutex);
 					/* remove failed, delay and retry */
 					SCSI_HBA_LOG((_LOG(4), NULL, probe,
 					    "delay expire"));
-					scsi_hba_devi_exit(self, circ);
+					scsi_hba_devi_exit(self, enteredv);
 					goto delay;
 				}
 				scsi_hba_barrier_list = b->barrier_next;
 				kmem_free(b, sizeof (struct scsi_hba_barrier));
-				scsi_hba_devi_exit(self, circ);
+				scsi_hba_devi_exit(self, enteredv);
 			} else {
 				/* establish timeout for next barrier expire */
 				(void) cv_timedwait(&scsi_hba_barrier_cv,
@@ -5935,9 +5940,9 @@ scsi_lunchg1_daemon(void *arg)
 		 * lun enumeration.
 		 */
 		(void) ddi_pathname(self, path);
-		(void) strcat(path, "/luns@");
-		(void) strcat(path, taddr);
-		(void) strcat(path, ",*");
+		(void) strlcat(path, "/luns@", sizeof (path));
+		(void) strlcat(path, taddr, sizeof (path));
+		(void) strlcat(path, ",*", sizeof (path));
 
 		/*
 		 * Now that we have the path, complete the pkt that
@@ -5956,7 +5961,7 @@ scsi_lunchg1_daemon(void *arg)
 		lunchg2->lunchg2_next = scsi_lunchg2_list;
 		scsi_lunchg2_list = lunchg2;
 		if (lunchg2->lunchg2_next == NULL)
-			(void) cv_signal(&scsi_lunchg2_cv);
+			cv_signal(&scsi_lunchg2_cv);
 		mutex_exit(&scsi_lunchg2_mutex);
 	}
 }
@@ -6049,7 +6054,7 @@ scsi_lunchg2_daemon(void *arg)
  */
 static struct scsi_device *
 scsi_device_config(dev_info_t *self, char *name, char *addr, scsi_enum_t se,
-    int *circp, int *ppi)
+    boolean_t *enteredvp, int *ppi)
 {
 	dev_info_t		*child = NULL;
 	dev_info_t		*probe = NULL;
@@ -6208,13 +6213,13 @@ scsi_device_config(dev_info_t *self, char *name, char *addr, scsi_enum_t se,
 		 * ndi/mdi_devi_exit_and_wait (and consider switching devcfg.c
 		 * code to use these ndi/mdi interfaces too).
 		 */
-		scsi_hba_devi_exit(self, *circp);
+		scsi_hba_devi_exit(self, *enteredvp);
 		mutex_enter(&DEVI(self)->devi_lock);
 		(void) cv_timedwait(&DEVI(self)->devi_cv,
 		    &DEVI(self)->devi_lock,
 		    ddi_get_lbolt() + drv_usectohz(MICROSEC));
 		mutex_exit(&DEVI(self)->devi_lock);
-		scsi_hba_devi_enter(self, circp);
+		scsi_hba_devi_enter(self, enteredvp);
 	}
 	ASSERT(probe == NULL);
 
@@ -6394,7 +6399,7 @@ scsi_device_config(dev_info_t *self, char *name, char *addr, scsi_enum_t se,
 	 * as we are freeing the node via scsi_hba_remove_node(probe).
 	 */
 	sdprobe->sd_uninit_prevent++;
-	scsi_hba_devi_exit(self, *circp);
+	scsi_hba_devi_exit(self, *enteredvp);
 	sp = scsi_probe(sdprobe, SLEEP_FUNC);
 
 	/* Introduce a small delay here to increase parallelism. */
@@ -6439,7 +6444,7 @@ scsi_device_config(dev_info_t *self, char *name, char *addr, scsi_enum_t se,
 		 * serialization on iport parent during scsi_device attach(9E)?
 		 */
 	}
-	scsi_hba_devi_enter(self, circp);
+	scsi_hba_devi_enter(self, enteredvp);
 	sdprobe->sd_uninit_prevent--;
 
 	if (sp != SCSIPROBE_EXISTS) {
@@ -6468,7 +6473,7 @@ scsi_device_config(dev_info_t *self, char *name, char *addr, scsi_enum_t se,
 
 	/* Create the child node from the inquiry data in the probe node. */
 	if ((child = scsi_device_configchild(self, addr, se, sdprobe,
-	    circp, &pi)) == NULL) {
+	    &pi)) == NULL) {
 		/*
 		 * This may fail because there was no driver binding identified
 		 * via driver_alias. We may still have a conf node.
@@ -6707,7 +6712,7 @@ fail:		ASSERT(child == NULL);
 }
 
 static void
-scsi_device_unconfig(dev_info_t *self, char *name, char *addr, int *circp)
+scsi_device_unconfig(dev_info_t *self, char *addr)
 {
 	dev_info_t		*child = NULL;
 	mdi_pathinfo_t		*path = NULL;
@@ -6722,21 +6727,21 @@ scsi_device_unconfig(dev_info_t *self, char *name, char *addr, int *circp)
 	 * use scsi_findchild. If it's demoted, we then use
 	 * ndi_devi_findchild_by_callback.
 	 */
-	(void) scsi_findchild(self, name, addr, 0, &child, &path, NULL);
+	(void) scsi_findchild(self, NULL, addr, 0, &child, &path, NULL);
 
 	if ((child == NULL) && (path == NULL)) {
-		child = ndi_devi_findchild_by_callback(self, name, addr,
+		child = ndi_devi_findchild_by_callback(self, NULL, addr,
 		    scsi_busctl_ua);
 		if (child) {
 			SCSI_HBA_LOG((_LOGUNCFG, self, NULL,
-			    "devinfo %s@%s found by callback",
-			    name ? name : "", addr));
+			    "devinfo @%s found by callback",
+			    addr));
 			ASSERT(ndi_flavor_get(child) ==
 			    SCSA_FLAVOR_SCSI_DEVICE);
 			if (ndi_flavor_get(child) != SCSA_FLAVOR_SCSI_DEVICE) {
 				SCSI_HBA_LOG((_LOGUNCFG, self, NULL,
-				    "devinfo %s@%s not SCSI_DEVICE flavored",
-				    name ? name : "", addr));
+				    "devinfo @%s not SCSI_DEVICE flavored",
+				    addr));
 				child = NULL;
 			}
 		}
@@ -6748,8 +6753,8 @@ scsi_device_unconfig(dev_info_t *self, char *name, char *addr, int *circp)
 		/* Don't unconfig probe nodes. */
 		if (scsi_hba_devi_is_barrier(child)) {
 			SCSI_HBA_LOG((_LOGUNCFG, self, NULL,
-			    "devinfo %s@%s is_barrier, skip",
-			    name ? name : "", addr));
+			    "devinfo @%s is_barrier, skip",
+			    addr));
 			return;
 		}
 
@@ -6757,13 +6762,13 @@ scsi_device_unconfig(dev_info_t *self, char *name, char *addr, int *circp)
 		if (ndi_devi_offline(child,
 		    NDI_DEVFS_CLEAN | NDI_DEVI_REMOVE) == DDI_SUCCESS) {
 			SCSI_HBA_LOG((_LOGUNCFG, self, NULL,
-			    "devinfo %s@%s offlined and removed",
-			    name ? name : "", addr));
+			    "devinfo @%s offlined and removed",
+			    addr));
 		} else if (ndi_devi_device_remove(child)) {
 			/* Offline/remove failed, note new device_remove */
 			SCSI_HBA_LOG((_LOGUNCFG, self, NULL,
-			    "devinfo %s@%s offline failed, device_remove",
-			    name ? name : "", addr));
+			    "devinfo @%s offline failed, device_remove",
+			    addr));
 		}
 	} else if (path) {
 		ASSERT(path && (child == NULL));
@@ -6780,9 +6785,9 @@ scsi_device_unconfig(dev_info_t *self, char *name, char *addr, int *circp)
 		 */
 		mdi_hold_path(path);
 		spathname = mdi_pi_spathname(path);	/* valid after free */
-		scsi_hba_devi_exit_phci(self, *circp);
+		scsi_hba_devi_exit_phci(self);
 		rval = mdi_pi_offline(path, 0);
-		scsi_hba_devi_enter_phci(self, circp);
+		scsi_hba_devi_enter_phci(self);
 
 		/* Note new device_remove */
 		if (mdi_pi_device_remove(path))
@@ -6798,8 +6803,7 @@ scsi_device_unconfig(dev_info_t *self, char *name, char *addr, int *circp)
 	} else {
 		ASSERT((path == NULL) && (child == NULL));
 
-		SCSI_HBA_LOG((_LOGUNCFG, self, NULL,
-		    "%s@%s not found", name ? name : "", addr));
+		SCSI_HBA_LOG((_LOGUNCFG, self, NULL, "@%s not found", addr));
 	}
 }
 
@@ -6809,12 +6813,12 @@ scsi_device_unconfig(dev_info_t *self, char *name, char *addr, int *circp)
 static struct scsi_device *
 scsi_hba_bus_configone_addr(dev_info_t *self, char *addr, scsi_enum_t se)
 {
-	int			circ;
+	boolean_t		enteredv;
 	struct scsi_device	*sd;
 
-	scsi_hba_devi_enter(self, &circ);
-	sd = scsi_device_config(self, NULL, addr, se, &circ, NULL);
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_enter(self, &enteredv);
+	sd = scsi_device_config(self, NULL, addr, se, &enteredv, NULL);
+	scsi_hba_devi_exit(self, enteredv);
 	return (sd);
 }
 
@@ -6824,11 +6828,11 @@ scsi_hba_bus_configone_addr(dev_info_t *self, char *addr, scsi_enum_t se)
 static void
 scsi_hba_bus_unconfigone_addr(dev_info_t *self, char *addr)
 {
-	int			circ;
+	boolean_t		enteredv;
 
-	scsi_hba_devi_enter(self, &circ);
-	(void) scsi_device_unconfig(self, NULL, addr, &circ);
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_enter(self, &enteredv);
+	(void) scsi_device_unconfig(self, addr);
+	scsi_hba_devi_exit(self, enteredv);
 }
 
 /*
@@ -7407,15 +7411,15 @@ scsi_hba_bus_config_taddr(dev_info_t *self, char *taddr, int mt, scsi_enum_t se)
 {
 	char			addr[SCSI_MAXNAMELEN];
 	struct scsi_device	*sd;
-	int			circ;
+	boolean_t		enteredv;
 	int			ret;
 	int			pi;
 
 	/* See if LUN0 of the specified target exists. */
 	(void) snprintf(addr, sizeof (addr), "%s,0", taddr);
 
-	scsi_hba_devi_enter(self, &circ);
-	sd = scsi_device_config(self, NULL, addr, se, &circ, &pi);
+	scsi_hba_devi_enter(self, &enteredv);
+	sd = scsi_device_config(self, NULL, addr, se, &enteredv, &pi);
 
 	if (sd) {
 		/*
@@ -7437,15 +7441,15 @@ scsi_hba_bus_config_taddr(dev_info_t *self, char *taddr, int mt, scsi_enum_t se)
 		 */
 		ret = NDI_SUCCESS;
 		sd->sd_uninit_prevent++;
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 
 		(void) scsi_hba_enum_lsf_of_t(sd, self, taddr, pi, mt, se);
 
-		scsi_hba_devi_enter(self, &circ);
+		scsi_hba_devi_enter(self, &enteredv);
 		sd->sd_uninit_prevent--;
 	} else
 		ret = NDI_FAILURE;
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 	return (ret);
 }
 
@@ -7565,7 +7569,7 @@ scsi_hba_bus_configone(dev_info_t *self, uint_t flags, char *arg,
     dev_info_t **childp)
 {
 	int			ret;
-	int			circ;
+	boolean_t		enteredv;
 	char			*name, *addr;
 	char			*lcp;
 	char			sc1, sc2;
@@ -7615,7 +7619,7 @@ scsi_hba_bus_configone(dev_info_t *self, uint_t flags, char *arg,
 	 * framework to make driver.conf children prior to bus_config.
 	 *
 	 * We enter our HBA (self) prior to scsi_device_config, and
-	 * pass it our circ. The scsi_device_config may exit the
+	 * pass it our enteredv. The scsi_device_config may exit the
 	 * HBA around scsi_probe() operations to allow for parallelism.
 	 * This is done after the probe node "@addr" is available as a
 	 * barrier to prevent parallel probes of the same device. The
@@ -7634,7 +7638,7 @@ scsi_hba_bus_configone(dev_info_t *self, uint_t flags, char *arg,
 	 * where the HBA determines if we should construct separate
 	 * target and lun devinfo nodes.
 	 */
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 	SCSI_HBA_LOG((_LOG(4), self, NULL, "%s@%s config_one", name, addr));
 	(void) i_ndi_make_spec_children(self, flags);
 
@@ -7680,7 +7684,7 @@ scsi_hba_bus_configone(dev_info_t *self, uint_t flags, char *arg,
 			SCSI_HBA_LOG((_LOG(2), self, NULL,
 			    "%s@%s lun enumeration triggered", name, addr));
 			*lcp = '\0';		/* turn ',' into '\0' */
-			scsi_hba_devi_exit(self, circ);
+			scsi_hba_devi_exit(self, enteredv);
 			(void) scsi_hba_bus_config_taddr(self, addr,
 			    mt, SE_BUSCONFIG);
 			return (NDI_FAILURE);
@@ -7699,7 +7703,7 @@ scsi_hba_bus_configone(dev_info_t *self, uint_t flags, char *arg,
 			*(lcp + 1) = '0';
 			*(lcp + 2) = '\0';
 			sd0 = scsi_device_config(self,
-			    NULL, addr, SE_BUSCONFIG, &circ, NULL);
+			    NULL, addr, SE_BUSCONFIG, &enteredv, NULL);
 
 			/* restore original lun */
 			*(lcp + 1) = sc1;
@@ -7732,7 +7736,7 @@ scsi_hba_bus_configone(dev_info_t *self, uint_t flags, char *arg,
 	 */
 	if (sd0) {
 		sd = scsi_device_config(self,
-		    name, addr, SE_BUSCONFIG, &circ, NULL);
+		    name, addr, SE_BUSCONFIG, &enteredv, NULL);
 	} else {
 		sd = NULL;
 		SCSI_HBA_LOG((_LOG(2), self, NULL,
@@ -7782,7 +7786,7 @@ scsi_hba_bus_configone(dev_info_t *self, uint_t flags, char *arg,
 		 * The framework may still be able to succeed with
 		 * with its GENERIC_PROP code.
 		 */
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 		if (flags & NDI_DRV_CONF_REPROBE)
 			flags |= NDI_CONFIG_REPROBE;
 		flags |= NDI_MDI_FALLBACK;	/* devinfo&pathinfo children */
@@ -7790,7 +7794,7 @@ scsi_hba_bus_configone(dev_info_t *self, uint_t flags, char *arg,
 		    (void *)arg, childp, 0));
 	}
 
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 	return (ret);
 }
 
@@ -7819,7 +7823,7 @@ scsi_hba_bus_config_spi(dev_info_t *self, uint_t flags,
 		 * Static driver.conf file enumeration:
 		 *
 		 * Force reprobe for BUS_CONFIG_ONE or when manually
-		 * reconfiguring via devfsadm(1m) to emulate deferred attach.
+		 * reconfiguring via devfsadm(8) to emulate deferred attach.
 		 * Reprobe only discovers driver.conf enumerated nodes, more
 		 * dynamic implementations probably require their own
 		 * bus_config.
@@ -7871,9 +7875,9 @@ static int
 scsi_hba_bus_unconfig_spi(dev_info_t *self, uint_t flags,
     ddi_bus_config_op_t op, void *arg)
 {
-	int	mt;
-	int	circ;
-	int	ret;
+	int mt;
+	int ret;
+	boolean_t enteredv;
 
 	/*
 	 * See if we are doing generic dynamic enumeration: if driver.conf has
@@ -7891,7 +7895,7 @@ scsi_hba_bus_unconfig_spi(dev_info_t *self, uint_t flags,
 	if (scsi_hba_bus_config_debug)
 		flags |= NDI_DEVI_DEBUG;
 
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 	switch (op) {
 	case BUS_UNCONFIG_ONE:
 		SCSI_HBA_LOG((_LOG(3), self, NULL,
@@ -7913,7 +7917,7 @@ scsi_hba_bus_unconfig_spi(dev_info_t *self, uint_t flags,
 	if (ret == NDI_SUCCESS)
 		ret = ndi_busop_bus_unconfig(self, flags, op, arg);
 
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 
 	return (ret);
 }
@@ -8087,7 +8091,7 @@ scsi_hba_bus_config_iportmap(dev_info_t *self, uint_t flags,
 	scsi_hba_tran_t		*tran;
 	impl_scsi_iportmap_t	*iportmap;
 	dev_info_t		*child;
-	int			circ;
+	boolean_t		enteredv;
 	uint64_t		tsa = 0;	/* clock64_t */
 	int			sync_usec;
 	int			synced;
@@ -8178,7 +8182,7 @@ scsi_hba_bus_config_iportmap(dev_info_t *self, uint_t flags,
 
 	if (op == BUS_CONFIG_ONE) {
 		/* create the iport node child */
-		scsi_hba_devi_enter(self, &circ);
+		scsi_hba_devi_enter(self, &enteredv);
 		if ((child = scsi_hba_bus_config_port(self, (char *)arg,
 		    SE_BUSCONFIG)) != NULL) {
 			if (childp) {
@@ -8187,7 +8191,7 @@ scsi_hba_bus_config_iportmap(dev_info_t *self, uint_t flags,
 			}
 			ret = NDI_SUCCESS;
 		}
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 	} else
 		ret = ndi_busop_bus_config(self, flags, op, arg, childp, 0);
 
@@ -8325,7 +8329,7 @@ static int
 scsi_hba_bus_unconfig(dev_info_t *self, uint_t flags,
     ddi_bus_config_op_t op, void *arg)
 {
-	int		circ;
+	boolean_t	enteredv;
 	scsi_hba_tran_t	*tran;
 	int		ret;
 
@@ -8341,9 +8345,9 @@ scsi_hba_bus_unconfig(dev_info_t *self, uint_t flags,
 	 * into the common code at a different enumeration level, such a
 	 * scsi_device_config, which still creates barrier/probe nodes.
 	 */
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 	scsi_hba_barrier_purge(self);
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 
 	/* DEBUG: for testing, allow bus_unconfig do drive removal. */
 	if (scsi_hba_bus_unconfig_remove)
@@ -8453,15 +8457,15 @@ scsi_tgtmap_smp_unconfig(void *arg, damap_t *mapp, damap_id_t tgtid)
 	char		*addr;
 	dev_info_t	*child;
 	char		nameaddr[SCSI_MAXNAMELEN];
-	int		circ;
+	boolean_t	enteredv;
 
 	addr = damap_id2addr(mapp, tgtid);
 	SCSI_HBA_LOG((_LOGUNCFG, self, NULL, "%s @%s", damap_name(mapp), addr));
 
 	(void) snprintf(nameaddr, sizeof (nameaddr), "smp@%s", addr);
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 	if ((child = ndi_devi_findchild(self, nameaddr)) == NULL) {
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 		return (DAM_SUCCESS);
 	}
 
@@ -8475,7 +8479,7 @@ scsi_tgtmap_smp_unconfig(void *arg, damap_t *mapp, damap_id_t tgtid)
 		    "devinfo smp@%s offline failed, device_remove",
 		    addr));
 	}
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 	return (DAM_SUCCESS);
 }
 
@@ -8911,6 +8915,39 @@ scsi_hba_tgtmap_tgt_remove(scsi_hba_tgtmap_t *handle,
 	    tgt_addr) == DAM_SUCCESS) ? DDI_SUCCESS : DDI_FAILURE);
 }
 
+void
+scsi_hba_tgtmap_scan_luns(scsi_hba_tgtmap_t *handle, char *tgt_addr)
+{
+	impl_scsi_tgtmap_t	*tgtmap = (impl_scsi_tgtmap_t *)handle;
+	dev_info_t		*self = tgtmap->tgtmap_tran->tran_iport_dip;
+	struct scsi_lunchg2	*lunchg2;
+	struct scsi_lunchg2	*p;
+	char			path[MAXPATHLEN];
+
+	(void) ddi_pathname(self, path);
+	(void) strlcat(path, "/luns@", sizeof (path));
+	(void) strlcat(path, tgt_addr, sizeof (path));
+	(void) strlcat(path, ",*", sizeof (path));
+
+	mutex_enter(&scsi_lunchg2_mutex);
+
+	/* if we're already scheduled to do this, don't submit another one */
+	for (p = scsi_lunchg2_list; p != NULL; p = p->lunchg2_next) {
+		if (strcmp(path, p->lunchg2_path) == 0) {
+			mutex_exit(&scsi_lunchg2_mutex);
+			return;
+		}
+	}
+
+	lunchg2 = kmem_alloc(sizeof (*lunchg2), KM_SLEEP);
+	lunchg2->lunchg2_path = strdup(path);
+	lunchg2->lunchg2_next = scsi_lunchg2_list;
+	scsi_lunchg2_list = lunchg2;
+	if (lunchg2->lunchg2_next == NULL)
+		cv_signal(&scsi_lunchg2_cv);
+	mutex_exit(&scsi_lunchg2_mutex);
+}
+
 int
 scsi_hba_tgtmap_lookup(scsi_hba_tgtmap_t *handle,
     char *tgt_addr, scsi_tgtmap_tgt_type_t *r_type)
@@ -9237,7 +9274,8 @@ scsi_hba_bus_config_prom_node(dev_info_t *self, uint_t flags,
     void *arg, dev_info_t **childp)
 {
 	char		**iports;
-	int		circ, i;
+	boolean_t	enteredv;
+	int		i;
 	int		ret = NDI_FAILURE;
 	unsigned int	num_iports = 0;
 	dev_info_t	*pdip = NULL;
@@ -9258,7 +9296,7 @@ scsi_hba_bus_config_prom_node(dev_info_t *self, uint_t flags,
 
 	ret = NDI_FAILURE;
 
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 
 	/* create iport nodes for each scsi port/bus */
 	for (i = 0; i < num_iports; i++) {
@@ -9284,7 +9322,7 @@ scsi_hba_bus_config_prom_node(dev_info_t *self, uint_t flags,
 		}
 	}
 
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 
 	kmem_free(addr, SCSI_MAXNAMELEN);
 
@@ -9303,7 +9341,8 @@ scsi_hba_bus_config_iports(dev_info_t *self, uint_t flags,
 {
 	char		*nameaddr, *addr;
 	char		**iports;
-	int		circ, i;
+	boolean_t	enteredv;
+	int		i;
 	int		ret = NDI_FAILURE;
 	unsigned int	num_iports = 0;
 
@@ -9318,7 +9357,7 @@ scsi_hba_bus_config_iports(dev_info_t *self, uint_t flags,
 
 	ASSERT(num_iports > 0);
 
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 
 	switch (op) {
 	case BUS_CONFIG_ONE:
@@ -9327,7 +9366,7 @@ scsi_hba_bus_config_iports(dev_info_t *self, uint_t flags,
 		if ((nameaddr == NULL) ||
 		    (strncmp(nameaddr, "iport@", strlen("iport@")) != 0)) {
 			ret = NDI_FAILURE;
-			scsi_hba_devi_exit(self, circ);
+			scsi_hba_devi_exit(self, enteredv);
 			ddi_prop_free(iports);
 			return (ret);
 		}
@@ -9381,7 +9420,7 @@ scsi_hba_bus_config_iports(dev_info_t *self, uint_t flags,
 		ret = ndi_busop_bus_config(self, flags, op,
 		    arg, childp, 0);
 	}
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 
 	ddi_prop_free(iports);
 
@@ -9392,12 +9431,12 @@ static int
 scsi_iportmap_config(void *arg, damap_t *mapp, damap_id_t tgtid)
 {
 	dev_info_t	*self = (dev_info_t *)arg;
-	int		circ;
+	boolean_t	enteredv;
 	char		nameaddr[SCSI_MAXNAMELEN];
 	char		*iport_addr;
 	dev_info_t	*childp;
 
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 
 	iport_addr = damap_id2addr(mapp, tgtid);
 	SCSI_HBA_LOG((_LOGIPT, self, NULL,
@@ -9405,7 +9444,7 @@ scsi_iportmap_config(void *arg, damap_t *mapp, damap_id_t tgtid)
 
 	(void) snprintf(nameaddr, sizeof (nameaddr), "iport@%s", iport_addr);
 	childp = scsi_hba_bus_config_port(self, nameaddr, SE_HP);
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 	return (childp != NULL ? DAM_SUCCESS : DAM_FAILURE);
 }
 
@@ -9414,7 +9453,8 @@ scsi_iportmap_unconfig(void *arg, damap_t *mapp, damap_id_t tgtid)
 {
 	dev_info_t	*self = arg;
 	dev_info_t	*childp;	/* iport child of HBA node */
-	int		circ, empty;
+	boolean_t	enteredv;
+	int		empty;
 	char		*addr;
 	char		nameaddr[SCSI_MAXNAMELEN];
 	scsi_hba_tran_t	*tran;
@@ -9423,9 +9463,9 @@ scsi_iportmap_unconfig(void *arg, damap_t *mapp, damap_id_t tgtid)
 	SCSI_HBA_LOG((_LOGIPT, self, NULL, "%s @%s", damap_name(mapp), addr));
 
 	(void) snprintf(nameaddr, sizeof (nameaddr), "iport@%s", addr);
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 	if ((childp = ndi_devi_findchild(self, nameaddr)) == NULL) {
-		scsi_hba_devi_exit(self, circ);
+		scsi_hba_devi_exit(self, enteredv);
 		return (DAM_FAILURE);
 	}
 
@@ -9433,7 +9473,7 @@ scsi_iportmap_unconfig(void *arg, damap_t *mapp, damap_id_t tgtid)
 	ASSERT(tran);
 
 	ndi_hold_devi(childp);
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 
 	/*
 	 * A begin/end (clear) against the iport's
@@ -9454,7 +9494,7 @@ scsi_iportmap_unconfig(void *arg, damap_t *mapp, damap_id_t tgtid)
 	(void) scsi_tgtmap_sync(tran->tran_tgtmap, 0);
 	empty = scsi_tgtmap_is_empty(tran->tran_tgtmap);
 
-	scsi_hba_devi_enter(self, &circ);
+	scsi_hba_devi_enter(self, &enteredv);
 	ndi_rele_devi(childp);
 
 	/* If begin/end/sync ends in empty map, offline/remove. */
@@ -9471,7 +9511,7 @@ scsi_iportmap_unconfig(void *arg, damap_t *mapp, damap_id_t tgtid)
 			    "device_remove", addr));
 		}
 	}
-	scsi_hba_devi_exit(self, circ);
+	scsi_hba_devi_exit(self, enteredv);
 	return (empty ? DAM_SUCCESS : DAM_FAILURE);
 }
 

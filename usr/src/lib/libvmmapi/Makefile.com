@@ -30,10 +30,10 @@ SRCDIR		= ../common
 LIBS		= $(DYNLIB)
 
 CPPFLAGS	= -I$(COMPAT)/bhyve -I$(CONTRIB)/bhyve \
-	$(CPPFLAGS.master) -I$(SRC)/uts/i86pc
+	-I$(COMPAT)/bhyve/amd64 -I$(CONTRIB)/bhyve/amd64 \
+	$(CPPFLAGS.master) -I$(SRC)/uts/intel
 
-# not linted
-SMATCH=off
+SMOFF += all_func_returns
 
 LDLIBS		+= -lc
 

@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2013-2021 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 #include <sys/types.h>
@@ -35,6 +36,8 @@
 #include <sys/nbmlock.h>
 #include <sys/share.h>
 #include <sys/fcntl.h>
+#include <sys/priv_const.h>
+#include <sys/policy.h>
 #include <nfs/lm.h>
 
 #include <smbsrv/smb_kproto.h>
@@ -129,6 +132,7 @@ static smb_wchar_t smb_catia_v4_lookup[SMB_CATIA_V4_LOOKUP_MAX];
 
 static void smb_vop_setup_xvattr(smb_attr_t *smb_attr, xvattr_t *xvattr);
 static void smb_sa_to_va_mask(uint_t sa_mask, uint_t *va_maskp);
+static void smb_sa_to_va_mask_get(uint_t sa_mask, uint_t *va_maskp);
 static callb_cpr_t *smb_lock_frlock_callback(flk_cb_when_t, void *);
 static void smb_vop_catia_init();
 
@@ -297,6 +301,59 @@ smb_vop_ioctl(vnode_t *vp, int cmd, void *arg, cred_t *cr)
 }
 
 /*
+ * Support for zero-copy read/write
+ * Request buffers and return them.
+ */
+int
+smb_vop_reqzcbuf(vnode_t *vp, int ioflag, xuio_t *xuio, cred_t *cr)
+{
+	int error;
+
+	error = VOP_REQZCBUF(vp, ioflag, xuio, cr, &smb_ct);
+	return (error);
+}
+
+int
+smb_vop_retzcbuf(vnode_t *vp, xuio_t *xuio, cred_t *cr)
+{
+	int error;
+
+	error = VOP_RETZCBUF(vp, xuio, cr, &smb_ct);
+	return (error);
+}
+
+#ifdef _KERNEL
+/*
+ * Determine whether this user's privileges can satisfy an ACL check.
+ * Caller determines which privileges are needed.
+ * srv_only determines whether all zone privileges are needed
+ * (e.g. kcred/zone_kcred()).
+ *
+ * ZFS first checks the ACL to determine which permissions are granted.
+ * It then uses privileges to satisfy any remaining permissions.
+ * The ACL check can be surprisingly expensive (for example, it may require
+ * going over the network if an FUID needs to be mapped to a posix ID).
+ * The SMB server inverts this order for two special cases:
+ * - When checking whether the SMB user has permission to traverse through a
+ *   directory during lookup;
+ * - When checking whether the server (kcred or zone_kcred) has permission to
+ *   read attributes for internal purposes.
+ * These checks happen frequently, in hot code, and nearly always succeed via
+ * the privileges granted to these users. In these cases, we first check for the
+ * specific privilege that would satisfy the required access, then skip the
+ * access check when the caller has that privilege.
+ * See zfs_zaccess() and its calls to secpolicy_vnode_access2() for how
+ * v4 accesses are mapped onto privileges.
+ */
+boolean_t
+smb_vop_priv_check(cred_t *cr, int priv, boolean_t srv_only, vnode_t *vp)
+{
+	return (PRIV_POLICY_ONLY(cr, priv, srv_only) &&
+	    vfs_has_feature(vp->v_vfsp, VFSFT_ACEMASKONACCESS));
+}
+#endif
+
+/*
  * smb_vop_getattr()
  *
  * smb_fsop_getattr()/smb_vop_getattr() should always be called from the CIFS
@@ -324,7 +381,6 @@ smb_vop_getattr(vnode_t *vp, vnode_t *unnamed_vp, smb_attr_t *ret_attr,
 {
 	int error;
 	vnode_t *use_vp;
-	smb_attr_t tmp_attr;
 	xvattr_t tmp_xvattr;
 	xoptattr_t *xoap = NULL;
 
@@ -333,12 +389,18 @@ smb_vop_getattr(vnode_t *vp, vnode_t *unnamed_vp, smb_attr_t *ret_attr,
 	else
 		use_vp = vp;
 
+#ifdef _KERNEL
+	/* Avoid potentially expensive access checks for non-client queries. */
+	if (smb_vop_priv_check(cr, PRIV_FILE_DAC_READ, B_TRUE, use_vp))
+		flags |= ATTR_NOACLCHECK;
+#endif
+
 	if (vfs_has_feature(use_vp->v_vfsp, VFSFT_XVATTR)) {
 		xva_init(&tmp_xvattr);
 		xoap = xva_getxoptattr(&tmp_xvattr);
 		ASSERT(xoap);
 
-		smb_sa_to_va_mask(ret_attr->sa_mask,
+		smb_sa_to_va_mask_get(ret_attr->sa_mask,
 		    &tmp_xvattr.xva_vattr.va_mask);
 
 		XVA_SET_REQ(&tmp_xvattr, XAT_READONLY);
@@ -407,7 +469,7 @@ smb_vop_getattr(vnode_t *vp, vnode_t *unnamed_vp, smb_attr_t *ret_attr,
 		/*
 		 * Support for file systems without VFSFT_XVATTR
 		 */
-		smb_sa_to_va_mask(ret_attr->sa_mask,
+		smb_sa_to_va_mask_get(ret_attr->sa_mask,
 		    &ret_attr->sa_vattr.va_mask);
 
 		error = VOP_GETATTR(use_vp, &ret_attr->sa_vattr,
@@ -420,11 +482,21 @@ smb_vop_getattr(vnode_t *vp, vnode_t *unnamed_vp, smb_attr_t *ret_attr,
 	}
 
 	if (unnamed_vp) {
+		/*
+		 * vp is a named stream under "unnamed_vp"
+		 * Need to get the size from vp (not use_vp)
+		 */
+		smb_attr_t tmp_attr;
 		ret_attr->sa_vattr.va_type = VREG;
 
-		if (ret_attr->sa_mask & (SMB_AT_SIZE | SMB_AT_NBLOCKS)) {
+		if (ret_attr->sa_mask &
+		    (SMB_AT_SIZE | SMB_AT_NBLOCKS | SMB_AT_ALLOCSZ)) {
 			tmp_attr.sa_vattr.va_mask = AT_SIZE | AT_NBLOCKS;
 
+			/*
+			 * Keep ATTR_NOACLCHECK from use_vp; if it's good for
+			 * the file, it's good for the xattr.
+			 */
 			error = VOP_GETATTR(vp, &tmp_attr.sa_vattr,
 			    flags, cr, &smb_ct);
 			if (error != 0)
@@ -436,8 +508,38 @@ smb_vop_getattr(vnode_t *vp, vnode_t *unnamed_vp, smb_attr_t *ret_attr,
 		}
 	}
 
-	if (ret_attr->sa_vattr.va_type == VDIR)
+	/*
+	 * Override a few things so they're as SMB expects.
+	 * SMB allocsz is always zero for directories.
+	 * For plain files, allocsz is the larger of:
+	 * size, allocsize  (See smb_node_getattr)
+	 */
+	if (ret_attr->sa_vattr.va_type == VDIR) {
 		ret_attr->sa_dosattr |= FILE_ATTRIBUTE_DIRECTORY;
+		/* SMB expectes directories to have... */
+		ret_attr->sa_vattr.va_nlink = 1;
+		ret_attr->sa_vattr.va_size = 0;
+		ret_attr->sa_allocsz = 0;
+	} else {
+		if (ret_attr->sa_dosattr == 0)
+			ret_attr->sa_dosattr = FILE_ATTRIBUTE_NORMAL;
+		if ((ret_attr->sa_mask & SMB_AT_ALLOCSZ) != 0) {
+			/*
+			 * ZFS includes meta-data in va_nblocks.
+			 * Special case zero to keep tests happy.
+			 */
+			if (ret_attr->sa_vattr.va_size == 0 &&
+			    ret_attr->sa_vattr.va_nblocks == 1)
+				ret_attr->sa_allocsz = 0;
+			else
+				ret_attr->sa_allocsz =
+				    ret_attr->sa_vattr.va_nblocks * DEV_BSIZE;
+			if (ret_attr->sa_allocsz < ret_attr->sa_vattr.va_size) {
+				ret_attr->sa_allocsz = P2ROUNDUP(
+				    ret_attr->sa_vattr.va_size, DEV_BSIZE);
+			}
+		}
+	}
 
 	return (error);
 }
@@ -614,7 +716,7 @@ smb_vop_lookup(
 		 */
 		VN_HOLD(dvp);
 		*vpp = dvp;
-		return (0);
+		goto attr_out;
 	}
 
 	ASSERT(vpp);
@@ -625,7 +727,7 @@ smb_vop_lookup(
 		if (rootvp && (dvp == rootvp)) {
 			VN_HOLD(dvp);
 			*vpp = dvp;
-			return (0);
+			goto attr_out;
 		}
 
 		if (dvp->v_flag & VROOT) {
@@ -654,6 +756,17 @@ smb_vop_lookup(
 	if (flags & SMB_CATIA)
 		np = smb_vop_catia_v5tov4(name, namebuf, sizeof (namebuf));
 
+#ifdef _KERNEL
+	/*
+	 * The SMB server enables BYPASS_TRAVERSE_CHECKING by default.
+	 * This grants PRIV_FILE_DAC_SEARCH to all users.
+	 * If the user has this privilege, we'll always succeed ACE_EXECUTE
+	 * checks on directories, so skip the (potentially expensive)
+	 * ACL check.
+	 */
+	if (smb_vop_priv_check(cr, PRIV_FILE_DAC_SEARCH, B_FALSE, dvp))
+		option_flags |= LOOKUP_NOACLCHECK;
+#endif
 	pn_alloc(&rpn);
 
 	/*
@@ -665,28 +778,27 @@ smb_vop_lookup(
 	error = VOP_LOOKUP(dvp, np, vpp, NULL, option_flags, NULL, cr,
 	    &smb_ct, direntflags, &rpn);
 
-	if (error == 0) {
-		if (od_name) {
-			bzero(od_name, MAXNAMELEN);
-			if ((option_flags & FIGNORECASE) != 0 &&
-			    rpn.pn_buf[0] != '\0')
-				np = rpn.pn_buf;
-			else
-				np = name;
-			if (flags & SMB_CATIA)
-				smb_vop_catia_v4tov5(np, od_name, MAXNAMELEN);
-			else
-				(void) strlcpy(od_name, np, MAXNAMELEN);
-		}
+	if (error == 0 && od_name != NULL) {
+		bzero(od_name, MAXNAMELEN);
+		if ((option_flags & FIGNORECASE) != 0 &&
+		    rpn.pn_buf[0] != '\0')
+			np = rpn.pn_buf;
+		else
+			np = name;
+		if (flags & SMB_CATIA)
+			smb_vop_catia_v4tov5(np, od_name, MAXNAMELEN);
+		else
+			(void) strlcpy(od_name, np, MAXNAMELEN);
+	}
+	pn_free(&rpn);
 
-		if (attr != NULL) {
-			attr->sa_mask = SMB_AT_ALL;
-			(void) smb_vop_getattr(*vpp, NULL, attr, 0,
-			    zone_kcred());
-		}
+attr_out:
+	if (error == 0 && attr != NULL) {
+		attr->sa_mask = SMB_AT_ALL;
+		(void) smb_vop_getattr(*vpp, NULL, attr, 0,
+		    zone_kcred());
 	}
 
-	pn_free(&rpn);
 	return (error);
 }
 
@@ -1082,6 +1194,21 @@ smb_sa_to_va_mask(uint_t sa_mask, uint_t *va_maskp)
 			*(va_maskp) |= smb_attrmap[i];
 
 		smask >>= 1;
+	}
+}
+
+/*
+ * Variant of smb_sa_to_va_mask for vop_getattr,
+ * adding some bits for SMB_AT_ALLOCSZ etc.
+ */
+void
+smb_sa_to_va_mask_get(uint_t sa_mask, uint_t *va_maskp)
+{
+	smb_sa_to_va_mask(sa_mask, va_maskp);
+
+	*va_maskp |= AT_TYPE;
+	if ((sa_mask & SMB_AT_ALLOCSZ) != 0) {
+		*va_maskp |= (AT_SIZE | AT_NBLOCKS);
 	}
 }
 

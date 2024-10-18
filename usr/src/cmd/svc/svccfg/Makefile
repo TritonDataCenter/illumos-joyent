@@ -24,119 +24,41 @@
 # Copyright 2020 Joyent, Inc.
 #
 
-MYPROG =	svccfg
-PROG =		$(MYPROG)
+include Makefile.shared.com
+include $(SRC)/cmd/Makefile.ctf
 
-SRCS  =		svccfg_main.c \
-		svccfg_engine.c \
-		svccfg_internal.c \
-		svccfg_libscf.c \
-		svccfg_tmpl.c \
-		svccfg_xml.c \
-		svccfg_help.c
+POFILES =				\
+	$(SRCS:%.c=%.po)		\
+	svccfg_grammar.po		\
+	svccfg_lex.po			\
+	../common/manifest_find.po	\
+	../common/manifest_hash.po
 
-LNTS =		$(SRCS:%.c=%.ln) \
-		manifest_find.ln \
-		manifest_hash.ln
-
-MYOBJS =	$(SRCS:%.c=%.o) \
-		svccfg_grammar.o \
-		svccfg_lex.o \
-		manifest_find.o \
-		manifest_hash.o \
-		notify_params.o
-OBJS =		$(MYOBJS)
-
-POFILES =	$(SRCS:%.c=%.po) \
-		svccfg_grammar.po \
-		svccfg_lex.po \
-		../common/manifest_find.po \
-		../common/manifest_hash.po
-
-include ../../Makefile.cmd
-include ../../Makefile.ctf
+SRCDIR = .
+COMDIR = ../common
 
 POFILE =	$(PROG)_all.po
-
-NATIVE_BUILD=$(POUND_SIGN)
-$(NATIVE_BUILD)NOT_NATIVE=$(POUND_SIGN)
-
-$(NATIVE_BUILD)PROG = $(MYPROG:%=%-native)
-$(NATIVE_BUILD)OBJS = $(MYOBJS:%.o=%-native.o)
 
 # svccfg has a name clash with main() and libl.so.1.  However, svccfg must
 # still export a number of "yy*" (libl) interfaces.  Reduce all other symbols
 # to local scope.
 MAPFILES +=	$(MAPFILE.LEX) $(MAPFILE.NGB)
-MAPOPTS =	$(MAPFILES:%=-M%)
+MAPOPTS =	$(MAPFILES:%=-Wl,-M%)
 
-MYCPPFLAGS =	-I ../common -I$(ADJUNCT_PROTO)/usr/include/libxml2
-CPPFLAGS +=	$(MYCPPFLAGS)
+CPPFLAGS +=	-I ../common -I$(ADJUNCT_PROTO)/usr/include/libxml2
 LDFLAGS +=	$(MAPOPTS)
 
-CERRWARN +=	-_gcc=-Wno-unused-label
-CERRWARN +=	-_gcc=-Wno-implicit-function-declaration
-CERRWARN +=	-_gcc=-Wno-switch
-CERRWARN +=	$(CNOWARN_UNINIT)
-CERRWARN +=	-_gcc=-Wno-unused-variable
-CERRWARN +=	-_gcc=-Wno-parentheses
-
-# not linted
-SMATCH=off
-
-LFLAGS = -t
-YFLAGS = -d
-
-CLOBBERFILES += svccfg_lex.c svccfg_grammar.c svccfg_grammar.h \
-    $(MYPROG:%=%-native)
-
-SVCCFG_EXTRA_LIBS = -lxml2 -lscf -ll -luutil -lumem -lmd5 -lnvpair
-$(NOT_NATIVE)SVCCFG_EXTRA_LIBS += -ltecla
-#
-# If no adjunct, then we'll already find /usr/lib via LDLIBS below.
-#
-$(NO_ADJUNCT_PROTO)NATIVE_LIBS += libxml2.so libl.so libumem.so \
-    libmd5.so libnvpair.so libc.so
-
-LIBSCF		= $(SRC)/lib/libscf
-LIBTECLA	= $(SRC)/lib/libtecla		# just for the header
-LIBUUTIL	= $(SRC)/lib/libuutil
-
-lint := LINTFLAGS = -mux
-lint := SVCCFG_EXTRA_LIBS = -lscf -ll -luutil -lumem -lmd5 -lnvpair
-
-LDLIBS += $(SVCCFG_EXTRA_LIBS)
-
-$(NATIVE_BUILD)NATIVE_LIBS += libl.so libumem.so libmd5.so libnvpair.so libc.so
-$(NATIVE_BUILD)CC =	$(NATIVECC)
-$(NATIVE_BUILD)LD =	$(NATIVELD)
-$(NATIVE_BUILD)CFLAGS =	$(NATIVE_CFLAGS)
-$(NATIVE_BUILD)CPPFLAGS = \
-	-DNATIVE_BUILD \
-	$(MYCPPFLAGS) \
-	-I$(LIBSCF)/inc \
-	-I$(LIBTECLA) \
-	-I$(LIBUUTIL)/common
-$(NATIVE_BUILD)LDFLAGS = $(BDIRECT)
-$(NATIVE_BUILD)LDLIBS = \
-	-L$(LIBUUTIL)/native -R $(LIBUUTIL)/native \
-	-L$(LIBSCF)/native -R $(LIBSCF)/native \
-	-L$(ADJUNCT_PROTO)/usr/lib -R$(ADJUNCT_PROTO)/usr/lib \
-	$(SVCCFG_EXTRA_LIBS)
+LDLIBS += -lxml2 -lscf -ll -luutil -lumem -lmd -lnvpair -ltecla
+NATIVE_LIBS += libxml2.so
 
 svccfg_lex.o svccfg_grammar.o := CCVERBOSE =
 
 svccfg_help.po := XGETFLAGS =	-a
 
 .KEEP_STATE:
-.PARALLEL: $(OBJS) $(LNTS)
+.PARALLEL: $(OBJS)
 
 all debug: $(PROG)
-
-native: FRC
-	@cd $(LIBUUTIL)/native; pwd; $(MAKE) $(MFLAGS) install
-	@cd $(LIBSCF)/native; pwd; $(MAKE) $(MFLAGS) install
-	@NATIVE_BUILD= $(MAKE) $(MFLAGS) all
 
 $(PROG): $(OBJS) $(MAPFILES)
 	$(LINK.c) -o $@ $(OBJS) $(LDLIBS)
@@ -149,38 +71,9 @@ $(POFILE): $(POFILES)
 
 install: all $(ROOTUSRSBINPROG)
 
-svccfg_lex.c: svccfg.l svccfg_grammar.h
-	$(LEX) $(LFLAGS) svccfg.l > $@
-
-svccfg_help.o: svccfg_grammar.h
-svccfg_help-native.o: svccfg_grammar.h
-
-svccfg_grammar.h svccfg_grammar.c: svccfg.y
-	$(YACC) $(YFLAGS) svccfg.y
-	@$(MV) y.tab.h svccfg_grammar.h
-	@$(MV) y.tab.c svccfg_grammar.c
-
-clean: FRC
-	$(RM) $(MYOBJS) $(MYOBJS:%.o=%-native.o) $(LNTS)
-
-lint: $(LNTS)
-	$(LINT.c) $(LINTFLAGS) $(LNTS) $(LDLIBS)
-
-%-native.o: %.c
-	$(COMPILE.c) -o $@ $<
-	$(POST_PROCESS_O)
-
-%-native.o: ../common/%.c
-	$(COMPILE.c) -o $@ $<
-	$(POST_PROCESS_O)
-
-%.o: ../common/%.c
-	$(COMPILE.c) $(OUTPUT_OPTION) $<
-	$(POST_PROCESS_O)
-
-%.ln: ../common/%.c
-	$(LINT.c) $(OUTPUT_OPTION) -c $<
+clean:
+	$(RM) $(OBJS)
 
 include ../../Makefile.targ
+include Makefile.shared.targ
 
-FRC:

@@ -24,8 +24,6 @@
  * All rights reserved.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /* This is the yacc grammar for the libfru NamingSyntax */
 #include <assert.h>
 #include <stdio.h>
@@ -41,8 +39,15 @@ extern Ancestor *gParserAnts;
 extern PathDef *gParserHead;
 extern int *gParserAbs;
 
-extern void yyerror (const char *msg);
-extern int  yylex   (void);
+#ifdef	__cplusplus
+extern "C" {
+#endif
+extern int yyerror(const char *msg);
+extern int yylex(void);
+extern int yywrap (void);
+#ifdef	__cplusplus
+}
+#endif
 
 %}
 
@@ -79,7 +84,7 @@ recordpath : element
            {
               if ($1->def->dataType != FDTYPE_Record)
               {
-                 yyerror (NULL);
+                 (void) yyerror (NULL);
                  YYABORT;
               }
               int found = 0;
@@ -90,7 +95,7 @@ recordpath : element
               }
               if ( !found )
               {
-                 yyerror (NULL);
+                 (void) yyerror (NULL);
                  YYABORT;
               }
               // insert it in the list.
@@ -103,7 +108,7 @@ recordpath : element
               // absolute path definitions MUST start with tagged elements.
               if ( $2->def->tagType == FRU_X )
               {
-                 yyerror ("First Element of absolute path MUST be tagged");
+                 (void) yyerror ("First Element of absolute path MUST be tagged");
                  YYABORT;
               }
               *gParserAbs = 1;
@@ -116,7 +121,7 @@ element    : NAME
               const fru_regdef_t *def = fru_reg_lookup_def_by_name($1);
               if ( def == NULL )
               {
-                 yyerror (NULL);
+                 (void) yyerror (NULL);
                  gParserErrno = FRU_NOREGDEF;
                  free ($1); // the lexer allocates this memory.
                  YYABORT;
@@ -133,14 +138,14 @@ element    : NAME
               const fru_regdef_t *def = fru_reg_lookup_def_by_name($1);
               if ( def == NULL )
               {
-                 yyerror (NULL);
+                 (void) yyerror (NULL);
                  gParserErrno = FRU_NOREGDEF;
                  free ($1); // the lexer allocates this memory.
                  YYABORT;
               }
               if ( def->iterationType == FRU_NOT_ITERATED )
               {
-                 yyerror (NULL);
+                 (void) yyerror (NULL);
                  free ($1); // the lexer allocates this memory.
                  YYABORT;
               }
@@ -149,7 +154,7 @@ element    : NAME
               {
                  if ( ($3 >= def->iterationCount) || ($3 < 0) )
                  {
-                    yyerror (NULL);
+                    (void) yyerror (NULL);
                     free ($1); // the lexer allocates this memory.
                     YYABORT;
                  }
@@ -162,7 +167,7 @@ element    : NAME
               $$ = pathDef;
            }
            ;
- 
+
 itercount : NUMBER
             { $$ = $1; }
           | LAST
@@ -173,12 +178,15 @@ itercount : NUMBER
 
 %%
 
-void
+int
 yyerror (const char *msg)
 {
-   gParserErrno = FRU_INVALPATH;
+	gParserErrno = FRU_INVALPATH;
+	return (0);
 }
 
 // just to override what the library should have done.
-int yywrap (void) { return 1; }
-
+int yywrap (void)
+{
+	return (1);
+}

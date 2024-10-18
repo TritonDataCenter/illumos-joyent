@@ -22,6 +22,7 @@
  * Copyright (c) 1988, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2012 Milan Jurik. All rights reserved.
  * Copyright 2014 Nexenta Systems, Inc.
+ * Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
  */
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T */
 /*	  All Rights Reserved	*/
@@ -120,15 +121,16 @@ static void message(enum messagemode, char *, ...);
 static char *alloc_vsprintf(const char *, va_list);
 static char *tail(char *);
 
-static void audit_success(int, struct passwd *);
+static void audit_success(int, struct passwd *, boolean_t);
 static void audit_logout(adt_session_data_t *, au_event_t);
-static void audit_failure(int, struct passwd *, char *, int);
+static void audit_failure(int, struct passwd *, char *, int, boolean_t);
 
 #ifdef DYNAMIC_SU
-static void validate(char *, int *);
+static void validate(char *, int *, boolean_t);
 static int legalenvvar(char *);
-static int su_conv(int, struct pam_message **, struct pam_response **, void *);
-static int emb_su_conv(int, struct pam_message **, struct pam_response **,
+static int su_conv(int, const struct pam_message **, struct pam_response **,
+    void *);
+static int emb_su_conv(int, const struct pam_message **, struct pam_response **,
     void *);
 static void freeresponse(int, struct pam_response **response);
 static struct pam_conv pam_conv = {su_conv, NULL};
@@ -190,8 +192,11 @@ main(int argc, char **argv)
 	int flags = 0;
 	int retcode;
 	int idx = 0;
+	userattr_t *user_entry;
+	char *authname;
 #endif	/* DYNAMIC_SU */
 	int pw_change = PW_FALSE;
+	boolean_t isrole = B_FALSE;
 
 	(void) setlocale(LC_ALL, "");
 #if !defined(TEXT_DOMAIN)	/* Should be defined by cc -D */
@@ -245,13 +250,13 @@ main(int argc, char **argv)
 
 	if (defopen(DEFFILE) == 0) {
 
-		if (Sulog = defread("SULOG="))
+		if ((Sulog = defread("SULOG=")) != NULL)
 			Sulog = strdup(Sulog);
-		if (Console = defread("CONSOLE="))
+		if ((Console = defread("CONSOLE=")) != NULL)
 			Console = strdup(Console);
-		if (Path = defread("PATH="))
+		if ((Path = defread("PATH=")) != NULL)
 			Path = strdup(Path);
-		if (Supath = defread("SUPATH="))
+		if ((Supath = defread("SUPATH=")) != NULL)
 			Supath = strdup(Supath);
 		if ((ptr = defread("SYSLOG=")) != NULL)
 			dosyslog = strcmp(ptr, "YES") == 0;
@@ -279,7 +284,31 @@ main(int argc, char **argv)
 	}
 
 #ifdef DYNAMIC_SU
-	if (pam_start(embedded ? EMBEDDED_NAME : "su", nptr,
+	authname = nptr;
+
+	if (((user_entry = getusernam(authname)) != NULL)) {
+		kva_t *attr = user_entry->attr;
+		char *kv;
+
+		if ((kv = kva_match(attr, USERATTR_TYPE_KW)) != NULL &&
+		    ((strcmp(kv, USERATTR_TYPE_NONADMIN_KW) == 0) ||
+		    (strcmp(kv, USERATTR_TYPE_ADMIN_KW) == 0))) {
+			isrole = B_TRUE;
+
+			if ((kv = kva_match(attr,
+			    USERATTR_ROLEAUTH_KW)) != NULL &&
+			    strcmp(kv, USERATTR_ROLEAUTH_USER) == 0) {
+				authname = cuserid(NULL);
+			}
+
+		}
+		free_userattr(user_entry);
+	}
+
+	if (authname == NULL)
+		exit(1);
+
+	if (pam_start(embedded ? EMBEDDED_NAME : "su", authname,
 	    embedded ? &emb_pam_conv : &pam_conv, &pamh) != PAM_SUCCESS)
 		exit(1);
 	if (pam_set_item(pamh, PAM_TTY, ttyn) != PAM_SUCCESS)
@@ -333,7 +362,7 @@ main(int argc, char **argv)
 		 * 3rd step: print out message to user.
 		 */
 		/* don't let audit_failure distinguish a role here */
-		audit_failure(PW_FALSE, NULL, nptr, retcode);
+		audit_failure(PW_FALSE, NULL, nptr, retcode, B_FALSE);
 		switch (retcode) {
 		case PAM_USER_UNKNOWN:
 			closelog();
@@ -368,7 +397,7 @@ main(int argc, char **argv)
 		exit(1);
 	}
 	if (flags)
-		validate(username, &pw_change);
+		validate(username, &pw_change, isrole);
 	if (pam_setcred(pamh, PAM_REINITIALIZE_CRED) != PAM_SUCCESS) {
 		message(ERR, gettext("unable to set credentials"));
 		exit(2);
@@ -384,7 +413,7 @@ main(int argc, char **argv)
 	if ((getpwnam_r(nptr, &pwd, pwdbuf, sizeof (pwdbuf)) == NULL) ||
 	    (getspnam_r(nptr, &sp, spbuf, sizeof (spbuf)) == NULL)) {
 		message(ERR, gettext("Unknown id: %s"), nptr);
-		audit_failure(PW_FALSE, NULL, nptr, PAM_USER_UNKNOWN);
+		audit_failure(PW_FALSE, NULL, nptr, PAM_USER_UNKNOWN, B_FALSE);
 		closelog();
 		exit(1);
 	}
@@ -403,7 +432,7 @@ main(int argc, char **argv)
 		if (Sulog != NULL)
 			log(Sulog, nptr, 0);    /* log entry */
 		message(ERR, gettext("Sorry"));
-		audit_failure(PW_FALSE, NULL, nptr, PAM_AUTH_ERR);
+		audit_failure(PW_FALSE, NULL, nptr, PAM_AUTH_ERR, B_FALSE);
 		if (dosyslog)
 			syslog(LOG_CRIT, "'su %s' failed for %s on %s",
 			    pwd.pw_name, username, ttyn);
@@ -421,7 +450,7 @@ ok:
 		    pwd.pw_name, username, ttyn);
 #endif	/* DYNAMIC_SU */
 
-	audit_success(pw_change, &pwd);
+	audit_success(pw_change, &pwd, isrole);
 	uid = pwd.pw_uid;
 	gid = pwd.pw_gid;
 	dir = strdup(pwd.pw_dir);
@@ -489,7 +518,7 @@ ok:
 		}
 		(void) strlcat(homedir, dir, sizeof (homedir));
 		(void) strlcat(logname, name, sizeof (logname));
-		if (hz = getenv("HZ"))
+		if ((hz = getenv("HZ")) != NULL)
 			(void) strlcat(hzname, hz, sizeof (hzname));
 
 		(void) strlcat(shelltyp, pshell, sizeof (shelltyp));
@@ -522,7 +551,7 @@ ok:
 		 */
 		tznam[0] = '\0';
 		for (j = 0; initenv[j] != 0; j++) {
-			if (initvar = getenv(initenv[j])) {
+			if ((initvar = getenv(initenv[j])) != NULL) {
 
 				/*
 				 * Skip over values beginning with '/' for
@@ -558,7 +587,7 @@ ok:
 		 */
 		if (tznam[0] == '\0') {
 			if (defopen(DEFAULT_LOGIN) == 0) {
-				if (initvar = defread("TIMEZONE=")) {
+				if ((initvar = defread("TIMEZONE=")) != NULL) {
 					(void) strcpy(tznam, "TZ=");
 					(void) strlcat(tznam, initvar,
 					    sizeof (tznam));
@@ -783,27 +812,19 @@ to(int sig)
  */
 
 static void
-audit_success(int pw_change, struct passwd *pwd)
+audit_success(int pw_change, struct passwd *pwd, boolean_t isrole)
 {
 	adt_session_data_t	*ah = NULL;
 	adt_event_data_t	*event;
 	au_event_t		event_id = ADT_su;
-	userattr_t		*user_entry;
-	char			*kva_value;
 
 	if (adt_start_session(&ah, NULL, ADT_USE_PROC_DATA) != 0) {
 		syslog(LOG_AUTH | LOG_ALERT,
 		    "adt_start_session(ADT_su): %m");
 		return;
 	}
-	if (((user_entry = getusernam(pwd->pw_name)) != NULL) &&
-	    ((kva_value = kva_match((kva_t *)user_entry->attr,
-	    USERATTR_TYPE_KW)) != NULL) &&
-	    ((strcmp(kva_value, USERATTR_TYPE_NONADMIN_KW) == 0) ||
-	    (strcmp(kva_value, USERATTR_TYPE_ADMIN_KW) == 0))) {
+	if (isrole)
 		event_id = ADT_role_login;
-	}
-	free_userattr(user_entry);	/* OK to use, checks for NULL */
 
 	/* since proc uid/gid not yet updated */
 	if (adt_set_user(ah, pwd->pw_uid, pwd->pw_gid, pwd->pw_uid,
@@ -1004,13 +1025,12 @@ audit_logout(adt_session_data_t *ah, au_event_t event_id)
  */
 
 static void
-audit_failure(int pw_change, struct passwd *pwd, char *user, int pamerr)
+audit_failure(int pw_change, struct passwd *pwd, char *user, int pamerr,
+    boolean_t isrole)
 {
 	adt_session_data_t	*ah;	/* audit session handle */
 	adt_event_data_t	*event;	/* event to generate */
 	au_event_t		event_id = ADT_su;
-	userattr_t		*user_entry;
-	char			*kva_value;
 
 	if (adt_start_session(&ah, NULL, ADT_USE_PROC_DATA) != 0) {
 		syslog(LOG_AUTH | LOG_ALERT,
@@ -1025,14 +1045,8 @@ audit_failure(int pw_change, struct passwd *pwd, char *user, int pamerr)
 			syslog(LOG_AUTH | LOG_ERR,
 			    "adt_set_user(ADT_su, ADT_FAILURE): %m");
 		}
-		if (((user_entry = getusernam(pwd->pw_name)) != NULL) &&
-		    ((kva_value = kva_match((kva_t *)user_entry->attr,
-		    USERATTR_TYPE_KW)) != NULL) &&
-		    ((strcmp(kva_value, USERATTR_TYPE_NONADMIN_KW) == 0) ||
-		    (strcmp(kva_value, USERATTR_TYPE_ADMIN_KW) == 0))) {
+		if (isrole)
 			event_id = ADT_role_login;
-		}
-		free_userattr(user_entry);	/* OK to use, checks for NULL */
 	}
 	if ((event = adt_alloc_event(ah, event_id)) == NULL) {
 		syslog(LOG_AUTH | LOG_ALERT,
@@ -1081,16 +1095,15 @@ audit_failure(int pw_change, struct passwd *pwd, char *user, int pamerr)
  *	a PAM authentication module to print error messages
  *	or garner information from the user.
  */
-/*ARGSUSED*/
 static int
-su_conv(int num_msg, struct pam_message **msg, struct pam_response **response,
-    void *appdata_ptr)
+su_conv(int num_msg, const struct pam_message **msg,
+    struct pam_response **response, void *appdata_ptr)
 {
-	struct pam_message	*m;
-	struct pam_response	*r;
-	char			*temp;
-	int			k;
-	char			respbuf[PAM_MAX_RESP_SIZE];
+	const struct pam_message *m;
+	struct pam_response *r;
+	char *temp;
+	int k;
+	char respbuf[PAM_MAX_RESP_SIZE];
 
 	if (num_msg <= 0)
 		return (PAM_CONV_ERR);
@@ -1168,16 +1181,15 @@ su_conv(int num_msg, struct pam_message **msg, struct pam_response **response,
  *	or garner information from the user.
  *	This version is used for embedded_su.
  */
-/*ARGSUSED*/
 static int
-emb_su_conv(int num_msg, struct pam_message **msg,
+emb_su_conv(int num_msg, const struct pam_message **msg,
     struct pam_response **response, void *appdata_ptr)
 {
-	struct pam_message	*m;
-	struct pam_response	*r;
-	char			*temp;
-	int			k;
-	char			respbuf[PAM_MAX_RESP_SIZE];
+	const struct pam_message *m;
+	struct pam_response *r;
+	char *temp;
+	int k;
+	char respbuf[PAM_MAX_RESP_SIZE];
 
 	if (num_msg <= 0)
 		return (PAM_CONV_ERR);
@@ -1320,7 +1332,7 @@ quotemsg(char *fmt, ...)
  * validate - Check that the account is valid for switching to.
  */
 static void
-validate(char *usernam, int *pw_change)
+validate(char *usernam, int *pw_change, boolean_t isrole)
 {
 	int error;
 	int tries;
@@ -1340,7 +1352,8 @@ validate(char *usernam, int *pw_change)
 					continue;
 				}
 				message(ERR, gettext("Sorry"));
-				audit_failure(PW_FAILED, &pwd, NULL, error);
+				audit_failure(PW_FAILED, &pwd, NULL, error,
+				    isrole);
 				if (dosyslog)
 					syslog(LOG_CRIT,
 					    "'su %s' failed for %s on %s",
@@ -1352,7 +1365,7 @@ validate(char *usernam, int *pw_change)
 			return;
 		} else {
 			message(ERR, gettext("Sorry"));
-			audit_failure(PW_FALSE, &pwd, NULL, error);
+			audit_failure(PW_FALSE, &pwd, NULL, error, isrole);
 			if (dosyslog)
 				syslog(LOG_CRIT, "'su %s' failed for %s on %s",
 				    pwd.pw_name, usernam, ttyn);

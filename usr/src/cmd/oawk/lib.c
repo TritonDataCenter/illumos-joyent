@@ -27,8 +27,6 @@
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
 /*	  All Rights Reserved  	*/
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdio.h>
 #include "awk.def"
 #include "awk.h"
@@ -36,6 +34,7 @@
 #include <wctype.h>
 #include "awktype.h"
 #include <stdlib.h>
+#include <stdarg.h>
 
 FILE	*infile	= NULL;
 wchar_t *file;
@@ -313,7 +312,7 @@ recbld(void)
 
 
 CELL *
-fieldadr(n)
+fieldadr(int n)
 {
 	if (n < 0 || n >= MAXFLD)
 		error(FATAL, "trying to access field %d", n);
@@ -335,10 +334,14 @@ yyerror(char *s)
 
 
 void
-error(f, s, a1, a2, a3, a4, a5, a6, a7)
+error(int f, char *fmt, ...)
 {
+	va_list ap;
+
+	va_start(ap, fmt);
 	fprintf(stderr, "awk: ");
-	fprintf(stderr, gettext((char *)s), a1, a2, a3, a4, a5, a6, a7);
+	vfprintf(stderr, gettext(fmt), ap);
+	va_end(ap);
 	fprintf(stderr, "\n");
 	if (NR && *NR > 0)
 		fprintf(stderr, gettext(" record number %g\n"), *NR);

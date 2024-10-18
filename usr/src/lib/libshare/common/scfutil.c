@@ -22,6 +22,8 @@
 /*
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2023 Oxide Computer Company
  */
 
 /* helper functions for using libscf with sharemgr */
@@ -152,8 +154,10 @@ sa_scf_init(sa_handle_impl_t ihandle)
 	/* Error handling/unwinding */
 err:
 	(void) sa_scf_fini(handle);
-	(void) printf("libshare SMF initialization problem: %s\n",
-	    scf_strerror(scf_error()));
+	if (scf_error() != SCF_ERROR_NOT_FOUND) {
+		(void) printf("libshare SMF initialization problem: %s\n",
+		    scf_strerror(scf_error()));
+	}
 	return (NULL);
 }
 
@@ -189,7 +193,7 @@ skip_property(char *name)
 
 	for (i = 0; skip_props[i] != NULL; i++)
 		if (strcmp(name, skip_props[i]) == 0)
-		return (1);
+			return (1);
 	return (0);
 }
 
@@ -239,8 +243,7 @@ valid_protocol(char *proto)
 
 static int
 sa_extract_pgroup(xmlNodePtr root, scfutilhandle_t *handle,
-			scf_propertygroup_t *pg,
-			char *nodetype, char *proto, char *sectype)
+    scf_propertygroup_t *pg, char *nodetype, char *proto, char *sectype)
 {
 	xmlNodePtr node;
 	scf_iter_t *iter;
@@ -335,7 +338,7 @@ out:
 
 static void
 sa_extract_attrs(xmlNodePtr root, scfutilhandle_t *handle,
-		    scf_instance_t *instance)
+    scf_instance_t *instance)
 {
 	scf_property_t *prop;
 	scf_value_t *value;
@@ -463,7 +466,7 @@ _sa_make_resource(xmlNodePtr node, char *valuestr)
  */
 void
 sa_share_from_pgroup(xmlNodePtr root, scfutilhandle_t *handle,
-			scf_propertygroup_t *pg, char *id)
+    scf_propertygroup_t *pg, char *id)
 {
 	xmlNodePtr node;
 	char *name;
@@ -595,7 +598,7 @@ sa_share_from_pgroup(xmlNodePtr root, scfutilhandle_t *handle,
 				desc = xmlNewChild(node, NULL,
 				    (xmlChar *)"description", NULL);
 				if (desc != NULL)
-					xmlNodeSetContent(desc,
+					(void) xmlNodeSetContent(desc,
 					    (xmlChar *)valuestr);
 			}
 		}
@@ -699,7 +702,7 @@ find_resource_by_index(sa_share_t share, char *index)
 
 static int
 sa_share_props_from_pgroup(xmlNodePtr root, scfutilhandle_t *handle,
-			scf_propertygroup_t *pg, char *id, sa_handle_t sahandle)
+    scf_propertygroup_t *pg, char *id, sa_handle_t sahandle)
 {
 	xmlNodePtr node;
 	char *name = NULL;
@@ -710,7 +713,7 @@ sa_share_props_from_pgroup(xmlNodePtr root, scfutilhandle_t *handle,
 	char *valuestr = NULL;
 	int ret = SA_OK;
 	char *sectype = NULL;
-	char *proto;
+	char *proto = NULL;
 	sa_share_t share;
 	uuid_t uuid;
 
@@ -1054,7 +1057,7 @@ out:
 
 static void
 sa_extract_defaults(xmlNodePtr root, scfutilhandle_t *handle,
-		    scf_instance_t *instance)
+    scf_instance_t *instance)
 {
 	xmlNodePtr node;
 	scf_property_t *prop;
@@ -1471,10 +1474,8 @@ sa_set_property(scfutilhandle_t *handle, char *propname, char *valstr)
 		ret = SA_SYSTEM_ERR;
 	}
 	if (ret == SA_SYSTEM_ERR) {
-		switch (scf_error()) {
-		case SCF_ERROR_PERMISSION_DENIED:
+		if (scf_error() == SCF_ERROR_PERMISSION_DENIED) {
 			ret = SA_NO_PERMISSION;
-			break;
 		}
 	}
 	/*
@@ -1529,9 +1530,9 @@ sa_set_resource_property(scfutilhandle_t *handle, sa_share_t share)
 	scf_value_t *value;
 	scf_transaction_entry_t *entry;
 	sa_resource_t resource;
-	char *valstr;
-	char *idstr;
-	char *description;
+	char *valstr = NULL;
+	char *idstr = NULL;
+	char *description = NULL;
 	char *propstr = NULL;
 	size_t strsize;
 
@@ -1626,10 +1627,8 @@ err:
 		sa_free_share_description(description);
 
 	if (ret == SA_SYSTEM_ERR) {
-		switch (scf_error()) {
-		case SCF_ERROR_PERMISSION_DENIED:
+		if (scf_error() == SCF_ERROR_PERMISSION_DENIED) {
 			ret = SA_NO_PERMISSION;
-			break;
 		}
 	}
 	/*

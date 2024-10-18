@@ -44,17 +44,15 @@ CONF_SRCDIR	= $(UTSBASE)/intel/io/intel_nhm
 include $(UTSBASE)/intel/Makefile.intel
 
 OBJECTS		= $(INTEL_NHM_OBJS:%=$(OBJS_DIR)/%)
-LINTS           = $(INTEL_NHM_OBJS:%.o=$(LINTS_DIR)/%.ln)
 
 #
 #       Define targets
 #
 ALL_TARGET      = $(BINARY) $(SRC_CONFFILE)
-LINT_TARGET     = $(LINT_MODULE).lint
 INSTALL_TARGET  = $(BINARY) $(ROOTMODULE) $(ROOT_CONFFILE)
 
 CPPFLAGS	+=  -I$(UTSBASE)/i86pc
-LDFLAGS		+= -dy -N drv/smbios
+LDFLAGS		+= -N drv/smbios
 
 CERRWARN	+= $(CNOWARN_UNINIT)
 
@@ -70,12 +68,6 @@ all:            $(ALL_DEPS)
 clean:          $(CLEAN_DEPS)
 
 clobber:        $(CLOBBER_DEPS)
-
-lint:           $(LINT_DEPS)
-
-modlintlib:     $(MODLINTLIB_DEPS)
-
-clean.lint:     $(CLEAN_LINT_DEPS)
 
 install:        $(INSTALL_DEPS)
 

@@ -22,20 +22,19 @@
 # Copyright (c) 1996 by Sun Microsystems, Inc.
 # All rights reserved.
 
-include		../Makefile.com
 include		../../Makefile.tools
-include		$(SGSHOME)/ld/Makefile.com
+include		$(SRC)/cmd/sgs/ld/Makefile.com
+include		../Makefile.com
 
-LDLIBS =	-L../libconv -L$(ROOTONBLDLIBMACH) -lld -lelf -lconv
-NATIVE_LIBS +=	libc.so
-CPPFLAGS =	$(NATIVE_CPPFLAGS)
-CFLAGS =	$(NATIVE_CFLAGS)
+LDLIBS =	-lumem -L../libconv -L$(ROOTONBLDLIBMACH64) -lld -lelf -lconv
+NATIVE_LIBS +=	libc.so libumem.so
 MAPFILES =	$(SRCDIR)/common/mapfile-intf
-CW_LINKER =
-VAR_LD_LLDFLAGS=	'-R$$ORIGIN/../../lib/$(MACH)'
-VAR_LD_LLDFLAGS64 =	'-R$$ORIGIN/../../../lib/$(MACH64)'
+RPATH =		'-R$$ORIGIN/../../lib/$(MACH)/64'
 
-install: $(ROOTONBLDMACHPROG)
+include		$(SRC)/Makefile.master.64
+include		$(SRC)/Makefile.native
+
+install: $(ROOTONBLDMACH64PROG)
 
 .KEEP_STATE:
 

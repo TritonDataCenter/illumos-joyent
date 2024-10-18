@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdlib.h>
 #include <memory.h>
 #include <math.h>
@@ -246,7 +244,8 @@ Convert(
 		outbuf = new AudioBuffer(length, "(PCM conversion buffer)");
 		if (outbuf == 0)
 			return (AUDIO_UNIXERROR);
-		if (err = outbuf->SetHeader(outhdr)) {
+		err = outbuf->SetHeader(outhdr);
+		if (err != AUDIO_SUCCESS) {
 			delete outbuf;
 			return (err);
 		}

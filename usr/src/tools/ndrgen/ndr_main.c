@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include "ndrgen.h"
 
 ndr_typeinfo_t	*typeinfo_list;
@@ -53,7 +51,7 @@ main(void)
 }
 
 int
-yyerror(char *msg)
+yyerror(const char *msg)
 {
 	compile_error("%s", msg);
 	return (0);

@@ -19,11 +19,14 @@
  * CDDL HEADER END
  */
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	All Rights Reserved	*/
 
 /*
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2021 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022 Garrett D'Amore
  */
 
 #include <sys/types.h>
@@ -43,8 +46,6 @@
 #include <sys/vtrace.h>
 #include <sys/ftrace.h>
 #include <sys/ontrap.h>
-#include <sys/multidata.h>
-#include <sys/multidata_impl.h>
 #include <sys/sdt.h>
 #include <sys/strft.h>
 
@@ -403,9 +404,6 @@ streams_msg_init(void)
 	    fthdr_constructor, fthdr_destructor, NULL, NULL, NULL, 0);
 	ftblk_cache = kmem_cache_create("streams_ftblk", sizeof (ftblk_t), 32,
 	    ftblk_constructor, ftblk_destructor, NULL, NULL, NULL, 0);
-
-	/* Initialize Multidata caches */
-	mmd_init();
 
 	/* initialize throttling queue for esballoc */
 	esballoc_queue_init();
@@ -836,6 +834,20 @@ frnop_func(void *arg)
 
 /*
  * Generic esballoc used to implement the four flavors: [d]esballoc[a].
+ *
+ * The variants with a 'd' prefix (desballoc, desballoca)
+ *	directly free the mblk when it loses its last ref,
+ *	where the other variants free asynchronously.
+ * The variants with an 'a' suffix (esballoca, desballoca)
+ *	add an extra ref, effectively letting the streams subsystem
+ *	know that the message data should not be modified.
+ *	(eg. see db_ref checks in reallocb and elsewhere)
+ *
+ * The method used by the 'a' suffix functions to keep the dblk
+ * db_ref > 1 is non-obvious.  The macro DBLK_RTFU(2,...) passed to
+ * gesballoc sets the initial db_ref = 2 and sets the DBLK_REFMIN
+ * bit in db_flags.  In dblk_decref() that flag essentially means
+ * the dblk has one extra ref, so the "last ref" is one, not zero.
  */
 static mblk_t *
 gesballoc(unsigned char *base, size_t size, uint32_t db_rtfu, frtn_t *frp,
@@ -963,6 +975,31 @@ esballoca(unsigned char *base, size_t size, uint_t pri, frtn_t *frp)
 
 	return (gesballoc(base, size, DBLK_RTFU(2, M_DATA, 0, 0),
 	    frp, freebs_enqueue, KM_NOSLEEP));
+}
+
+/*
+ * Same as esballoca() but sleeps waiting for memory.
+ */
+mblk_t *
+esballoca_wait(unsigned char *base, size_t size, uint_t pri, frtn_t *frp)
+{
+	mblk_t *mp;
+
+	/*
+	 * Note that this is structured to allow the common case (i.e.
+	 * STREAMS flowtracing disabled) to call gesballoc() with tail
+	 * call optimization.
+	 */
+	if (!str_ftnever) {
+		mp = gesballoc(base, size, DBLK_RTFU(2, M_DATA, 0, 0),
+		    frp, freebs_enqueue, KM_SLEEP);
+
+		STR_FTALLOC(&DB_FTHDR(mp), FTEV_ESBALLOCA, size);
+		return (mp);
+	}
+
+	return (gesballoc(base, size, DBLK_RTFU(2, M_DATA, 0, 0),
+	    frp, freebs_enqueue, KM_SLEEP));
 }
 
 /*ARGSUSED*/
@@ -1417,31 +1454,6 @@ copyb(mblk_t *bp)
 	if (dp->db_fthdr != NULL)
 		STR_FTEVENT_MBLK(bp, caller(), FTEV_COPYB, 0);
 
-	/*
-	 * Special handling for Multidata message; this should be
-	 * removed once a copy-callback routine is made available.
-	 */
-	if (dp->db_type == M_MULTIDATA) {
-		cred_t *cr;
-
-		if ((nbp = mmd_copy(bp, KM_NOSLEEP)) == NULL)
-			return (NULL);
-
-		nbp->b_flag = bp->b_flag;
-		nbp->b_band = bp->b_band;
-		ndp = nbp->b_datap;
-
-		/* See comments below on potential issues. */
-		STR_FTEVENT_MBLK(nbp, caller(), FTEV_COPYB, 1);
-
-		ASSERT(ndp->db_type == dp->db_type);
-		cr = dp->db_credp;
-		if (cr != NULL)
-			crhold(ndp->db_credp = cr);
-		ndp->db_cpid = dp->db_cpid;
-		return (nbp);
-	}
-
 	size = dp->db_lim - dp->db_base;
 	unaligned = P2PHASE((uintptr_t)dp->db_base, sizeof (uint_t));
 	if ((nbp = allocb_tmpl(size + unaligned, bp)) == NULL)
@@ -1573,15 +1585,6 @@ pullupmsg(mblk_t *mp, ssize_t len)
 	ASSERT(mp->b_datap->db_ref > 0);
 	ASSERT(mp->b_next == NULL && mp->b_prev == NULL);
 
-	/*
-	 * We won't handle Multidata message, since it contains
-	 * metadata which this function has no knowledge of; we
-	 * assert on DEBUG, and return failure otherwise.
-	 */
-	ASSERT(mp->b_datap->db_type != M_MULTIDATA);
-	if (mp->b_datap->db_type == M_MULTIDATA)
-		return (0);
-
 	if (len == -1) {
 		if (mp->b_cont == NULL && str_aligned(mp->b_rptr))
 			return (1);
@@ -1647,15 +1650,6 @@ msgpullup(mblk_t *mp, ssize_t len)
 	ssize_t	totlen;
 	ssize_t	n;
 
-	/*
-	 * We won't handle Multidata message, since it contains
-	 * metadata which this function has no knowledge of; we
-	 * assert on DEBUG, and return failure otherwise.
-	 */
-	ASSERT(mp->b_datap->db_type != M_MULTIDATA);
-	if (mp->b_datap->db_type == M_MULTIDATA)
-		return (NULL);
-
 	totlen = xmsgsize(mp);
 
 	if ((len > 0) && (len > totlen))
@@ -1714,14 +1708,6 @@ adjmsg(mblk_t *mp, ssize_t len)
 	int first;
 
 	ASSERT(mp != NULL);
-	/*
-	 * We won't handle Multidata message, since it contains
-	 * metadata which this function has no knowledge of; we
-	 * assert on DEBUG, and return failure otherwise.
-	 */
-	ASSERT(mp->b_datap->db_type != M_MULTIDATA);
-	if (mp->b_datap->db_type == M_MULTIDATA)
-		return (0);
 
 	if (len < 0) {
 		fromhead = 0;
@@ -1885,21 +1871,6 @@ getq(queue_t *q)
 }
 
 /*
- * Calculate number of data bytes in a single data message block taking
- * multidata messages into account.
- */
-
-#define	ADD_MBLK_SIZE(mp, size) 					\
-	if (DB_TYPE(mp) != M_MULTIDATA) {				\
-		(size) += MBLKL(mp);					\
-	} else {							\
-		uint_t	pinuse;						\
-									\
-		mmd_getsize(mmd_getmultidata(mp), NULL, &pinuse);	\
-		(size) += pinuse;					\
-	}
-
-/*
  * Returns the number of bytes in a message (a message is defined as a
  * chain of mblks linked by b_cont). If a non-NULL mblkcnt is supplied we
  * also return the number of distinct mblks in the message.
@@ -1912,7 +1883,7 @@ mp_cont_len(mblk_t *bp, int *mblkcnt)
 	int	bytes = 0;
 
 	for (mp = bp; mp != NULL; mp = mp->b_cont) {
-		ADD_MBLK_SIZE(mp, bytes);
+		bytes += MBLKL(mp);
 		mblks++;
 	}
 
@@ -1966,7 +1937,7 @@ getq_noenab(queue_t *q, ssize_t rbytes)
 			 */
 			for (mp1 = bp; mp1 != NULL; mp1 = mp1->b_cont) {
 				mblkcnt++;
-				ADD_MBLK_SIZE(mp1, bytecnt);
+				bytecnt += MBLKL(mp1);
 				if (bytecnt  >= rbytes)
 					break;
 			}
@@ -3443,9 +3414,9 @@ done:
 int
 strqget(queue_t *q, qfields_t what, unsigned char pri, void *valp)
 {
-	qband_t 	*qbp = NULL;
-	int 		error = 0;
-	kthread_id_t 	freezer;
+	qband_t		*qbp = NULL;
+	int		error = 0;
+	kthread_id_t	freezer;
 
 	freezer = STREAM(q)->sd_freezer;
 	if (freezer == curthread) {
@@ -3566,8 +3537,8 @@ done:
 void
 strwakeq(queue_t *q, int flag)
 {
-	stdata_t 	*stp = STREAM(q);
-	pollhead_t 	*pl;
+	stdata_t	*stp = STREAM(q);
+	pollhead_t	*pl;
 
 	mutex_enter(&stp->sd_lock);
 	pl = &stp->sd_pollist;
@@ -3912,7 +3883,7 @@ out:
 	 * I would like to make the following assertion:
 	 *
 	 * ASSERT((flags & (SQ_EXCL|SQ_CIPUT)) != (SQ_EXCL|SQ_CIPUT) ||
-	 * 	sq->sq_count == 0);
+	 *	sq->sq_count == 0);
 	 *
 	 * which indicates that if we are both putshared and exclusive,
 	 * we became exclusive while executing the putproc, and the only
@@ -3951,7 +3922,7 @@ infonext(queue_t *qp, infod_t *idp)
 	queue_t		*nqp;
 	syncq_t		*sq;
 	uint16_t	count;
-	uint16_t 	flags;
+	uint16_t	flags;
 	struct qinit	*qi;
 	int		(*proc)();
 	struct stdata	*stp;

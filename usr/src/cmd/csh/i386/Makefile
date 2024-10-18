@@ -39,7 +39,7 @@ CERRWARN += -_gcc=-Wno-extra
 SMATCH=off
 
 MAPFILES =	../mapfile-intf $(MAPFILE.NGB)
-LDFLAGS +=	$(MAPFILES:%=-M%)
+LDFLAGS +=	$(MAPFILES:%=-Wl,-M%)
 
 HDDEP = sh.o sh.dir.o sh.dol.o sh.err.o sh.exec.o sh.exp.o sh.file.o \
 	sh.func.o sh.glob.o sh.hist.o sh.init.o sh.lex.o sh.misc.o \
@@ -76,10 +76,12 @@ $(CSH_PROG): $(COMMONOBJS) $(LOCALOBJS) $(MAPFILES)
 
 $(HDDEP): ../sh.tconst.h
 
-install: all $(ROOTBINPROG)  $(ROOTPROG)
+$(ROOTPROG) := INSLINKTARGET=../has/bin/$(PROG)
 
-lint:	../sh.tconst.h
-	$(LINT.c) $(COMMONSRCS) signal.c $(LDLIBS)
+$(ROOTPROG):
+	$(INS.symlink)
+
+install: all $(ROOTHASBINPROG) $(ROOTPROG)
 
 clean:
 	$(RM) $(LOCALOBJS) $(COMMONOBJS)

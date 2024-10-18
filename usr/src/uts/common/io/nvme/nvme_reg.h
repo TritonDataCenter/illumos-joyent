@@ -10,9 +10,10 @@
  */
 
 /*
- * Copyright 2016 Nexenta Systems, Inc. All rights reserved.
- * Copyright (c) 2018, Joyent, Inc.
- * Copyright 2019 Western Digital Corporation
+ * Copyright 2020 Joyent, Inc.
+ * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -29,7 +30,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 
 /*
  * NVMe constants
@@ -292,6 +292,11 @@ typedef struct {
 #define	NVME_OPC_NVMEMI_RECV	0x1E	/* 1.3 */
 #define	NVME_OPC_DB_CONFIG	0x7C	/* 1.3 */
 
+#define	NVME_OPC_VENDOR_LOW	0xC0
+#define	NVME_OPC_VENDOR_HIGH	0xFF
+#define	NVME_IS_VENDOR_SPECIFIC_CMD(x)	\
+	((x) >= NVME_OPC_VENDOR_LOW && (x) <= NVME_OPC_VENDOR_HIGH)
+
 /* NVMe NVM command set specific admin command opcodes */
 #define	NVME_OPC_NVM_FORMAT	0x80
 #define	NVME_OPC_NVM_SEC_SEND	0x81
@@ -327,7 +332,8 @@ typedef struct {
  */
 #define	NVME_ASYNC_TYPE_ERROR		0x0	/* Error Status */
 #define	NVME_ASYNC_TYPE_HEALTH		0x1	/* SMART/Health Status */
-#define	NVME_ASYNC_TYPE_VENDOR		0x7	/* vendor specific */
+#define	NVME_ASYNC_TYPE_NOTICE		0x2	/* Notice (1.2) */
+#define	NVME_ASYNC_TYPE_VENDOR		0x7	/* Vendor specific */
 
 #define	NVME_ASYNC_ERROR_INV_SQ		0x0	/* Invalid Submission Queue */
 #define	NVME_ASYNC_ERROR_INV_DBL	0x1	/* Invalid Doorbell Write */
@@ -339,6 +345,17 @@ typedef struct {
 #define	NVME_ASYNC_HEALTH_RELIABILITY	0x0	/* Device Reliability */
 #define	NVME_ASYNC_HEALTH_TEMPERATURE	0x1	/* Temp. Above Threshold */
 #define	NVME_ASYNC_HEALTH_SPARE		0x2	/* Spare Below Threshold */
+
+/* NVMe 1.2 */
+#define	NVME_ASYNC_NOTICE_NS_CHANGE	0x0	/* Namespace attribute change */
+#define	NVME_ASYNC_NOTICE_FW_ACTIVATE	0x1	/* Firmware activation start */
+/* NVMe 1.3 */
+#define	NVME_ASYNC_NOTICE_TELEMETRY	0x2	/* Telemetry log changed */
+/* NVMe 1.4 */
+#define	NVME_ASYNC_NOTICE_NS_ASYMM	0x3	/* Asymm. NS access change */
+#define	NVME_ASYNC_NOTICE_LATENCYLOG	0x4	/* Pred. Latency log change */
+#define	NVME_ASYNC_NOTICE_LBASTATUS	0x5	/* LBA status alert */
+#define	NVME_ASYNC_NOTICE_ENDURANCELOG	0x6	/* Endurance log change */
 
 typedef union {
 	struct {
@@ -383,21 +400,6 @@ typedef union {
 } nvme_create_sq_dw11_t;
 
 /*
- * NVMe Identify
- */
-
-/* NVMe Identify parameters (cdw10) */
-#define	NVME_IDENTIFY_NSID	0x0	/* Identify Namespace */
-#define	NVME_IDENTIFY_CTRL	0x1	/* Identify Controller */
-#define	NVME_IDENTIFY_LIST	0x2	/* Identify List Namespaces */
-
-#define	NVME_IDENTIFY_NSID_ALLOC_LIST	0x10	/* List Allocated NSID */
-#define	NVME_IDENTIFY_NSID_ALLOC	0x11	/* Identify Allocated NSID */
-#define	NVME_IDENTIFY_NSID_CTRL_LIST	0x12	/* List Controllers on NSID */
-#define	NVME_IDENTIFY_CTRL_LIST		0x13	/* Controller List */
-#define	NVME_IDENTIFY_PRIMARY_CAPS	0x14	/* Primary Controller Caps */
-
-/*
  * NVMe Abort Command
  */
 typedef union {
@@ -408,20 +410,84 @@ typedef union {
 	uint32_t r;
 } nvme_abort_cmd_t;
 
-
 /*
- * NVMe Get Log Page
+ * NVMe Get Log Page. dw12/13 are the lower and upper halves of the 64-bit
+ * offset field respectively in bytes. These must be dword aligned. The offset
+ * was added in NVMe v1.2, but requires controller support.
  */
 typedef union {
 	struct {
 		uint8_t lp_lid;		/* Log Page Identifier */
-		uint8_t lp_rsvd1;
-		uint16_t lp_numd:12;	/* Number of Dwords */
-		uint16_t lp_rsvd2:4;
+		/*
+		 * The log-specific field was introduced as a 4-bit field in
+		 * NVMe 1.3. It was extended to be a 7-bit field in NVMe 2.0 and
+		 * renamed log-specific parameter.
+		 */
+		uint8_t lp_lsp:7;
+		uint8_t lp_rae:1;	/* Retain Async Event  v1.3 */
+		/*
+		 * This is the lower number of dwords. This was changed in NVMe
+		 * v1.2 to be split between this field and dw11. In NVMe 1.0/1.1
+		 * this was only 12 bits long.
+		 */
+		uint16_t lp_lnumdl;	/* Number of Dwords */
 	} b;
 	uint32_t r;
-} nvme_getlogpage_t;
+} nvme_getlogpage_dw10_t;
 
+typedef union {
+	struct {
+		uint16_t lp_numdu;	/* Number of dwords v1.2 */
+		uint16_t lp_lsi;	/* Log Specific Field v1.3 */
+	} b;
+	uint32_t r;
+} nvme_getlogpage_dw11_t;
+
+typedef union {
+	struct {
+		uint8_t lp_uuid:7;	/* UUID Index v1.4 */
+		uint8_t lp_rsvd1:1;
+		uint8_t lp_rsvd2;
+		uint8_t lp_rsvd3:7;
+		uint8_t lp_ot:1;	/* Offset Type v2.0 */
+		uint8_t lp_csi;		/* Command Set Identifier v2.0 */
+	} b;
+	uint32_t r;
+} nvme_getlogpage_dw14_t;
+
+/*
+ * dword11 values for the dataset management command. Note that the dword11
+ * attributes are distinct from the context attributes (nr_ctxattr) values
+ * for an individual range (of the context attribute values defined by the NVMe
+ * spec, none are currently used by the NVMe driver).
+ */
+#define	NVME_DSET_MGMT_ATTR_OPT_READ	0x01
+#define	NVME_DSET_MGMT_ATTR_OPT_WRITE	0x02
+#define	NVME_DSET_MGMT_ATTR_DEALLOCATE	0x04
+
+#define	NVME_DSET_MGMT_MAX_RANGES	256
+typedef struct {
+	uint32_t	nr_ctxattr;
+	uint32_t	nr_len;
+	uint64_t	nr_lba;
+} nvme_range_t;
+
+/*
+ * NVMe Identify Command
+ */
+typedef union {
+	struct {
+		/*
+		 * The controller or namespace structure (CNS). This field was
+		 * originally a single bit wide in NVMe 1.0. It was two bits
+		 * wide in NVMe 1.1 and was increased to 8 bits in NVMe 1.2.
+		 */
+		uint8_t id_cns;
+		uint8_t id_rsvd0;
+		uint16_t id_cntid;	/* Controller ID, NVMe 1.2 */
+	} b;
+	uint32_t r;
+} nvme_identify_dw10_t;
 
 #ifdef __cplusplus
 }

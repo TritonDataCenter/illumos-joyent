@@ -10,7 +10,8 @@
  */
 
 /*
- * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Nexenta by DDN, Inc.  All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 /*
@@ -314,9 +315,29 @@ uint32_t
 smb_oplock_request(smb_request_t *sr, smb_ofile_t *ofile, uint32_t *statep)
 {
 	smb_node_t *node = ofile->f_node;
+	uint32_t status;
+
+	smb_llist_enter(&node->n_ofile_list, RW_READER);
+	mutex_enter(&node->n_oplock.ol_mutex);
+
+	status = smb_oplock_request_LH(sr, ofile, statep);
+
+	mutex_exit(&node->n_oplock.ol_mutex);
+	smb_llist_exit(&node->n_ofile_list);
+
+	return (status);
+}
+
+uint32_t
+smb_oplock_request_LH(smb_request_t *sr, smb_ofile_t *ofile, uint32_t *statep)
+{
+	smb_node_t *node = ofile->f_node;
 	uint32_t type = *statep & OPLOCK_LEVEL_TYPE_MASK;
 	uint32_t level = *statep & OPLOCK_LEVEL_CACHE_MASK;
 	uint32_t status;
+
+	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
+	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
 
 	*statep = LEVEL_NONE;
 
@@ -341,9 +362,6 @@ smb_oplock_request(smb_request_t *sr, smb_ofile_t *ofile, uint32_t *statep)
 		 */
 		return (NT_STATUS_OPLOCK_NOT_GRANTED);
 	}
-
-	smb_llist_enter(&node->n_ofile_list, RW_READER);
-	mutex_enter(&node->n_oplock.ol_mutex);
 
 	/*
 	 * If Type is LEVEL_ONE or LEVEL_BATCH:
@@ -494,14 +512,15 @@ smb_oplock_request(smb_request_t *sr, smb_ofile_t *ofile, uint32_t *statep)
 		break;
 	}
 
-	/* Give caller back the "Granular" bit. */
-	if (status == NT_STATUS_SUCCESS)
+	/*
+	 * Give caller back the "Granular" bit, eg. when
+	 * NT_STATUS_SUCCESS or NT_STATUS_OPLOCK_BREAK_IN_PROGRESS
+	 */
+	if (NT_SC_SEVERITY(status) == NT_STATUS_SEVERITY_SUCCESS) {
 		*statep |= LEVEL_GRANULAR;
+	}
 
 out:
-	mutex_exit(&node->n_oplock.ol_mutex);
-	smb_llist_exit(&node->n_ofile_list);
-
 	return (status);
 }
 
@@ -543,6 +562,18 @@ smb_oplock_req_excl(
 
 	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
 	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
+
+#ifdef	DEBUG
+	FOREACH_NODE_OFILE(node, o) {
+		DTRACE_PROBE1(each_ofile, smb_ofile_t *, o);
+	}
+#endif
+
+	/*
+	 * Don't allow grants on closing ofiles.
+	 */
+	if (ofile->f_oplock_closing)
+		return (status);
 
 	/*
 	 * If Open.Stream.Oplock is empty:
@@ -632,7 +663,7 @@ smb_oplock_req_excl(
 				ASSERT(node->n_oplock.cnt_II >= 0);
 				if (o == ofile)
 					continue;
-				DTRACE_PROBE1(unexpected, smb_ofile_t, o);
+				DTRACE_PROBE1(unexpected, smb_ofile_t *, o);
 				smb_oplock_ind_break(o,
 				    LEVEL_NONE, B_FALSE,
 				    NT_STATUS_SUCCESS);
@@ -959,7 +990,9 @@ smb_oplock_req_excl(
 		 * This operation MUST be made cancelable...
 		 * This operation waits until the oplock is
 		 * broken or canceled, as specified in
-		 * section 2.1.5.17.3.
+		 * section 2.1.5.17.3. Note: This function
+		 * does not cause breaks that require a wait,
+		 * so never returns ..._BREAK_IN_PROGRESS.
 		 *
 		 * When the operation specified in section
 		 * 2.1.5.17.3 is called, its following input
@@ -972,11 +1005,18 @@ smb_oplock_req_excl(
 		 * section 2.1.5.17.3.
 		 */
 		/* Keep *rop = ... from caller. */
-		if ((node->n_oplock.ol_state & BREAK_ANY) != 0) {
-			status = NT_STATUS_OPLOCK_BREAK_IN_PROGRESS;
-			/* Caller does smb_oplock_wait_break() */
-		} else {
-			status = NT_STATUS_SUCCESS;
+		status = NT_STATUS_SUCCESS;
+
+		/*
+		 * First oplock grant installs FEM hooks.
+		 */
+		if (node->n_oplock.ol_fem == B_FALSE) {
+			if (smb_fem_oplock_install(node) != 0) {
+				cmn_err(CE_NOTE,
+				    "smb_fem_oplock_install failed");
+			} else {
+				node->n_oplock.ol_fem =	B_TRUE;
+			}
 		}
 	}
 
@@ -1028,6 +1068,18 @@ smb_oplock_req_shared(
 
 	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
 	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
+
+#ifdef	DEBUG
+	FOREACH_NODE_OFILE(node, o) {
+		DTRACE_PROBE1(each_ofile, smb_ofile_t *, o);
+	}
+#endif
+
+	/*
+	 * Don't allow grants on closing ofiles.
+	 */
+	if (ofile->f_oplock_closing)
+		return (status);
 
 	/*
 	 * If Open.Stream.Oplock is empty:
@@ -1363,6 +1415,18 @@ smb_oplock_req_shared(
 		} else {
 			status = NT_STATUS_SUCCESS;
 		}
+
+		/*
+		 * First oplock grant installs FEM hooks.
+		 */
+		if (node->n_oplock.ol_fem == B_FALSE) {
+			if (smb_fem_oplock_install(node) != 0) {
+				cmn_err(CE_NOTE,
+				    "smb_fem_oplock_install failed");
+			} else {
+				node->n_oplock.ol_fem =	B_TRUE;
+			}
+		}
 	}
 
 out:
@@ -1436,8 +1500,8 @@ smb_oplock_ack_break(
 	boolean_t FoundMatchingRHOplock = B_FALSE;
 	int other_keys;
 
-	smb_llist_enter(&node->n_ofile_list, RW_READER);
-	mutex_enter(&node->n_oplock.ol_mutex);
+	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
+	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
 
 	/*
 	 * If Open.Stream.Oplock is empty, the operation MUST be
@@ -1549,21 +1613,10 @@ smb_oplock_ack_break(
 			 *	OplockCompletionStatus = STATUS_SUCCESS.
 			 * (Because BreakingOplockOpen is equal to the
 			 * passed-in Open, the operation ends at this point.)
-			 *
-			 * It should be OK to return the reduced oplock
-			 * (*rop = LEVEL_NONE) here and avoid the need
-			 * to send another oplock break.  This is safe
-			 * because we already have an Ack of the break
-			 * to Level_II, and the additional break to none
-			 * would use AckRequired = FALSE.
-			 *
-			 * If we followed the spec here, we'd have:
-			 * smb_oplock_ind_break(ofile,
-			 *    LEVEL_NONE, B_FALSE,
-			 *    NT_STATUS_SUCCESS);
-			 * (Or smb_oplock_ind_break_in_ack...)
 			 */
-			*rop = LEVEL_NONE;	/* Reduced from L2 */
+			smb_oplock_ind_break_in_ack(
+			    sr, ofile,
+			    LEVEL_NONE, B_FALSE);
 		}
 		status = NT_STATUS_SUCCESS;
 		goto out;
@@ -1639,8 +1692,18 @@ smb_oplock_ack_break(
 		BreakToLevel = READ_CACHING;
 		break;
 	case BREAK_TO_NO_CACHING:
-	default:
 		BreakToLevel = LEVEL_NONE;
+		break;
+	default:
+		ASSERT(0);
+		/* FALLTHROUGH */
+	case 0:
+		/*
+		 * This can happen when we have multiple RH opens,
+		 * and one of them breaks (RH to R).  Happens in
+		 * the smbtorture smb2.lease.v2rename test.
+		 */
+		BreakToLevel = CACHE_R;
 		break;
 	}
 
@@ -1651,6 +1714,21 @@ smb_oplock_ack_break(
 	case (READ_CACHING|HANDLE_CACHING):
 	case (READ_CACHING|HANDLE_CACHING|BREAK_TO_READ_CACHING):
 	case (READ_CACHING|HANDLE_CACHING|BREAK_TO_NO_CACHING):
+		/*
+		 * XXX: Missing from [MS-FSA]
+		 *
+		 * If we previously sent a break to none and the
+		 * client Ack level is R instead of none, we
+		 * need to send another break. We can then
+		 * proceed as if we got level = none.
+		 */
+		if (level == CACHE_R && BreakToLevel == LEVEL_NONE) {
+			smb_oplock_ind_break_in_ack(
+			    sr, ofile,
+			    LEVEL_NONE, B_FALSE);
+			level = LEVEL_NONE;
+		}
+
 		/*
 		 * For each RHOpContext ThisContext in
 		 * Open.Stream.Oplock.RHBreakQueue:
@@ -1949,7 +2027,11 @@ smb_oplock_ack_break(
 		 */
 
 		/*
-		 * Breaking R to none?  This is like:
+		 * Breaking R to none.
+		 *
+		 * We sent break exclusive (RWH or RW) to none and
+		 * the client Ack reduces to R instead of to none.
+		 * Need to send another break. This is like:
 		 * "If BreakCacheLevel contains READ_CACHING..."
 		 * from smb_oplock_break_cmn.
 		 */
@@ -1963,16 +2045,24 @@ smb_oplock_ack_break(
 		}
 
 		/*
-		 * Breaking RH to R or RH to none?  This is like:
+		 * Breaking RH to R or RH to none.
+		 *
+		 * We sent break from (RWH or RW) to (R or none),
+		 * and the client Ack reduces to RH instead of none.
+		 * Need to send another break. This is like:
 		 * "If BreakCacheLevel equals HANDLE_CACHING..."
 		 * from smb_oplock_break_cmn.
+		 *
+		 * Note: Windows always does break to CACHE_R here,
+		 * letting another Ack and ind_break round trip
+		 * take us the rest of the way from R to none.
 		 */
 		if (level == CACHE_RH &&
 		    (BreakToLevel == CACHE_R ||
 		    BreakToLevel == LEVEL_NONE)) {
 			smb_oplock_ind_break_in_ack(
 			    sr, ofile,
-			    BreakToLevel, B_TRUE);
+			    CACHE_R, B_TRUE);
 
 			ofile->f_oplock.BreakingToRead =
 			    (BreakToLevel & READ_CACHING) ? 1: 0;
@@ -2024,6 +2114,7 @@ smb_oplock_ack_break(
 		 * the spec for this bit of code.  Therefore, this will
 		 * return SUCCESS instead of OPLOCK_BREAK_IN_PROGRESS.
 		 */
+		ASSERT(node->n_oplock.excl_open == ofile);
 		node->n_oplock.ol_state = level | EXCLUSIVE;
 		status = NT_STATUS_SUCCESS;
 		break;	/* case (READ_CACHING|WRITE_CACHING|...) */
@@ -2036,21 +2127,39 @@ smb_oplock_ack_break(
 	} /* Switch (oplock.state) */
 
 out:
-	/*
-	 * The spec. describes waiting for a break here,
-	 * but we let the caller do that (when needed) if
-	 * status == NT_STATUS_OPLOCK_BREAK_IN_PROGRESS
-	 */
-	mutex_exit(&node->n_oplock.ol_mutex);
-	smb_llist_exit(&node->n_ofile_list);
-
 	if (status == NT_STATUS_INVALID_OPLOCK_PROTOCOL)
 		*rop = LEVEL_NONE;
 
 	if (status == NT_STATUS_SUCCESS &&
 	    type == LEVEL_GRANULAR &&
-	    *rop != LEVEL_NONE)
+	    *rop != LEVEL_NONE) {
 		*rop |= LEVEL_GRANULAR;
+	}
+
+	/*
+	 * If this node no longer has any oplock grants, let's
+	 * go ahead and remove the FEM hooks now. We could leave
+	 * that until close, but this lets access outside of SMB
+	 * be free of FEM oplock work after a "break to none".
+	 */
+	if (node->n_oplock.ol_state == NO_OPLOCK &&
+	    node->n_oplock.ol_fem == B_TRUE) {
+		smb_fem_oplock_uninstall(node);
+		node->n_oplock.ol_fem = B_FALSE;
+	}
+
+	/*
+	 * The spec. describes waiting for a break here,
+	 * but we let the caller do that (when needed) if
+	 * status == NT_STATUS_OPLOCK_BREAK_IN_PROGRESS
+	 *
+	 * After some research, smb_oplock_ack_break()
+	 * never returns that status.  Paranoid check.
+	 */
+	if (status == NT_STATUS_OPLOCK_BREAK_IN_PROGRESS) {
+		ASSERT(!"Unexpected OPLOCK_BREAK_IN_PROGRESS");
+		status = NT_STATUS_SUCCESS;
+	}
 
 	return (status);
 }
@@ -2257,13 +2366,14 @@ smb_oplock_break_CLOSE(smb_node_t *node, smb_ofile_t *ofile)
 {
 	smb_ofile_t *o;
 
-	if (ofile == NULL) {
-		ASSERT(0);
-		return;
-	}
+	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
+	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
 
-	smb_llist_enter(&node->n_ofile_list, RW_READER);
-	mutex_enter(&node->n_oplock.ol_mutex);
+#ifdef	DEBUG
+	FOREACH_NODE_OFILE(node, o) {
+		DTRACE_PROBE1(each_ofile, smb_ofile_t *, o);
+	}
+#endif
 
 	/*
 	 * If Oplock.IIOplocks is not empty:
@@ -2481,8 +2591,14 @@ smb_oplock_break_CLOSE(smb_node_t *node, smb_ofile_t *ofile)
 	if ((node->n_oplock.ol_state & BREAK_ANY) == 0)
 		cv_broadcast(&node->n_oplock.WaitingOpenCV);
 
-	mutex_exit(&node->n_oplock.ol_mutex);
-	smb_llist_exit(&node->n_ofile_list);
+	/*
+	 * If no longer any oplock, remove FEM hooks.
+	 */
+	if (node->n_oplock.ol_state == NO_OPLOCK &&
+	    node->n_oplock.ol_fem == B_TRUE) {
+		smb_fem_oplock_uninstall(node);
+		node->n_oplock.ol_fem = B_FALSE;
+	}
 }
 
 /*
@@ -2629,6 +2745,12 @@ smb_oplock_break_cmn(smb_node_t *node,
 	smb_llist_enter(&node->n_ofile_list, RW_READER);
 	mutex_enter(&node->n_oplock.ol_mutex);
 
+#ifdef	DEBUG
+	FOREACH_NODE_OFILE(node, o) {
+		DTRACE_PROBE1(each_ofile, smb_ofile_t *, o);
+	}
+#endif
+
 	if (node->n_oplock.ol_state == 0 ||
 	    node->n_oplock.ol_state == NO_OPLOCK)
 		goto out;
@@ -2687,6 +2809,8 @@ smb_oplock_break_cmn(smb_node_t *node,
 					 * completes some earlier call to
 					 * 2.1.5.17.1.)
 					 */
+					o = nol->excl_open;
+					ASSERT(o != NULL);
 					smb_oplock_ind_break(o,
 					    LEVEL_TWO, B_TRUE,
 					    NT_STATUS_SUCCESS);
@@ -2765,6 +2889,8 @@ smb_oplock_break_cmn(smb_node_t *node,
 					 * completes some earlier call to
 					 * 2.1.5.17.1.)
 					 */
+					o = nol->excl_open;
+					ASSERT(o != NULL);
 					smb_oplock_ind_break(o,
 					    LEVEL_NONE, B_TRUE,
 					    NT_STATUS_SUCCESS);
@@ -2840,7 +2966,7 @@ smb_oplock_break_cmn(smb_node_t *node,
 				 *  equals Open.TargetOplockKey,
 				 *	 go to the LeaveBreakToNone label.
 				 */
-				if (o != NULL &&
+				if ((o = nol->excl_open) != NULL &&
 				    CompareOplockKeys(ofile, o, CmpFlags))
 					goto LeaveBreakToNone;
 
@@ -3515,8 +3641,7 @@ smb_oplock_move(smb_node_t *node,
 
 	ASSERT(fr_ofile->f_node == node);
 	ASSERT(to_ofile->f_node == node);
-
-	mutex_enter(&node->n_oplock.ol_mutex);
+	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
 
 	/*
 	 * The ofile to which we're moving the oplock
@@ -3531,7 +3656,7 @@ smb_oplock_move(smb_node_t *node,
 		cmn_err(CE_NOTE, "smb_oplock_move: not empty?");
 #endif
 		DTRACE_PROBE2(dst__not__empty,
-		    smb_node_t, node, smb_ofile_t, to_ofile);
+		    smb_node_t *, node, smb_ofile_t *, to_ofile);
 	}
 
 	og_tmp = to_ofile->f_oplock;
@@ -3541,5 +3666,4 @@ smb_oplock_move(smb_node_t *node,
 	if (node->n_oplock.excl_open == fr_ofile)
 		node->n_oplock.excl_open = to_ofile;
 
-	mutex_exit(&node->n_oplock.ol_mutex);
 }

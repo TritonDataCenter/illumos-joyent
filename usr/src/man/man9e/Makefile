@@ -40,11 +40,15 @@ MANFILES=	Intro.9e		\
 		gld.9e			\
 		identify.9e		\
 		ioctl.9e		\
+		ksensor.9e		\
+		ksensor_ops.9e		\
 		ks_snapshot.9e		\
 		ks_update.9e		\
 		mac.9e			\
 		mac_capab_transceiver.9e	\
 		mac_capab_led.9e	\
+		mac_capab_rings.9e	\
+		mac_filter.9e		\
 		mc_getcapab.9e		\
 		mc_getprop.9e		\
 		mc_getstat.9e		\
@@ -57,6 +61,12 @@ MANFILES=	Intro.9e		\
 		mc_start.9e		\
 		mc_tx.9e		\
 		mc_unicst.9e		\
+		mgi_start.9e		\
+		mi_enable.9e		\
+		mr_gget.9e		\
+		mr_rget.9e		\
+		mri_poll.9e		\
+		mri_stat.9e		\
 		mmap.9e			\
 		open.9e			\
 		power.9e		\
@@ -115,12 +125,23 @@ MANLINKS=	ddi_ufm_op_fill_image.9e	\
 		gldm_set_promiscuous.9e	\
 		gldm_start.9e		\
 		gldm_stop.9e		\
+		kso_kind.9e		\
+		kso_scalar.9e		\
 		MAC.9e			\
 		mc_close.9e		\
 		mc_stop.9e		\
 		mcl_set.9e		\
 		mct_info.9e		\
 		mct_read.9e		\
+		mgi_addmac.9e		\
+		mgi_addvlan.9e		\
+		mgi_remmac.9e		\
+		mgi_remvlan.9e		\
+		mgi_stop.9e		\
+		mi_disable.9e		\
+		mri_start.9e		\
+		mri_stop.9e		\
+		mri_tx.9e		\
 		intro.9e		\
 		tran_destroy_pkt.9e	\
 		tran_pkt_constructor.9e	\
@@ -144,6 +165,9 @@ intro.9e			:= LINKSRC = Intro.9e
 _info.9e			:= LINKSRC = _fini.9e
 _init.9e			:= LINKSRC = _fini.9e
 
+kso_kind.9e			:= LINKSRC = ksensor_ops.9e
+kso_scalar.9e			:= LINKSRC = ksensor_ops.9e
+
 MAC.9e				:= LINKSRC = mac.9e
 gldv3.9e			:= LINKSRC = mac.9e
 GLDv3.9e			:= LINKSRC = mac.9e
@@ -159,6 +183,11 @@ gldm_set_promiscuous.9e		:= LINKSRC = gld.9e
 gldm_start.9e			:= LINKSRC = gld.9e
 gldm_stop.9e			:= LINKSRC = gld.9e
 
+mgi_addmac.9e			:= LINKSRC = mac_filter.9e
+mgi_remmac.9e			:= LINKSRC = mac_filter.9e
+mgi_addvlan.9e			:= LINKSRC = mac_filter.9e
+mgi_remvlan.9e			:= LINKSRC = mac_filter.9e
+
 mc_close.9e			:= LINKSRC = mc_open.9e
 mc_stop.9e			:= LINKSRC = mc_start.9e
 
@@ -166,6 +195,14 @@ mcl_set.9e			:= LINKSRC = mac_capab_led.9e
 
 mct_info.9e			:= LINKSRC = mac_capab_transceiver.9e
 mct_read.9e			:= LINKSRC = mac_capab_transceiver.9e
+
+mgi_stop.9e			:= LINKSRC = mgi_start.9e
+mri_start.9e			:= LINKSRC = mgi_start.9e
+mri_stop.9e			:= LINKSRC = mgi_start.9e
+
+mi_disable.9e			:= LINKSRC = mi_enable.9e
+
+mri_tx.9e			:= LINKSRC = mc_tx.9e
 
 tran_setcap.9e			:= LINKSRC = tran_getcap.9e
 

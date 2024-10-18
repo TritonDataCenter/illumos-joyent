@@ -19,12 +19,13 @@
 # CDDL HEADER END
 #
 # Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
 # Copyright 2012 Joshua M. Clulow <josh@sysmgr.org>
+# Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
 # Copyright 2015, OmniTI Computer Consulting, Inc. All rights reserved.
 # Copyright 2016 RackTop Systems.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2020 Joyent, Inc.
+# Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
 #
 # - This file is sourced by "bldenv" and "nightly" and should not
 #   be executed directly.
@@ -50,7 +51,7 @@ export NIGHTLY_OPTIONS='-FnCDAmprt'
 #export MAILTO=
 
 # CODEMGR_WS - where is your workspace at
-export CODEMGR_WS="`git rev-parse --show-toplevel`"
+export CODEMGR_WS="${CODEMGR_WS:-`git rev-parse --show-toplevel`}"
 
 # Compilers may be specified using the following variables:
 # PRIMARY_CC	- primary C compiler
@@ -65,9 +66,6 @@ export CODEMGR_WS="`git rev-parse --show-toplevel`"
 # the compiler, currently either gnu (or gcc) or sun (or cc), which is also
 # used by Makefiles to guard options.
 #
-# __SUNC and __GNUC must still be set to reflect the style of the primary
-# compiler (and to influence the default primary, otherwise)
-#
 # for example:
 # export PRIMARY_CC=gcc4,/opt/gcc/4.4.4/bin/gcc,gnu
 # export PRIMARY_CCC=gcc4,/opt/gcc/4.4.4/bin/g++,gnu
@@ -79,11 +77,11 @@ export CODEMGR_WS="`git rev-parse --show-toplevel`"
 #
 # To disable shadow compilation, unset SHADOW_* or set them to the empty string.
 #
-export GNUC_ROOT=/usr/gcc/7
-export PRIMARY_CC=gcc7,$GNUC_ROOT/bin/gcc,gnu
-export PRIMARY_CCC=gcc7,$GNUC_ROOT/bin/g++,gnu
-export SHADOW_CCS=gcc4,/opt/gcc/4.4.4/bin/gcc,gnu
-export SHADOW_CCCS=gcc4,/opt/gcc/4.4.4/bin/g++,gnu
+export GNUC_ROOT=/usr/gcc/10
+export PRIMARY_CC=gcc10,$GNUC_ROOT/bin/gcc,gnu
+export PRIMARY_CCC=gcc10,$GNUC_ROOT/bin/g++,gnu
+export SHADOW_CCS=gcc7,/usr/gcc/7/bin/gcc,gnu
+export SHADOW_CCCS=gcc7,/usr/gcc/7/bin/g++,gnu
 
 # comment to disable smatch
 export ENABLE_SMATCH=1
@@ -106,22 +104,9 @@ export ENABLE_SMB_PRINTING=
 
 # If your distro uses certain versions of Python, make sure either
 # Makefile.master contains your new defaults OR your .env file sets them.
-#export PYTHON_VERSION=2.7
-#export PYTHON_PKGVERS=-27
-#export PYTHON_SUFFIX=
-#export PYTHON3_VERSION=3.5
-#export PYTHON3_PKGVERS=-35
-#export PYTHON3_SUFFIX=m
-
-# To disable building with either Python2 or Python 3 (or both), uncomment
-# these lines:
-#export BUILDPY2='#'
-#export BUILDPY3='#'
-
-# To disable building this workspace's tools in $SRC/tools with either Python2
-# or Python3 (but not both!), uncomment either of these lines:
-#export BUILDPY2TOOLS='#'
-#export BUILDPY3TOOLS='#'
+#export PYTHON3_VERSION=3.9
+#export PYTHON3_PKGVERS=-39
+#export PYTHON3_SUFFIX=
 
 # Set console color scheme either by build type:
 #
@@ -139,8 +124,8 @@ export ENABLE_SMB_PRINTING=
 # Set if your distribution has different package versioning
 #export PKGVERS_BRANCH=2018.0.0.17900
 
-# Skip Java 8 builds on distributions that don't support it
-#export BLD_JAVA_8=
+# Skip Java 11 builds on distributions that don't support it
+#export BLD_JAVA_11=
 
 # POST_NIGHTLY can be any command to be run at the end of nightly.  See
 # nightly(1) for interactions between environment variables and this command.
@@ -148,6 +133,31 @@ export ENABLE_SMB_PRINTING=
 
 # Populates /etc/versions/build on each nightly run
 export BUILDVERSION_EXEC="git describe --all --long --dirty"
+
+# -----------------------------------------------------------------------------
+# When the 'n' option is not present in NIGHTLY_OPTIONS, nightly updates
+# the build workspace from the sources identified by the following
+# variables.  Defaults are set in nightly if the environment file
+# leaves them unset.
+# -----------------------------------------------------------------------------
+
+# SCM in use.  Defaults to "git"; others are undertested.
+#export BRINGOVER_SCM="git"
+
+# URL or pathname to source workspace.
+#export BRINGOVER_WS="${CLONE_WS}"
+
+# Branch within BRINGOVER_WS; must be specified if BRINGOVER_WS is a URL
+#export BRINGOVER_BRANCH=""
+
+# Short name to use within CODEMGR_WS for BRINGOVER_WS.
+# This is git-specific.
+#export BRINGOVER_REMOTE=nightly_bringover_ws
+
+# Command-line options to add to the clone operation that creates a new
+# workspace.   If git is in use, adding "--reference /path/to/local/illumos-gate"
+# can speed up clones and make them use less disk space.
+#export CLONE_OPTIONS=""
 
 # -----------------------------------------------------------------------------
 # You are less likely to need to modify parameters below.
@@ -197,11 +207,11 @@ ONBLD_BIN='/opt/onbld/bin'
 # PARENT_WS is used to determine the parent of this workspace. This is
 # for the options that deal with the parent workspace (such as where the
 # proto area will go).
-export PARENT_WS=''
+export PARENT_WS="${PARENT_WS:-}"
 
 # CLONE_WS is the workspace nightly should do a bringover from.
 # The bringover, if any, is done as STAFFER.
-export CLONE_WS='ssh://anonhg@hg.illumos.org/illumos-gate'
+export CLONE_WS="${CLONE_WS:-}"
 
 # Set STAFFER to your own login as gatekeeper or developer
 # The point is to use group "staff" and avoid referencing the parent
@@ -213,7 +223,7 @@ export MAILTO="${MAILTO:-$STAFFER}"
 # MAILFROM.
 #export MAILFROM="user@example.com"
 
-# The project (see project(4)) under which to run this build.  If not
+# The project (see project(5)) under which to run this build.  If not
 # specified, the build is simply run in a new task in the current project.
 export BUILD_PROJECT=''
 
@@ -227,7 +237,7 @@ export MACH="$(uname -p)"
 #  totally freed itself, we can remove this reference.
 #
 # Location of encumbered binaries.
-export ON_CLOSED_BINS="$CODEMGR_WS/closed"
+export ON_CLOSED_BINS="/opt/onbld/closed"
 
 # REF_PROTO_LIST - for comparing the list of stuff in your proto area
 # with. Generally this should be left alone, since you want to see differences
@@ -246,7 +256,7 @@ export MULTI_PROTO="no"
 # when the release slips (nah) or you move an environment file to a new
 # release
 #
-export VERSION="`git describe --long --all HEAD | cut -d/ -f2-`"
+#export VERSION="${VERSION:-`git describe --long --all HEAD | cut -d/ -f2-`}"
 
 #
 # the RELEASE and RELEASE_DATE variables are set in Makefile.master;
@@ -274,27 +284,21 @@ export PKGARCHIVE="${CODEMGR_WS}/packages/${MACH}/nightly"
 # export PKGPUBLISHER_REDIST='on-redist'
 
 # Package manifest format version.
-export PKGFMT_OUTPUT='v1'
+export PKGFMT_OUTPUT='v2'
 
-# we want make to do as much as it can, just in case there's more than
+# We want make to do as much as it can, just in case there's more than
 # one problem.
-export MAKEFLAGS='k'
-
-# Magic variables to prevent the devpro compilers/teamware from checking
-# for updates or sending mail back to devpro on every use.
-export SUNW_NO_UPDATE_NOTIFY='1'
-export UT_NO_USAGE_TRACKING='1'
+# We also must set e in MAKEFLAGS as the makefiles depend on importing
+# the environment variables set here.
+export MAKEFLAGS='ke'
 
 # Build tools - don't change these unless you know what you're doing.  These
 # variables allows you to get the compilers and onbld files locally.
 # Set BUILD_TOOLS to pull everything from one location.
 # Alternately, you can set ONBLD_TOOLS to where you keep the contents of
-# SUNWonbld and SPRO_ROOT to where you keep the compilers.  SPRO_VROOT
-# exists to make it easier to test new versions of the compiler.
+# SUNWonbld.
 export BUILD_TOOLS='/opt'
 #export ONBLD_TOOLS='/opt/onbld'
-export SPRO_ROOT='/opt/SUNWspro'
-export SPRO_VROOT="$SPRO_ROOT"
 
 # Set this flag to 'n' to disable the use of 'checkpaths'.  The default,
 # if the 'N' option is not specified, is to run this test.
@@ -306,7 +310,7 @@ export SPRO_VROOT="$SPRO_ROOT"
 #
 export LD_TOXIC_PATH="$ROOT/lib:$ROOT/usr/lib"
 
-if [[ "$ENABLE_SMATCH" = "1" ]]; then
+if [[ "$ENABLE_SMATCH" == "1" ]]; then
 	SMATCHBIN=$CODEMGR_WS/usr/src/tools/proto/root_$MACH-nd/opt/onbld/bin/$MACH/smatch
 	export SHADOW_CCS="$SHADOW_CCS smatch,$SMATCHBIN,smatch"
 fi

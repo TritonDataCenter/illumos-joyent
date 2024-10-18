@@ -37,17 +37,15 @@
 # cmd/sgs/tools/Makefile.com
 
 include		$(SRC)/cmd/Makefile.cmd
-
 include		$(SRC)/cmd/sgs/Makefile.com
+include		$(SRC)/Makefile.native
 
 OBJECTS=	piglatin.o
-NATIVECC_CFLAGS = -O
-NATIVE_LDFLAGS = $(LDASSERTS) $(ZASSERTDEFLIB)=libc.so $(BDIRECT)
 
 NATIVE=		$(OBJECTS:%.o=%)
 SRCS=		$(OBJECTS:%.o=../common/%.c)
 
-CPPFLAGS +=	$(VAR_TOOLS_CPPFLAGS)
+CPPFLAGS +=	-I$(SRC)/uts/common
 
 ROOTDIR=	$(ROOT)/opt/SUNWonld
 ROOTPROGS=	$(PROGS:%=$(ROOTDIR)/bin/%)

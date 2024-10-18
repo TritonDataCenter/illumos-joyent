@@ -24,6 +24,8 @@
  * Copyright 2018, Joyent Inc.
  * Copyright (c) 2015, 2016 by Delphix. All rights reserved.
  * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2020 RackTop Systems Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -85,6 +87,7 @@
 #include <libdllink.h>
 #include <libdlvlan.h>
 #include <libdlvnic.h>
+#include <libdlaggr.h>
 
 #include <inet/tcp.h>
 #include <arpa/inet.h>
@@ -220,10 +223,18 @@ extern int _autofssys(int, void *);
 static int
 autofs_cleanup(zoneid_t zoneid)
 {
+	int r;
+
 	/*
 	 * Ask autofs to unmount all trigger nodes in the given zone.
+	 * Handle ENOSYS in the case that the autofs kernel module is not
+	 * installed.
 	 */
-	return (_autofssys(AUTOFS_UNMOUNTALL, (void *)((uintptr_t)zoneid)));
+	r = _autofssys(AUTOFS_UNMOUNTALL, (void *)((uintptr_t)zoneid));
+	if (r != 0 && errno == ENOSYS) {
+		return (0);
+	}
+	return (r);
 }
 
 static void
@@ -1178,6 +1189,9 @@ mount_one_dev(zlog_t *zlogp, char *devpath, zone_mnt_t mount_cmd)
 	case ZS_EXCLUSIVE:
 		curr_iptype = "exclusive";
 		break;
+	default:
+		zerror(zlogp, B_FALSE, "bad ip-type");
+		goto cleanup;
 	}
 	if (curr_iptype == NULL)
 		abort();
@@ -1277,7 +1291,7 @@ mount_one(zlog_t *zlogp, struct zone_fstab *fsptr, const char *rootpath,
 	/*
 	 * In general the strategy here is to do just as much verification as
 	 * necessary to avoid crashing or otherwise doing something bad; if the
-	 * administrator initiated the operation via zoneadm(1m), they'll get
+	 * administrator initiated the operation via zoneadm(8), they'll get
 	 * auto-verification which will let them know what's wrong.  If they
 	 * modify the zone configuration of a running zone, and don't attempt
 	 * to verify that it's OK, then we won't crash but won't bother trying
@@ -2234,6 +2248,9 @@ configure_one_interface(zlog_t *zlogp, zoneid_t zone_id,
 	if (ioctl(s, SIOCLIFADDIF, (caddr_t)&lifr) < 0) {
 		/*
 		 * Here, we know that the interface can't be brought up.
+		 * A similar warning message was already printed out to
+		 * the console by zoneadm(8) so instead we log the
+		 * message to syslog and continue.
 		 */
 		(void) close(s);
 		return (Z_OK);
@@ -2376,7 +2393,7 @@ configure_one_interface(zlog_t *zlogp, zoneid_t zone_id,
 		 */
 		char buffer[INET6_ADDRSTRLEN];
 		void  *addr;
-		const char *nomatch = "no matching subnet found in netmasks(4)";
+		const char *nomatch = "no matching subnet found in netmasks(5)";
 
 		if (af == AF_INET)
 			addr = &((struct sockaddr_in *)
@@ -3013,13 +3030,75 @@ configure_exclusive_network_interfaces(zlog_t *zlogp, zoneid_t zoneid)
 	return (0);
 }
 
+/*
+ * Retrieve the list of datalink IDs assigned to a zone.
+ *
+ * On return, *count will be updated with the total number of links and, if it
+ * is not NULL, **linksp will be updated to point to allocated memory
+ * containing the link IDs. This should be passed to free() when the caller is
+ * finished with it.
+ */
+static int
+fetch_zone_datalinks(zlog_t *zlogp, zoneid_t zoneid, int *countp,
+    datalink_id_t **linksp)
+{
+	datalink_id_t *links = NULL;
+	int links_size = 0;
+	int num_links;
+
+	if (linksp != NULL)
+		*linksp = NULL;
+	*countp = 0;
+
+	num_links = 0;
+	if (zone_list_datalink(zoneid, &num_links, NULL) != 0) {
+		zerror(zlogp, B_TRUE,
+		    "unable to determine number of network interfaces");
+		return (-1);
+	}
+
+	if (num_links == 0)
+		return (0);
+
+	/* If linkp is NULL, the caller only wants the count. */
+	if (linksp == NULL) {
+		*countp = num_links;
+		return (0);
+	}
+
+	do {
+		datalink_id_t *p;
+
+		links_size = num_links;
+		p = reallocarray(links, links_size, sizeof (datalink_id_t));
+
+		if (p == NULL) {
+			zerror(zlogp, B_TRUE,
+			    "failed to allocate memory for zone links");
+			free(links);
+			return (-1);
+		}
+		links = p;
+
+		if (zone_list_datalink(zoneid, &num_links, links) != 0) {
+			zerror(zlogp, B_TRUE, "failed to list zone links");
+			free(links);
+			return (-1);
+		}
+	} while (links_size < num_links);
+
+	*countp = num_links;
+	*linksp = links;
+
+	return (0);
+}
+
 static int
 remove_datalink_pool(zlog_t *zlogp, zoneid_t zoneid)
 {
 	ushort_t flags;
 	zone_iptype_t iptype;
-	int i, dlnum = 0;
-	datalink_id_t *dllink, *dllinks = NULL;
+	int i;
 	dladm_status_t err;
 
 	if (strlen(pool_name) == 0)
@@ -3039,34 +3118,15 @@ remove_datalink_pool(zlog_t *zlogp, zoneid_t zoneid)
 	}
 
 	if (iptype == ZS_EXCLUSIVE) {
-		/*
-		 * Get the datalink count and for each datalink,
-		 * attempt to clear the pool property and clear
-		 * the pool_name.
-		 */
-		if (zone_list_datalink(zoneid, &dlnum, NULL) != 0) {
-			zerror(zlogp, B_TRUE, "unable to count network "
-			    "interfaces");
-			return (-1);
-		}
+		datalink_id_t *dllinks = NULL;
+		int dlnum = 0;
 
-		if (dlnum == 0)
-			return (0);
-
-		if ((dllinks = malloc(dlnum * sizeof (datalink_id_t)))
-		    == NULL) {
-			zerror(zlogp, B_TRUE, "memory allocation failed");
+		if (fetch_zone_datalinks(zlogp, zoneid, &dlnum, &dllinks) != 0)
 			return (-1);
-		}
-		if (zone_list_datalink(zoneid, &dlnum, dllinks) != 0) {
-			zerror(zlogp, B_TRUE, "unable to list network "
-			    "interfaces");
-			return (-1);
-		}
 
 		bzero(pool_name, sizeof (pool_name));
-		for (i = 0, dllink = dllinks; i < dlnum; i++, dllink++) {
-			err = dladm_set_linkprop(dld_handle, *dllink, "pool",
+		for (i = 0; i < dlnum; i++) {
+			err = dladm_set_linkprop(dld_handle, dllinks[i], "pool",
 			    NULL, 0, DLADM_OPT_ACTIVE);
 			if (err != DLADM_STATUS_OK) {
 				zerror(zlogp, B_TRUE,
@@ -3085,7 +3145,7 @@ remove_datalink_protect(zlog_t *zlogp, zoneid_t zoneid)
 	zone_iptype_t iptype;
 	int i, dlnum = 0;
 	dladm_status_t dlstatus;
-	datalink_id_t *dllink, *dllinks = NULL;
+	datalink_id_t *dllinks = NULL;
 
 	if (zone_getattr(zoneid, ZONE_ATTR_FLAGS, &flags,
 	    sizeof (flags)) < 0) {
@@ -3104,51 +3164,111 @@ remove_datalink_protect(zlog_t *zlogp, zoneid_t zoneid)
 		return (0);
 
 	/*
-	 * Get the datalink count and for each datalink,
-	 * attempt to clear the pool property and clear
-	 * the pool_name.
+	 * Get the datalink count and for each datalink, attempt to clear the
+	 * protection and allowed_ips properties.
 	 */
-	if (zone_list_datalink(zoneid, &dlnum, NULL) != 0) {
-		zerror(zlogp, B_TRUE, "unable to count network interfaces");
-		return (-1);
-	}
 
-	if (dlnum == 0)
-		return (0);
-
-	if ((dllinks = malloc(dlnum * sizeof (datalink_id_t))) == NULL) {
-		zerror(zlogp, B_TRUE, "memory allocation failed");
+	if (fetch_zone_datalinks(zlogp, zoneid, &dlnum, &dllinks) != 0)
 		return (-1);
-	}
-	if (zone_list_datalink(zoneid, &dlnum, dllinks) != 0) {
-		zerror(zlogp, B_TRUE, "unable to list network interfaces");
-		free(dllinks);
-		return (-1);
-	}
 
-	for (i = 0, dllink = dllinks; i < dlnum; i++, dllink++) {
+	for (i = 0; i < dlnum; i++) {
 		char dlerr[DLADM_STRSIZE];
 
-		dlstatus = dladm_set_linkprop(dld_handle, *dllink,
+		dlstatus = dladm_set_linkprop(dld_handle, dllinks[i],
 		    "protection", NULL, 0, DLADM_OPT_ACTIVE);
 		if (dlstatus == DLADM_STATUS_NOTFOUND) {
 			/* datalink does not belong to the GZ */
 			continue;
 		}
-		if (dlstatus != DLADM_STATUS_OK)
+		if (dlstatus != DLADM_STATUS_OK) {
 			zerror(zlogp, B_FALSE,
-			    "clear 'protection' link property: %s",
-			    dladm_status2str(dlstatus, dlerr));
+			    "clear link %d 'protection' link property: %s",
+			    dllinks[i], dladm_status2str(dlstatus, dlerr));
+		}
 
-		dlstatus = dladm_set_linkprop(dld_handle, *dllink,
+		dlstatus = dladm_set_linkprop(dld_handle, dllinks[i],
 		    "allowed-ips", NULL, 0, DLADM_OPT_ACTIVE);
-		if (dlstatus != DLADM_STATUS_OK)
+		if (dlstatus != DLADM_STATUS_OK) {
 			zerror(zlogp, B_FALSE,
-			    "clear 'allowed-ips' link property: %s",
-			    dladm_status2str(dlstatus, dlerr));
+			    "clear link %d 'allowed-ips' link property: %s",
+			    dllinks[i], dladm_status2str(dlstatus, dlerr));
+		}
 	}
 	free(dllinks);
 	return (0);
+}
+
+static int
+unconfigure_exclusive_network_interfaces(zlog_t *zlogp, zoneid_t zoneid)
+{
+	datalink_id_t *dllinks;
+	int dlnum = 0;
+	uint_t i;
+
+	/*
+	 * The kernel shutdown callback for the dls module should have removed
+	 * all datalinks from this zone.  If any remain, then there's a
+	 * problem.
+	 */
+
+	if (fetch_zone_datalinks(zlogp, zoneid, &dlnum, &dllinks) != 0)
+		return (-1);
+
+	if (dlnum == 0)
+		return (0);
+
+	/*
+	 * There are some datalinks left in the zone. The most likely cause of
+	 * this is that the datalink-management daemon (dlmgmtd) was not
+	 * running when the zone was shut down. That prevented the kernel from
+	 * doing the required upcall to move the links back to the GZ. To
+	 * attempt recovery, do that now.
+	 */
+
+	for (i = 0; i < dlnum; i++) {
+		char dlerr[DLADM_STRSIZE];
+		dladm_status_t status;
+		uint32_t link_flags;
+		datalink_id_t link = dllinks[i];
+		char *prop_vals[] = { GLOBAL_ZONENAME };
+
+		status = dladm_datalink_id2info(dld_handle, link,
+		    &link_flags, NULL, NULL, NULL, 0);
+
+		if (status != DLADM_STATUS_OK) {
+			zerror(zlogp, B_FALSE,
+			    "failed to get link info for %u: %s",
+			    link, dladm_status2str(status, dlerr));
+			continue;
+		}
+
+		if (link_flags & DLADM_OPT_TRANSIENT)
+			continue;
+
+		status = dladm_set_linkprop(dld_handle, link, "zone",
+		    prop_vals, 1, DLADM_OPT_ACTIVE);
+
+		if (status != DLADM_STATUS_OK) {
+			zerror(zlogp, B_FALSE,
+			    "failed to move link %u to GZ: %s",
+			    link, dladm_status2str(status, dlerr));
+		}
+	}
+
+	free(dllinks);
+
+	/* Check again and log a message if links remain */
+
+	if (fetch_zone_datalinks(zlogp, zoneid, &dlnum, NULL) != 0)
+		return (-1);
+
+	if (dlnum == 0)
+		return (0);
+
+	zerror(zlogp, B_FALSE, "%d datalink(s) remain in zone after shutdown",
+	    dlnum);
+
+	return (-1);
 }
 
 static int
@@ -3251,6 +3371,9 @@ get_privset(zlog_t *zlogp, priv_set_t *privs, zone_mnt_t mount_cmd)
 		case ZS_EXCLUSIVE:
 			curr_iptype = "exclusive";
 			break;
+		default:
+			zerror(zlogp, B_FALSE, "bad ip-type");
+			return (-1);
 		}
 
 		if (zonecfg_default_privset(privs, curr_iptype) == Z_OK)
@@ -4192,7 +4315,7 @@ get_zone_label(zlog_t *zlogp, priv_set_t *privs)
 
 	if (zcent == NULL) {
 		zerror(zlogp, B_FALSE, "zone requires a label assignment. "
-		    "See tnzonecfg(4)");
+		    "See tnzonecfg(5)");
 	} else {
 		if (zlabel == NULL)
 			zlabel = m_label_alloc(MAC_LABEL);
@@ -4422,7 +4545,7 @@ setup_zone_rm(zlog_t *zlogp, char *zone_name, zoneid_t zoneid)
 			    "scheduling class for\nthis zone.  FSS will be "
 			    "used for processes\nin the zone but to get the "
 			    "full benefit of FSS,\nit should be the default "
-			    "scheduling class.\nSee dispadmin(1M) for more "
+			    "scheduling class.\nSee dispadmin(8) for more "
 			    "details.");
 
 			if (zone_setattr(zoneid, ZONE_ATTR_SCHED_CLASS, "FSS",
@@ -4465,7 +4588,7 @@ setup_zone_rm(zlog_t *zlogp, char *zone_name, zoneid_t zoneid)
 		    "enabled.\nThe system will not dynamically adjust the\n"
 		    "processor allocation within the specified range\n"
 		    "until svc:/system/pools/dynamic is enabled.\n"
-		    "See poold(1M).");
+		    "See poold(8).");
 	}
 
 	/* The following is a warning, not an error. */
@@ -4545,78 +4668,114 @@ setup_zone_hostid(zone_dochandle_t handle, zlog_t *zlogp, zoneid_t zoneid)
 }
 
 static int
+secflags_parse_check(secflagset_t *flagset, const char *flagstr, char *descr,
+    zlog_t *zlogp)
+{
+	secflagdelta_t delt;
+
+	if (secflags_parse(NULL, flagstr, &delt) == -1) {
+		zerror(zlogp, B_FALSE,
+		    "failed to parse %s security-flags '%s': %s",
+		    descr, flagstr, strerror(errno));
+		return (Z_BAD_PROPERTY);
+	}
+
+	if (delt.psd_ass_active != B_TRUE) {
+		zerror(zlogp, B_FALSE,
+		    "relative security-flags are not allowed "
+		    "(%s security-flags: '%s')", descr, flagstr);
+		return (Z_BAD_PROPERTY);
+	}
+
+	secflags_copy(flagset, &delt.psd_assign);
+
+	return (Z_OK);
+}
+
+static int
 setup_zone_secflags(zone_dochandle_t handle, zlog_t *zlogp, zoneid_t zoneid)
 {
 	psecflags_t secflags;
 	struct zone_secflagstab tab = {0};
-	secflagdelta_t delt;
+	secflagset_t flagset;
 	int res;
 
 	res = zonecfg_lookup_secflags(handle, &tab);
 
-	if ((res != Z_OK) &&
-	    /* The general defaulting code will handle this */
-	    (res != Z_NO_ENTRY) && (res != Z_BAD_PROPERTY)) {
-		zerror(zlogp, B_FALSE, "security-flags property is "
-		    "invalid: %d", res);
+	/*
+	 * If the zone configuration does not define any security flag sets,
+	 * then check to see if there are any default flags configured for
+	 * the brand. If so, set these as the default set for this zone and
+	 * the lower/upper sets will become none/all as per the defaults.
+	 *
+	 * If there is no brand default either, then the flags will be
+	 * defaulted below.
+	 */
+	if (res == Z_NO_ENTRY) {
+		char flagstr[ZONECFG_SECFLAGS_MAX];
+		brand_handle_t bh = NULL;
+
+		if ((bh = brand_open(brand_name)) == NULL) {
+			zerror(zlogp, B_FALSE,
+			    "unable to find brand named %s", brand_name);
+			return (Z_BAD_PROPERTY);
+		}
+		if (brand_get_secflags(bh, flagstr, sizeof (flagstr)) != 0) {
+			brand_close(bh);
+			zerror(zlogp, B_FALSE,
+			    "unable to retrieve brand default security flags");
+			return (Z_BAD_PROPERTY);
+		}
+		brand_close(bh);
+
+		if (*flagstr != '\0' &&
+		    strlcpy(tab.zone_secflags_default, flagstr,
+		    sizeof (tab.zone_secflags_default)) >=
+		    sizeof (tab.zone_secflags_default)) {
+			zerror(zlogp, B_FALSE,
+			    "brand default security-flags is too long");
+			return (Z_BAD_PROPERTY);
+		}
+	} else if (res != Z_OK) {
+		zerror(zlogp, B_FALSE,
+		    "security-flags property is invalid: %d", res);
 		return (res);
 	}
 
-	if (strlen(tab.zone_secflags_lower) == 0)
+	if (strlen(tab.zone_secflags_lower) == 0) {
 		(void) strlcpy(tab.zone_secflags_lower, "none",
 		    sizeof (tab.zone_secflags_lower));
-	if (strlen(tab.zone_secflags_default) == 0)
+	}
+	if (strlen(tab.zone_secflags_default) == 0) {
 		(void) strlcpy(tab.zone_secflags_default,
 		    tab.zone_secflags_lower,
 		    sizeof (tab.zone_secflags_default));
-	if (strlen(tab.zone_secflags_upper) == 0)
+	}
+	if (strlen(tab.zone_secflags_upper) == 0) {
 		(void) strlcpy(tab.zone_secflags_upper, "all",
 		    sizeof (tab.zone_secflags_upper));
-
-	if (secflags_parse(NULL, tab.zone_secflags_default,
-	    &delt) == -1) {
-		zerror(zlogp, B_FALSE, "default security-flags: '%s'"
-		    "are invalid", tab.zone_secflags_default);
-		return (Z_BAD_PROPERTY);
-	} else if (delt.psd_ass_active != B_TRUE) {
-		zerror(zlogp, B_FALSE, "relative security-flags are not "
-		    "allowed in zone configuration (default "
-		    "security-flags: '%s')",
-		    tab.zone_secflags_default);
-		return (Z_BAD_PROPERTY);
-	} else {
-		secflags_copy(&secflags.psf_inherit, &delt.psd_assign);
-		secflags_copy(&secflags.psf_effective, &delt.psd_assign);
 	}
 
-	if (secflags_parse(NULL, tab.zone_secflags_lower,
-	    &delt) == -1) {
-		zerror(zlogp, B_FALSE, "lower security-flags: '%s'"
-		    "are invalid", tab.zone_secflags_lower);
-		return (Z_BAD_PROPERTY);
-	} else if (delt.psd_ass_active != B_TRUE) {
-		zerror(zlogp, B_FALSE, "relative security-flags are not "
-		    "allowed in zone configuration (lower "
-		    "security-flags: '%s')",
-		    tab.zone_secflags_lower);
-		return (Z_BAD_PROPERTY);
+	if ((res = secflags_parse_check(&flagset, tab.zone_secflags_default,
+	    "default", zlogp)) != Z_OK) {
+		return (res);
 	} else {
-		secflags_copy(&secflags.psf_lower, &delt.psd_assign);
+		secflags_copy(&secflags.psf_inherit, &flagset);
+		secflags_copy(&secflags.psf_effective, &flagset);
 	}
 
-	if (secflags_parse(NULL, tab.zone_secflags_upper,
-	    &delt) == -1) {
-		zerror(zlogp, B_FALSE, "upper security-flags: '%s'"
-		    "are invalid", tab.zone_secflags_upper);
-		return (Z_BAD_PROPERTY);
-	} else if (delt.psd_ass_active != B_TRUE) {
-		zerror(zlogp, B_FALSE, "relative security-flags are not "
-		    "allowed in zone configuration (upper "
-		    "security-flags: '%s')",
-		    tab.zone_secflags_upper);
-		return (Z_BAD_PROPERTY);
+	if ((res = secflags_parse_check(&flagset, tab.zone_secflags_lower,
+	    "lower", zlogp)) != Z_OK) {
+		return (res);
 	} else {
-		secflags_copy(&secflags.psf_upper, &delt.psd_assign);
+		secflags_copy(&secflags.psf_lower, &flagset);
+	}
+
+	if ((res = secflags_parse_check(&flagset, tab.zone_secflags_upper,
+	    "upper", zlogp)) != Z_OK) {
+		return (res);
+	} else {
+		secflags_copy(&secflags.psf_upper, &flagset);
 	}
 
 	if (!psecflags_validate(&secflags)) {
@@ -4730,13 +4889,10 @@ vplat_create(zlog_t *zlogp, zone_mnt_t mount_cmd, zoneid_t zone_did)
 		zerror(zlogp, B_TRUE, "unable to determine ip-type");
 		return (-1);
 	}
-	switch (iptype) {
-	case ZS_SHARED:
-		flags = 0;
-		break;
-	case ZS_EXCLUSIVE:
+	if (iptype == ZS_EXCLUSIVE) {
 		flags = ZCF_NET_EXCL;
-		break;
+	} else {
+		flags = 0;
 	}
 	if (flags == -1)
 		abort();
@@ -5164,76 +5320,75 @@ unmounted:
 }
 
 /*
- * Delete all transient VNICs belonging to this zone. A transient VNIC
+ * Delete all transient links belonging to this zone. A transient link
  * is one that is created and destroyed along with the lifetime of the
- * zone. Non-transient VNICs, ones that are assigned from the GZ to a
+ * zone. Non-transient links, ones that are assigned from the GZ to a
  * NGZ, are reassigned to the GZ in zone_shutdown() via the
  * zone-specific data (zsd) callbacks.
  */
 static int
-delete_transient_vnics(zlog_t *zlogp, zoneid_t zoneid)
+delete_transient_links(zlog_t *zlogp, zoneid_t zoneid)
 {
-	dladm_status_t status;
-	int num_links = 0;
-	datalink_id_t *links, link;
-	uint32_t link_flags;
-	datalink_class_t link_class;
-	char link_name[MAXLINKNAMELEN];
+	datalink_id_t *dllinks = NULL;
+	int dlnum = 0;
+	uint_t i;
 
-	if (zone_list_datalink(zoneid, &num_links, NULL) != 0) {
-		zerror(zlogp, B_TRUE, "unable to determine "
-		    "number of network interfaces");
+	if (fetch_zone_datalinks(zlogp, zoneid, &dlnum, &dllinks) != 0)
 		return (-1);
-	}
 
-	if (num_links == 0)
+	if (dlnum == 0)
 		return (0);
 
-	links = malloc(num_links * sizeof (datalink_id_t));
-
-	if (links == NULL) {
-		zerror(zlogp, B_TRUE, "failed to delete "
-		    "network interfaces because of alloc fail");
-		return (-1);
-	}
-
-	if (zone_list_datalink(zoneid, &num_links, links) != 0) {
-		zerror(zlogp, B_TRUE, "failed to delete "
-		    "network interfaces because of failure "
-		    "to list them");
-		return (-1);
-	}
-
-	for (int i = 0; i < num_links; i++) {
+	for (i = 0; i < dlnum; i++) {
+		char link_name[MAXLINKNAMELEN];
 		char dlerr[DLADM_STRSIZE];
-		link = links[i];
+		datalink_id_t link = dllinks[i];
+		datalink_class_t link_class;
+		dladm_status_t status;
+		uint32_t link_flags;
 
 		status = dladm_datalink_id2info(dld_handle, link, &link_flags,
 		    &link_class, NULL, link_name, sizeof (link_name));
 
 		if (status != DLADM_STATUS_OK) {
-			zerror(zlogp, B_FALSE, "failed to "
-			    "delete network interface (%u)"
-			    "due to failure to get link info: %s",
-			    link,
-			    dladm_status2str(status, dlerr));
-			return (-1);
+			zerror(zlogp, B_FALSE,
+			    "failed to get link info for %u: %s",
+			    link, dladm_status2str(status, dlerr));
+			continue;
 		}
 
-		if (link_flags & DLADM_OPT_TRANSIENT) {
-			assert(link_class & DATALINK_CLASS_VNIC);
+		if (!(link_flags & DLADM_OPT_TRANSIENT))
+			continue;
+
+		switch (link_class) {
+		case DATALINK_CLASS_VNIC:
+		case DATALINK_CLASS_ETHERSTUB:
 			status = dladm_vnic_delete(dld_handle, link,
 			    DLADM_OPT_ACTIVE);
+			break;
+		case DATALINK_CLASS_VLAN:
+			status = dladm_vlan_delete(dld_handle, link,
+			    DLADM_OPT_ACTIVE);
+			break;
+		case DATALINK_CLASS_AGGR:
+			status = dladm_aggr_delete(dld_handle, link,
+			    DLADM_OPT_ACTIVE);
+			break;
+		default:
+			zerror(zlogp, B_FALSE,
+			    "unhandled class for transient link %s (%u)",
+			    link_name, link);
+			continue;
+		}
 
-			if (status != DLADM_STATUS_OK) {
-				zerror(zlogp, B_TRUE, "failed to delete link "
-				    "with id %d: %s", link,
-				    dladm_status2str(status, dlerr));
-				return (-1);
-			}
+		if (status != DLADM_STATUS_OK) {
+			zerror(zlogp, B_TRUE,
+			    "failed to delete transient link %s (%u): %s",
+			    link_name, link, dladm_status2str(status, dlerr));
 		}
 	}
 
+	free(dllinks);
 	return (0);
 }
 
@@ -5277,12 +5432,15 @@ vplat_teardown(zlog_t *zlogp, boolean_t unmount_cmd, boolean_t rebooting,
 		goto error;
 	}
 
-	if (remove_datalink_pool(zlogp, zoneid) != 0)
-		zerror(zlogp, B_FALSE, "unable clear datalink pool property");
-
-	if (remove_datalink_protect(zlogp, zoneid) != 0)
+	if (remove_datalink_pool(zlogp, zoneid) != 0) {
 		zerror(zlogp, B_FALSE,
-		    "unable clear datalink protect property");
+		    "unable to clear datalink pool property");
+	}
+
+	if (remove_datalink_protect(zlogp, zoneid) != 0) {
+		zerror(zlogp, B_FALSE,
+		    "unable to clear datalink protect property");
+	}
 
 	/*
 	 * The datalinks assigned to the zone will be removed from the NGZ as
@@ -5348,9 +5506,15 @@ vplat_teardown(zlog_t *zlogp, boolean_t unmount_cmd, boolean_t rebooting,
 			}
 			break;
 		case ZS_EXCLUSIVE:
-			if (delete_transient_vnics(zlogp, zoneid) != 0) {
+			if (delete_transient_links(zlogp, zoneid) != 0) {
 				zerror(zlogp, B_FALSE, "unable to delete "
-				    "transient vnics in zone");
+				    "transient links in zone");
+				goto error;
+			}
+			if (unconfigure_exclusive_network_interfaces(zlogp,
+			    zoneid) != 0) {
+				zerror(zlogp, B_FALSE, "unable to unconfigure "
+				    "network interfaces in zone");
 				goto error;
 			}
 

@@ -21,6 +21,7 @@
 /*
  * Copyright 2012 DEY Storage Systems, Inc.  All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 /*
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
@@ -658,6 +659,21 @@ typedef struct {
 #define	SHT_GNU_LIBLIST		0x6ffffff7	/* Prelink library list */
 #define	SHT_CHECKSUM		0x6ffffff8	/* Checksum for DSO content */
 
+/*
+ * LLVM-specific section types, actually independent of any (ELF) OS.
+ * See: https://llvm.org/docs/Extensions.html
+ */
+#define	SHT_LLVM_ODRTAB		0x6fff4c00 /* ODR Table */
+#define	SHT_LLVM_LINKER_OPTIONS	0x6fff4c01 /* Linker options */
+#define	SHT_LLVM_UNKNOWN1	0x6fff4c02 /* previously call graph profile */
+#define	SHT_LLVM_ADDRSIG	0x6fff4c03 /* significant address table */
+#define	SHT_LLVM_DEPENDENT_LIBRARIES	0x6fff4c04 /* dependent libraries. */
+#define	SHT_LLVM_SYMPART	0x6fff4c05 /* symbol partition specs. */
+#define	SHT_LLVM_PART_EHDR	0x6fff4c06 /* ehdr for loadable part. */
+#define	SHT_LLVM_PART_PHDR	0x6fff4c07 /* phdrs for loadable part. */
+#define	SHT_LLVM_BB_ADDR_MAP	0x6fff4c08 /* basic block addr map */
+#define	SHT_LLVM_CALL_GRAPH_PROFILE	0x6fff4c09 /* call graph profile */
+
 #define	SHT_LOPROC	0x70000000	/* processor specific range */
 #define	SHT_HIPROC	0x7fffffff
 
@@ -743,6 +759,9 @@ typedef struct {
 #define	STB_GLOBAL	1
 #define	STB_WEAK	2
 #define	STB_NUM		3
+
+#define	STB_LOOS	10		/* operating system specific range */
+#define	STB_HIOS	12
 
 #define	STB_LOPROC	13		/* processor specific range */
 #define	STB_HIPROC	15
@@ -981,7 +1000,8 @@ typedef	Elf64_Word	Elf64_Capchain;
 #define	CA_SUNW_PLAT	4		/* platform capability entry */
 #define	CA_SUNW_MACH	5		/* machine capability entry */
 #define	CA_SUNW_ID	6		/* capability identifier */
-#define	CA_SUNW_NUM	7
+#define	CA_SUNW_HW_3	7		/* third hardware capabilities entry */
+#define	CA_SUNW_NUM	8
 
 /*
  * Define software capabilities (CA_SUNW_SF_1 values).  Note, hardware
@@ -1018,7 +1038,9 @@ typedef	Elf64_Word	Elf64_Capchain;
 #define	NT_SPYMASTER	23	/* psinfo_t for agent LWP spymaster	*/
 #define	NT_SECFLAGS	24	/* process security-flags */
 #define	NT_LWPNAME	25	/* prlwpname_t */
-#define	NT_NUM		25
+#define	NT_UPANIC	26	/* prupanic_t */
+#define	NT_CWD		27	/* prcwd_t */
+#define	NT_NUM		27
 
 
 #ifdef _KERNEL

@@ -22,6 +22,7 @@
 #
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2018 Nexenta Systems, Inc.
+# Copyright 2022 Garrett D'Amore
 #
 
 include ../Makefile.master
@@ -77,17 +78,13 @@ install_h	:=	TARGET= install_h
 clean		:=	TARGET= clean
 clobber		:=	TARGET= clobber
 clobber_h	:=	TARGET= clobber
-lint		:=	TARGET= lint
-clean.lint	:=	TARGET= clean.lint
 check		:=	TARGET= check
-modlist		:=	TARGET= modlist
-modlist		:=	NO_STATE= -K $$MODSTATE$$$$
 
 .KEEP_STATE:
 
-def all lint: all_h $(PMTMO_FILE) $($(MACH)_ARCHITECTURES)
+def all: all_h $($(MACH)_ARCHITECTURES)
 
-install: all_h install_dirs $(PMTMO_FILE) $($(MACH)_ARCHITECTURES)
+install: all_h install_dirs $($(MACH)_ARCHITECTURES)
 
 install_dirs:
 	@cd ..; pwd; $(MAKE) rootdirs
@@ -112,15 +109,6 @@ install_dirs:
 $($(MACH)_ARCHITECTURES): $(PREREQ_TARGET) FRC
 	@cd $@; pwd; $(MAKE) $(NO_STATE) $(TARGET)
 
-$(PMTMO_FILE) pmtmo_file: $(PATCH_MAKEUP_TABLE)
-	@if [ -z "$(PATCH_MAKEUP_TABLE)" ] ; then \
-		echo 'ERROR: $$(PATCH_MAKEUP_TABLE) not set' \
-		    'in environment' >&2 ; \
-		exit 1 ; \
-	fi
-	RELEASE="$(RELEASE)" MACH="$(MACH)" \
-	    $(CTFCVTPTBL) -o $(PMTMO_FILE) $(PATCH_MAKEUP_TABLE)
-
 #
 # The following is the list of directories which contain Makefiles with
 # targets to install header file. The machine independent headers are
@@ -140,8 +128,6 @@ COMMON_HDRDIRS= common/c2 \
 		common/klm \
 		common/inet \
 		common/inet/ipf/netinet \
-		common/inet/kssl \
-		common/inet/nca \
 		common/inet/sockmods/netpacket \
 		common/io/bpf/net \
 		common/io/fibre-channel/fca/qlc \
@@ -193,16 +179,12 @@ all_h: FRC
 	@cd common/idmap; pwd; $(MAKE) $@
 	@cd common/klm; pwd; $(MAKE) $@
 
+FRC:
+
 clean clobber: $($(MACH)_ARCHITECTURES) $(DYNHDRDIRS)
-	@if [ '$(PATCH_BUILD)' != '#' ] ; then \
-		echo $(RM) $(PMTMO_FILE) ; \
-		$(RM) $(PMTMO_FILE) ; \
-	fi
 
 # testing convenience
 clobber_h: $(DYNHDRDIRS)
-
-clean.lint modlist: $($(MACH)_ARCHITECTURES)
 
 #
 # Cross-reference customization: build a cross-reference over all of
@@ -216,7 +198,4 @@ XRDIRS = $(sparc_ARCHITECTURES) $(i386_ARCHITECTURES) sun4 sfmmu	\
 
 XRINCDIRS = $(XRDIRS)
 
-cscope.out tags: FRC
-	$(XREF) -x $@
-
-FRC:
+include ../Makefile.xref

@@ -66,6 +66,7 @@ extern char *bam_root;
 typedef struct menu_entry {
 	int me_idx;
 	boolean_t me_active;
+	boolean_t me_active_next;
 	char *me_title;
 	char *me_type;
 	char *me_bootfs;
@@ -114,6 +115,10 @@ print_menu_cb(ofmt_arg_t *ofarg, char *buf, uint_t bufsize)
 		(void) snprintf(buf, bufsize, "%s", entry->me_type);
 		break;
 	case 4:
+		if (entry->me_active_next == B_TRUE) {
+			(void) snprintf(buf, bufsize, "   T");
+			break;
+		}
 		if (entry->me_active == B_TRUE)
 			(void) snprintf(buf, bufsize, "   *");
 		else
@@ -266,6 +271,26 @@ menu_active_on_boot(be_node_list_t *be_nodes, const char *bootfs)
 	return (rv);
 }
 
+/*
+ * Get the be_active_next for bootfs.
+ */
+static boolean_t
+menu_active_next(be_node_list_t *be_nodes, const char *bootfs)
+{
+	be_node_list_t *be_node;
+	boolean_t rv = B_FALSE;
+
+	for (be_node = be_nodes; be_node != NULL;
+	    be_node = be_node->be_next_node) {
+		if (strcmp(be_node->be_root_ds, bootfs) == 0) {
+			rv = be_node->be_active_next;
+			break;
+		}
+	}
+
+	return (rv);
+}
+
 error_t
 menu_read(struct menu_lst *menu, char *menu_path)
 {
@@ -300,29 +325,34 @@ menu_read(struct menu_lst *menu, char *menu_path)
 				ret = BAM_ERROR;
 			goto done;
 		}
+		if (buf[0] == '\n')	/* Skip empty lines */
+			continue;
+
 		key = strtok(buf, " \n");
-		if (strcmp(key, "title") != 0) {
+		if (key == NULL || strcmp(key, "title") != 0) {
 			ret = BAM_ERROR;
 			goto done;
 		}
 		value = strtok(NULL, " \n");
-		if ((title = strdup(value)) == NULL) {
+		if (value == NULL || (title = strdup(value)) == NULL) {
 			ret = BAM_ERROR;
 			goto done;
 		}
 
-		if (fgets(buf, PATH_MAX, fp) == NULL) {
-			ret = BAM_ERROR;
-			goto done;
-		}
+		do {
+			if (fgets(buf, PATH_MAX, fp) == NULL) {
+				ret = BAM_ERROR;
+				goto done;
+			}
+		} while (buf[0] == '\n');	/* Skip empty lines */
 
 		key = strtok(buf, " \n");
-		if ((type = strdup(key)) == NULL) {
+		if (key == NULL || (type = strdup(key)) == NULL) {
 			ret = BAM_ERROR;
 			goto done;
 		}
 		value = strtok(NULL, " \n");
-		if ((bootfs = strdup(value)) == NULL) {
+		if (value == NULL || (bootfs = strdup(value)) == NULL) {
 			ret = BAM_ERROR;
 			goto done;
 		}
@@ -335,6 +365,7 @@ menu_read(struct menu_lst *menu, char *menu_path)
 		mp->me_type = type;
 		mp->me_bootfs = bootfs;
 		mp->me_active = menu_active_on_boot(be_nodes, bootfs);
+		mp->me_active_next = menu_active_next(be_nodes, bootfs);
 		STAILQ_INSERT_TAIL(menu, mp, me_next);
 
 		title = NULL;
@@ -735,6 +766,11 @@ bam_mount_be(menu_entry_t *entry, char **dir)
 		if (strcmp(be_node->be_root_ds, entry->me_bootfs) == 0)
 			break;
 
+	if (be_node == NULL) {
+		ret = BE_ERR_BE_NOENT;
+		goto out;
+	}
+
 	if (nvlist_add_string(be_attrs, BE_ATTR_ORIG_BE_NAME,
 	    be_node->be_node_name) != 0) {
 		ret = BE_ERR_NOMEM;
@@ -812,7 +848,8 @@ list_menu_entry(menu_entry_t *entry, char *setting)
 			(void) rmdir(dir);
 			free(dir);
 		}
-		bam_error(_("%s is not mounted\n"), entry->me_title);
+		bam_error(_("%s is not mounted: %s\n"), entry->me_title,
+		    be_err_to_str(mounted));
 		return (BAM_ERROR);
 	}
 

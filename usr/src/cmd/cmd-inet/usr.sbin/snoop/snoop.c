@@ -22,6 +22,9 @@
 /*
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2021 Joyent, Inc.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 #include <stdio.h>
@@ -79,6 +82,7 @@ int x_length = 0x7fffffff;
 FILE *namefile;
 boolean_t Pflg;
 boolean_t Iflg;
+boolean_t fflg;
 boolean_t qflg;
 boolean_t rflg;
 #ifdef	DEBUG
@@ -92,6 +96,54 @@ static void usage(void);
 static void snoop_sigrecover(int sig, siginfo_t *info, void *p);
 static char *protmalloc(size_t);
 static void resetperm(void);
+
+static char *
+process_ocapfile(const char *arg, size_t *nfiles, off_t *limit)
+{
+	char *ptr = strdup(arg);
+	char *name, *data;
+	const char *errstr;
+	long long n, m;
+	int i;
+
+	name = strsep(&ptr, ":");
+	data = strsep(&ptr, ":");
+	if (data == NULL || ptr == NULL)
+		usage();
+
+	n = strtonum(data, 1, 100, &errstr);
+	if (errstr != NULL) {
+		printf("%s: value %s: %s\n", __func__, data, errstr);
+		usage();
+	}
+	*nfiles = n;
+	m = 1;
+	i = strlen(ptr);
+	if (i > 0)
+		i--;
+
+	switch (ptr[i]) {
+	case 'k':
+		m = 1024;
+		ptr[i] = '\0';
+		break;
+	case 'm':
+		m = 1024 * 1024;
+		ptr[i] = '\0';
+		break;
+	case 'g':
+		m = 1024 * 1024 * 1024;
+		ptr[i] = '\0';
+		break;
+	}
+	n = strtonum(ptr, 1, MAXOFF_T, &errstr);
+	if (errstr != NULL) {
+		printf("%s: value %s: %s\n", __func__, ptr, errstr);
+		usage();
+	}
+	*limit = n * m;
+	return (name);
+}
 
 int
 main(int argc, char **argv)
@@ -123,6 +175,8 @@ main(int argc, char **argv)
 	char *datalink = NULL;
 	char *zonename = NULL;
 	dlpi_handle_t dh;
+	size_t nfiles = 0;
+	off_t limit = 0;
 
 	names[0] = '\0';
 	/*
@@ -228,7 +282,7 @@ main(int argc, char **argv)
 	}
 	(void) setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
 
-	while ((c = getopt(argc, argv, "at:CPDSi:o:Nn:s:d:I:vVp:f:c:x:U?rqz:Z"))
+	while ((c = getopt(argc, argv, "at:CPDSi:O:o:Nn:s:d:I:vVp:fc:x:U?rqz:Z"))
 	    != EOF) {
 		switch (c) {
 		case 'a':
@@ -269,7 +323,14 @@ main(int argc, char **argv)
 		case 'i':
 			icapfile = optarg;
 			break;
+		case 'O':
+			if (ocapfile != NULL)
+				usage();
+			ocapfile = process_ocapfile(optarg, &nfiles, &limit);
+			break;
 		case 'o':
+			if (ocapfile != NULL)
+				usage();
 			ocapfile = optarg;
 			break;
 		case 'N':
@@ -306,21 +367,7 @@ main(int argc, char **argv)
 			}
 			break;
 		case 'f':
-			(void) gethostname(self, MAXHOSTNAMELEN);
-			p = strchr(optarg, ':');
-			if (p) {
-				*p = '\0';
-				if (strcmp(optarg, self) == 0 ||
-				    strcmp(p+1, self) == 0)
-				(void) fprintf(stderr,
-				"Warning: cannot capture packets from %s\n",
-				    self);
-				*p = ' ';
-			} else if (strcmp(optarg, self) == 0)
-				(void) fprintf(stderr,
-				"Warning: cannot capture packets from %s\n",
-				    self);
-			argstr = optarg;
+			fflg = B_TRUE;
 			break;
 		case 'x':
 			p = optarg;
@@ -439,7 +486,10 @@ main(int argc, char **argv)
 	 * mappings through the name service.
 	 */
 	if (ocapfile) {
-		cap_open_write(ocapfile);
+		if (nfiles > 1)
+			cap_open_wr_multi(ocapfile, nfiles, limit);
+		else
+			cap_open_write(ocapfile);
 		proc = cap_write;
 	} else {
 		flags |= F_NOW;
@@ -793,6 +843,8 @@ usage(void)
 	"\t[ -S ]                       # Report packet size\n");
 	(void) fprintf(stderr,
 	"\t[ -i file ]                  # Read previously captured packets\n");
+	(void) fprintf(stderr,
+	"\t[ -O prefix:count:size ]     # Capture packets in files\n");
 	(void) fprintf(stderr,
 	"\t[ -o file ]                  # Capture packets in file\n");
 	(void) fprintf(stderr,

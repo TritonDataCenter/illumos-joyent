@@ -26,6 +26,7 @@
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2020 Joyent, Inc.
 # Copyright 2020 Oxide Computer Company
+# Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
 #
 # Uses supplied "env" file, based on /opt/onbld/etc/env, to set shell variables
 # before spawning a shell for doing a release-style builds interactively
@@ -196,6 +197,9 @@ unset \
 	ENV \
 	ARCH \
 	CLASSPATH
+
+# set variables we want environment file to be able to override
+MAKEFLAGS=e
 
 #
 # Setup environment variables
@@ -371,7 +375,27 @@ fi
 
 ENVLDLIBS1="-L$ROOT/lib -L$ROOT/usr/lib"
 ENVCPPFLAGS1="-I$ROOT/usr/include"
-MAKEFLAGS=e
+
+# Per usr/src/cmd/make/bin/main.cc, MAKEFLAGS could be in one of two styles.
+# If '-' or '=' is present, it is a new-style MAKEFLAGS which could be
+# pasted into the command line as-is.
+# Otherwise it is old-style (just a list of flag letters with no -)
+# make always converts MAKEFLAGS to new-style in the environment of
+# the processes it spawns
+
+case $MAKEFLAGS in
+	*-* | *=*)
+		print "New-style MAKEFLAGS detected; no change made"
+		print ""
+		;;
+	*e*)
+		;;
+	*)
+		MAKEFLAGS="${MAKEFLAGS}e"
+		print "MAKEFLAGS is now '${MAKEFLAGS}'"
+		print ""
+		;;
+esac
 
 export \
         ENVLDLIBS1 \
@@ -384,6 +408,11 @@ export \
         MAKEFLAGS \
         PARENT_ROOT \
         PARENT_TOOLS_ROOT
+
+if [[ -z "$VERSION" ]]; then
+	export VERSION=$(git -C "${CODEMGR_WS}" describe --long --all --dirty |
+		cut -d/ -f2-)
+fi
 
 printf 'RELEASE      is %s\n'   "$RELEASE"
 printf 'VERSION      is %s\n'   "$VERSION"

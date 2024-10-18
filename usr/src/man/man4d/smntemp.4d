@@ -1,0 +1,66 @@
+.\"
+.\" This file and its contents are supplied under the terms of the
+.\" Common Development and Distribution License ("CDDL"), version 1.0.
+.\" You may only use this file in accordance with the terms of version
+.\" 1.0 of the CDDL.
+.\"
+.\" A full copy of the text of the CDDL should have accompanied this
+.\" source.  A copy of the CDDL is also available via the Internet at
+.\" http://www.illumos.org/license/CDDL.
+.\"
+.\"
+.\" Copyright 2019, Joyent, Inc.
+.\" Copyright 2024 Oxide Computer Company
+.\"
+.Dd May 22, 2024
+.Dt SMNTEMP 4D
+.Os
+.Sh NAME
+.Nm smntemp
+.Nd AMD SMN Temperature Sensor Driver
+.Sh SYNOPSIS
+.Pa /dev/sensors/temperature/cpu/*
+.Sh DESCRIPTION
+The
+.Nm
+driver provides the system access to the temperature and control sensors found
+in the AMD System Management Network
+.Pq SMN
+on Zen 1-5 processors
+.Pq AMD Family 17h, 19h, and 1ah .
+.Pp
+Each CCD, core complex die, present in the SoC exposes its own temperature in
+degrees Celsius.
+This covers the temperature of the CCD as a whole and could be thought of as a
+temperature sensor for all the cores and caches in the die.
+There is no per-core temperature sensor available.
+.Pp
+In addition, a control temperature is exposed for each I/O die, Zen 2 and newer,
+or each Zeppelin die, Zen 1.
+The control temperature is a unitless measure derived from the temperature that
+indicates to cooling infrastructure what action to take and can take any value
+on the range 0 to 100.
+A value of 95 indicates that thermal throttling should be occurring and a value
+of 100 indicates that the chip will hit its thermal limit and shut down if no
+action is taken.
+Critically, the control temperature is not truly a measure of degrees!
+.Pp
+Temperature information is available to the system via the fault
+management architecture
+.Pq FMA .
+The file system location and programming interface to the
+.Nm
+driver are considered
+.Sy Volatile ,
+subject to change without notice, and should not be used directly.
+Raw temperature information can be dumped through the FMA developer
+utility fmtopo.
+.Sh SEE ALSO
+.Xr amdnbtemp 4D ,
+.Xr amdzen 4D ,
+.Xr fmadm 8
+.Rs
+.%A AMD
+.%B Open-Source Register Reference For AMD Family 17h Processors Models 00h-2Fh
+.%D July, 2018
+.Re

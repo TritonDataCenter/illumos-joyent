@@ -4,7 +4,7 @@
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
 .\" Copyright 2020 Robert Mustacchi
-.TH STDIO 3C "March 25, 2020"
+.TH STDIO 3C "February 17, 2023"
 .SH NAME
 stdio, stdin, stdout, stderr \- standard buffered input/output package
 .SH SYNOPSIS
@@ -116,7 +116,7 @@ than 255 files may be opened using \fBfopen()\fR, and only file descriptors 0
 through 255 can be used in a stream. This restriction only holds for the 32-bit
 compilation environment. The 64-bit environment may use more streams and the use
 of more than 255 may be enabled in a 32-bit environment through the use of
-\fBextendedFILE\fR(5).
+\fBextendedFILE\fR(7).
 .sp
 .LP
 The functions and constants mentioned in the entries of section 3S of this
@@ -314,7 +314,7 @@ will print everything out together, blocking other threads that might want to
 write to the same file between calls to \fBfprintf()\fR.
 .sp
 .LP
-An unlocked interface is available in case performace is an issue.  For
+An unlocked interface is available in case performance is an issue.  For
 example:
 .sp
 .in +2
@@ -337,6 +337,12 @@ error conditions.
 \fBferror\fR(3C), \fBfmemopen\fR(3C), \fBfopen\fR(3C), \fBfread\fR(3C),
 \fBfseek\fR(3C), \fBflockfile\fR(3C), \fBgetc\fR(3C), \fBgets\fR(3C),
 \fBopen_memstream(3C)\fR, \fBopen_wmemstream(3C(\fR, \fBpopen\fR(3C),
-\fBprintf\fR(3C), \fBputc\fR(3C), \fBputs\fR(3C), \fBscanf\fR(3C),
-\fBsetbuf\fR(3C), \fBsystem\fR(3C), \fBtmpfile\fR(3C), \fBtmpnam\fR(3C),
-\fBungetc\fR(3C)
+.BR printf (3C),
+.BR putc (3C),
+.BR puts (3C),
+.BR scanf (3C),
+.BR setbuf (3C),
+.BR system (3C),
+.BR tmpfile (3C),
+.BR tmpnam (3C),
+.BR ungetc (3C)

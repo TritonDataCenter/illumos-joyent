@@ -37,8 +37,6 @@
 #include <sys/archsystm.h>
 #include <sys/machsystm.h>
 #include <sys/fpu/fpusystm.h>
-#include <sys/tnf.h>
-#include <sys/tnf_probe.h>
 #include <sys/simulate.h>
 #include <sys/ftrace.h>
 #include <sys/ontrap.h>
@@ -86,7 +84,7 @@ static int ldstub_nc(struct regs *, int);
 void	trap_cleanup(struct regs *, uint_t, k_siginfo_t *, int);
 void	trap_rtt(void);
 
-static int
+static int __NORETURN
 die(unsigned type, struct regs *rp, caddr_t addr, uint_t mmu_fsr)
 {
 	struct panic_trap_info ti;
@@ -114,8 +112,6 @@ die(unsigned type, struct regs *rp, caddr_t addr, uint_t mmu_fsr)
 		panic("BAD TRAP: type=%x rp=%p addr=%p mmu_fsr=%x",
 		    type, (void *)rp, (void *)addr, mmu_fsr);
 	}
-
-	return (0);	/* avoid optimization of restore in call's delay slot */
 }
 
 #if defined(SF_ERRATA_23) || defined(SF_ERRATA_30) /* call ... illegal-insn */
@@ -218,9 +214,6 @@ trap(struct regs *rp, caddr_t addr, uint32_t type, uint32_t mmu_fsr)
 			mstate = LMS_TRAP;
 			break;
 		}
-		/* Kernel probe */
-		TNF_PROBE_1(thread_state, "thread", /* CSTYLED */,
-		    tnf_microstate, state, (char)mstate);
 		mstate = new_mstate(curthread, mstate);
 		siginfo.si_signo = 0;
 		stepped =
@@ -775,7 +768,7 @@ trap(struct regs *rp, caddr_t addr, uint32_t type, uint32_t mmu_fsr)
 				rp->r_npc += 4;
 				goto out;
 			}
-			/* fall into ... */
+			/* FALLTHROUGH */
 		case FT_PRIV:
 			siginfo.si_signo = SIGSEGV;
 			siginfo.si_code = SEGV_ACCERR;
@@ -1225,9 +1218,6 @@ out:	/* We can't get here from a system trap */
 	ASSERT(type & T_USER);
 	trap_rtt();
 	(void) new_mstate(curthread, mstate);
-	/* Kernel probe */
-	TNF_PROBE_1(thread_state, "thread", /* CSTYLED */,
-		tnf_microstate, state, LMS_USER);
 
 	TRACE_0(TR_FAC_TRAP, TR_C_TRAP_HANDLER_EXIT, "C_trap_handler_exit");
 	return;

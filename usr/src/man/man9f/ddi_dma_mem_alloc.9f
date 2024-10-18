@@ -3,11 +3,10 @@
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH DDI_DMA_MEM_ALLOC 9F "Jun 05, 2006"
+.TH DDI_DMA_MEM_ALLOC 9F "July 13, 2024"
 .SH NAME
 ddi_dma_mem_alloc \- allocate memory for DMA transfer
 .SH SYNOPSIS
-.LP
 .nf
 #include <sys/ddi.h>
 #include <sys/sunddi.h>
@@ -15,17 +14,14 @@ ddi_dma_mem_alloc \- allocate memory for DMA transfer
 
 
 \fBint\fR \fBddi_dma_mem_alloc\fR(\fBddi_dma_handle_t\fR \fIhandle\fR, \fBsize_t\fR \fIlength\fR,
-     \fBddi_device_acc_attr_t *\fR\fIaccattrp\fR, \fBuint_t\fR \fIflags\fR,
+     \fBconst ddi_device_acc_attr_t *\fR\fIaccattrp\fR, \fBuint_t\fR \fIflags\fR,
      \fBint (*\fR\fIwaitfp\fR) (caddr_t), \fBcaddr_t\fR \fIarg\fR, \fBcaddr_t *\fR\fIkaddrp\fR,
      \fBsize_t *\fR\fIreal_length\fR, \fBddi_acc_handle_t *\fR\fIhandlep\fR);
 .fi
 
 .SH INTERFACE LEVEL
-.sp
-.LP
-Solaris DDI specific (Solaris DDI).
+illumos DDI specific (illumos DDI).
 .SH PARAMETERS
-.sp
 .ne 2
 .na
 \fB\fIhandle\fR\fR
@@ -192,8 +188,6 @@ Pointer to a data access handle.
 .RE
 
 .SH DESCRIPTION
-.sp
-.LP
 The \fBddi_dma_mem_alloc()\fR function allocates memory for \fBDMA\fR transfers
 to or from a device. The allocation will obey the alignment, padding
 constraints and device granularity as specified by the \fBDMA\fR attributes
@@ -238,8 +232,6 @@ ensure the consistency of a memory object shared between the \fBCPU\fR and the
 device after a \fBDMA\fR transfer, explicit synchronization steps using
 \fBddi_dma_sync\fR(9F) or \fBddi_dma_unbind_handle\fR(9F) are required.
 .SH RETURN VALUES
-.sp
-.LP
 The \fBddi_dma_mem_alloc()\fR function returns:
 .sp
 .ne 2
@@ -260,24 +252,23 @@ Memory allocation failed.
 .RE
 
 .SH CONTEXT
-.sp
-.LP
 The \fBddi_dma_mem_alloc()\fR function can be called from user, interrupt, or
 kernel context except when \fIwaitfp\fR is set to \fBDDI_DMA_SLEEP\fR, in which
 case it cannot be called from interrupt context.
 .SH SEE ALSO
-.sp
-.LP
-\fBddi_dma_addr_bind_handle\fR(9F), \fBddi_dma_alloc_handle\fR(9F),
-\fBddi_dma_mem_free\fR(9F), \fBddi_dma_sync\fR(9F),
-\fBddi_dma_unbind_handle\fR(9F), \fBddi_get8\fR(9F), \fBddi_put8\fR(9F),
-\fBddi_device_acc_attr\fR(9S), \fBddi_dma_attr\fR(9S)
+.BR ddi_dma_addr_bind_handle (9F),
+.BR ddi_dma_alloc_handle (9F),
+.BR ddi_dma_mem_free (9F),
+.BR ddi_dma_sync (9F),
+.BR ddi_dma_unbind_handle (9F),
+.BR ddi_get8 (9F),
+.BR ddi_put8 (9F),
+.BR ddi_device_acc_attr (9S),
+.BR ddi_dma_attr (9S)
 .sp
 .LP
 \fIWriting Device Drivers\fR
 .SH WARNINGS
-.sp
-.LP
 If \fBDDI_NEVERSWAP_ACC\fR is specified, memory can be used for any purpose;
 but if either endian mode is specified, you must use \fBddi_get/put*\fR and
 never anything else.

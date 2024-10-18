@@ -36,9 +36,6 @@
 
 #include <sys/sdt.h>
 
-#define	OVERLAY_FREEMSG(mp, reason) \
-    DTRACE_PROBE2(overlay__fremsg, mblk_t *, mp, char *, reason)
-
 static list_t overlay_mux_list;
 static kmutex_t overlay_mux_lock;
 
@@ -84,7 +81,7 @@ overlay_mux_recv(ksocket_t ks, mblk_t *mpchain, size_t msgsize, int oob,
 	overlay_mux_t *mux = arg;
 
 	/*
-	 * We may have a received a chain of messages. Each messsage in the
+	 * We may have a received a chain of messages. Each message in the
 	 * chain will likely have a T_unitdata_ind attached to it as an M_PROTO.
 	 * If we aren't getting that, we should probably drop that for the
 	 * moment.
@@ -354,8 +351,16 @@ overlay_mux_tx(overlay_mux_t *mux, struct msghdr *hdr, mblk_t *mp)
 	/*
 	 * It'd be nice to be able to use MSG_MBLK_QUICKRELE, unfortunately,
 	 * that isn't actually supported by UDP at this time.
+	 *
+	 * Send with MSG_DONTWAIT to indicate clogged UDP sockets upstack.
 	 */
-	ret = ksocket_sendmblk(mux->omux_ksock, hdr, 0, &mp, kcred);
+	ret = ksocket_sendmblk(mux->omux_ksock, hdr, MSG_DONTWAIT, &mp, kcred);
+	/*
+	 * NOTE: ksocket_sendmblk() may send partial packets downstack,
+	 * returning what's not sent in &mp (i.e. mp pre-call might be a
+	 * b_cont of mp post-call).  We can't hold up this message (it's a
+	 * datagram), so we drop, and let the caller cope.
+	 */
 	if (ret != 0)
 		freemsg(mp);
 

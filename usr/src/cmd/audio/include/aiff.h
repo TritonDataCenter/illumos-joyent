@@ -31,8 +31,6 @@
 #ifndef _AIFF_H
 #define	_AIFF_H
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <sys/types.h>
 
 #ifdef	__cplusplus
@@ -139,9 +137,8 @@ typedef struct aiff_ssnd_chunk aiff_ssnd_chunk_t;
 /* define for aiff_ssnd_chunk.aiff_ssnd_ID */
 #define	AUDIO_AIFF_SSND_ID		((uint32_t)0x53534e44)	/* 'SSND' */
 
-
 /* byte swapping macros */
-#if defined(__sparc)				/* big endian */
+#if defined(__BIG_ENDIAN)
 #define	AUDIO_AIFF_FILE2HOST_INT(from, to)				\
 		*((int *)(to)) = *((int *)(from))
 #define	AUDIO_AIFF_FILE2HOST_SHORT(from, to)				\
@@ -150,7 +147,7 @@ typedef struct aiff_ssnd_chunk aiff_ssnd_chunk_t;
 		*((int *)(to)) = *((int *)(from))
 #define	AUDIO_AIFF_HOST2FILE_SHORT(from, to)				\
 		*((short *)(to)) = *((short *)(from))
-#elif defined(__i386) || defined(__amd64)	/* little endian */
+#elif defined(_LITTLE_ENDIAN)
 #define	AUDIO_AIFF_FILE2HOST_INT(from, to)				\
 		(*to) = ((((*from) >> 24) & 0xff) | (((*from) & 0xff) << 24) | \
 		(((*from) >> 8) & 0xff00) | (((*from) & 0xff00) << 8))

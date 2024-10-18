@@ -96,16 +96,16 @@
 	<stability value='Evolving' />
 
 	<template>
-	    	<common_name>
-		    	<loctext xml:lang='C'>
-				Solaris Fault Manager
+		<common_name>
+			<loctext xml:lang='C'>
+				Fault Manager
 			</loctext>
 		</common_name>
 
 		<documentation>
-		    	<manpage
+			<manpage
 			    title='fmd'
-			    section='1M'
+			    section='8'
 			    manpath='/usr/share/man' />
 		</documentation>
 	</template>

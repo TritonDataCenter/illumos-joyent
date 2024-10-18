@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012 by Delphix. All rights reserved.
+ * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #include <assert.h>
@@ -37,6 +38,7 @@
 
 #include <libbe.h>
 #include <libbe_priv.h>
+#include <libzfsbootenv.h>
 
 /* ******************************************************************** */
 /*			Public Functions				*/
@@ -148,9 +150,19 @@ be_rename(nvlist_t *be_attrs)
 	/* New BE will reside in the same zpool as orig BE */
 	bt.nbe_zpool = bt.obe_zpool;
 
-	be_make_root_ds(bt.obe_zpool, bt.obe_name, root_ds, sizeof (root_ds));
+	if ((ret = be_make_root_ds(bt.obe_zpool, bt.obe_name, root_ds,
+	    sizeof (root_ds))) != BE_SUCCESS) {
+		be_print_err(gettext("%s: failed to get BE container dataset "
+		    "for %s/%s\n"), __func__, bt.obe_zpool, bt.obe_name);
+		goto done;
+	};
 	bt.obe_root_ds = strdup(root_ds);
-	be_make_root_ds(bt.nbe_zpool, bt.nbe_name, root_ds, sizeof (root_ds));
+	if ((ret = be_make_root_ds(bt.nbe_zpool, bt.nbe_name, root_ds,
+	    sizeof (root_ds))) != BE_SUCCESS) {
+		be_print_err(gettext("%s: failed to get BE container dataset "
+		    "for %s/%s\n"), __func__, bt.nbe_zpool, bt.nbe_name);
+		goto done;
+	}
 	bt.nbe_root_ds = strdup(root_ds);
 
 	/*
@@ -185,13 +197,48 @@ be_rename(nvlist_t *be_attrs)
 		goto done;
 	}
 
+	/* Change the nextboot property on the pool if necessary */
+	if (getzoneid() == GLOBAL_ZONEID) {
+		char *nextboot = NULL;
+		int rv = 0;
+
+		if (lzbe_get_boot_device(bt.obe_zpool, &nextboot) == 0 &&
+		    nextboot != NULL && strcmp(nextboot, bt.obe_root_ds) == 0) {
+			if ((rv = lzbe_set_boot_device(bt.obe_zpool,
+			    lzbe_add, "")) != 0) {
+				be_print_err(gettext("be_rename: failed to "
+				    "remove temporary activation for "
+				    "dataset %s on pool %s\n"),
+				    bt.obe_root_ds, bt.obe_zpool);
+			}
+			if (rv == 0 && (rv = lzbe_set_boot_device(bt.nbe_zpool,
+			    lzbe_add, bt.nbe_root_ds)) != 0) {
+				be_print_err(gettext("be_rename: failed to "
+				    "enable temporary activation for "
+				    "dataset %s on pool %s\n"),
+				    bt.nbe_root_ds, bt.nbe_zpool);
+			}
+		}
+		free(nextboot);
+		switch (rv) {
+		case 0:
+			break;
+		case ENOMEM:
+			ret = BE_ERR_NOMEM;
+			goto done;
+		default:
+			ret = BE_ERR_UNKNOWN;
+			goto done;
+		}
+	}
+
 	/* Refresh handle to BE's root dataset after the rename */
 	ZFS_CLOSE(zhp);
 	if ((zhp = zfs_open(g_zfs, bt.nbe_root_ds, ZFS_TYPE_FILESYSTEM))
 	    == NULL) {
 		be_print_err(gettext("be_rename: failed to "
 		    "open BE root dataset (%s): %s\n"),
-		    bt.obe_root_ds, libzfs_error_description(g_zfs));
+		    bt.nbe_root_ds, libzfs_error_description(g_zfs));
 		ret = zfs_err_to_be_err(g_zfs);
 		goto done;
 	}
@@ -211,8 +258,12 @@ be_rename(nvlist_t *be_attrs)
 	 * Since the new and old BEs reside in the same pool (see above),
 	 * the same variable can be used for the container for both.
 	 */
-	be_make_root_container_ds(bt.obe_zpool, be_root_container,
-	    sizeof (be_root_container));
+	if ((ret = be_make_root_container_ds(bt.obe_zpool, be_root_container,
+	    sizeof (be_root_container))) != BE_SUCCESS) {
+		be_print_err(gettext("%s: failed to get BE container dataset "
+		    "for %s\n"), __func__, bt.obe_zpool);
+		goto done;
+	}
 
 	if ((ret = be_update_vfstab(bt.nbe_name, be_root_container,
 	    be_root_container, &fld, mp)) != BE_SUCCESS) {

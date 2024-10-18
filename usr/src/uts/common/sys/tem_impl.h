@@ -29,6 +29,10 @@
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989, 1990 AT&T	*/
 /*	  All Rights Reserved	*/
 
+/*
+ * Copyright 2021 RackTop Systems, Inc.
+ */
+
 #ifndef	_SYS_TEM_IMPL_H
 #define	_SYS_TEM_IMPL_H
 
@@ -76,8 +80,7 @@ extern "C" {
 #define	TEM_ATTR(c)		(((c) & TEM_ATTR_MASK) << 21)
 #define	TEM_ATTR_ISSET(c, a)	((TEM_CHAR_ATTR(c) & (a)) == (a))
 
-#define	TEM_MAXPARAMS	5	/* maximum number of ANSI paramters */
-#define	TEM_MAXTAB	40	/* maximum number of tab stops */
+#define	TEM_MAXPARAMS	32	/* maximum number of ANSI paramters */
 #define	TEM_MAXFKEY	30	/* max length of function key with <ESC>Q */
 
 #define	TEM_SCROLL_UP		0
@@ -96,6 +99,8 @@ extern "C" {
 #define	TEM_ATTR_BRIGHT_BG	0x0040
 #define	TEM_ATTR_TRANSPARENT	0x0080
 #define	TEM_ATTR_IMAGE		0x0100
+#define	TEM_ATTR_RGB_FG		0x0200
+#define	TEM_ATTR_RGB_BG		0x0400
 
 #define	ANSI_COLOR_BLACK	0
 #define	ANSI_COLOR_RED		1
@@ -140,7 +145,15 @@ extern "C" {
 #define	DEFAULT_ANSI_BACKGROUND	ANSI_COLOR_WHITE
 
 typedef uint32_t tem_char_t;	/* 32bit char to support UTF-8 */
-typedef uint8_t text_color_t;
+typedef union {
+	uint32_t n;
+	struct bgra {
+		uint8_t b;
+		uint8_t g;
+		uint8_t r;
+		uint8_t a;
+	} rgb;
+} text_color_t;
 typedef uint16_t text_attr_t;
 
 #if !defined(_BOOT)
@@ -175,20 +188,30 @@ typedef struct term_char {
 } term_char_t;
 
 /*
+ * Values for tvs_stateflags.
+ */
+#define	TVS_AUTOWRAP	0x00000001	/* autowrap is on by default */
+#define	TVS_WRAPPED	0x00000002	/* line wrap in progress */
+
+/*
  * State structure for each virtual terminal emulator
  */
 struct tem_vt_state {
+	queue_t		*tvs_queue;	/* read queue for console */
 	kmutex_t	tvs_lock;
 	uchar_t		tvs_fbmode;	/* framebuffer mode */
+	uchar_t		tvs_alpha;	/* rgb alpha channel */
 	text_attr_t	tvs_flags;	/* flags for this x3.64 terminal */
 	int		tvs_state;	/* state in output esc seq processing */
+	uint_t		tvs_stateflags;	/* state of some features */
 	boolean_t	tvs_gotparam;	/* does output esc seq have a param */
 
 	int	tvs_curparam;	/* current param # of output esc seq */
 	int	tvs_paramval;	/* value of current param */
 	int	tvs_params[TEM_MAXPARAMS];  /* parameters of output esc seq */
-	screen_pos_t	tvs_tabs[TEM_MAXTAB];	/* tab stops */
-	int	tvs_ntabs;		/* number of tabs used */
+	screen_pos_t	*tvs_tabs;	/* tab stops */
+	size_t	tvs_maxtab;		/* maximum number of tab stops */
+	size_t	tvs_ntabs;		/* number of tabs used */
 	int	tvs_nscroll;		/* number of lines to scroll */
 
 	struct tem_char_pos tvs_s_cursor;	/* start cursor position */
@@ -200,8 +223,10 @@ struct tem_vt_state {
 	size_t		tvs_outindex;	/* index into a_outbuf */
 	void		*tvs_pix_data;	/* pointer to tmp bitmap area */
 	size_t		tvs_pix_data_size;
-	text_color_t	tvs_fg_color;
-	text_color_t	tvs_bg_color;
+
+	text_color_t	tvs_fg_color;	/* console foreground */
+	text_color_t	tvs_bg_color;	/* console background */
+
 	int		tvs_first_line;	/* kernel console output begins */
 
 	term_char_t	*tvs_screen_buf;	/* whole screen buffer */
@@ -214,6 +239,7 @@ struct tem_vt_state {
 
 	boolean_t	tvs_isactive;
 	boolean_t	tvs_initialized;	/* initialization flag */
+	boolean_t	tvs_cursor_hidden;
 
 	list_node_t	tvs_list_node;
 };
@@ -227,7 +253,7 @@ typedef struct tem_safe_callbacks {
 	    screen_pos_t, screen_pos_t, cred_t *, enum called_from);
 	void (*tsc_cursor)(struct tem_vt_state *, short, cred_t *,
 	    enum called_from);
-	void (*tsc_bit2pix)(struct tem_vt_state *, term_char_t);
+	void (*tsc_bit2pix)(struct tem_vt_state *, term_char_t *);
 	void (*tsc_cls)(struct tem_vt_state *, int,
 	    screen_pos_t, screen_pos_t, cred_t *, enum called_from);
 } tem_safe_callbacks_t;
@@ -311,7 +337,7 @@ void	tem_safe_pix_copy(struct tem_vt_state *,
 	    cred_t *, enum called_from);
 void	tem_safe_pix_cursor(struct tem_vt_state *, short, cred_t *,
 	    enum called_from);
-void	tem_safe_pix_bit2pix(struct tem_vt_state *, term_char_t);
+void	tem_safe_pix_bit2pix(struct tem_vt_state *, term_char_t *);
 void	tem_safe_pix_cls(struct tem_vt_state *, int, screen_pos_t, screen_pos_t,
 	    cred_t *, enum called_from);
 void	tem_safe_pix_cls_range(struct tem_vt_state *,

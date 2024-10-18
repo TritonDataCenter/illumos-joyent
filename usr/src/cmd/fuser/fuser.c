@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
 /*	  All Rights Reserved  	*/
 
@@ -452,8 +450,8 @@ int
 main(int argc, char **argv)
 {
 	fu_data_t	*fu_data;
-	char		*mntname, c;
-	int		newfile = 0, errors = 0, opts = 0, flags = 0;
+	char		*mntname;
+	int		c, newfile = 0, errors = 0, opts = 0, flags = 0;
 	int		uts_flags, sig, okay, err;
 
 	(void) setlocale(LC_ALL, "");

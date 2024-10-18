@@ -21,11 +21,12 @@
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 
 /*
- * main() of idmapd(1M)
+ * main() of idmapd(8)
  */
 
 #include "idmapd.h"
@@ -69,6 +70,7 @@ extern void	init_dc_locator(void);
 extern void	fini_dc_locator(void);
 
 idmapd_state_t	_idmapdstate;
+mutex_t _svcstate_lock = ERRORCHECKMUTEX;
 
 SVCXPRT *xprt = NULL;
 
@@ -307,8 +309,6 @@ main(int argc, char **argv)
 			    "Unable to raise RLIMIT_NOFILE to %d",
 			    rl.rlim_cur);
 	}
-
-	(void) mutex_init(&_svcstate_lock, USYNC_THREAD, NULL);
 
 	if (_idmapdstate.daemon_mode == TRUE) {
 		if (daemonize_start() < 0) {
@@ -695,3 +695,22 @@ trace(idmap_mapping *req, idmap_id_res *res, char *fmt, ...)
 
 	return (0);
 }
+
+/*
+ * Enable libumem debugging by default on DEBUG builds.
+ * idmapd uses rpcgen, so we can't use #ifdef DEBUG without causing
+ * undesirable behavior.
+ */
+#ifdef IDMAPD_DEBUG
+const char *
+_umem_debug_init(void)
+{
+	return ("default,verbose"); /* $UMEM_DEBUG setting */
+}
+
+const char *
+_umem_logging_init(void)
+{
+	return ("fail,contents"); /* $UMEM_LOGGING setting */
+}
+#endif

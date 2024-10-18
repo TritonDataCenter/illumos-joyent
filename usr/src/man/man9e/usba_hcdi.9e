@@ -36,7 +36,7 @@ DMA, and also act as the root hub.
 .Sy hcdi
 drivers are part of the illumos USB Architecture (USBA).
 The
-.Xr usba 7D
+.Xr usba 4D
 driver provides support for many of the surrounding needs of an
 .Sy hcdi
 driver and requires that such drivers implement a specific operations
@@ -270,7 +270,7 @@ They should not be used as they have gaps added by the compiler for alignment.
 Once assembled, the device driver should call
 .Xr usba_hubdi_bind_root_hub 9F .
 This will cause an instance of the
-.Xr hubd 7D
+.Xr hubd 4D
 driver to be attached and associated with the root controller.
 As such, driver writers need to ensure that all initialization is done prior to
 loading the root hub.
@@ -814,7 +814,7 @@ memory allocation.
 Individual manual pages indicate the flags that drivers should consult.
 .It Vt usb_port_status_t
 The
-.Sy usb_port_status_t
+.Vt usb_port_status_t
 determines the current negotiated speed of the device.
 The following are valid values that this may be:
 .Bl -tag -width Sy
@@ -830,12 +830,12 @@ This is a USB 2.x device.
 .It Sy USBA_SUPER_SPEED_DEV
 The device is running as a super speed device.
 This is a USB 3.0 device.
+.El
 .It Vt usb_cr_t
 This is a set of codes that may be returned as a part of the call to
 .Xr usba_hcdi_cb 9F .
 The best place for the full set of these is currently in the source
 control headers.
-.El
 .El
 .Ss Interrupts
 While some hardware supports more than one interrupt queue, a single
@@ -847,12 +847,12 @@ Due to the way host controller drivers need to interact with hotplug,
 drivers should generally set the
 .Sy ddi-forceattach
 property to one in their
-.Xr driver.conf 4
+.Xr driver.conf 5
 file.
 .Sh SEE ALSO
-.Xr driver.conf 4 ,
-.Xr hubd 7D ,
-.Xr usba 7D ,
+.Xr hubd 4D ,
+.Xr usba 4D ,
+.Xr driver.conf 5 ,
 .Xr attach 9E ,
 .Xr close 9E ,
 .Xr detach 9E ,

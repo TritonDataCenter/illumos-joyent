@@ -168,14 +168,10 @@
 
 
 @ MSG_WARN_INVINTERP1	"%s: PT_INTERP header has no associated section\n"
-@ MSG_WARN_INVINTERP2	"%s: interp section: %s: and PT_INTERP program \
-			 header have conflicting size or offsets\n"
 @ MSG_WARN_INVCAP1	"%s: PT_SUNWCAP header has no associated section\n"
 @ MSG_WARN_INVCAP2	"%s: capabilities section[%d]: %s: requires PT_CAP \
 			 program header\n"
-@ MSG_WARN_INVCAP3	"%s: capabilities section[%d]: %s: and PT_CAP program \
-			 header have conflicting size or offsets\n"
-@ MSG_WARN_INVCAP4	"%s: capabilities section[%d]: %s: requires string \
+@ MSG_WARN_INVCAP3	"%s: capabilities section[%d]: %s: requires string \
 			 table: invalid sh_info: %d\n";
 @ MSG_WARN_INADDR32SF1	"%s: capabilities section %s: software capability \
 			 ADDR32: is ineffective within a 32-bit object\n"
@@ -269,6 +265,11 @@
 @ MSG_STR_UNKNOWN	"<unknown>"
 @ MSG_STR_SECTION	"%s (section)"
 @ MSG_STR_CHECKSUM	"elf checksum: 0x%lx"
+@ MSG_STR_VADDR		"virtual address"
+@ MSG_STR_OFFSET	"offset"
+@ MSG_STR_FILESIZE	"file size"
+@ MSG_STR_MEMSIZE	"memory size"
+@ MSG_STR_ALIGNMENT	"alignment"
 
 @ MSG_FMT_SCNNDX	"section[%d]"
 @ MSG_FMT_NOTEENTNDX	"  entry [%d]";
@@ -283,6 +284,13 @@
 @ MSG_ERR_BAD_T_OSABI	"%s: unrecognized operating system ABI: %s\n"
 @ MSG_ERR_AMBIG_MATCH	"%s: ambiguous use of -I, -N, or -T. Remove \
 			 -p option or section selection option(s)\n"
+
+# Program/section correspondence messages
+@ MSG_SHDR_PHDR_MISMATCH	"%s: Section[%d: %s]: %s does not \
+				 match %s segment: %s=%x: Program \
+				 Header[%d].%s=%x\n"
+@ MSG_SHDR_NO_PHDR		"%s: Section[%d: %s]: has no matching \
+				 %s segment\n"
 
 #
 # SHT_MOVE messages
@@ -314,6 +322,7 @@
 @ MSG_NOTE_BADCORETYPE	"%s: unknown note type %#x\n"
 
 @ MSG_NOTE_BAD_SECFLAGS_VER	"unknown prsecflags_t version: "
+@ MSG_NOTE_BAD_UPANIC_VER	"unknown prupanic_t version: "
 
 @ _END_
 
@@ -472,6 +481,8 @@
 @ MSG_CNOTE_DESC_PRFDINFO_T		"desc: (prfdinfo_core_t)"
 @ MSG_CNOTE_DESC_PRSECFLAGS_T		"desc: (prsecflags_t)"
 @ MSG_CNOTE_DESC_PRLWPNAME_T		"desc: (prlwpname_t)"
+@ MSG_CNOTE_DESC_PRUPANIC_T		"desc: (prupanic_t)"
+@ MSG_CNOTE_DESC_PRCWD_T		"desc: (prcwd_t)"
 
 @ MSG_CNOTE_FMT_LINE		"%*s%-*s%s"
 @ MSG_CNOTE_FMT_LINE_2UP	"%*s%-*s%-*s%-*s%s"
@@ -646,6 +657,14 @@
 @ MSG_CNOTE_T_PR_INO			"pr_ino:"
 @ MSG_CNOTE_T_PR_FILEFLAGS		"pr_fileflags:"
 @ MSG_CNOTE_T_PR_FDFLAGS		"pr_fdflags:"
+@ MSG_CNOTE_T_PRU_VERSION		"pru_version:"
+@ MSG_CNOTE_T_PRU_FLAGS			"pru_flags:"
+@ MSG_CNOTE_T_PRU_DATA			"pru_data:"
+@ MSG_CNOTE_T_CWD_FSID			"prcwd_fsid:"
+@ MSG_CNOTE_T_CWD_FSNAME		"prcwd_fsname:"
+@ MSG_CNOTE_T_CWD_MNTPT			"prcwd_mntpt:"
+@ MSG_CNOTE_T_CWD_MNTSPEC		"prcwd_mntspec:"
+@ MSG_CNOTE_T_CWD_CWD			"prcwd_cwd:"
 
 
 # Names of fake sections generated from program header data

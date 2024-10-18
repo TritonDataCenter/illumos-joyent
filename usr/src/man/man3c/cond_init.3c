@@ -44,7 +44,7 @@
 .\" Copyright (c) 2001, The IEEE and The Open Group.  All Rights Reserved.
 .\" Copyright (c) 2007, Sun Microsystems, Inc.  All Rights Reserved.
 .\"
-.TH COND_INIT 3C "February 15, 2020"
+.TH COND_INIT 3C "September 15, 2024"
 .SH NAME
 cond_init, cond_wait, cond_timedwait, cond_reltimedwait, cond_signal,
 cond_broadcast, cond_destroy \- condition variables
@@ -118,7 +118,7 @@ The \fBcond_init()\fR function initializes the condition variable pointed to by
 \fIcvp\fR. A condition variable can have several different types of behavior,
 specified by \fItype\fR. No current type uses \fIarg\fR although a future type
 may specify additional behavior parameters with \fIarg\fR. The \fItype\fR
-argument c take one of the following values:
+argument can take one of the following values:
 .sp
 .ne 2
 .na
@@ -159,7 +159,7 @@ Default condition variable initialization (intra-process):
 .nf
 cond_t cvp;
 
-cond_init(&cvp, NULL, NULL); /*initialize condition variable
+cond_init(&cvp, 0, NULL); /*initialize condition variable
                                 with default*/
 .fi
 .in -2
@@ -399,7 +399,7 @@ while (cond == FALSE) {
 .in -2
 
 .SH ATTRIBUTES
-See \fBattributes\fR(5) for descriptions of the following attributes:
+See \fBattributes\fR(7) for descriptions of the following attributes:
 .sp
 
 .sp
@@ -413,9 +413,16 @@ MT-Level	MT-Safe
 .TE
 
 .SH SEE ALSO
-\fBfork\fR(2), \fBmmap\fR(2), \fBsetitimer\fR(2), \fBshmop\fR(2),
-\fBmutex_init\fR(3C), \fBsignal\fR(3C), \fBattributes\fR(5),
-\fBcondition\fR(5), \fBmutex\fR(5), \fBstandards\fR(5)
+.BR fork (2),
+.BR mmap (2),
+.BR setitimer (2),
+.BR shmop (2),
+.BR mutex_init (3C),
+.BR signal (3C),
+.BR attributes (7),
+.BR condition (7),
+.BR mutex (7),
+.BR standards (7)
 .SH NOTES
 If more than one thread is blocked on a condition variable, the order in which
 threads are unblocked is determined by the scheduling policy. When each thread,
@@ -435,7 +442,7 @@ The \fBcond_timedwait()\fR and \fBcond_reltimedwait()\fR functions are similar
 to \fBcond_wait()\fR, except that the calling thread will not wait for the
 condition to become true past the absolute time specified by \fIabstime\fR or
 the relative time specified by \fIreltime\fR. Note that \fBcond_timedwait()\fR
-or \fBcond_reltimedwait()\fR might continue to block as it trys to reacquire
+or \fBcond_reltimedwait()\fR might continue to block as it tries to reacquire
 the mutex pointed to by \fImp\fR, which may be locked by another thread. If
 either \fBcond_timedwait()\fR or \fBcond_reltimedwait()\fR returns because of a
 timeout, it returns the error value \fBETIME\fR.

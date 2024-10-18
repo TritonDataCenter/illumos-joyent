@@ -23,6 +23,7 @@
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2017 Joyent, Inc.
+ * Copyright 2022 Garrett D'Amore
  */
 
 #include <sys/file.h>
@@ -56,9 +57,6 @@ ksocket_socket(ksocket_t *ksp, int domain, int type, int protocol, int flags,
 
 	/* All Solaris components should pass a cred for this operation. */
 	ASSERT(cr != NULL);
-
-	if (domain == AF_NCA)
-		return (EAFNOSUPPORT);
 
 	ASSERT(flags == KSOCKET_SLEEP || flags == KSOCKET_NOSLEEP);
 	so = socket_create(domain, type, protocol, NULL, NULL, version, flags,
@@ -804,8 +802,7 @@ ksocket_spoll(ksocket_t ks, int timo, short events, short *revents,
 	pdp->pd_events = events;
 	pdp->pd_pcache = pcp;
 	pcache_insert_fd(pcp, pdp, 1);
-	pollhead_insert(php, pdp);
-	pdp->pd_php = php;
+	polldat_associate(pdp, php);
 
 	mutex_enter(&pcp->pc_lock);
 	while (!(so->so_state & SS_CLOSING)) {
@@ -838,11 +835,8 @@ ksocket_spoll(ksocket_t ks, int timo, short events, short *revents,
 	}
 	mutex_exit(&pcp->pc_lock);
 
-	if (pdp->pd_php != NULL) {
-		pollhead_delete(pdp->pd_php, pdp);
-		pdp->pd_php = NULL;
-		pdp->pd_fd = 0;
-	}
+	polldat_disassociate(pdp);
+	pdp->pd_fd = 0;
 
 	/*
 	 * pollwakeup() may still interact with this pollcache. Wait until
@@ -942,5 +936,5 @@ ksocket_krecv_set(ksocket_t ks, ksocket_krecv_f cb, void *arg)
 void
 ksocket_krecv_unblock(ksocket_t ks)
 {
-	so_krecv_unblock(KSTOSO(ks));
+	return (so_krecv_unblock(KSTOSO(ks)));
 }

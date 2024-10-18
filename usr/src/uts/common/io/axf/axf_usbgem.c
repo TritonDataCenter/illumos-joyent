@@ -31,8 +31,6 @@
  * DAMAGE.
  */
 
-#pragma ident "@(#)axf_usbgem.c	1.3 12/02/09"
-
 /*
  *  Changelog:
  */
@@ -292,7 +290,7 @@ static mblk_t *axf_rx_make_packet(struct usbgem_dev *, mblk_t *);
 /* =============================================================== */
 /* BEGIN CSTYLED */
 #define	OUT(dp, req, val, ix, len, buf, errp, label)	\
-	if ((*(errp) = usbgem_ctrl_out((dp), 	\
+	if ((*(errp) = usbgem_ctrl_out((dp),	\
 	/* bmRequestType */ USB_DEV_REQ_HOST_TO_DEV	\
 		    | USB_DEV_REQ_TYPE_VENDOR | USB_DEV_REQ_RCPT_DEV,	\
 	/* bRequest */ (req),	\
@@ -303,7 +301,7 @@ static mblk_t *axf_rx_make_packet(struct usbgem_dev *, mblk_t *);
 	/* size */     (len))) != USB_SUCCESS) goto label
 
 #define	IN(dp, req, val, ix, len, buf, errp, label)	\
-	if ((*(errp) = usbgem_ctrl_in((dp), 	\
+	if ((*(errp) = usbgem_ctrl_in((dp),	\
 	/* bmRequestType */ USB_DEV_REQ_DEV_TO_HOST	\
 		    | USB_DEV_REQ_TYPE_VENDOR | USB_DEV_REQ_RCPT_DEV,	\
 	/* bRequest */ (req),	\
@@ -791,6 +789,7 @@ axf_tx_make_packet(struct usbgem_dev *dp, mblk_t *mp)
 	return (new);
 }
 
+#if DEBUG_LEVEL > 10
 static void
 axf_dump_packet(struct usbgem_dev *dp, uint8_t *bp, int n)
 {
@@ -801,6 +800,7 @@ axf_dump_packet(struct usbgem_dev *dp, uint8_t *bp, int n)
 		    bp[0], bp[1], bp[2], bp[3], bp[4], bp[5], bp[6], bp[7]);
 	}
 }
+#endif
 
 static mblk_t *
 axf_rx_make_packet(struct usbgem_dev *dp, mblk_t *mp)
@@ -1410,80 +1410,7 @@ axfdetach(dev_info_t *dip, ddi_detach_cmd_t cmd)
  * OS depend (loadable streams driver) routine
  */
 /* ======================================================== */
-#ifdef USBGEM_CONFIG_GLDv3
 USBGEM_STREAM_OPS(axf_ops, axfattach, axfdetach);
-#else
-static	struct module_info axfminfo = {
-	0,			/* mi_idnum */
-	"axf",			/* mi_idname */
-	0,			/* mi_minpsz */
-	ETHERMTU,		/* mi_maxpsz */
-	ETHERMTU*128,		/* mi_hiwat */
-	1,			/* mi_lowat */
-};
-
-static	struct qinit axfrinit = {
-	(int (*)()) NULL,	/* qi_putp */
-	usbgem_rsrv,		/* qi_srvp */
-	usbgem_open,		/* qi_qopen */
-	usbgem_close,		/* qi_qclose */
-	(int (*)()) NULL,	/* qi_qadmin */
-	&axfminfo,		/* qi_minfo */
-	NULL			/* qi_mstat */
-};
-
-static	struct qinit axfwinit = {
-	usbgem_wput,		/* qi_putp */
-	usbgem_wsrv,		/* qi_srvp */
-	(int (*)()) NULL,	/* qi_qopen */
-	(int (*)()) NULL,	/* qi_qclose */
-	(int (*)()) NULL,	/* qi_qadmin */
-	&axfminfo,		/* qi_minfo */
-	NULL			/* qi_mstat */
-};
-
-static struct streamtab	axf_info = {
-	&axfrinit,	/* st_rdinit */
-	&axfwinit,	/* st_wrinit */
-	NULL,		/* st_muxrinit */
-	NULL		/* st_muxwrinit */
-};
-
-static	struct cb_ops cb_axf_ops = {
-	nulldev,	/* cb_open */
-	nulldev,	/* cb_close */
-	nodev,		/* cb_strategy */
-	nodev,		/* cb_print */
-	nodev,		/* cb_dump */
-	nodev,		/* cb_read */
-	nodev,		/* cb_write */
-	nodev,		/* cb_ioctl */
-	nodev,		/* cb_devmap */
-	nodev,		/* cb_mmap */
-	nodev,		/* cb_segmap */
-	nochpoll,	/* cb_chpoll */
-	ddi_prop_op,	/* cb_prop_op */
-	&axf_info,	/* cb_stream */
-	D_NEW|D_MP	/* cb_flag */
-};
-
-static	struct dev_ops axf_ops = {
-	DEVO_REV,	/* devo_rev */
-	0,		/* devo_refcnt */
-	usbgem_getinfo,	/* devo_getinfo */
-	nulldev,	/* devo_identify */
-	nulldev,	/* devo_probe */
-	axfattach,	/* devo_attach */
-	axfdetach,	/* devo_detach */
-	nodev,		/* devo_reset */
-	&cb_axf_ops,	/* devo_cb_ops */
-	NULL,		/* devo_bus_ops */
-	usbgem_power,	/* devo_power */
-#if DEVO_REV >= 4
-	usbgem_quiesce,	/* devo_quiesce */
-#endif
-};
-#endif
 
 static struct modldrv modldrv = {
 	&mod_driverops,	/* Type of module.  This one is a driver */
@@ -1503,7 +1430,7 @@ static struct modlinkage modlinkage = {
 int
 _init(void)
 {
-	int 	status;
+	int	status;
 
 	DPRINTF(2, (CE_CONT, "!axf: _init: called"));
 

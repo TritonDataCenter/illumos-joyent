@@ -10,17 +10,18 @@
 # or http://www.opensolaris.org/os/licensing.
 # See the License for the specific language governing permissions
 # and limitations under the License.
-#    
+#
 # When distributing Covered Code, include this CDDL HEADER in each
 # file and include the License file at usr/src/OPENSOLARIS.LICENSE.
 # If applicable, add the following below this CDDL HEADER, with the
 # fields enclosed by brackets "[]" replaced with your own identifying
 # information: Portions Copyright [yyyy] [name of copyright owner]
-#    
+#
 # CDDL HEADER END
 #
 #
 # Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright 2024 OmniOS Community Edition (OmniOSce) Association.
 #
 # s10 boot script.
 #
@@ -44,7 +45,7 @@ elif [ "$arch" = "sparc" ]; then
 	ARCH32=
         ARCH64=sparcv9
 else
-        echo "Unsupported architecture: $arch" 
+        echo "Unsupported architecture: $arch"
         exit 2
 fi
 
@@ -80,17 +81,6 @@ replace_with_native() {
 	[ ! -f $1 ] && printf "$w_missing" "$1"
 	if [ ! -h $path_dname -a -d $path_dname ]; then
 		safe_replace $ZONEROOT/$1 $BRANDDIR/s10_isaexec_wrapper $2 $3 \
-		    remove
-	fi
-}
-
-replace_with_native_py() {
-	path_dname=$ZONEROOT/`dirname $1`
-
-	[ ! -f $1 ] && printf "$w_missing" "$1"
-
-	if [ ! -h $path_dname -a -d $path_dname ]; then
-		safe_replace $ZONEROOT/$1 $BRANDDIR/s10_python_wrapper $2 $3 \
 		    remove
 	fi
 }
@@ -214,24 +204,13 @@ replace_with_native /usr/sbin/if_mpadm 0555 root:bin
 #
 # Replace IPFilter commands with native wrappers
 #
-if [ -n "$ARCH32" ]; then
-	replace_with_native /usr/lib/ipf/$ARCH32/ipftest 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH32/ipf 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH32/ipfs 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH32/ipfstat 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH32/ipmon 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH32/ipnat 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH32/ippool 0555 root:bin
-fi
-if [ -n "$ARCH64" ]; then
-	replace_with_native /usr/lib/ipf/$ARCH64/ipftest 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH64/ipf 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH64/ipfs 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH64/ipfstat 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH64/ipmon 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH64/ipnat 0555 root:bin
-	replace_with_native /usr/sbin/$ARCH64/ippool 0555 root:bin
-fi
+replace_with_native /usr/lib/ipf/ipftest 0555 root:bin
+replace_with_native /usr/sbin/ipf 0555 root:bin
+replace_with_native /usr/sbin/ipfs 0555 root:bin
+replace_with_native /usr/sbin/ipfstat 0555 root:bin
+replace_with_native /usr/sbin/ipmon 0555 root:bin
+replace_with_native /usr/sbin/ipnat 0555 root:bin
+replace_with_native /usr/sbin/ippool 0555 root:bin
 
 #
 # Replace in.mpathd daemon at /usr/lib/inet by native wrapper
@@ -241,7 +220,7 @@ if [ ! -h $ZONEROOT/usr/lib/inet -a -d $ZONEROOT/usr/lib/inet ]; then
 	    /lib/inet/in.mpathd 0555 root:bin remove
 fi
 
-# 
+#
 # Create wrapper at /lib/inet/in.mpathd as well because native ifconfig
 # looks up in.mpathd under /lib/inet.
 #
@@ -273,7 +252,7 @@ safe_copy /lib/svc/share/net_include.sh $filename
 
 #
 # PSARC 2009/306 removed the ND_SET/ND_GET ioctl's for modifying
-# IP/TCP/UDP/SCTP/ICMP tunables. If S10 ndd(1M) is used within an
+# IP/TCP/UDP/SCTP/ICMP tunables. If S10 ndd(8) is used within an
 # S10 container, the kernel will return EINVAL. So we need this.
 #
 replace_with_native /usr/sbin/ndd 0555 root:bin
@@ -293,7 +272,6 @@ replace_with_native /usr/lib/fs/zfs/fstyp 0555 root:bin
 replace_with_native /usr/lib/zfs/availdevs 0555 root:bin
 replace_with_native /usr/sbin/df 0555 root:bin
 replace_with_native /usr/sbin/zstreamdump 0555 root:bin
-replace_with_native_py /usr/lib/zfs/pyzfs.py 0555 root:bin
 
 #
 # Replace automount and automountd with native wrappers.
@@ -302,7 +280,7 @@ replace_with_native /usr/lib/fs/autofs/automount 0555 root:bin
 replace_with_native /usr/lib/autofs/automountd 0555 root:bin
 
 #
-# The class-specific dispadmin(1M) and priocntl(1) binaries must be native
+# The class-specific dispadmin(8) and priocntl(1) binaries must be native
 # wrappers, and we must have all of the ones the native zone does.  This
 # allows new scheduling classes to appear without causing dispadmin and
 # priocntl to be unhappy.

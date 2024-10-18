@@ -23,6 +23,10 @@
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
  */
 
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 #include <sys/systm.h>
 #include <sys/sunndi.h>
 #include <sys/sunmdi.h>
@@ -56,7 +60,7 @@ ibtl_ibnex_callback_t	ibtl_ibnex_callback_routine = NULL;
  *			IBTL_IBNEX_UNCFG_CLNTS_FLAG - Build a NVLIST containing
  *						clients' devpaths and their
  *						AP_IDs. (-x unconfig_clients)
- *	callback	- Callback function to get ap_id from ib(7d)
+ *	callback	- Callback function to get ap_id from ib(4D)
  * Output:
  *	buffer		- The information is returned in this buffer
  *      bufsiz		- The size of the information buffer
@@ -272,15 +276,15 @@ ibtl_ibnex_get_hca_info(ib_guid_t hca_guid, int flag, char **buffer,
 
 /*
  * Function:
- *      ibtl_ibnex_register_callback()
+ *	ibtl_ibnex_register_callback()
  * Input:
  *	ibnex_cb	- IB nexus driver callback routine
  * Output:
- *      none
+ *	none
  * Returns:
- *      none
+ *	none
  * Description:
- *     	Register a callback routine for IB nexus driver
+ *	Register a callback routine for IB nexus driver
  */
 void
 ibtl_ibnex_register_callback(ibtl_ibnex_callback_t ibnex_cb)
@@ -294,15 +298,15 @@ ibtl_ibnex_register_callback(ibtl_ibnex_callback_t ibnex_cb)
 
 /*
  * Function:
- *      ibtl_ibnex_unregister_callback()
+ *	ibtl_ibnex_unregister_callback()
  * Input:
- *      none
+ *	none
  * Output:
- *      none
+ *	none
  * Returns:
- *      none
+ *	none
  * Description:
- *     	Un-register a callback routine for IB nexus driver
+ *	Un-register a callback routine for IB nexus driver
  */
 void
 ibtl_ibnex_unregister_callback()
@@ -454,16 +458,16 @@ ibtl_ibnex_get_hca_verbose_data(ib_guid_t hca_guid, char **buffer,
 
 /*
  * Function:
- *      ibt_reprobe_dev()
+ *	ibt_reprobe_dev()
  * Input:
- *      dev_info_t	*dip
+ *	dev_info_t	*dip
  * Output:
- *      none
+ *	none
  * Returns:
  *      Return value from IBnexus callback handler
  *		IBT_ILLEGAL_OP if IBnexus callback is not installed.
  * Description:
- *     	This function passes the IBTF client's "reprobe device
+ *		This function passes the IBTF client's "reprobe device
  *		properties" request to IBnexus. See ibt_reprobe_dev(9f)
  *		for details.
  */
@@ -519,7 +523,7 @@ ibt_reprobe_dev(dev_info_t *dip)
  *	else IBT_NO_HCAS_AVAILABLE.
  *
  *	For IOC/Pseudo devices check if the given pdip is that of
- *	the ib(7d) nexus or that of the eoib(7d) nexus. If yes
+ *	the ib(4D) nexus or that of the eoib(4D) nexus. If yes
  *	return IBT_SUCCESS, else IBT_NO_HCAS_AVAILABLE.
  */
 ibt_status_t
@@ -560,7 +564,7 @@ ibtl_ibnex_valid_hca_parent(dev_info_t *pdip)
  * Returns:
  *	IBT_SUCCESS/IBT_FAILURE
  * Description:
- * 	Register the HCA dip as the MPxIO PCHI.
+ *	Register the HCA dip as the MPxIO PCHI.
  */
 ibt_status_t
 ibtl_ibnex_phci_register(dev_info_t *hca_dip)
@@ -583,15 +587,14 @@ ibtl_ibnex_phci_register(dev_info_t *hca_dip)
  * Returns:
  *	IBT_SUCCESS/IBT_FAILURE
  * Description:
- * 	Free up any pending MPxIO Pathinfos and unregister the HCA dip as the
- * 	MPxIO PCHI.
+ *	Free up any pending MPxIO Pathinfos and unregister the HCA dip as the
+ *	MPxIO PCHI.
  */
 ibt_status_t
 ibtl_ibnex_phci_unregister(dev_info_t *hca_dip)
 {
 	mdi_pathinfo_t *pip = NULL;
 	dev_info_t *vdip = 0;
-	int circ = 0, circ1 = 0;
 
 	/*
 	 * Should free all the Pathinfos associated with the HCA pdip before
@@ -602,20 +605,20 @@ ibtl_ibnex_phci_unregister(dev_info_t *hca_dip)
 	 * cleaned up if needed.
 	 */
 	vdip = mdi_devi_get_vdip(hca_dip);
-	ndi_devi_enter(vdip, &circ1);
-	ndi_devi_enter(hca_dip, &circ);
+	ndi_devi_enter(vdip);
+	ndi_devi_enter(hca_dip);
 	while (pip = mdi_get_next_client_path(hca_dip, NULL)) {
 		if (mdi_pi_free(pip, 0) == MDI_SUCCESS) {
 			continue;
 		}
-		ndi_devi_exit(hca_dip, circ);
-		ndi_devi_exit(vdip, circ1);
+		ndi_devi_exit(hca_dip);
+		ndi_devi_exit(vdip);
 		IBTF_DPRINTF_L1(ibtl_ibnex, "ibtl_ibnex_phci_unregister: "
 		    "mdi_pi_free failed");
 		return (IBT_FAILURE);
 	}
-	ndi_devi_exit(hca_dip, circ);
-	ndi_devi_exit(vdip, circ1);
+	ndi_devi_exit(hca_dip);
+	ndi_devi_exit(vdip);
 
 	if (mdi_phci_unregister(hca_dip, 0) != MDI_SUCCESS) {
 		IBTF_DPRINTF_L1(ibtl_ibnex, "ibtl_ibnex_phci_unregister: PHCI "

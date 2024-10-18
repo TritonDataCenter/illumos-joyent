@@ -69,7 +69,7 @@ static	void	ndp_badflag(enum ndp_action);
 static	void	ndp_missingarg(char);
 
 static	void	ndp_run_in_child(ndp_void_f *);
-static	void	ndp_do_run(void);
+static	void	ndp_do_run(int);
 static	void	ndp_setup_handler(sigset_t *);
 static	void	ndp_start_timer(time_t period);
 static	void	ndp_run_periodically(time_t, ndp_void_f *);
@@ -106,7 +106,7 @@ static	boolean_t	ndp_run = B_TRUE;
 #define	NETSTAT_PATH	"/usr/bin/netstat"
 
 /*
- * Macros borrowed from route(1M) for working with PF_ROUTE messages
+ * Macros borrowed from route(8) for working with PF_ROUTE messages
  */
 #define	RT_ADVANCE(x, n) ((x) += ndp_salen(n))
 #define	RT_NEXTADDR(cp, w, u) \
@@ -250,7 +250,7 @@ ndp_run_in_child(ndp_void_f *func)
  * SIGALRM handler to schedule a run.
  */
 static void
-ndp_do_run(void)
+ndp_do_run(int signal __unused)
 {
 	ndp_run = B_TRUE;
 }

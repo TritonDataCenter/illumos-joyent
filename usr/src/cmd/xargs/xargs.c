@@ -718,7 +718,7 @@ getarg(char *arg)
  *
  *	Assumes that message has already been gettext()'d. It would be
  *	nice if we could just do the gettext() here, but we can't, since
- *	since xgettext(1M) wouldn't be able to pick up our error message.
+ *	since xgettext(1) wouldn't be able to pick up our error message.
  */
 /* PRINTFLIKE1 */
 static void
@@ -736,12 +736,12 @@ ermsg(char *messages, ...)
 }
 
 static int
-echoargs()
+echoargs(void)
 {
 	char	**anarg;
 	char	**tanarg;	/* tmp ptr			*/
-	int		i;
-	char		reply[LINE_MAX];
+	int	i;
+	char	reply[LINE_MAX];
 
 	tanarg = anarg = arglist-1;
 
@@ -773,7 +773,10 @@ echoargs()
 			break;
 		}
 	}
-	reply[i] = 0;
+	if (i < LINE_MAX)
+		reply[i] = '\0';
+	else
+		reply[LINE_MAX - 1] = '\0';
 
 	/* flush remainder of line if necessary */
 	if (i == LINE_MAX) {

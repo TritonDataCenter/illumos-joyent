@@ -138,50 +138,20 @@ fablib(Crle_desc * crle, int flag)
 	switch (flag) {
 	case CRLE_EDLIB:
 #if M_CLASS == ELFCLASS64
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 		path = MSG_ORIG(MSG_PTH_NEWDLP_64);
 #else
-		path = MSG_ORIG(MSG_PTH_OLDDLP_64);
-#endif
-#else
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 		path = MSG_ORIG(MSG_PTH_NEWDLP);
-#else
-		path = MSG_ORIG(MSG_PTH_OLDDLP);
-#endif
 #endif
 		list = &crle->c_edlibpath;
 		break;
 
 	case CRLE_ESLIB:
 #if M_CLASS == ELFCLASS64
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 		path = MSG_ORIG(MSG_PTH_NEWTD_64);
 #else
-		path = MSG_ORIG(MSG_PTH_OLDTD_64);
-#endif
-#else
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 		path = MSG_ORIG(MSG_PTH_NEWTD);
-#else
-		path = MSG_ORIG(MSG_PTH_OLDTD);
-#endif
 #endif
 		list = &crle->c_eslibpath;
-		break;
-
-	case CRLE_ADLIB:
-		path = MSG_ORIG(MSG_PTH_AOUTDLP);
-		list = &crle->c_adlibpath;
-		break;
-
-	case CRLE_ASLIB:
-#ifndef	SGS_PRE_UNIFIED_PROCESS
-		path = MSG_ORIG(MSG_PTH_NEWTD);
-#else
-		path = MSG_ORIG(MSG_PTH_OLDTD);
-#endif
-		list = &crle->c_aslibpath;
 		break;
 
 	default:
@@ -225,6 +195,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 	const char	*strtbl;
 	int		ndx, bkts;
 	APlist		*cmdline = NULL;
+	boolean_t	cmdset = B_FALSE;
 	char		_cmd[PATH_MAX], *cmd;
 	char		_objdir[PATH_MAX], *objdir = NULL;
 
@@ -394,6 +365,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 			    conv_dl_flag(head->ch_dlflags, CONV_FMT_ALT_CRLE,
 			    &dl_flag_buf));
 			cmd = strdupa(_cmd);
+			cmdset = B_TRUE;
 			if (aplist_append(&cmdline, cmd, AL_CNT_CRLE) == NULL)
 				return (INSCFG_RET_FAIL);
 		}
@@ -439,6 +411,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 			/*
 			 * Construct the original command line arguments.
 			 */
+			cmdset = B_TRUE;
 			(void) snprintf(_cmd, PATH_MAX,
 			    MSG_ORIG(MSG_CMD_OUTPUT), crle->c_objdir);
 			cmd = strdupa(_cmd);
@@ -462,9 +435,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 		str = (const char *)(head->ch_edlibpath + addr);
 
 		if (crle->c_flags & CRLE_UPDATE) {
-			crle->c_flags &= ~CRLE_AOUT;
 
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 			if ((head->ch_cnflags & RTC_HDR_UPM) == 0) {
 				if (head->ch_cnflags & RTC_HDR_64)
 					str = conv_config_upm(str,
@@ -477,7 +448,6 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 					    MSG_ORIG(MSG_PTH_UPDLP),
 					    MSG_PTH_UPDLP_SIZE);
 			}
-#endif
 			if (addlib(crle, &crle->c_edlibpath, str) != 0)
 				return (INSCFG_RET_FAIL);
 		} else {
@@ -487,6 +457,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 			(void) snprintf(_cmd, PATH_MAX,
 			    MSG_ORIG(MSG_CMD_EDLIB), str);
 			cmd = strdupa(_cmd);
+			cmdset = B_TRUE;
 			if (aplist_append(&cmdline, cmd, AL_CNT_CRLE) == NULL)
 				return (INSCFG_RET_FAIL);
 		}
@@ -508,17 +479,9 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 			 * Indicate any system default.
 			 */
 #if M_CLASS == ELFCLASS64
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 			(void) printf(MSG_INTL(MSG_DEF_NEWDLP_64));
 #else
-			(void) printf(MSG_INTL(MSG_DEF_OLDDLP_64));
-#endif
-#else
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 			(void) printf(MSG_INTL(MSG_DEF_NEWDLP));
-#else
-			(void) printf(MSG_INTL(MSG_DEF_OLDDLP));
-#endif
 #endif
 		}
 	}
@@ -529,9 +492,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 		str = (const char *)(head->ch_eslibpath + addr);
 
 		if (crle->c_flags & CRLE_UPDATE) {
-			crle->c_flags &= ~CRLE_AOUT;
 
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 			if ((head->ch_cnflags & RTC_HDR_UPM) == 0) {
 				if (head->ch_cnflags & RTC_HDR_64)
 					str = conv_config_upm(str,
@@ -544,7 +505,6 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 					    MSG_ORIG(MSG_PTH_UPTD),
 					    MSG_PTH_UPTD_SIZE);
 			}
-#endif
 			if (addlib(crle, &crle->c_eslibpath, str) != 0)
 				return (INSCFG_RET_FAIL);
 		} else {
@@ -554,6 +514,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 			(void) snprintf(_cmd, PATH_MAX,
 			    MSG_ORIG(MSG_CMD_ESLIB), str);
 			cmd = strdupa(_cmd);
+			cmdset = B_TRUE;
 			if (aplist_append(&cmdline, cmd, AL_CNT_CRLE) == NULL)
 				return (INSCFG_RET_FAIL);
 		}
@@ -575,101 +536,9 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 			 * Indicate any system default.
 			 */
 #if M_CLASS == ELFCLASS64
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 			(void) printf(MSG_INTL(MSG_DEF_NEWTD_64));
 #else
-			(void) printf(MSG_INTL(MSG_DEF_OLDTD_64));
-#endif
-#else
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 			(void) printf(MSG_INTL(MSG_DEF_NEWTD));
-#else
-			(void) printf(MSG_INTL(MSG_DEF_OLDTD));
-#endif
-#endif
-		}
-	}
-
-	if (head->ch_adlibpath) {
-		const char	*str;
-
-		str = (const char *)(head->ch_adlibpath + addr);
-
-		if (crle->c_flags & CRLE_UPDATE) {
-			crle->c_flags |= CRLE_AOUT;
-			if (addlib(crle, &crle->c_adlibpath, str) != 0)
-				return (INSCFG_RET_FAIL);
-		} else {
-			(void) printf(MSG_INTL(MSG_DMP_DLIBPTH),
-			    MSG_ORIG(MSG_STR_AOUT), str);
-
-			(void) snprintf(_cmd, PATH_MAX,
-			    MSG_ORIG(MSG_CMD_ADLIB), str);
-			cmd = strdupa(_cmd);
-			if (aplist_append(&cmdline, cmd, AL_CNT_CRLE) == NULL)
-				return (INSCFG_RET_FAIL);
-		}
-	} else {
-		if (crle->c_flags & CRLE_UPDATE) {
-			if (crle->c_flags & CRLE_ADLIB) {
-				/*
-				 * If we've been asked to update a configuration
-				 * file, and no existing default AOUT search
-				 * path exists, but the user is going to add new
-				 * entries, fabricate the system defaults so
-				 * that the users get added to them.
-				 */
-				if (fablib(crle, CRLE_ADLIB) != 0)
-					return (INSCFG_RET_FAIL);
-			}
-		} else if (crle->c_flags & CRLE_AOUT) {
-			/*
-			 * Indicate any system default.
-			 */
-			(void) printf(MSG_INTL(MSG_DEF_AOUTDLP));
-		}
-	}
-
-	if (head->ch_aslibpath) {
-		const char	*str;
-
-		str = (const char *)(head->ch_aslibpath + addr);
-
-		if (crle->c_flags & CRLE_UPDATE) {
-			crle->c_flags |= CRLE_AOUT;
-			if (addlib(crle, &crle->c_aslibpath, str) != 0)
-				return (INSCFG_RET_FAIL);
-		} else {
-			(void) printf(MSG_INTL(MSG_DMP_TLIBPTH),
-			    MSG_ORIG(MSG_STR_AOUT), str);
-
-			(void) snprintf(_cmd, PATH_MAX,
-			    MSG_ORIG(MSG_CMD_ASLIB), str);
-			cmd = strdupa(_cmd);
-			if (aplist_append(&cmdline, cmd, AL_CNT_CRLE) == NULL)
-				return (INSCFG_RET_FAIL);
-		}
-	} else {
-		if (crle->c_flags & CRLE_UPDATE) {
-			if (crle->c_flags & CRLE_ASLIB) {
-				/*
-				 * If we've been asked to update a configuration
-				 * file, and no existing default AOUT secure
-				 * path exists, but the user is going to add new
-				 * entries, fabricate the system defaults so
-				 * that the users get added to them.
-				 */
-				if (fablib(crle, CRLE_ASLIB) != 0)
-					return (INSCFG_RET_FAIL);
-			}
-		} else if (crle->c_flags & CRLE_AOUT) {
-			/*
-			 * Indicate any system default.
-			 */
-#ifndef	SGS_PRE_UNIFIED_PROCESS
-			(void) printf(MSG_INTL(MSG_DEF_AOUTNEWTD));
-#else
-			(void) printf(MSG_INTL(MSG_DEF_AOUTOLDTD));
 #endif
 		}
 	}
@@ -706,6 +575,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 				(void) printf(pfmt, str);
 				(void) snprintf(_cmd, PATH_MAX, sfmt, str);
 				cmd = strdupa(_cmd);
+				cmdset = B_TRUE;
 				if (aplist_append(&cmdline, cmd,
 				    AL_CNT_CRLE) == NULL)
 					return (INSCFG_RET_FAIL);
@@ -769,7 +639,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 	 * If there's no hash table there's nothing else to process.
 	 */
 	if (head->ch_hash == 0) {
-		if ((crle->c_flags & CRLE_UPDATE) == 0)
+		if (((crle->c_flags & CRLE_UPDATE) == 0) && cmdset)
 			printcmd(crle, head, cmdline);
 		return (INSCFG_RET_OK);
 	}
@@ -807,6 +677,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 				(void) snprintf(_cmd, PATH_MAX,
 				    getformat(dobj->co_flags), str);
 				cmd = strdupa(_cmd);
+				cmdset = B_TRUE;
 				if (aplist_append(&cmdline, cmd,
 				    AL_CNT_CRLE) == NULL)
 					return (INSCFG_RET_FAIL);
@@ -900,6 +771,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 					    MSG_ORIG(MSG_CMD_OUTPUT),
 					    crle->c_objdir);
 					cmd = strdupa(_cmd);
+					cmdset = B_TRUE;
 					if (aplist_append(&cmdline, cmd,
 					    AL_CNT_CRLE) == NULL)
 						return (INSCFG_RET_FAIL);
@@ -909,6 +781,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 				(void) snprintf(_cmd, PATH_MAX,
 				    getformat(flags), str);
 				cmd = strdupa(_cmd);
+				cmdset = B_TRUE;
 				if (aplist_append(&cmdline, cmd,
 				    AL_CNT_CRLE) == NULL)
 					return (INSCFG_RET_FAIL);
@@ -950,7 +823,7 @@ scanconfig(Crle_desc * crle, Addr addr, int c_class)
 		}
 	}
 
-	if ((crle->c_flags & CRLE_UPDATE) == 0)
+	if (((crle->c_flags & CRLE_UPDATE) == 0) && cmdset)
 		printcmd(crle, head, cmdline);
 
 	if ((crle->c_flags & CRLE_VERBOSE) == 0)
@@ -1041,14 +914,6 @@ inspectconfig(Crle_desc * crle, int c_class)
 					if (fablib(crle, CRLE_ESLIB))
 						return (INSCFG_RET_FAIL);
 				}
-				if (crle->c_flags & CRLE_ADLIB) {
-					if (fablib(crle, CRLE_ADLIB))
-						return (INSCFG_RET_FAIL);
-				}
-				if (crle->c_flags & CRLE_ASLIB) {
-					if (fablib(crle, CRLE_ASLIB))
-						return (INSCFG_RET_FAIL);
-				}
 				return (INSCFG_RET_OK);
 
 			} else if (crle->c_flags & CRLE_CONFDEF) {
@@ -1069,32 +934,13 @@ inspectconfig(Crle_desc * crle, int c_class)
 				    CONV_FMT_ALT_FILE, &inv_buf3));
 
 
-				if (crle->c_flags & CRLE_AOUT) {
-					fmt1 = MSG_INTL(MSG_DEF_AOUTDLP);
-#ifndef SGS_PRE_UNIFIED_PROCESS
-					fmt2 = MSG_INTL(MSG_DEF_AOUTNEWTD);
-#else
-					fmt2 = MSG_INTL(MSG_DEF_AOUTOLDTD);
-#endif
-				} else {
 #if M_CLASS == ELFCLASS64
-#ifndef	SGS_PRE_UNIFIED_PROCESS
-					fmt1 = MSG_INTL(MSG_DEF_NEWDLP_64);
-					fmt2 = MSG_INTL(MSG_DEF_NEWTD_64);
+				fmt1 = MSG_INTL(MSG_DEF_NEWDLP_64);
+				fmt2 = MSG_INTL(MSG_DEF_NEWTD_64);
 #else
-					fmt1 = MSG_INTL(MSG_DEF_OLDDLP_64);
-					fmt2 = MSG_INTL(MSG_DEF_OLDTD_64);
+				fmt1 = MSG_INTL(MSG_DEF_NEWDLP);
+				fmt2 = MSG_INTL(MSG_DEF_NEWTD);
 #endif
-#else
-#ifndef	SGS_PRE_UNIFIED_PROCESS
-					fmt1 = MSG_INTL(MSG_DEF_NEWDLP);
-					fmt2 = MSG_INTL(MSG_DEF_NEWTD);
-#else
-					fmt1 = MSG_INTL(MSG_DEF_OLDDLP);
-					fmt2 = MSG_INTL(MSG_DEF_OLDTD);
-#endif
-#endif
-				}
 				(void) printf(fmt1);
 				(void) printf(fmt2);
 

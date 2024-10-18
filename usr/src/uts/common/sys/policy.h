@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2015, Joyent, Inc. All rights reserved.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 #ifndef	_SYS_POLICY_H
@@ -53,12 +54,12 @@ typedef uint16_t in_port_t;
  * priv_policy_choice
  *		determines extend of operation
  *		audit on success
- * 		returns a boolean_t indicating success (B_TRUE) or failure.
+ *		returns a boolean_t indicating success (B_TRUE) or failure.
  *
  * priv_policy_only
  *		when auditing is in appropriate (interrupt context)
  *		to determine context of operation
- * 		returns a boolean_t indicating success (B_TRUE) or failure.
+ *		returns a boolean_t indicating success (B_TRUE) or failure.
  *
  */
 int priv_policy(const cred_t *, int, boolean_t, int, const char *);
@@ -162,11 +163,12 @@ int secpolicy_vnode_create_gid(const cred_t *);
 int secpolicy_vnode_owner(const cred_t *, uid_t);
 int secpolicy_vnode_remove(const cred_t *);
 int secpolicy_vnode_setdac(const cred_t *, uid_t);
+int secpolicy_vnode_setdac3(const cred_t *, uid_t, boolean_t);
 int secpolicy_vnode_setid_retain(const cred_t *, boolean_t);
 int secpolicy_vnode_setids_setgids(const cred_t *, gid_t);
 int secpolicy_vnode_stky_modify(const cred_t *);
 int secpolicy_vscan(const cred_t *);
-int secpolicy_xhci(const cred_t *);
+int secpolicy_hwmanip(const cred_t *);
 int secpolicy_zinject(const cred_t *);
 int secpolicy_zfs(const cred_t *);
 int secpolicy_ucode_update(const cred_t *);

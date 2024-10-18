@@ -24,8 +24,6 @@
  *  Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -264,11 +262,11 @@ main(int argc, char **argv)
 
 	act.sa_handler = timer;
 	act.sa_flags = SA_RESTART;
-	(void *) sigemptyset(&act.sa_mask);
-	(void *) sigaddset(&act.sa_mask, SIGALRM);
-	(void *) sigaddset(&act.sa_mask, SIGHUP);
-	(void *) sigaction(SIGALRM, &act, NULL);
-	(void *) sigaction(SIGHUP, &act, NULL);
+	(void) sigemptyset(&act.sa_mask);
+	(void) sigaddset(&act.sa_mask, SIGALRM);
+	(void) sigaddset(&act.sa_mask, SIGHUP);
+	(void) sigaction(SIGALRM, &act, NULL);
+	(void) sigaction(SIGHUP, &act, NULL);
 
 	if (debugl == MAX_TND_DEBUG) {
 		(void) fprintf(logf, "%s : ", gettime());

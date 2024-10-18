@@ -23,18 +23,11 @@
 # Copyright (c) 2000-2001 by Sun Microsystems, Inc.
 # All rights reserved.
 #
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-#
-# lib/libfru/sparc/Makefile
-#
 
 include ../Makefile.obj
 include ../Makefile.flag
 LDLIBS += -L$(SRC)/lib/libfruutils/$(MACH) -lfruutils
 LDLIBS += -L$(SRC)/lib/libfru/libfrureg/$(MACH) -lfrureg
-
-# Redefine this such that libC is found.
-BUILDCCC.SO=	$(LINK.cc) $(DYNFLAGS) -o $@ -G  $(PICS) $(LDLIBS)
 
 install: all $(ROOTLIBDIR) $(ROOTLINKSCCC)
 

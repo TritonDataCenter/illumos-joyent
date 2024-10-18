@@ -27,8 +27,6 @@
 #ifndef	_GNU_MSGFMT_H
 #define	_GNU_MSGFMT_H
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdio.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -114,7 +112,7 @@ struct msgtbl {
 
 extern int	yyparse(void);
 extern int	yylex(void);
-extern void	yyerror(const char *);
+extern int	yyerror(const char *) __NORETURN;
 extern void	handle_domain(char *);
 extern void	handle_comment(char *);
 extern void	handle_message(struct entry *, struct entry *);

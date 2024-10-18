@@ -21,12 +21,10 @@
  */
 
 /*
- * Copyright 2018, Richard Lowe.
- */
-/*
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
+ * Copyright 2018 Richard Lowe.
  * Copyright 2019 Joyent, Inc.
  */
 
@@ -38,17 +36,18 @@
  *
  */
 
-/* If you modify this file, you must increment CW_VERSION */
-#define	CW_VERSION	"5.0"
+/*
+ * If you modify this file, you must increment CW_VERSION.  This is a semver,
+ * incompatible changes should bump the major, anything else the minor.
+ */
+#define	CW_VERSION	"9.1"
 
 /*
  * -#		Verbose mode
  * -###		Show compiler commands built by driver, no compilation
  * -A<name[(tokens)]>	Preprocessor predicate assertion
- * -B<[static|dynamic]>	Specify dynamic or static binding
  * -C		Prevent preprocessor from removing comments
  * -c		Compile only - produce .o files, suppress linking
- * -cg92	Alias for -xtarget=ss1000
  * -D<name[=token]>	Associate name with token as if by #define
  * -d[y|n]	dynamic [-dy] or static [-dn] option to linker
  * -E		Compile source through preprocessor only, output to stdout
@@ -56,17 +55,6 @@
  * -errtags=<a>	Display messages with tags a(no, yes)
  * -errwarn=<t>	Treats warnings specified by tags t(%none, %all, <tag list>)
  *		as errors
- * -fast	Optimize using a selection of options
- * -fd		Report old-style function definitions and declarations
- * -fnonstd	Initialize floating-point hardware to non-standard preferences
- * -fns[=<yes|no>] Select non-standard floating point mode
- * -fprecision=<p> Set FP rounding precision mode p(single, double, extended)
- * -fround=<r>	Select the IEEE rounding mode in effect at startup
- * -fsimple[=<n>] Select floating-point optimization preferences <n>
- * -fsingle	Use single-precision arithmetic (-Xt and -Xs modes only)
- * -ftrap=<t>	Select floating-point trapping mode in effect at startup
- * -fstore	force floating pt. values to target precision on assignment
- * -G		Build a dynamic shared library
  * -g		Compile for debugging
  * -H		Print path name of each file included during compilation
  * -h <name>	Assign <name> to generated dynamic shared library
@@ -75,19 +63,11 @@
  * -keeptmp	Keep temporary files created during compilation
  * -L<dir>	Pass to linker to add <dir> to the library search path
  * -l<name>	Link with library lib<name>.a or lib<name>.so
- * -mc		Remove duplicate strings from .comment section of output files
- * -mr		Remove all strings from .comment section of output files
- * -mr,"string"	Remove all strings and append "string" to .comment section
  * -mt		Specify options needed when compiling multi-threaded code
- * -native	Find available processor, generate code accordingly
- * -nofstore	Do not force floating pt. values to target precision
- *		on assignment
- * -norunpath	Do not build in a runtime path for shared libraries
  * -O		Use default optimization level (-xO2 or -xO3. Check man page.)
  * -o <outputfile> Set name of output file to <outputfile>
  * -P		Compile source through preprocessor only, output to .i  file
  * -p		Compile for profiling with prof
- * -Q[y|n]	Emit/don't emit identification info to output file
  * -R<dir[:dir]> Build runtime search path list into executable
  * -S		Compile and only generate assembly code (.s)
  * -s		Strip symbol table from the executable file
@@ -100,50 +80,13 @@
  * -Xa		Compile assuming ANSI C conformance, allow K & R extensions
  *		(default mode)
  * -Xs		Compile assuming (pre-ANSI) K & R C style code
- * -Xt		Compile assuming K & R conformance, allow ANSI C
  * -xarch=<a>	Specify target architecture instruction set
  * -xbuiltin[=<b>] When profitable inline, or substitute intrinisic functions
  *		for system functions, b={%all,%none}
- * -xCC		Accept C++ style comments
  * -xchip=<c>	Specify the target processor for use by the optimizer
- * -xcode=<c>	Generate different code for forming addresses
- * -xcrossfile[=<n>] Enable optimization and inlining across source files,
- *		n={0|1}
- * -xe		Perform only syntax/semantic checking, no code generation
- * -xF		Compile for later mapfile reordering or unused section
- *		elimination
- * -xhelp=<f>	Display on-line help information f(flags, readme, errors)
- * -xildoff	Cancel -xildon
- * -xildon	Enable use of the incremental linker, ild
- * -xinline=[<a>,...,<a>]  Attempt inlining of specified user routines,
- *		<a>={%auto,func,no%func}
- * -xlibmieee	Force IEEE 754 return values for math routines in
- *		exceptional cases
- * -xlibmil	Inline selected libm math routines for optimization
- * -xlic_lib=sunperf	Link in the Sun supplied performance libraries
- * -xlicinfo	Show license server information
- * -xmaxopt=[off,1,2,3,4,5] maximum optimization level allowed on #pragma opt
  * -xO<n>	Generate optimized code (n={1|2|3|4|5})
- * -xP		Print prototypes for function definitions
- * -xprofile=<p> Collect data for a profile or use a profile to optimize
- *		<p>={{collect,use}[:<path>],tcov}
- * -xregs=<r>	Control register allocation
- * -xs		Allow debugging without object (.o) files
- * -xsb		Compile for use with the WorkShop source browser
- * -xsbfast	Generate only WorkShop source browser info, no compilation
- * -xsfpconst	Represent unsuffixed floating point constants as single
- *		precision
- * -xspace	Do not do optimizations that increase code size
- * -xstrconst	Place string literals into read-only data segment
  * -xtarget=<t>	Specify target system for optimization
- * -xtemp=<dir>	Set directory for temporary files to <dir>
- * -xtime	Report the execution time for each compilation phase
- * -xunroll=n	Enable unrolling loops n times where possible
- * -Y<c>,<dir>	Specify <dir> for location of component <c> (a,l,m,p,0,h,i,u)
- * -YA,<dir>	Change default directory searched for components
- * -YI,<dir>	Change default directory searched for include files
- * -YP,<dir>	Change default directory for finding libraries files
- * -YS,<dir>	Change default directory for startup object files
+ * -YI,<dir>	Specify <dir> for location of headers
  */
 
 /*
@@ -156,100 +99,43 @@
  * -B<[static|dynamic]>		pass-thru (syntax error for anything else)
  * -C				pass-thru
  * -c				pass-thru
- * -cg92			-m32 -mcpu=v8 -mtune=supersparc (SPARC only)
  * -D<name[=token]>		pass-thru
- * -dy or -dn			-Wl,-dy or -Wl,-dn
  * -E				pass-thru
- * -erroff=E_EMPTY_TRANSLATION_UNIT ignore
  * -errtags=%all		-Wall
  * -errwarn=%all		-Werror else -Wno-error
- * -fast			error
- * -fd				error
- * -fnonstd			error
- * -fns[=<yes|no>]		error
- * -fprecision=<p>		error
- * -fround=<r>			error
- * -fsimple[=<n>]		error
- * -fsingle[=<n>]		error
- * -ftrap=<t>			error
- * -fstore			error
- * -G				pass-thru
  * -g				pass-thru
  * -H				pass-thru
- * -h <name>			pass-thru
  * -I<dir>			pass-thru
  * -i				pass-thru
  * -keeptmp			-save-temps
  * -L<dir>			pass-thru
  * -l<name>			pass-thru
- * -mc				error
- * -mr				error
- * -mr,"string"			error
  * -mt				-D_REENTRANT
- * -native			error
- * -nofstore			error
  * -nolib			-nodefaultlibs
- * -norunpath			ignore
  * -O				-O1 (Check the man page to be certain)
  * -o <outputfile>		pass-thru
  * -P				-E -o filename.i (or error)
  * -p				pass-thru
- * -Q[y|n]			error
  * -R<dir[:dir]>		pass-thru
  * -S				pass-thru
- * -s				-Wl,-s
- * -t				-Wl,-t
  * -U<name>			pass-thru
  * -V				--version
  * -v				-Wall
  * -Wa,<arg>			pass-thru
- * -Wp,<arg>			pass-thru except -xc99=<a>
+ * -Wp,<arg>			pass-thru
  * -Wl,<arg>			pass-thru
- * -W{m,0,2,h,i,u>		error/ignore
  * -xmodel=kernel		-ffreestanding -mcmodel=kernel -mno-red-zone
  * -Wu,-save_args		-msave-args
  * -w				pass-thru
  * -Xa				-std=iso9899:199409 or -ansi
- * -Xt				error
  * -Xs				-traditional -std=c89
  * -xarch=<a>			table
  * -xbuiltin[=<b>]		-fbuiltin (-fno-builtin otherwise)
- * -xCC				ignore
  * -xchip=<c>			table
- * -xcode=<c>			table
- * -xcrossfile[=<n>]		ignore
- * -xe				error
- * -xF				error
- * -xhelp=<f>			error
- * -xildoff			ignore
- * -xildon			ignore
- * -xinline			ignore
- * -xlibmieee			error
- * -xlibmil			error
- * -xlic_lib=sunperf		error
- * -xmaxopt=[...]		error
  * -xO<n>			-O<n>
- * -xP				error
- * -xprofile=<p>		error
- * -xregs=<r>			table
- * -xs				error
- * -xsb				error
- * -xsbfast			error
- * -xsfpconst			error
- * -xspace			ignore (-not -Os)
- * -xstrconst			ignore
  * -xtarget=<t>			table
- * -xtemp=<dir>			error
- * -xtime			error
  * -xtransition			-Wtransition
- * -xunroll=n			error
- * -W0,-xdbggen=no%usedonly	-fno-eliminate-unused-debug-symbols
- *				-fno-eliminate-unused-debug-types
- * -Y<c>,<dir>			error
- * -YA,<dir>			error
  * -YI,<dir>			-nostdinc -I<dir>
- * -YP,<dir>			error
- * -YS,<dir>			error
  */
 
 #include <ctype.h>
@@ -259,6 +145,7 @@
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -351,21 +238,6 @@ static const xarch_table_t xtbl[] = {
 	{ "pentium_pro", SS11,	{ "-march=pentiumpro" } },
 	{ "sse",	SS11, { "-msse", "-mfpmath=sse" } },
 	{ "sse2",	SS11, { "-msse2", "-mfpmath=sse" } },
-#elif defined(__sparc)
-	{ "generic",	(SS11|M32), { "-m32", "-mcpu=v8" } },
-	{ "generic64",	(SS11|M64), { "-m64", "-mcpu=v9" } },
-	{ "v8",		(SS11|M32), { "-m32", "-mcpu=v8", "-mno-v8plus" } },
-	{ "v8plus",	(SS11|M32), { "-m32", "-mcpu=v9", "-mv8plus" } },
-	{ "v8plusa",	(SS11|M32), { "-m32", "-mcpu=ultrasparc", "-mv8plus",
-			"-mvis" } },
-	{ "v8plusb",	(SS11|M32), { "-m32", "-mcpu=ultrasparc3", "-mv8plus",
-			"-mvis" } },
-	{ "v9",		(SS11|M64), { "-m64", "-mcpu=v9" } },
-	{ "v9a",	(SS11|M64), { "-m64", "-mcpu=ultrasparc", "-mvis" } },
-	{ "v9b",	(SS11|M64), { "-m64", "-mcpu=ultrasparc3", "-mvis" } },
-	{ "sparc",	SS12, { "-mcpu=v9", "-mv8plus" } },
-	{ "sparcvis",	SS12, { "-mcpu=ultrasparc", "-mvis" } },
-	{ "sparcvis2",	SS12, { "-mcpu=ultrasparc3", "-mvis" } }
 #endif
 };
 
@@ -377,21 +249,6 @@ static const char *xchip_tbl[] = {
 	"486",		"-mtune=i486", NULL,
 	"pentium",	"-mtune=pentium", NULL,
 	"pentium_pro",  "-mtune=pentiumpro", NULL,
-#elif defined(__sparc)
-	"super",	"-mtune=supersparc", NULL,
-	"ultra",	"-mtune=ultrasparc", NULL,
-	"ultra3",	"-mtune=ultrasparc3", NULL,
-#endif
-	NULL,		NULL
-};
-
-static const char *xcode_tbl[] = {
-#if defined(__sparc)
-	"abs32",	"-fno-pic", "-mcmodel=medlow", NULL,
-	"abs44",	"-fno-pic", "-mcmodel=medmid", NULL,
-	"abs64",	"-fno-pic", "-mcmodel=medany", NULL,
-	"pic13",	"-fpic", NULL,
-	"pic32",	"-fPIC", NULL,
 #endif
 	NULL,		NULL
 };
@@ -400,16 +257,6 @@ static const char *xtarget_tbl[] = {
 #if defined(__x86)
 	"pentium_pro",	"-march=pentiumpro", NULL,
 #endif	/* __x86 */
-	NULL,		NULL
-};
-
-static const char *xregs_tbl[] = {
-#if defined(__sparc)
-	"appl",		"-mapp-regs", NULL,
-	"no%appl",	"-mno-app-regs", NULL,
-	"float",	"-mfpu", NULL,
-	"no%float",	"-mno-fpu", NULL,
-#endif	/* __sparc */
 	NULL,		NULL
 };
 
@@ -500,7 +347,7 @@ usage(void)
 {
 	extern char *__progname;
 	(void) fprintf(stderr,
-	    "usage: %s [-C] [--versions] --primary <compiler> "
+	    "usage: %s [-C] [--tag arg] [--versions] --primary <compiler> "
 	    "[--shadow <compiler>]... -- cflags...\n",
 	    __progname);
 	(void) fprintf(stderr, "compilers take the form: name,path,style\n"
@@ -594,13 +441,13 @@ discard_file_name(cw_ictx_t *ctx, const char *path)
 	return (ret);
 }
 
-static boolean_t
+static bool
 is_source_file(const char *path)
 {
 	char *ext = strrchr(path, '.');
 
 	if ((ext == NULL) || (*(ext + 1) == '\0'))
-		return (B_FALSE);
+		return (false);
 
 	ext += 1;
 
@@ -609,12 +456,27 @@ is_source_file(const char *path)
 	    (strcmp(ext, "i") == 0) ||
 	    (strcasecmp(ext, "s") == 0) ||
 	    (strcmp(ext, "cpp") == 0)) {
-		return (B_TRUE);
+		return (true);
 	}
 
-	return (B_FALSE);
+	return (false);
 }
 
+static bool
+is_asm_file(const char *path)
+{
+	char *ext = strrchr(path, '.');
+
+	if ((ext == NULL) || (*(ext + 1) == '\0'))
+		return (false);
+
+	ext += 1;
+
+	if (strcasecmp(ext, "s") == 0)
+		return (true);
+
+	return (false);
+}
 
 static void
 do_gcc(cw_ictx_t *ctx)
@@ -640,17 +502,6 @@ do_gcc(cw_ictx_t *ctx)
 	newae(ctx->i_ae, "-fdiagnostics-show-option");
 	newae(ctx->i_ae, "-nodefaultlibs");
 
-#if defined(__sparc)
-	/*
-	 * The SPARC ldd and std instructions require 8-byte alignment of
-	 * their address operand.  gcc correctly uses them only when the
-	 * ABI requires 8-byte alignment; unfortunately we have a number of
-	 * pieces of buggy code that doesn't conform to the ABI.  This
-	 * flag makes gcc work more like Studio with -xmemalign=4.
-	 */
-	newae(ctx->i_ae, "-mno-integer-ldd-std");
-#endif
-
 	/*
 	 * This is needed because 'u' is defined
 	 * under a conditional on 'sun'.  Should
@@ -674,13 +525,6 @@ do_gcc(cw_ictx_t *ctx)
 		if (*arg == '-') {
 			arglen--;
 		} else {
-			/*
-			 * Discard inline files that gcc doesn't grok
-			 */
-			if (!in_output && arglen > 3 &&
-			    strcmp(arg + arglen - 3, ".il") == 0)
-				continue;
-
 			if (!in_output && is_source_file(arg))
 				c_files++;
 
@@ -704,25 +548,10 @@ do_gcc(cw_ictx_t *ctx)
 				newae(ctx->i_ae, strchr(arg, '=') + 1);
 				continue;
 			}
-			if (strncmp(arg, "-compat=", 8) == 0) {
-				/* discard -compat=4 and -compat=5 */
-				continue;
-			}
-			if (strcmp(arg, "-Qoption") == 0) {
-				/* discard -Qoption and its two arguments */
-				if (ctx->i_oldargc < 3)
-					error(arg);
-				ctx->i_oldargc -= 2;
-				ctx->i_oldargv += 2;
-				continue;
-			}
+
 			if (strcmp(arg, "-xwe") == 0) {
 				/* turn warnings into errors */
 				newae(ctx->i_ae, "-Werror");
-				continue;
-			}
-			if (strcmp(arg, "-norunpath") == 0) {
-				/* gcc has no corresponding option */
 				continue;
 			}
 			if (strcmp(arg, "-nolib") == 0) {
@@ -730,13 +559,6 @@ do_gcc(cw_ictx_t *ctx)
 				nolibc = 1;
 				continue;
 			}
-#if defined(__sparc)
-			if (strcmp(arg, "-cg92") == 0) {
-				mflag |= xlate_xtb(ctx->i_ae, "v8");
-				xlate(ctx->i_ae, "super", xchip_tbl);
-				continue;
-			}
-#endif	/* __sparc */
 		}
 
 		switch ((c = arg[1])) {
@@ -790,7 +612,6 @@ do_gcc(cw_ictx_t *ctx)
 			break;
 		case 'A':
 		case 'g':
-		case 'h':
 		case 'I':
 		case 'i':
 		case 'L':
@@ -822,39 +643,7 @@ do_gcc(cw_ictx_t *ctx)
 			    strcmp(arg, "-D_BOOT") == 0)
 				newae(ctx->i_ae, "-ffreestanding");
 			break;
-		case 'd':
-			if (arglen == 2) {
-				if (strcmp(arg, "-dy") == 0) {
-					newae(ctx->i_ae, "-Wl,-dy");
-					break;
-				}
-				if (strcmp(arg, "-dn") == 0) {
-					newae(ctx->i_ae, "-Wl,-dn");
-					break;
-				}
-			}
-			if (strcmp(arg, "-dalign") == 0) {
-				/*
-				 * -dalign forces alignment in some cases;
-				 * gcc does not need any flag to do this.
-				 */
-				break;
-			}
-			error(arg);
-			break;
 		case 'e':
-			if (strcmp(arg,
-			    "-erroff=E_EMPTY_TRANSLATION_UNIT") == 0) {
-				/*
-				 * Accept but ignore this -- gcc doesn't
-				 * seem to complain about empty translation
-				 * units
-				 */
-				break;
-			}
-			/* XX64 -- ignore all -erroff= options, for now */
-			if (strncmp(arg, "-erroff=", 8) == 0)
-				break;
 			if (strcmp(arg, "-errtags=yes") == 0) {
 				warnings(ctx->i_ae);
 				break;
@@ -864,10 +653,6 @@ do_gcc(cw_ictx_t *ctx)
 				break;
 			}
 			error(arg);
-			break;
-		case 'G':
-			newae(ctx->i_ae, "-shared");
-			nolibc = 1;
 			break;
 		case 'k':
 			if (strcmp(arg, "-keeptmp") == 0) {
@@ -896,30 +681,6 @@ do_gcc(cw_ictx_t *ctx)
 			}
 			error(arg);
 			break;
-		case 'B':	/* linker options */
-		case 'M':
-		case 'z':
-			{
-				char *opt;
-				size_t len;
-				char *s;
-
-				if (arglen == 1) {
-					opt = *++ctx->i_oldargv;
-					if (opt == NULL || *opt == '\0')
-						error(arg);
-					ctx->i_oldargc--;
-				} else {
-					opt = arg + 2;
-				}
-				len = strlen(opt) + 7;
-				if ((s = malloc(len)) == NULL)
-					nomem();
-				(void) snprintf(s, len, "-Wl,-%c%s", c, opt);
-				newae(ctx->i_ae, s);
-				free(s);
-			}
-			break;
 		case 'O':
 			if (arglen == 1) {
 				newae(ctx->i_ae, "-O");
@@ -940,19 +701,14 @@ do_gcc(cw_ictx_t *ctx)
 			nolibc = 1;
 			break;
 		case 's':
-			if (arglen == 1) {
-				newae(ctx->i_ae, "-Wl,-s");
+			if (strcmp(arg, "-shared") == 0) {
+				newae(ctx->i_ae, "-shared");
+				nolibc = 1;
 				break;
 			}
 			error(arg);
 			break;
-		case 't':
-			if (arglen == 1) {
-				newae(ctx->i_ae, "-Wl,-t");
-				break;
-			}
-			error(arg);
-			break;
+
 		case 'V':
 			if (arglen == 1) {
 				ctx->i_flags &= ~CW_F_ECHO;
@@ -969,75 +725,13 @@ do_gcc(cw_ictx_t *ctx)
 			error(arg);
 			break;
 		case 'W':
-			if (strncmp(arg, "-Wp,-xc99", 9) == 0) {
-				/*
-				 * gcc's preprocessor will accept c99
-				 * regardless, so accept and ignore.
-				 */
-				break;
-			}
 			if (strncmp(arg, "-Wa,", 4) == 0 ||
 			    strncmp(arg, "-Wp,", 4) == 0 ||
 			    strncmp(arg, "-Wl,", 4) == 0) {
 				newae(ctx->i_ae, arg);
 				break;
 			}
-			if (strcmp(arg, "-W0,-noglobal") == 0 ||
-			    strcmp(arg, "-W0,-xglobalstatic") == 0) {
-				/*
-				 * gcc doesn't prefix local symbols
-				 * in debug mode, so this is not needed.
-				 */
-				break;
-			}
-			if (strcmp(arg, "-W0,-Lt") == 0) {
-				/*
-				 * Generate tests at the top of loops.
-				 * There is no direct gcc equivalent, ignore.
-				 */
-				break;
-			}
-			if (strcmp(arg, "-W0,-xdbggen=no%usedonly") == 0) {
-				newae(ctx->i_ae,
-				    "-fno-eliminate-unused-debug-symbols");
-				newae(ctx->i_ae,
-				    "-fno-eliminate-unused-debug-types");
-				break;
-			}
-			if (strcmp(arg, "-W2,-xwrap_int") == 0) {
-				/*
-				 * Use the legacy behaviour (pre-SS11)
-				 * for integer wrapping.
-				 * gcc does not need this.
-				 */
-				break;
-			}
-			if (strcmp(arg, "-Wd,-xsafe=unboundsym") == 0) {
-				/*
-				 * Prevents optimizing away checks for
-				 * unbound weak symbol addresses.  gcc does
-				 * not do this, so it's not needed.
-				 */
-				break;
-			}
-			if (strncmp(arg, "-Wc,-xcode=", 11) == 0) {
-				xlate(ctx->i_ae, arg + 11, xcode_tbl);
-				break;
-			}
-			if (strncmp(arg, "-Wc,-Qiselect", 13) == 0) {
-				/*
-				 * Prevents insertion of register symbols.
-				 * gcc doesn't do this, so ignore it.
-				 */
-				break;
-			}
-			if (strcmp(arg, "-Wc,-Qassembler-ounrefsym=0") == 0) {
-				/*
-				 * Prevents optimizing away of static variables.
-				 * gcc does not do this, so it's not needed.
-				 */
-				break;
-			}
+
 #if defined(__x86)
 			if (strcmp(arg, "-Wu,-save_args") == 0) {
 				newae(ctx->i_ae, "-msave-args");
@@ -1047,10 +741,6 @@ do_gcc(cw_ictx_t *ctx)
 			error(arg);
 			break;
 		case 'X':
-			if (strcmp(arg, "-Xa") == 0 ||
-			    strcmp(arg, "-Xt") == 0) {
-				break;
-			}
 			if (strcmp(arg, "-Xs") == 0) {
 				Xsmode(ctx->i_ae);
 				break;
@@ -1076,12 +766,6 @@ do_gcc(cw_ictx_t *ctx)
 				}
 				error(arg);
 				break;
-			case 'C':
-				/* Accept C++ style comments -- ignore */
-				if (strcmp(arg, "-xCC") == 0)
-					break;
-				error(arg);
-				break;
 			case 'c':
 				if (strncmp(arg, "-xc99=%all", 10) == 0) {
 					newae(ctx->i_ae, "-std=gnu99");
@@ -1095,32 +779,7 @@ do_gcc(cw_ictx_t *ctx)
 					xlate(ctx->i_ae, arg + 7, xchip_tbl);
 					break;
 				}
-				if (strncmp(arg, "-xcode=", 7) == 0) {
-					xlate(ctx->i_ae, arg + 7, xcode_tbl);
-					break;
-				}
-				if (strncmp(arg, "-xcrossfile", 11) == 0)
-					break;
-				error(arg);
-				break;
-			case 'F':
-				/*
-				 * Compile for mapfile reordering, or unused
-				 * section elimination, syntax can be -xF or
-				 * more complex, like -xF=%all -- ignore.
-				 */
-				if (strncmp(arg, "-xF", 3) == 0)
-					break;
-				error(arg);
-				break;
-			case 'i':
-				if (strncmp(arg, "-xinline", 8) == 0)
-					/* No inlining; ignore */
-					break;
-				if (strcmp(arg, "-xildon") == 0 ||
-				    strcmp(arg, "-xildoff") == 0)
-					/* No incremental linking; ignore */
-					break;
+
 				error(arg);
 				break;
 #if defined(__x86)
@@ -1168,20 +827,6 @@ do_gcc(cw_ictx_t *ctx)
 				}
 				error(arg);
 				break;
-			case 'r':
-				if (strncmp(arg, "-xregs=", 7) == 0) {
-					xlate(ctx->i_ae, arg + 7, xregs_tbl);
-					break;
-				}
-				error(arg);
-				break;
-			case 's':
-				if (strcmp(arg, "-xs") == 0 ||
-				    strcmp(arg, "-xspace") == 0 ||
-				    strcmp(arg, "-xstrconst") == 0)
-					break;
-				error(arg);
-				break;
 			case 't':
 				if (strncmp(arg, "-xtarget=", 9) == 0) {
 					xlate(ctx->i_ae, arg + 9, xtarget_tbl);
@@ -1189,9 +834,6 @@ do_gcc(cw_ictx_t *ctx)
 				}
 				error(arg);
 				break;
-			case 'e':
-			case 'h':
-			case 'l':
 			default:
 				error(arg);
 				break;
@@ -1207,9 +849,6 @@ do_gcc(cw_ictx_t *ctx)
 			} else {
 				arg += 2;
 			}
-			/* Just ignore -YS,... for now */
-			if (strncmp(arg, "S,", 2) == 0)
-				break;
 			if (strncmp(arg, "I,", 2) == 0) {
 				char *s = strdup(arg);
 				s[0] = '-';
@@ -1221,10 +860,6 @@ do_gcc(cw_ictx_t *ctx)
 			}
 			error(arg);
 			break;
-		case 'Q':
-			/*
-			 * We could map -Qy into -Wl,-Qy etc.
-			 */
 		default:
 			error(arg);
 			break;
@@ -1259,49 +894,13 @@ do_gcc(cw_ictx_t *ctx)
 
 	switch (mflag) {
 	case 0:
-		/* FALLTHROUGH */
 	case M32:
-#if defined(__sparc)
-		/*
-		 * Only -m32 is defined and so put in the missing xarch
-		 * translation.
-		 */
-		newae(ctx->i_ae, "-mcpu=v8");
-		newae(ctx->i_ae, "-mno-v8plus");
-#endif
-		break;
 	case M64:
-#if defined(__sparc)
-		/*
-		 * Only -m64 is defined and so put in the missing xarch
-		 * translation.
-		 */
-		newae(ctx->i_ae, "-mcpu=v9");
-#endif
-		break;
 	case SS12:
-#if defined(__sparc)
-		/* no -m32/-m64 flag used - this is an error for sparc builds */
-		(void) fprintf(stderr, "No -m32/-m64 flag defined\n");
-		exit(2);
-#endif
-		break;
 	case SS11:
-		/* FALLTHROUGH */
 	case (SS11|M32):
 	case (SS11|M64):
-		break;
 	case (SS12|M32):
-#if defined(__sparc)
-		/*
-		 * Need to add in further 32 bit options because with SS12
-		 * the xarch=sparcvis option can be applied to 32 or 64
-		 * bit, and so the translatation table (xtbl) cannot handle
-		 * that.
-		 */
-		newae(ctx->i_ae, "-mv8plus");
-#endif
-		break;
 	case (SS12|M64):
 		break;
 	default:
@@ -1342,7 +941,13 @@ do_smatch(cw_ictx_t *ctx)
 		char *arg = ctx->i_oldargv[i];
 
 		if (strcmp(arg, "-_smatch=off") == 0) {
-			ctx->i_flags &= ~ (CW_F_EXEC | CW_F_ECHO);
+			ctx->i_flags &= ~(CW_F_EXEC | CW_F_ECHO);
+			return;
+		}
+
+		/* smatch can't handle asm */
+		if ((arg[0] != '-') && is_asm_file(arg)) {
+			ctx->i_flags &= ~(CW_F_EXEC | CW_F_ECHO);
 			return;
 		}
 	}
@@ -1488,13 +1093,33 @@ prepctx(cw_ictx_t *ctx)
 static int
 invoke(cw_ictx_t *ctx)
 {
-	char **newargv;
+	char **newargv, *makeflags;
 	int ac;
 	struct ae *a;
 
-	if ((newargv = calloc(sizeof (*newargv), ctx->i_ae->ael_argc + 1)) ==
-	    NULL)
+	newargv = calloc(ctx->i_ae->ael_argc + 1, sizeof (*newargv));
+	if (newargv == NULL)
 		nomem();
+
+	/*
+	 * Check to see if the silent make flag is present (-s), if so, do not
+	 * echo. The MAKEFLAGS environment variable is set by dmake. By
+	 * observation it appears to place short flags without any arguments
+	 * first followed by any long form flags or flags with arguments.
+	 */
+	makeflags = getenv("MAKEFLAGS");
+	if (makeflags != NULL) {
+		size_t makeflags_len = strlen(makeflags);
+		for (size_t i = 0; i < makeflags_len; i++) {
+			if (makeflags[i] == 's') {
+				ctx->i_flags &= ~CW_F_ECHO;
+				break;
+			}
+			/* end of short flags */
+			if (makeflags[i] == ' ')
+				break;
+		}
+	}
 
 	if (ctx->i_flags & CW_F_ECHO)
 		(void) fprintf(stderr, "+ ");
@@ -1716,12 +1341,12 @@ main(int argc, char **argv)
 	cw_compiler_t shadows[10];
 	int nshadows = 0;
 	int ret = 0;
-	boolean_t do_serial = B_FALSE;
-	boolean_t do_exec = B_FALSE;
-	boolean_t vflg = B_FALSE;
-	boolean_t Cflg = B_FALSE;
-	boolean_t cflg = B_FALSE;
-	boolean_t nflg = B_FALSE;
+	bool do_serial;
+	bool do_exec;
+	bool vflg = false;
+	bool Cflg = false;
+	bool cflg = false;
+	bool nflg = false;
 	char *tmpdir;
 
 	cw_ictx_t *main_ctx;
@@ -1732,6 +1357,7 @@ main(int argc, char **argv)
 		{ "noecho", no_argument, NULL, 'n' },
 		{ "primary", required_argument, NULL, 'p' },
 		{ "shadow", required_argument, NULL, 's' },
+		{ "tag", required_argument, NULL, 't' },
 		{ "versions", no_argument, NULL, 'v' },
 		{ NULL, 0, NULL, 0 },
 	};
@@ -1743,17 +1369,17 @@ main(int argc, char **argv)
 	while ((ch = getopt_long(argc, argv, "C", longopts, NULL)) != -1) {
 		switch (ch) {
 		case 'c':
-			cflg = B_TRUE;
+			cflg = true;
 			break;
 		case 'C':
-			Cflg = B_TRUE;
+			Cflg = true;
 			break;
 		case 'l':
 			if ((main_ctx->i_linker = strdup(optarg)) == NULL)
 				nomem();
 			break;
 		case 'n':
-			nflg = B_TRUE;
+			nflg = true;
 			break;
 		case 'p':
 			if (primary.c_path != NULL) {
@@ -1771,8 +1397,10 @@ main(int argc, char **argv)
 			parse_compiler(optarg, &shadows[nshadows]);
 			nshadows++;
 			break;
+		case 't':	/* Ignored, a diagnostic in build logs only */
+			break;
 		case 'v':
-			vflg = B_TRUE;
+			vflg = true;
 			break;
 		default:
 			(void) fprintf(stderr, "Did you forget '--'?\n");
@@ -1785,8 +1413,8 @@ main(int argc, char **argv)
 		usage();
 	}
 
-	do_serial = (getenv("CW_SHADOW_SERIAL") == NULL) ? B_FALSE : B_TRUE;
-	do_exec = (getenv("CW_NO_EXEC") == NULL) ? B_TRUE : B_FALSE;
+	do_serial = getenv("CW_SHADOW_SERIAL") != NULL;
+	do_exec = getenv("CW_NO_EXEC") == NULL;
 
 	/* Leave room for argv[0] */
 	argc -= (optind - 1);

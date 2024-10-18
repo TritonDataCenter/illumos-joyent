@@ -143,15 +143,15 @@ extern "C" {
 /*
  * (This structure definition is specified in the i386 ABI supplement)
  * It's likely we can just get rid of the struct __old_fpu or maybe
- * move it to $SRC/uts/intel/ia32/os/fpu.c which appears to be the
+ * move it to $SRC/uts/intel/os/fpu.c which appears to be the
  * only place that uses it.  See: www.illumos.org/issues/6284
  */
 typedef struct __old_fpu {
 	union {
 		struct __old_fpchip_state	/* fp extension state */
 		{
-			int 	state[27];	/* 287/387 saved state */
-			int 	status;		/* status word saved at */
+			int	state[27];	/* 287/387 saved state */
+			int	status;		/* status word saved at */
 						/* exception */
 		} fpchip_state;
 		struct __old_fp_emul_space	/* for emulator(s) */
@@ -159,9 +159,9 @@ typedef struct __old_fpu {
 			char	fp_emul[246];
 			char	fp_epad[2];
 		} fp_emul_space;
-		int 	f_fpregs[62];		/* union of the above */
+		int	f_fpregs[62];		/* union of the above */
 	} fp_reg_set;
-	long    	f_wregs[33];		/* saved weitek state */
+	long		f_wregs[33];		/* saved weitek state */
 } __old_fpregset_t;
 #endif	/* __i386 */
 
@@ -193,8 +193,8 @@ typedef struct dbregset {
  *
  * Note that the ucontext_t actually describes the general register in terms
  * of the gregset_t data type, as described in this file.  Note also
- * that the core file content is defined by core(4) in terms of data types
- * defined by procfs -- see proc(4).
+ * that the core file content is defined by core(5) in terms of data types
+ * defined by procfs -- see proc(5).
  */
 #if defined(__i386) && \
 	(!defined(_KERNEL) && !defined(_XPG4_2) || defined(__EXTENSIONS__))

@@ -11,8 +11,11 @@
 .\"
 .\" Copyright 2019 Joyent, Inc.
 .\" Copyright 2020 RackTop Systems, Inc.
+.\" Copyright 2023 Oxide Computer Company
+.\" Copyright 2023 Jason King
+.\" Copyright 2023 Peter Tribble
 .\"
-.Dd May 11, 2020
+.Dd July 17, 2023
 .Dt MAC 9E
 .Os
 .Sh NAME
@@ -67,10 +70,60 @@ or
 .Xr close 9E
 routines.
 In addition, all of the work to interact with
-.Xr dlpi 7P
+.Xr dlpi 4P
 is taken care of automatically and transparently.
+.Ss High-Level Design
+At a high-level, a device driver is chiefly concerned with three general
+operations:
+.Bl -enum -offset indent
+.It
+Sending frames
+.It
+Receiving frames
+.It
+Managing device configuration and metadata
+.El
+.Pp
+When sending frames, the MAC framework always calls functions registered
+in the
+.Xr mac_callbacks 9S
+structure to have the driver transmit frames on hardware.
+When receiving frames, the driver will generally receive an interrupt which will
+cause it to check for incoming data and deliver it to the MAC framework.
+.Pp
+Configuration of a device, such as whether auto-negotiation should be
+enabled, the speeds that the device supports, the MTU (maximum
+transmission unit), and the generation of pause frames are all driven by
+properties.
+The functions to get, set, and obtain information about properties are
+defined through callback functions specified in the
+.Xr mac_callbacks 9S
+structure.
+The full list of properties and a description of the relevant callbacks
+can be found in the
+.Sx PROPERTIES
+section.
+.Pp
+The MAC framework is designed to take advantage of various modern
+features provided by hardware, such as checksumming, segmentation
+offload, and hardware filtering.
+The MAC framework assumes none of these advanced features are present
+and allows device drivers to negotiate them through a capability system.
+Drivers can declare that they support various capabilities by
+implementing the optional
+.Xr mc_getcapab 9E
+entry point.
+Each capability has its associated entry points and structures to fill
+out.
+The capabilities are detailed in the
+.Sx CAPABILITIES
+section.
+.Pp
+The following sections describe the flow of a basic device driver.
+For advanced device drivers, the flow is generally the same.
+The primary distinction is in how frames are sent and received.
 .Ss Initializing MAC Support
-For a device to be used in the framework, it must register with the
+For a device to be used by the MAC framework, it must register with the
 framework and take specific actions during
 .Xr _init 9E ,
 .Xr attach 9E ,
@@ -92,12 +145,16 @@ structure should have a
 structure defined for it; however, it does not need to implement any of
 the standard
 .Xr cb_ops 9S
-entry points.
+entry points unless it also exposes a custom set of device nodes not
+otherwise managed by the MAC framework.
+See the
+.Sx Custom Device Nodes
+section for more details.
 .Pp
 Normally, in a driver's
 .Xr _init 9E
 entry point, it passes its
-.Sy modlinkage
+.Xr modlinkage 9S
 structure directly to
 .Xr mod_install 9F .
 To properly register with MAC, the driver must call
@@ -121,6 +178,32 @@ and
 .Xr mac_fini_ops 9F
 functions, see the examples section in
 .Xr mac_init_ops 9F .
+.Ss Custom Device Nodes
+A device may want to provide its own minor nodes as simple character or block
+devices backed by the usual
+.Xr cb_ops 9S
+routines.
+The MAC framework allows for this by leaving a portion of the minor
+number space available for private driver use.
+.Xr mac_private_minor 9F
+returns the first minor number a driver may use for its own purposes,
+e.g., to pass to
+.Xr ddi_create_minor_node 9F .
+.Pp
+A driver making use of this ability must provide its own
+.Xr getinfo 9E
+implementation that is aware of any such minor nodes.
+It must also delegate back to the MAC framework as appropriate via either
+calls to
+.Xr mac_getinfo 9F
+or
+.Xr mac_devt_to_instance 9F
+for MAC reserved minor nodes.
+It should also take care to not affect MAC reserved minors, e.g.,
+removing all minor nodes associated with a device:
+.Bd -literal -offset indent
+    ddi_remove_minor_node(dip, NULL);
+.Ed
 .Ss Registering with MAC
 Every instance of a device should register separately with MAC.
 To register with MAC, a driver must allocate a
@@ -128,7 +211,7 @@ To register with MAC, a driver must allocate a
 structure, fill it in, and then call
 .Xr mac_register 9F .
 The
-.Sy mac_register_t
+.Vt mac_register_t
 structure contains information about the device and all of the required
 function pointers that will be used as callbacks by the framework.
 .Pp
@@ -145,11 +228,11 @@ it will start receiving callbacks from the MAC framework.
 To allocate the registration structure, the driver should call
 .Xr mac_alloc 9F .
 Device drivers should generally always pass the symbol
-.Sy MAC_VERSION
+.Dv MAC_VERSION
 as the argument to
 .Xr mac_alloc 9F .
 Upon successful completion, the driver will receive a
-.Sy mac_register_t
+.Vt mac_register_t
 structure which it should fill in.
 The structure and its members are documented in
 .Xr mac_register 9S .
@@ -176,7 +259,7 @@ should enable interrupts and finish any other initialization required.
 If the call to
 .Xr mac_register 9F
 failed, then it should unwind its initialization and should return
-.Sy DDI_FAILURE
+.Dv DDI_FAILURE
 from its
 .Xr attach 9E
 routine.
@@ -249,13 +332,14 @@ or
 .Xr mac_rx 9F .
 Other routines in the DDI may be called while locks are held; however,
 device driver writers should be careful about calling blocking routines
-while locks are held or in interrupt context, though it is generally
-legal to do so.
+while locks are held or in interrupt context, even when it is
+legal to do so as this may cause all other callers that need a given
+lock to back up behind such an operation.
 .Ss Receiving Data
 A device driver will often receive data through the means of an
-interrupt.
-When that interrupt occurs, the device driver will receive one or more frames
-with optional metadata.
+interrupt or by being asked to poll for frames.
+When this occurs, zero or more frames, each with optional metadata, may
+be ready for the device driver to consume.
 Often each frame has a corresponding descriptor which has information about
 whether or not there were errors or whether or not the device successfully
 checksummed the packet.
@@ -266,10 +350,19 @@ See the section
 .Sx RECEIVE DESCRIPTOR LAYOUT
 for more information.
 .Pp
-During a single interrupt, a device driver should process a fixed number
-of frames.
+During a single interrupt or poll request, a device driver should process
+a fixed number of frames.
 For each frame the device driver should:
 .Bl -enum -offset indent
+.It
+Ensure that all of the DMA memory for the descriptor ring is synchronized with
+the
+.Xr ddi_dma_sync 9F
+function and check the handle for errors if the device driver has enabled DMA
+error reporting as part of the Fault Management Architecture (FMA).
+If the driver does not rely on DMA, then it may skip this step.
+It is recommended that this is performed once per interrupt or poll for
+the entire region and not on a per-packet basis.
 .It
 First check whether or not the frame has errors.
 If errors were detected, then the frame should not be sent to the operating
@@ -301,7 +394,7 @@ should set the corresponding checksumming information with a call to
 It should then append this new message block to the
 .Em end
 of the message block chain, linking it to the
-.Sy b_next
+.Fa b_next
 pointer.
 It is vitally important that all the frames be chained in the order that they
 were received.
@@ -331,6 +424,37 @@ the system can keep up with a driver's delivery rate of frames.
 The rest of the networking stack will handle issues related to keeping up
 appropriately and ensure that kernel memory is not exhausted by packets
 that are not being processed.
+.Pp
+If the device driver has negotiated the
+.Dv MAC_CAPAB_RINGS
+capability
+.Pq discussed in Xr mac_capab_rings 9E
+then it should call
+.Xr mac_rx_ring 9F
+and not
+.Xr mac_rx 9F .
+A given interrupt may correspond to more than one ring that needs to be
+checked.
+The set of rings is likely to span different groups that were registered
+with MAC through the
+.Xr mr_gget 9E
+interface.
+In those cases, the driver should follow the above procedure
+independently for each ring.
+That means it will call
+.Xr mac_rx_ring 9F
+once for each ring using the handle that it received from when MAC
+called the driver's
+.Xr mr_rget 9E
+entry point.
+When it is looking at the rings, the driver will need to make sure that
+the ring has not had interrupts disabled
+.Pq due to a pending change to polling mode .
+This is discussed in greater detail in the
+.Xr mac_capab_rings 9E
+and
+.Xr mri_poll 9E
+manual pages.
 .Pp
 Finally, the device driver should make sure that any other housekeeping
 activities required for the ring are taken care of such that more data
@@ -370,6 +494,22 @@ device driver writers provide private properties for their device to control the
 interrupt coalescing rate.
 This will make it much easier to perform experiments and observe the impact of
 different interrupt rates on the rest of the system.
+.Ss Polling
+Even with interrupt coalescing, when there is a certain incoming packet rate it
+can make more sense to just actively poll the device, asking for more packets
+rather than constantly taking an interrupt.
+When a device driver supports the
+.Xr mac_capab_rings 9E
+capability and therefore polling on receive rings, the MAC framework will ask
+the driver to disable interrupts, with its
+.Xr mi_disable 9E
+entry point, and then subsequently call its polling entry point,
+.Xr mri_poll 9E .
+.Pp
+As long as a device driver implements the needed entry points, then there is
+nothing else that it needs to do to take advantage of polling.
+A driver should not attempt to spin up its own threads, task queues, or
+creatively use timeouts, to try to simulate polling for received packets.
 .Ss MAC Address Filter Management
 The MAC framework will attempt to use as many MAC address filters as a
 device has.
@@ -381,6 +521,27 @@ and just return the appropriate error as documented in the corresponding manual
 pages for the entry points.
 The framework will ensure that the device is placed in promiscuous mode
 if it needs to.
+.Pp
+If the hardware supports more than one unicast filter then the device
+driver should consider implementing the
+.Dv MAC_CAPAB_RINGS
+capability, which exposes a means for multiple unicast MAC address filters to be
+used by the broader system.
+It is still useful to implement this on hardware which only has a single ring.
+See
+.Xr mac_capab_rings 9E
+for more information.
+.Ss Receive Side Scaling
+Receive side scaling is where a hardware device supports multiple,
+independent queues of frames that can be received.
+Each of these queues is generally associated with an independent
+interrupt and the hardware usually performs some form of hash across the
+queues.
+Hardware which supports this should look at implementing the
+.Dv MAC_CAPAB_RINGS
+capability and see
+.Xr mac_capab_rings 9E
+for more information.
 .Ss Link Updates
 It is the responsibility of the device driver to keep track of the
 data link's state.
@@ -439,7 +600,7 @@ family of properties, they may change depending on power settings.
 See the
 .Sy Ethernet Link Properties
 section in
-.Xr dladm 1M
+.Xr dladm 8
 for more information.
 .Pp
 It's worth discussing how these different values get used throughout the
@@ -502,26 +663,17 @@ fail the call to
 .Xr detach 9E .
 .Ss Interacting with Devices
 Administrators always interact with devices through the
-.Xr dladm 1M
+.Xr dladm 8
 command line interface.
-The state of devices such as whether the link is considered
-.Sy up
-or
-.Sy down ,
-various link properties such as the
-.Sy MTU ,
-.Sy auto-negotiation
-state,
-and
-.Sy flow control
-state,
-are all exposed.
+The state of devices such as whether the link is considered up or down,
+various link properties such as the MTU, auto-negotiation state, and
+flow control state, are all exposed.
 It is also the preferred way that these properties are set and configured.
 .Pp
 While device tunables may be presented in a
-.Xr driver.conf 4
+.Xr driver.conf 5
 file, it is recommended instead to expose such things through
-.Xr dladm 1M
+.Xr dladm 8
 private properties, whether explicitly documented or not.
 .Sh CAPABILITIES
 Capabilities in the MAC Framework are optional features that a device
@@ -542,7 +694,7 @@ Note, the set of capabilities changes over time and there are also private
 capabilities in the system.
 Several of the capabilities are used in the implementation of the MAC framework.
 Others, like
-.Sy MAC_CAPAB_RINGS ,
+.Dv MAC_CAPAB_RINGS ,
 represent feature that have not been stabilized and thus both API and binary
 compatibility for them is not guaranteed.
 It is important that the device driver handles unknown capabilities correctly.
@@ -551,13 +703,13 @@ For more information, see
 .Pp
 The following capabilities are
 stable and defined in the system:
-.Ss MAC_CAPAB_HCKSUM
+.Ss Dv MAC_CAPAB_HCKSUM
 The
-.Sy MAC_CAPAB_HCKSUM
+.Dv MAC_CAPAB_HCKSUM
 capability indicates to the system that the device driver supports some
 amount of checksumming.
 The specific data for this capability is a pointer to a
-.Sy uint32_t .
+.Vt uint32_t .
 To indicate no support for any kind of checksumming, the driver should
 either set this value to zero or simply return that it doesn't support
 the capability.
@@ -568,7 +720,7 @@ If the driver can only verify checksums when receiving data, then it should not
 indicate that it supports this capability.
 The following set of flags may be combined through a bitwise inclusive OR:
 .Bl -tag -width Ds
-.It Sy HCKSUM_INET_PARTIAL
+.It Dv HCKSUM_INET_PARTIAL
 This indicates that the hardware can calculate a partial checksum for
 both IPv4 and IPv6 UDP and TCP packets; however, it requires the pseudo-header
 checksum be calculated for it.
@@ -577,22 +729,22 @@ The pseudo-header checksum will be available for the mblk_t when calling
 Note this does not imply that the hardware is capable of calculating
 the partial checksum for other L4 protocols or the IPv4 header checksum.
 That should be indicated with the
-.Sy HCKSUM_IPHDRCKSUM flag.
-.It Sy HCKSUM_INET_FULL_V4
+.Dv HCKSUM_IPHDRCKSUM flag .
+.It Dv HCKSUM_INET_FULL_V4
 This indicates that the hardware will fully calculate the L4 checksum for
 outgoing IPv4 UDP or TCP packets only, and does not require a pseudo-header
 checksum.
 Note this does not imply that the hardware is capable of calculating the
 checksum for other L4 protocols or the IPv4 header checksum.
 That should be indicated with the
-.Sy HCKSUM_IPHDRCKSUM .
-.It Sy HCKSUM_INET_FULL_V6
+.Dv HCKSUM_IPHDRCKSUM .
+.It Dv HCKSUM_INET_FULL_V6
 This indicates that the hardware will fully calculate the L4 checksum for
 outgoing IPv6 UDP or TCP packets only, and does not require a pseudo-header
 checksum.
 Note this does not imply that the hardware is capable of calculating the
 checksum for any other L4 protocols.
-.It Sy HCKSUM_IPHDRCKSUM
+.It Dv HCKSUM_IPHDRCKSUM
 This indicates that the hardware supports calculating the checksum for
 the IPv4 header itself.
 .El
@@ -624,17 +776,17 @@ checksumming, then it should simply not call
 Note that the checksum flags should be set on the first
 mblk_t that makes up a given message.
 In other words, if multiple mblk_t structures are linked together by the
-.Sy b_cont
+.Fa b_cont
 member to describe a single frame, then it should only be called on the
 first mblk_t of that set.
 However, each distinct message should have the checksum bits set on it, if
 applicable.
 In other words, each mblk_t that is linked together by the
-.Sy b_next
+.Fa b_next
 pointer may have checksum flags set.
 .Pp
 It is recommended that device drivers provide a private property or
-.Xr driver.conf 4
+.Xr driver.conf 5
 property to control whether or not checksumming is enabled for both rx
 and tx; however, the default disposition is recommended to be enabled
 for both.
@@ -644,46 +796,68 @@ The transmit property should be checked when determining how to reply to
 .Xr mc_getcapab 9E
 and the receive property should be checked in the context of the receive
 function.
-.Ss MAC_CAPAB_LSO
+.Ss Dv MAC_CAPAB_LSO
 The
-.Sy MAC_CAPAB_LSO
+.Dv MAC_CAPAB_LSO
 capability indicates that the driver supports various forms of large
 send offload (LSO).
 The private data is a pointer to a
-.Sy mac_capab_lso_t
+.Ft mac_capab_lso_t
 structure.
-At the moment, LSO support is limited to TCP inside of IPv4.
+The system currently supports offloading TCP packets over both IPv4 and
+IPv6.
 This structure has the following members which are used to indicate
 various types of LSO support.
 .Bd -literal -offset indent
 t_uscalar_t		lso_flags;
 lso_basic_tcp_ivr4_t	lso_basic_tcp_ipv4;
+lso_basic_tcp_ipv6_t	lso_basic_tcp_ipv6;
 .Ed
 .Pp
 The
-.Sy lso_flags
+.Fa lso_flags
 member is used to indicate which members are valid and should be
 considered.
 Each flag represents a different form of LSO.
 The member should be set to the bitwise inclusive OR of the following values:
 .Bl -tag -width Dv -offset indent
-.It Sy LSO_TX_BASIC_TCP_IPV4
+.It Dv LSO_TX_BASIC_TCP_IPV4
 This indicates hardware support for performing TCP segmentation
 offloading over IPv4.
 When this flag is set, the
-.Sy lso_basic_tcp_ipv4
+.Fa lso_basic_tcp_ipv4
+member must be filled in.
+.It Dv LSO_TX_BASIC_TCP_IPV6
+This indicates hardware support for performing TCP segmentation
+offloading over IPv6.
+The IPv6 packet will have no extension headers present.
+When this flag is set, the
+.Fa lso_basic_tcp_ipv6
 member must be filled in.
 .El
 .Pp
 The
-.Sy lso_basic_tcp_ipv4
+.Fa lso_basic_tcp_ipv4
 member is a structure with the following members:
 .Bd -literal -offset indent
 t_uscalar_t	lso_max
 .Ed
 .Bd -filled -offset indent
 The
-.Sy lso_max
+.Fa lso_max
+member should be set to the maximum size of the TCP data
+payload that can be offloaded to the hardware.
+.Ed
+.Pp
+The
+.Fa lso_basic_tcp_ipv6
+member is a structure with the following members:
+.Bd -literal -offset indent
+t_uscalar_t	lso_max
+.Ed
+.Bd -filled -offset indent
+The
+.Fa lso_max
 member should be set to the maximum size of the TCP data
 payload that can be offloaded to the hardware.
 .Ed
@@ -692,6 +866,88 @@ Like with checksumming, it is recommended that driver writers provide a
 means for disabling the support of LSO even if it is enabled by default.
 This deals with the case where issues that pop up for LSO may be worked
 around without requiring additional driver work.
+.Sh EVOLVING CAPABILITIES
+The following capabilities are still evolving in the operating system.
+They are documented such that device driver writers may experiment with
+them.
+However, if such drivers are not present inside the core operating
+system repository, they may be subject to API and ABI breakage.
+.Ss Dv MAC_CAPAB_RINGS
+The
+.Dv MAC_CAPAB_RINGS
+capability is very important for implementing a high-performing device
+driver.
+Networking hardware structures the queues of packets to be sent
+and received into a ring.
+Each entry in this ring has a descriptor, which describes the address
+and options for a packet which is going to
+be transmitted or received.
+While simple networking devices only have a single ring, most high-speed
+networking devices have support for many rings.
+.Pp
+Rings are used for two important purposes.
+The first is receive side scaling (RSS), which is the ability to have
+the hardware hash the contents of a packet based on some of the protocol
+headers, and send it to one of several rings.
+These different rings may each have their own interrupt associated with
+them, allowing the card to receive traffic in parallel.
+Similar logic can be performed when sending traffic, to leverage
+multiple hardware resources, thus increasing capacity.
+.Pp
+The second use of rings is to group them together and apply filtering
+rules.
+For example, if a packet matches a specific VLAN or MAC address,
+then it can be sent to a specific ring or a specific group of rings.
+This is especially useful when there are multiple different virtual NICs
+or zones in play as the operating system will be able to use the
+hardware classification features to already know where a given packet
+needs to be delivered internally rather than having to determine that
+for each packet.
+.Pp
+From the MAC framework's perspective, a driver can have one or more
+groups.
+A group consists of the following:
+.Bl -bullet -offset -indent
+.It
+One or more hardware rings.
+.It
+One or more MAC address or VLAN filters.
+.El
+.Pp
+The details around how a device driver changes when rings are employed,
+the data structures that a driver must implement, and more are available
+in
+.Xr mac_capab_rings 9E .
+.Ss Dv MAC_CAPAB_TRANSCEIVER
+Many networking devices leverage external transceivers that adhere to
+standards such as SFP, QSFP, QSFP-DD, etc., which often contain
+standardized information in a EEPROM on the device.
+The
+.Dv MAC_CAPAB_TRANSCEIVER
+capability provides a means of discovering the number of transceivers,
+their types, and reading the data from a transceiver.
+This allows administrators and users to determine if devices are
+present, if the hardware can use them, and in many cases, detailed
+information about the device ranging from its manufacturer and
+serial numbers to specific information about its health.
+Implementing this capability will lead to the operating system being
+able to discover and display transceivers as part of its fault
+management topology.
+.Pp
+See
+.Xr mac_capab_transceiver 9E
+for more details on the capability structure and the various function
+entry points that come along with it.
+.Ss Dv MAC_CAPAB_LED
+The
+.Dv MAC_CAPAB_LED
+capability provides a means to access and control the LEDs on a network
+interface card.
+This is then made available to the broader operating system and consumed
+by facilities such as the Fault Management Architecture.
+See
+.Xr mac_capab_led 9E
+for more details on the structure and requirements of the capability.
 .Sh PROPERTIES
 Properties in the MAC framework represent aspects of a link.
 These include things like the link's current state and MTU.
@@ -729,86 +985,660 @@ and
 .Xr mc_setprop 9E
 for more information on how to handle them.
 .Bl -hang -width Ds
-.It Sy MAC_PROP_DUPLEX
+.It Dv MAC_PROP_DUPLEX
 .Bd -filled -compact
 Type:
-.Sy link_duplex_t |
+.Vt link_duplex_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_DUPLEX
+.Dv MAC_PROP_DUPLEX
 property is used to indicate whether or not the link is duplex.
 A duplex link may have traffic flowing in both directions at the same time.
 The
-.Sy link_duplex_t
+.Vt link_duplex_t
 is an enumeration which may be set to any of the following values:
 .Bl -tag -width Ds
-.It Sy LINK_DUPLEX_UNKNOWN
+.It Dv LINK_DUPLEX_UNKNOWN
 The current state of the link is unknown.
 This may be because the link has not negotiated to a specific speed or it is
 down.
-.It Sy LINK_DUPLEX_HALF
+.It Dv LINK_DUPLEX_HALF
 The link is running at half duplex.
 Communication may travel in only one direction on the link at a given time.
-.It Sy LINK_DUPLEX_FULL
+.It Dv LINK_DUPLEX_FULL
 The link is running at full duplex.
 Communication may travel in both directions on the link simultaneously.
 .El
-.It Sy MAC_PROP_SPEED
+.It Dv MAC_PROP_SPEED
 .Bd -filled -compact
 Type:
-.Sy uint64_t |
+.Vt uint64_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_SPEED
+.Dv MAC_PROP_SPEED
 property stores the current link speed in bits per second.
 A link that is running at 100 MBit/s would store the value 100000000ULL.
 A link that is running at 40 Gbit/s would store the value 40000000000ULL.
-.It Sy MAC_PROP_STATUS
+.It Dv MAC_PROP_STATUS
 .Bd -filled -compact
 Type:
-.Sy link_state_t |
+.Vt link_state_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_STATUS
+.Dv MAC_PROP_STATUS
 property is used to indicate the current state of the link.
 It indicates whether the link is up or down.
 The
-.Sy link_state_t
+.Vt link_state_t
 is an enumeration which may be set to any of the following values:
 .Bl -tag -width Ds
-.It Sy LINK_STATE_UNKNOWN
+.It Dv LINK_STATE_UNKNOWN
 The current state of the link is unknown.
 This may be because the driver's
 .Xr mc_start 9E
 endpoint has not been called so it has not attempted to start the link.
-.It Sy LINK_STATE_DOWN
+.It Dv LINK_STATE_DOWN
 The link is down.
 This may be because of a negotiation problem, a cable problem, or some other
 device specific issue.
-.It Sy LINK_STATE_UP
+.It Dv LINK_STATE_UP
 The link is up.
 If auto-negotiation is in use, it should have completed.
 Traffic should be able to flow over the link, barring other issues.
 .El
-.It Sy MAC_PROP_AUTONEG
+.It Dv MAC_PROP_MEDIA
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint32_t No (Varies) |
+Permissions:
+.Sy Read-Only
+.Ed
+.Pp
+The
+.Dv MAC_PROP_MEDIA
+property indicates the current type of media on the link.
+The type of media is class-specific and determined based on the
+.Fa m_type_ident
+field in the
+.Vt mac_register_t
+structure used when calling
+.Xr mac_register 9F .
+The media is always read-only.
+This property is not used to control how auto-negotiation should be
+performed, instead the existing speed-based properties are used instead.
+This property should be updated after auto-negotiation has completed.
+If device hardware and firmware do not provide a way to accurately
+determine this, then it is much better to return that the media is
+unknown rather than to lie or guess.
+A common case where this comes up is when a network card uses an
+SFP-based device.
+If the underlying negotiated type of the link isn't made available and
+therefore the driver can't distinguish between say 40GBASE-SR4 and
+40GBASE-LR4, then drivers should return that the media is unknown.
+.Pp
+Similarly many types here represent an electrical interface that is
+often used between a MAC and a PHY, but also for chip-to-chip
+connectivity or on a backplane.
+When connecting to a PHY these shouldn't generally be used as the user
+is concerned with what is actually on the link they plug in, not the
+internals of the device.
+.Pp
+Currently media values are defined for Ethernet-based devices and use
+the enumeration
+.Vt mac_ether_media_t .
+These are defined in
+.In sys/mac_ether.h
+and generally follow the IEEE standardized physical medium dependent
+.Pq PMD
+layer in 802.3.
+.Bl -tag -width Ds
+.It Dv ETHER_MEDIA_UNKNOWN
+This indicates that the type of the link media is unknown to the driver.
+This may be because the link is in a state where this information is
+unknown or the hardware, firmware, and device driver cannot figure it
+out.
+If there is no media present and the link is down, use
+.Dv ETHER_MEDIA_NONE
+instead.
+.It Dv ETHER_MEDIA_NONE
+Represents the case that there is no specific media in use.
+This should generally be used when the link is down.
+.It Dv ETHER_MEDIA_10BASE_T
+Traditional 10 Mbit/s Ethernet based utilizing CAT-3 cabling.
+Defined in 802.3i.
+.It Dv ETHER_MEDIA_10BASE_T1
+A more recent variant of 10 Mbit/s Ethernet that uses a single twisted
+pair.
+Defined in 802.3cg.
+.It Dv ETHER_MEDIA_100BASE_TX
+The most common form of 100 Mbit/s Ethernet that utilizes two twisted
+pairs over a CAT-5 cable.
+Defined in 802.3u.
+.It Dv ETHER_MEDIA_100BASE_FX
+100 Mbit/s Ethernet operating over multi-mode fiber.
+Defined in 802.3u.
+.It Dv ETHER_MEDIA_100BASE_X
+This is a general term that covers operating in one of the 100BASE-?X
+variants.
+This is here because some PHYs do not distinguish between operating in
+100BASE-TX and 100BASE-FX.
+If the driver can determine if it is operating with a BASE-T or fiber
+based PHY, prefer the more specific types instead.
+.It Dv ETHER_MEDIA_100BASE_T4
+This is an uncommon half-duplex variant of 100 Mbit/s Ethernet that
+operates over CAT-3 cable using four twisted pairs.
+Defined in 802.3u.
+.It Dv ETHER_MEDIA_100BASE_T2
+This is another uncommon variant of 100 Mbit/s Ethernet that only
+requires two twisted pairs, but unlike 100BASE-TX requires CAT-3 cables.
+Defined in 802.3y.
+.It Dv ETHER_MEDIA_100BASE_T1
+A more recent form of 100 Mbit/s Ethernet that requires only a single
+twisted pair.
+Defined in 802.3bw.
+.It Dv ETHER_MEDIA_100_SGMII
+This form of 100 Mbit/s Ethernet is generally used for chip-to-chip
+connectivity and utilizes the SGMII
+.Pq Serial gigabit media-independent interface
+specification.
+.It Dv ETHER_MEDIA_1000BASE_X
+This is a general catch-all for all 1 Gbit/s fiber-based operation.
+This is here for compatibility with the generic information returned by
+traditional 802.3-compatible PHYs.
+When more specific information is available, that should be used
+instead.
+.It Dv ETHER_MEDIA_1000BASE_T
+Traditional 1 Gbit/s Ethernet that utilizes a CAT-5 cable with four
+twisted pairs.
+Defined in 802.3ab.
+.It Dv ETHER_MEDIA_1000BASE_T1
+A more recent form of 1 Gbit/s Ethernet that only requires a single
+twisted pair.
+.It Dv ETHER_MEDIA_1000BASE_KX
+This form of 1 Gbit/s Ethernet is designed for operating over a backplane.
+Defined in 802.3ap.
+.It Dv ETHER_MEDIA_1000BASE_CX
+An older form of 1 Gbit/s Ethernet that operates over balanced copper
+cables.
+Defined in 802.3z.
+.It Dv ETHER_MEDIA_1000BASE_SX
+1 Gbit/s Ethernet operating over a pair of multi-mode fibers, one for
+each direction.
+.It Dv ETHER_MEDIA_1000BASE_LX
+1 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+each direction.
+.It Dv ETHER_MEDIA_1000BASE_BX
+1 Gbit/s Ethernet operating over a single piece of single-mode fiber.
+This media operates bi-directionally as opposed to how 1000BASE-LX and
+1000BASE-SX operate.
+.It Dv ETHER_MEDIA_1000_SGMII
+A form of 1 Gbit/s Ethernet defined by Cisco that is used for
+chip-to-chip connectivity.
+.It Dv ETHER_MEDIA_2500BASE_T
+2.5 Gbit/s Ethernet based on four copper twisted-pairs.
+Defined in 802.3bz.
+.It Dv ETHER_MEDIA_2500BASE_KX
+2.5 Gbit/s Ethernet that is designed for operating over a backplane
+interconnect.
+Defined in 802.3cb.
+.It Dv ETHER_MEDIA_2500BASE_X
+This is a variant of 2.5 Gbit/s Ethernet that took the 1000BASE-X IEEE
+standard and ran it with a 2.5x faster clock.
+It is a defacto standard.
+.It Dv ETHER_MEDIA_5000BASE_T
+5.0 Gbit/s Ethernet based on four copper twisted-pairs.
+Defined in 802.3bz.
+.It Dv ETHER_MEDIA_5000BASE_KR
+5.0 Gbit/s Ethernet that is designed for operating over a backplane
+interconnect.
+Defined in 802.3cb.
+.It Dv ETHER_MEDIA_10GBASE_T
+10 Gbit/s Ethernet operating over four copper twisted pairs utilizing
+CAT-6a cables.
+Defined in 802.3an.
+.It Dv ETHER_MEDIA_10GBASE_SR
+10 Gbit/s Ethernet operating over a pair of multi-mode fibers, one for
+each direction.
+Defined in 802.3ae.
+.It Dv ETHER_MEDIA_10GBASE_LR
+10 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+each direction.
+The maximum fiber length is 10km.
+Defined in 802.3ae.
+.It Dv ETHER_MEDIA_10GBASE_ER
+10 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+each direction.
+The maximum fiber length is 30km.
+Defined in 802.3ae.
+.It Dv ETHER_MEDIA_10GBASE_LRM
+10 Gbit/s Ethernet operating over a pair of multi-mode fibers, one for
+each direction.
+This has a longer reach of up to 220m and is a longer distance than
+10GBASE-SR.
+Defined in 802.3aq.
+.It Dv ETHER_MEDIA_10GBASE_KR
+10 Gbit/s Ethernet operating over a single lane backplane.
+Defined n 802.3ap.
+.It Dv ETHER_MEDIA_10GBASE_CX4
+10 Gbit/s Ethernet operating over a group of four shielded copper cables.
+Defined in 802.3ak.
+.It Dv ETHER_MEDIA_10GBASE_KX4
+10 Gbit/s Ethernet operating over a four lane backplane.
+Defined n 802.3ap.
+.It Dv ETHER_MEDIA_10GBASE_CR
+10 Gbit/s Ethernet that is built using a passive copper
+SFP-compatible cable.
+This is sometimes called 10GSFP+Cu passive.
+Defined in SFF-8431.
+.It Dv ETHER_MEDIA_10GBASE_AOC
+10 Gbit/s Ethernet that is built using a short-range active
+optical cable that is SFP+-compatible.
+Defined in SFF-8431.
+.It Dv ETHER_MEDIA_10GBASE_ACC
+10 Gbit/s Ethernet based upon a single lane of copper cable with an
+active component that allows it go longer distances than 10GBASE-CR.
+Defined in SFF-8431.
+.It Dv ETHER_MEDIA_10G_XAUI
+10 Gbit/s signalling that is defined for use between a MAC and PHY.
+This is the roman numeral X and attachment unit interface.
+Sometimes used for chip-to-chip interconnects.
+Defined in 802.3ae.
+.It Dv ETHER_MEDIA_10G_SFI
+10 Gbit/s signalling that is defined for use between a MAC and an
+SFP-based transceiver.
+Defined in SFF-8431.
+.It Dv ETHER_MEDIA_10G_XFI
+10 Gbit/s signalling that is defined for use between a MAC and an
+XFP-based transceiver.
+Defined in INF-8077i
+.Pq XFP MSA .
+.It Dv ETHER_MEDIA_25GBASE_T
+25 Gbit/s Ethernet based upon four twisted pair cables using CAT-8
+cable.
+Defined in 802.3bq.
+.It Dv ETHER_MEDIA_25GBASE_SR
+25 Gbit/s Ethernet operating over a pair of multi-mode fibers, one for
+each direction.
+Defined in 802.3by.
+.It Dv ETHER_MEDIA_25GBASE_LR
+25 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+each direction.
+The maximum fiber length is 10km.
+Defined in 802.3cc.
+.It Dv ETHER_MEDIA_25GBASE_ER
+25 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+each direction.
+The maximum fiber length is 30km.
+Defined in 802.3cc.
+.It Dv ETHER_MEDIA_25GBASE_KR
+25 Gbit/s Ethernet operating over a backplane with a single lane.
+Defined in 802.3by.
+.It Dv ETHER_MEDIA_25GBASE_CR
+25 Gbit/s Ethernet operating over a single lane of copper cable.
+Generally used with an SFP28 style connector.
+Defined in 802.3by.
+.It Dv ETHER_MEDIA_25GBASE_AOC
+25 Gbit/s Ethernet based that is built using a short-range active
+optical cable that is SFP28-compatible.
+Defined loosely by SFF-8402 and often utilizes 25GBASE-SR.
+.It Dv ETHER_MEDIA_25GBASE_ACC
+25 Gbit/s Ethernet based upon a single lane of copper cable with an
+active component that allows it go longer distances than 25GBASE-CR.
+Defined loosely by SFF-8402.
+.It Dv ETHER_MEDIA_25G_AUI
+25 Gbit/s signalling that is defined for use between a MAC and PHY and
+for chip-to-chip connectivity.
+Defined by 802.3by.
+.It Dv ETHER_MEDIA_40GBASE_T
+40 Gbit/s Ethernet based upon four twisted-pairs of CAT-8 cables.
+Defined in 802.3bq.
+.It Dv ETHER_MEDIA_40GBASE_CR4
+40 Gbit/s Ethernet utilizing four lanes of twinaxial copper cabling
+each operating at 10 Gbit/s.
+This is generally used with a QSFP+ connector defined in SFF-8635.
+Defined in 802.3ba.
+.It Dv ETHER_MEDIA_40GBASE_KR4
+40 Gbit/s Ethernet utilizing four lanes over a copper backplane each
+operating at 10 Gbit/s.
+Defined in 802.3ba.
+.It Dv ETHER_MEDIA_40GBASE_SR4
+40 Gbit/s Ethernet based upon using four pairs of multi-mode fiber, each
+operating at 10 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+Generally utilizes a QSFP+ connector.
+Defined in 802.3ba.
+.It Dv ETHER_MEDIA_40GBASE_LR4
+40 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for each direction.
+Utilizes wavelength multiplexing as the electrical interface is four 10
+Gbit/s signals.
+The maximum fiber length is 10km.
+Defined in 802.3ba.
+.It Dv ETHER_MEDIA_40GBASE_ER4
+40 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for each direction.
+Utilizes wavelength multiplexing as the electrical interface is four 10
+Gbit/s signals and generally based upon a QSFP+ connector.
+The maximum fiber length is 40km.
+Defined in 802.3bm.
+.It Dv ETHER_MEDIA_40GBASE_LM4
+40 Gbit/s Ethernet based upon using one pair of multi-mode fibers, one
+for each direction.
+Utilizes wavelength multiplexing as the electrical interface is four 10
+Gbit/s signals and generally based upon a QSFP+ connector.
+Defined by a specific MSA.
+.It Dv ETHER_MEDIA_40GBASE_AOC4
+40 Gbit/s Ethernet based upon a QSFP+ based cable with built-in
+optical transceivers.
+The electrical interface is four lanes running at 10 Gbit/s.
+.It Dv ETHER_MEDIA_40GBASE_ACC4
+40 Gbit/s Ethernet based upon four copper lanes each running at 10
+Gbit/s with some additional component compared to 40GBASE-CR4.
+.It Dv ETHER_MEDIA_40G_XLAUI
+40 Gbit/s signalling operating across four lanes that is defined for use
+between a MAC and a PHY or for chip-to-chip connectivity.
+Defined by 802.3ba.
+.It Dv ETHER_MEDIA_40G_XLPPI
+40 Gbit/s signalling operating across four lanes that is designed to
+connect between a chip and a module, generally a QSFP+ based device.
+Defined in 802.3ba.
+.It Dv ETHER_MEDIA_50GBASE_KR2
+50 Gbit/s Ethernet which operates over a two lane copper backplane.
+Each lane operates at 25 Gbit/s.
+Defined by the 25G and 50G Ethernet consortium.
+This did not become an IEEE standard.
+.It Dv ETHER_MEDIA_50GBASE_CR2
+50 Gbit/s Ethernet which operates over two lane copper twinaxial cable,
+generally with a QSFP+ connector.
+Each lane operates at 25 Gbit/s.
+Defined by the 25G and 50G Ethernet consortium.
+.It Dv ETHER_MEDIA_50GBASE_SR2
+50 Gbit/s Ethernet based upon using four pairs of multi-mode fiber, each
+operating at 25 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+Generally utilizes a QSFP+ connector.
+Defined by the 25G and 50G Ethernet consortium.
+.It Dv ETHER_MEDIA_50GBASE_LR2
+50 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for each direction.
+Utilizes wavelength multiplexing as the electrical interface is two 25
+Gbit/s signals.
+Defined by the 25G and 50G Ethernet consortium.
+.It Dv ETHER_MEDIA_50GBASE_AOC2
+50 Gbit/s Ethernet generally based upon a QSFP+ based cable with built-in
+optical transceivers.
+The electrical interface is two lanes running at 25 Gbit/s.
+.It Dv ETHER_MEDIA_50GBASE_ACC2
+50 Gbit/s Ethernet based upon two copper twinaxial lanes each running at
+25 Gbit/s with some additional component compared to 50GBASE-CR2.
+.It Dv ETHER_MEDIA_50GBASE_KR
+50 Gbit/s Ethernet operating over a single lane backplane.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_50GBASE_CR
+50 Gbit/s Ethernet operating over a single lane twinaxial copper cable
+generally utilizing an SFP56 interface.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_50GBASE_SR
+50 Gbit/s Ethernet operating over a pair of multi-mode fibers, one for
+each direction.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_50GBASE_LR
+50 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+each direction.
+The maximum fiber length is 10km.
+Defined in 802.3cd.
+.It Dv ETHER_MEDIA_50GBASE_ER
+50 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+each direction.
+The maximum fiber length is 40km.
+Defined in 802.3cd.
+.It Dv ETHER_MEDIA_50GBASE_FR
+50 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+each direction.
+The maximum fiber length is 2km.
+Defined in 802.3cd.
+.It Dv ETHER_MEDIA_50GBASE_AOC
+50 Gbit/s Ethernet that is built using a short-range active optical
+cable that is generally SFP56 compatible.
+The electrical interface operates at 25 Gbit/s PAM4 signaling.
+.It Dv ETHER_MEDIA_50GBASE_ACC
+50 Gbit/s Ethernet that is built using a single lane twinaxial
+cable that is generally SFP56 compatible but uses an active component
+such as a retimer or redriver when compared to 50GBASE-CR.
+.It Dv ETHER_MEDIA_100GBASE_CR10
+100 Gbit/s Ethernet operating over ten lanes of shielded twinaxial
+copper cable, each operating at 10 Gbit/s.
+Defined in 802.3ba.
+.It Dv ETHER_MEDIA_100GBASE_SR10
+100 Gbit/s Ethernet based upon using ten pairs of multi-mode fiber, each
+operating at 10 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+.It Dv ETHER_MEDIA_100GBASE_SR4
+100 Gbit/s Ethernet based upon using four pairs of multi-mode fiber,
+each operating at 25 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+Defined by 802.3bm.
+.It Dv ETHER_MEDIA_100GBASE_LR4
+100 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for each direction.
+Utilizes wavelength multiplexing as the electrical interface is four 25
+Gbit/s signals and generally based upon a QSFP28 connector.
+The maximum fiber length is 10km.
+Defined by 802.3ba.
+.It Dv ETHER_MEDIA_100GBASE_ER4
+100 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for each direction.
+Utilizes wavelength multiplexing as the electrical interface is four 25
+Gbit/s signals and generally based upon a QSFP28 connector.
+The maximum fiber length is 40km.
+Defined by 802.3ba.
+.It Dv ETHER_MEDIA_100GBASE_KR4
+100 Gbit/s Ethernet based upon using a four lane copper backplane.
+Each lane operates at 25 Gbit/s.
+Defined in 802.3bj.
+.It Dv ETHER_MEDIA_100GBASE_CAUI4
+100 Gbit/s signalling used for chip-to-chip and chip-to-module
+connectivity.
+Defined in 802.3bm.
+.It Dv ETHER_MEDIA_100GBASE_CR4
+100 Gbit/s Ethernet based upon using a four lane copper twinaxial cable.
+Each lane operates at 25 Gbit/s and generally utilizes a QSFP28
+connector.
+Defined in 802.3bj.
+.It Dv ETHER_MEDIA_100GBASE_AOC4
+100 Gbit/s Ethernet that utilizes an active optical cable with
+short-range optical transceivers.
+Electrically operates as four lanes of 25 Gbit/s and most commonly uses
+a QSFP28 connector.
+.It Dv ETHER_MEDIA_100GBASE_ACC4
+100 Gbit/s Ethernet that utilizes a four lane copper twinaxial cable
+that unlike 100GBASE-CR4 has an active component such as a retimer or
+redriver.
+.It Dv ETHER_MEDIA_100GBASE_KR2
+100 Gbit/s Ethernet based upon using a two lane copper backplane.
+Each lane operates at 50 Gbit/s.
+Defined in 802.3cd.
+.It Dv ETHER_MEDIA_100GBASE_CR2
+100 Gbit/s Ethernet that utilizes a two lane copper twinaxial cable.
+Each lane operates at 50 Gbit/s.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_100GBASE_SR2
+100 Gbit/s Ethernet based upon using two pairs of multi-mode fiber,
+each operating at 50 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_100GBASE_KR
+100 Gbit/s Ethernet operating over a single lane copper backplane.
+Defined by 802.3ck.
+.It Dv ETHER_MEDIA_100GBASE_CR
+100 Gbit/s Ethernet operating over a single lane copper twinaxial cable.
+Generally uses an SFP112 connector.
+Defined by 802.3ck.
+.It Dv ETHER_MEDIA_100GBASE_SR
+100 Gbit/s Ethernet operating over a pair of multi-mode fibers, one for
+transmitting and one for receiving.
+The maximum fiber length is 60-100m depending on the fiber type
+.Pq OM3, OM4 .
+Defined by 802.3db.
+.It Dv ETHER_MEDIA_100GBASE_DR
+100 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+transmitting and one for receiving.
+Designed to be used with a parallel DR4/DR8 interface.
+The maximum fiber length is 500m.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_100GBASE_LR
+100 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+transmitting and one for receiving.
+The maximum fiber length is 10km.
+Defined by 802.3cu.
+.It Dv ETHER_MEDIA_100GBASE_FR
+100 Gbit/s Ethernet operating over a pair of single-mode fibers, one for
+transmitting and one for receiving.
+The maximum fiber length is 2km.
+Defined by 802.3cu.
+.It Dv ETHER_MEDIA_200GBASE_CR4
+200 Gbit/s Ethernet utilizing a four lane passive copper twinaxial
+cable.
+Each lane operates at 50 Gbit/s and the connector is generally based on
+QSFP56.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_200GBASE_KR4
+200 Gbit/s Ethernet utilizing four lanes over a copper backplane each
+operating at 50 Gbit/s.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_200GBASE_SR4
+200 Gbit/s Ethernet based upon using four pairs of multi-mode fiber,
+each operating at 50 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+Defined by 802.3cd.
+.It Dv ETHER_MEDIA_200GBASE_DR4
+200 Gbit/s Ethernet based upon using four pairs of single-mode fiber,
+each operating at 50 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_200GBASE_FR4
+200 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for transmitting and one for receiving.
+Utilizes wavelength multiplexing as the electrical interface is four 50
+Gbit/s signals and generally based upon a QSFP56 connector.
+The maximum fiber length is 2km.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_200GBASE_LR4
+200 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for transmitting and one for receiving.
+Utilizes wavelength multiplexing as the electrical interface is four 50
+Gbit/s signals and generally based upon a QSFP56 connector.
+The maximum fiber length is 10km.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_200GBASE_ER4
+200 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for transmitting and one for receiving.
+Utilizes wavelength multiplexing as the electrical interface is four 50
+Gbit/s signals and generally based upon a QSFP56 connector.
+The maximum fiber length is 40km.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_200GAUI_4
+200 Gbit/s signalling utilizing four lanes each operating at 50 Gbit/s.
+Used for chip-to-chip and chip-to-module connections.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_200GBASE_KR2
+200 Gbit/s Ethernet utilizing two lanes over a copper backplane each
+operating at 100 Gbit/s.
+Defined by 802.3ck.
+.It Dv ETHER_MEDIA_200GBASE_CR2
+200 Gbit/s Ethernet utilizing a two lane passive copper twinaxial
+cable.
+Each lane operates at 100 Gbit/s.
+Defined by 802.3ck.
+.It Dv ETHER_MEDIA_200GBASE_SR2
+200 Gbit/s Ethernet based upon using two pairs of multi-mode fiber,
+each operating at 100 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+Defined by 802.3db.
+.It Dv ETHER_MEDIA_200GAUI_2
+200 Gbit/s signalling utilizing two lanes each operating at 100 Gbit/s.
+Used for chip-to-chip and chip-to-module connections.
+Defined by 802.3ck.
+.It Dv ETHER_MEDIA_400GBASE_KR8
+400 Gbit/s Ethernet utilizing eight lanes over a copper backplane each
+operating at 50 Gbit/s.
+Defined by the 25/50 Gigabit Ethernet Consortium.
+.It Dv ETHER_MEDIA_400GBASE_FR8
+200 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for transmitting and one for receiving.
+Utilizes wavelength multiplexing as the electrical interface is eight 50
+Gbit/s signals and generally based upon a QSFP-DD connector.
+The maximum fiber length is 2km.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_400GBASE_LR8
+200 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for transmitting and one for receiving.
+Utilizes wavelength multiplexing as the electrical interface is eight 50
+Gbit/s signals and generally based upon a QSFP-DD connector.
+The maximum fiber length is 10km.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_400GBASE_ER8
+200 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for transmitting and one for receiving.
+Utilizes wavelength multiplexing as the electrical interface is eight 50
+Gbit/s signals and generally based upon a QSFP-DD connector.
+The maximum fiber length is 40km.
+Defined by 802.3cn.
+.It Dv ETHER_MEDIA_400GAUI_8
+400 Gbit/s signalling utilizing eight lanes each operating at 50 Gbit/s.
+Used for chip-to-chip and chip-to-module connections.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_400GBASE_KR4
+400 Gbit/s Ethernet utilizing four lanes over a copper backplane each
+operating at 100 Gbit/s.
+Defined by 802.3ck.
+.It Dv ETHER_MEDIA_400GBASE_CR4
+200 Gbit/s Ethernet utilizing a two lane passive copper twinaxial
+cable.
+Each lane operates at 100 Gbit/s and generally uses a QSFP112 connector.
+Defined by 802.3ck.
+.It Dv ETHER_MEDIA_400GBASE_SR4
+400 Gbit/s Ethernet based upon using four pairs of multi-mode fiber,
+each operating at 100 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+Defined by 802.3db.
+.It Dv ETHER_MEDIA_400GBASE_DR4
+400 Gbit/s Ethernet based upon using four pairs of single-mode fiber,
+each operating at 100 Gbit/s, with one fiber in the pair being used for
+transmit and the other for receive.
+The maximum fiber length is 500m.
+Defined by 802.3bs.
+.It Dv ETHER_MEDIA_400GBASE_FR4
+400 Gbit/s Ethernet based upon using one pair of single-mode fibers, one
+for transmitting and one for receiving.
+Utilizes wavelength multiplexing as the electrical interface is four 100
+Gbit/s signals and generally based upon a QSFP112 connector.
+The maximum fiber length is 2km.
+Defined by 802.3cu.
+.It Dv ETHER_MEDIA_400GAUI_4
+400 Gbit/s signalling utilizing four lanes each operating at 100 Gbit/s.
+Used for chip-to-chip and chip-to-module connections.
+Defined by 802.3ck.
+.El
+.It Dv MAC_PROP_AUTONEG
+.Bd -filled -compact
+Type:
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_AUTONEG
+.Dv MAC_PROP_AUTONEG
 property indicates whether or not the device is currently configured to
 perform auto-negotiation.
 A value of
@@ -824,16 +1654,16 @@ state.
 When setting this property, if the device supports operating in the requested
 mode, then the device driver should reset the link to negotiate to the new speed
 after updating any internal registers.
-.It Sy MAC_PROP_MTU
+.It Dv MAC_PROP_MTU
 .Bd -filled -compact
 Type:
-.Sy uint32_t |
+.Vt uint32_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_MTU
+.Dv MAC_PROP_MTU
 property determines the maximum transmission unit (MTU).
 This indicates the maximum size packet that the device can transmit, ignoring
 its own headers.
@@ -858,35 +1688,35 @@ If the device does not support changing the MTU after the device's
 .Xr mc_start 9E
 entry point has been called, then driver writers should return
 .Er EBUSY .
-.It Sy MAC_PROP_FLOWCTRL
+.It Dv MAC_PROP_FLOWCTRL
 .Bd -filled -compact
 Type:
-.Sy link_flowctrl_t |
+.Vt link_flowctrl_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_FLOWCTRL
+.Dv MAC_PROP_FLOWCTRL
 property manages the configuration of pause frames as part of Ethernet
 flow control.
 Note, this only describes what this device will advertise.
 What is actually enabled may be different and is subject to the rules of
 auto-negotiation.
 The
-.Sy link_flowctrl_t
+.Vt link_flowctrl_t
 is an enumeration that may be set to one of the following values:
 .Bl -tag -width Ds
-.It Sy LINK_FLOWCTRL_NONE
+.It Dv LINK_FLOWCTRL_NONE
 Flow control is disabled.
 No pause frames should be generated or honored.
-.It Sy LINK_FLOWCTRL_RX
+.It Dv LINK_FLOWCTRL_RX
 The device can receive pause frames; however, it should not generate
 them.
-.It Sy LINK_FLOWCTRL_TX
+.It Dv LINK_FLOWCTRL_TX
 The device can generate pause frames; however, it does not support
 receiving them.
-.It Sy LINK_FLOWCTRL_BI
+.It Dv LINK_FLOWCTRL_BI
 The device supports both sending and receiving pause frames.
 .El
 .Pp
@@ -895,33 +1725,33 @@ it has configured the device, not what the device has actually
 negotiated.
 When setting the property, it should update the hardware and allow the link to
 potentially perform auto-negotiation again.
-.It Sy MAC_PROP_EN_FEC_CAP
+.It Dv MAC_PROP_EN_FEC_CAP
 .Bd -filled -compact
 Type:
-.Sy link_fec_t |
+.Vt link_fec_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_FEC_CAP
+.Dv MAC_PROP_EN_FEC_CAP
 property indicates which Forward Error Correction (FEC) code is advertised
 by the device.
 .Pp
 The
-.Sy link_fec_t
+.Vt link_fec_t
 is an enumeration that may be a combination of the following bit values:
 .Bl -tag -width Ds
-.It Sy LINK_FEC_NONE
+.It Dv LINK_FEC_NONE
 No FEC over the link.
-.It Sy LINK_FEC_AUTO
+.It Dv LINK_FEC_AUTO
 The FEC coding to use is auto-negotiated,
-.Sy LINK_FEC_AUTO
+.Dv LINK_FEC_AUTO
 cannot be set along with any of the other values.
 This is the default setting the device driver should use.
-.It Sy LINK_FEC_RS
+.It Dv LINK_FEC_RS
 The link may use Reed-Solomon FEC coding.
-.It Sy LINK_FEC_BASE_R
+.It Dv LINK_FEC_BASE_R
 The link may use Base-R coding, also common referred to as FireCode.
 .El
 .Pp
@@ -932,18 +1762,18 @@ the device driver should return
 .Er EINVAL .
 When retrieving this property, the device driver should return the current
 value of the property.
-.It Sy MAC_PROP_ADV_FEC_CAP
+.It Dv MAC_PROP_ADV_FEC_CAP
 .Bd -filled -compact
 Type:
-.Sy link_fec_t |
+.Vt link_fec_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_FEC_CAP
+.Dv MAC_PROP_ADV_FEC_CAP
 has the same values as
-.Sy MAC_PROP_EN_FEC_CAP .
+.Dv MAC_PROP_EN_FEC_CAP .
 The property indicates which Forward Error Correction (FEC) code has been
 negotiated over the link.
 .El
@@ -980,295 +1810,343 @@ section for more information.
 .Pp
 The properties are ordered in increasing link speed:
 .Bl -hang -width Ds
-.It Sy MAC_PROP_ADV_10HDX_CAP
+.It Dv MAC_PROP_ADV_10HDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_10HDX_CAP
+.Dv MAC_PROP_ADV_10HDX_CAP
 property describes whether or not 10 Mbit/s half-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_10HDX_CAP
+.It Dv MAC_PROP_EN_10HDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_10HDX_CAP
+.Dv MAC_PROP_EN_10HDX_CAP
 property describes whether or not 10 Mbit/s half-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_10FDX_CAP
+.It Dv MAC_PROP_ADV_10FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_10FDX_CAP
+.Dv MAC_PROP_ADV_10FDX_CAP
 property describes whether or not 10 Mbit/s full-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_10FDX_CAP
+.It Dv MAC_PROP_EN_10FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_10FDX_CAP
+.Dv MAC_PROP_EN_10FDX_CAP
 property describes whether or not 10 Mbit/s full-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_100HDX_CAP
+.It Dv MAC_PROP_ADV_100HDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_100HDX_CAP
+.Dv MAC_PROP_ADV_100HDX_CAP
 property describes whether or not 100 Mbit/s half-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_100HDX_CAP
+.It Dv MAC_PROP_EN_100HDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_100HDX_CAP
+.Dv MAC_PROP_EN_100HDX_CAP
 property describes whether or not 100 Mbit/s half-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_100FDX_CAP
+.It Dv MAC_PROP_ADV_100FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_100FDX_CAP
+.Dv MAC_PROP_ADV_100FDX_CAP
 property describes whether or not 100 Mbit/s full-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_100FDX_CAP
+.It Dv MAC_PROP_EN_100FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_100FDX_CAP
+.Dv MAC_PROP_EN_100FDX_CAP
 property describes whether or not 100 Mbit/s full-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_100T4_CAP
+.It Dv MAC_PROP_ADV_100T4_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_100T4_CAP
+.Dv MAC_PROP_ADV_100T4_CAP
 property describes whether or not 100 Mbit/s Ethernet using the
 100BASE-T4 standard is
 advertised.
-.It Sy MAC_PROP_EN_100T4_CAP
+.It Dv MAC_PROP_EN_100T4_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_100T4_CAP
+.Dv MAC_PROP_EN_100T4_CAP
 property describes whether or not 100 Mbit/s Ethernet using the
 100BASE-T4 standard is
 enabled.
-.It Sy MAC_PROP_ADV_1000HDX_CAP
+.It Dv MAC_PROP_ADV_1000HDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_1000HDX_CAP
+.Dv MAC_PROP_ADV_1000HDX_CAP
 property describes whether or not 1 Gbit/s half-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_1000HDX_CAP
+.It Dv MAC_PROP_EN_1000HDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_1000HDX_CAP
+.Dv MAC_PROP_EN_1000HDX_CAP
 property describes whether or not 1 Gbit/s half-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_1000FDX_CAP
+.It Dv MAC_PROP_ADV_1000FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_1000FDX_CAP
+.Dv MAC_PROP_ADV_1000FDX_CAP
 property describes whether or not 1 Gbit/s full-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_1000FDX_CAP
+.It Dv MAC_PROP_EN_1000FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_1000FDX_CAP
+.Dv MAC_PROP_EN_1000FDX_CAP
 property describes whether or not 1 Gbit/s full-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_2500FDX_CAP
+.It Dv MAC_PROP_ADV_2500FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_2500FDX_CAP
+.Dv MAC_PROP_ADV_2500FDX_CAP
 property describes whether or not 2.5 Gbit/s full-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_2500FDX_CAP
+.It Dv MAC_PROP_EN_2500FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_2500FDX_CAP
+.Dv MAC_PROP_EN_2500FDX_CAP
 property describes whether or not 2.5 Gbit/s full-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_5000FDX_CAP
+.It Dv MAC_PROP_ADV_5000FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_5000FDX_CAP
+.Dv MAC_PROP_ADV_5000FDX_CAP
 property describes whether or not 5.0 Gbit/s full-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_5000FDX_CAP
+.It Dv MAC_PROP_EN_5000FDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_5000FDX_CAP
+.Dv MAC_PROP_EN_5000FDX_CAP
 property describes whether or not 5.0 Gbit/s full-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_10GFDX_CAP
+.It Dv MAC_PROP_ADV_10GFDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_10GFDX_CAP
+.Dv MAC_PROP_ADV_10GFDX_CAP
 property describes whether or not 10 Gbit/s full-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_10GFDX_CAP
+.It Dv MAC_PROP_EN_10GFDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_10GFDX_CAP
+.Dv MAC_PROP_EN_10GFDX_CAP
 property describes whether or not 10 Gbit/s full-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_40GFDX_CAP
+.It Dv MAC_PROP_ADV_40GFDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_40GFDX_CAP
+.Dv MAC_PROP_ADV_40GFDX_CAP
 property describes whether or not 40 Gbit/s full-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_40GFDX_CAP
+.It Dv MAC_PROP_EN_40GFDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_40GFDX_CAP
+.Dv MAC_PROP_EN_40GFDX_CAP
 property describes whether or not 40 Gbit/s full-duplex support is
 enabled.
-.It Sy MAC_PROP_ADV_100GFDX_CAP
+.It Dv MAC_PROP_ADV_100GFDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read-Only
 .Ed
 .Pp
 The
-.Sy MAC_PROP_ADV_100GFDX_CAP
+.Dv MAC_PROP_ADV_100GFDX_CAP
 property describes whether or not 100 Gbit/s full-duplex support is
 advertised.
-.It Sy MAC_PROP_EN_100GFDX_CAP
+.It Dv MAC_PROP_EN_100GFDX_CAP
 .Bd -filled -compact
 Type:
-.Sy uint8_t |
+.Vt uint8_t |
 Permissions:
 .Sy Read/Write
 .Ed
 .Pp
 The
-.Sy MAC_PROP_EN_100GFDX_CAP
+.Dv MAC_PROP_EN_100GFDX_CAP
 property describes whether or not 100 Gbit/s full-duplex support is
+enabled.
+.It Dv MAC_PROP_ADV_200GFDX_CAP
+.Bd -filled -compact
+Type:
+.Vt uint8_t |
+Permissions:
+.Sy Read-Only
+.Ed
+.Pp
+The
+.Dv MAC_PROP_ADV_200GFDX_CAP
+property describes whether or not 200 Gbit/s full-duplex support is
+advertised.
+.It Dv MAC_PROP_EN_200GFDX_CAP
+.Bd -filled -compact
+Type:
+.Vt uint8_t |
+Permissions:
+.Sy Read/Write
+.Ed
+.Pp
+The
+.Dv MAC_PROP_EN_200GFDX_CAP
+property describes whether or not 200 Gbit/s full-duplex support is
+enabled.
+.It Dv MAC_PROP_ADV_400GFDX_CAP
+.Bd -filled -compact
+Type:
+.Vt uint8_t |
+Permissions:
+.Sy Read-Only
+.Ed
+.Pp
+The
+.Dv MAC_PROP_ADV_400GFDX_CAP
+property describes whether or not 400 Gbit/s full-duplex support is
+advertised.
+.It Dv MAC_PROP_EN_400GFDX_CAP
+.Bd -filled -compact
+Type:
+.Vt uint8_t |
+Permissions:
+.Sy Read/Write
+.Ed
+.Pp
+The
+.Dv MAC_PROP_EN_400GFDX_CAP
+property describes whether or not 400 Gbit/s full-duplex support is
 enabled.
 .El
 .Ss Private Properties
@@ -1276,10 +2154,10 @@ In addition to the defined properties above, drivers are allowed to
 define private properties.
 These private properties are device-specific properties.
 All private properties share the same constant,
-.Sy MAC_PROP_PRIVATE .
+.Dv MAC_PROP_PRIVATE .
 Properties are distinguished by a name, which is a character string.
 The list of such private properties is defined when registering with mac in the
-.Sy m_priv_props
+.Fa m_priv_props
 member of the
 .Xr mac_register 9S
 structure.
@@ -1287,13 +2165,13 @@ structure.
 The driver may define whatever semantics it wants for these private
 properties.
 They will not be listed when running
-.Xr dladm 1M ,
+.Xr dladm 8 ,
 unless explicitly requested by name.
 All such properties should start with a leading underscore character and then
 consist of alphanumeric ASCII characters and additional underscores or hyphens.
 .Pp
 Properties of type
-.Sy MAC_PROP_PRIVATE
+.Dv MAC_PROP_PRIVATE
 may show up in all three property related entry points:
 .Xr mc_propinfo 9E ,
 .Xr mc_getprop 9E ,
@@ -1318,7 +2196,7 @@ proper stat.
 .Pp
 In general, if the device is not keeping track of these statistics, then
 it is recommended that the driver store these values as a
-.Sy uint64_t
+.Vt uint64_t
 to ensure that overflow does not occur.
 .Pp
 If a device does not support a specific statistic, then it is fine to
@@ -1331,51 +2209,44 @@ for more information on the proper way to handle these.
 The following statistics are based on MIB-II statistics from both RFC
 1213 and RFC 1573.
 .Bl -tag -width Ds
-.It Sy MAC_STAT_IFSPEED
+.It Dv MAC_STAT_IFSPEED
 The device's current speed in bits per second.
-.It Sy MAC_STAT_MULTIRCV
+.It Dv MAC_STAT_MULTIRCV
 The total number of received multicast packets.
-.It Sy MAC_STAT_BRDCSTRCV
+.It Dv MAC_STAT_BRDCSTRCV
 The total number of received broadcast packets.
-.It Sy MAC_STAT_MULTIXMT
+.It Dv MAC_STAT_MULTIXMT
 The total number of transmitted multicast packets.
-.It Sy MAC_STAT_BRDCSTXMT
+.It Dv MAC_STAT_BRDCSTXMT
 The total number of received broadcast packets.
-.It Sy MAC_STAT_NORCVBUF
+.It Dv MAC_STAT_NORCVBUF
 The total number of packets discarded by the hardware due to a lack of
 receive buffers.
-.It Sy MAC_STAT_IERRORS
+.It Dv MAC_STAT_IERRORS
 The total number of errors detected on input.
-.It Sy MAC_STAT_UNKNOWNS
+.It Dv MAC_STAT_UNKNOWNS
 The total number of received packets that were discarded because they
 were of an unknown protocol.
-.It Sy MAC_STAT_NOXMTBUF
+.It Dv MAC_STAT_NOXMTBUF
 The total number of outgoing packets dropped due to a lack of transmit
 buffers.
-.It Sy MAC_STAT_OERRORS
+.It Dv MAC_STAT_OERRORS
 The total number of outgoing packets that resulted in errors.
-.It Sy MAC_STAT_COLLISIONS
+.It Dv MAC_STAT_COLLISIONS
 Total number of collisions encountered by the transmitter.
-.It Sy MAC_STAT_RBYTES
-The total number of
-.Sy bytes
-received by the device, regardless of packet type.
-.It Sy MAC_STAT_IPACKETS
-The total number of
-.Sy packets
-received by the device, regardless of packet type.
-.It Sy MAC_STAT_OBYTES
-The total number of
-.Sy bytes
-transmitted by the device, regardless of packet type.
-.It Sy MAC_STAT_OPACKETS
-The total number of
-.Sy packets
-sent by the device, regardless of packet type.
-.It Sy MAC_STAT_UNDERFLOWS
+.It Dv MAC_STAT_RBYTES
+The total number of bytes received by the device, regardless of packet
+type.
+.It Dv MAC_STAT_IPACKETS
+The total number of packets received by the device, regardless of packet type.
+.It Dv MAC_STAT_OBYTES
+The total number of bytes transmitted by the device, regardless of packet type.
+.It Dv MAC_STAT_OPACKETS
+The total number of packets sent by the device, regardless of packet type.
+.It Dv MAC_STAT_UNDERFLOWS
 The total number of packets that were smaller than the minimum sized
 packet for the device and were therefore dropped.
-.It Sy MAC_STAT_OVERFLOWS
+.It Dv MAC_STAT_OVERFLOWS
 The total number of packets that were larger than the maximum sized
 packet for the device and were therefore dropped.
 .El
@@ -1384,206 +2255,192 @@ The following statistics are specific to Ethernet devices.
 They refer to values from RFC 1643 and include various MII/GMII specific stats.
 Many of these are also defined in IEEE 802.3.
 .Bl -tag -width Ds
-.It Sy ETHER_STAT_ADV_CAP_1000FDX
+.It Dv ETHER_STAT_ADV_CAP_1000FDX
 Indicates that the device is advertising support for 1 Gbit/s
 full-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_1000HDX
+.It Dv ETHER_STAT_ADV_CAP_1000HDX
 Indicates that the device is advertising support for 1 Gbit/s
 half-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_100FDX
+.It Dv ETHER_STAT_ADV_CAP_100FDX
 Indicates that the device is advertising support for 100 Mbit/s
 full-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_100GFDX
+.It Dv ETHER_STAT_ADV_CAP_100GFDX
 Indicates that the device is advertising support for 100 Gbit/s
 full-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_100HDX
+.It Dv ETHER_STAT_ADV_CAP_100HDX
 Indicates that the device is advertising support for 100 Mbit/s
 half-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_100T4
+.It Dv ETHER_STAT_ADV_CAP_100T4
 Indicates that the device is advertising support for 100 Mbit/s
 100BASE-T4 operation.
-.It Sy ETHER_STAT_ADV_CAP_10FDX
+.It Dv ETHER_STAT_ADV_CAP_10FDX
 Indicates that the device is advertising support for 10 Mbit/s
 full-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_10GFDX
+.It Dv ETHER_STAT_ADV_CAP_10GFDX
 Indicates that the device is advertising support for 10 Gbit/s
 full-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_10HDX
+.It Dv ETHER_STAT_ADV_CAP_10HDX
 Indicates that the device is advertising support for 10 Mbit/s
 half-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_2500FDX
+.It Dv ETHER_STAT_ADV_CAP_2500FDX
 Indicates that the device is advertising support for 2.5 Gbit/s
 full-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_40GFDX
+.It Dv ETHER_STAT_ADV_CAP_40GFDX
 Indicates that the device is advertising support for 40 Gbit/s
 full-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_5000FDX
+.It Dv ETHER_STAT_ADV_CAP_5000FDX
 Indicates that the device is advertising support for 5.0 Gbit/s
 full-duplex operation.
-.It Sy ETHER_STAT_ADV_CAP_ASMPAUSE
+.It Dv ETHER_STAT_ADV_CAP_ASMPAUSE
 Indicates that the device is advertising support for receiving pause
 frames.
-.It Sy ETHER_STAT_ADV_CAP_AUTONEG
+.It Dv ETHER_STAT_ADV_CAP_AUTONEG
 Indicates that the device is advertising support for auto-negotiation.
-.It Sy ETHER_STAT_ADV_CAP_PAUSE
+.It Dv ETHER_STAT_ADV_CAP_PAUSE
 Indicates that the device is advertising support for generating pause
 frames.
-.It Sy ETHER_STAT_ADV_REMFAULT
+.It Dv ETHER_STAT_ADV_REMFAULT
 Indicates that the device is advertising support for detecting faults in
 the remote link peer.
-.It Sy ETHER_STAT_ALIGN_ERRORS
+.It Dv ETHER_STAT_ALIGN_ERRORS
 Indicates the number of times an alignment error was generated by the
 Ethernet device.
 This is a count of packets that were not an integral number of octets and failed
 the FCS check.
-.It Sy ETHER_STAT_CAP_1000FDX
+.It Dv ETHER_STAT_CAP_1000FDX
 Indicates the device supports 1 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_CAP_1000HDX
+.It Dv ETHER_STAT_CAP_1000HDX
 Indicates the device supports 1 Gbit/s half-duplex operation.
-.It Sy ETHER_STAT_CAP_100FDX
+.It Dv ETHER_STAT_CAP_100FDX
 Indicates the device supports 100 Mbit/s full-duplex operation.
-.It Sy ETHER_STAT_CAP_100GFDX
+.It Dv ETHER_STAT_CAP_100GFDX
 Indicates the device supports 100 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_CAP_100HDX
+.It Dv ETHER_STAT_CAP_100HDX
 Indicates the device supports 100 Mbit/s half-duplex operation.
-.It Sy ETHER_STAT_CAP_100T4
+.It Dv ETHER_STAT_CAP_100T4
 Indicates the device supports 100 Mbit/s 100BASE-T4 operation.
-.It Sy ETHER_STAT_CAP_10FDX
+.It Dv ETHER_STAT_CAP_10FDX
 Indicates the device supports 10 Mbit/s full-duplex operation.
-.It Sy ETHER_STAT_CAP_10GFDX
+.It Dv ETHER_STAT_CAP_10GFDX
 Indicates the device supports 10 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_CAP_10HDX
+.It Dv ETHER_STAT_CAP_10HDX
 Indicates the device supports 10 Mbit/s half-duplex operation.
-.It Sy ETHER_STAT_CAP_2500FDX
+.It Dv ETHER_STAT_CAP_2500FDX
 Indicates the device supports 2.5 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_CAP_40GFDX
+.It Dv ETHER_STAT_CAP_40GFDX
 Indicates the device supports 40 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_CAP_5000FDX
+.It Dv ETHER_STAT_CAP_5000FDX
 Indicates the device supports 5.0 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_CAP_ASMPAUSE
+.It Dv ETHER_STAT_CAP_ASMPAUSE
 Indicates that the device supports the ability to receive pause frames.
-.It Sy ETHER_STAT_CAP_AUTONEG
+.It Dv ETHER_STAT_CAP_AUTONEG
 Indicates that the device supports the ability to perform link
 auto-negotiation.
-.It Sy ETHER_STAT_CAP_PAUSE
+.It Dv ETHER_STAT_CAP_PAUSE
 Indicates that the device supports the ability to transmit pause frames.
-.It Sy ETHER_STAT_CAP_REMFAULT
+.It Dv ETHER_STAT_CAP_REMFAULT
 Indicates that the device supports the ability of detecting a remote
 fault in a link peer.
-.It Sy ETHER_STAT_CARRIER_ERRORS
+.It Dv ETHER_STAT_CARRIER_ERRORS
 Indicates the number of times that the Ethernet carrier sense condition
 was lost or not asserted.
-.It Sy ETHER_STAT_DEFER_XMTS
+.It Dv ETHER_STAT_DEFER_XMTS
 Indicates the number of frames for which the device was unable to
 transmit the frame due to being busy and had to try again.
-.It Sy ETHER_STAT_EX_COLLISIONS
+.It Dv ETHER_STAT_EX_COLLISIONS
 Indicates the number of frames that failed to send due to an excessive
 number of collisions.
-.It Sy ETHER_STAT_FCS_ERRORS
+.It Dv ETHER_STAT_FCS_ERRORS
 Indicates the number of times that a frame check sequence failed.
-.It Sy ETHER_STAT_FIRST_COLLISIONS
+.It Dv ETHER_STAT_FIRST_COLLISIONS
 Indicates the number of times that a frame was eventually transmitted
 successfully, but only after a single collision.
-.It Sy ETHER_STAT_JABBER_ERRORS
+.It Dv ETHER_STAT_JABBER_ERRORS
 Indicates the number of frames that were received that were both larger
 than the maximum packet size and failed the frame check sequence.
-.It Sy ETHER_STAT_LINK_ASMPAUSE
+.It Dv ETHER_STAT_LINK_ASMPAUSE
 Indicates whether the link is currently configured to accept pause
 frames.
-.It Sy ETHER_STAT_LINK_AUTONEG
+.It Dv ETHER_STAT_LINK_AUTONEG
 Indicates whether the current link state is a result of
 auto-negotiation.
-.It Sy ETHER_STAT_LINK_DUPLEX
+.It Dv ETHER_STAT_LINK_DUPLEX
 Indicates the current duplex state of the link.
 The values used here should be the same as documented for
-.Sy MAC_PROP_DUPLEX .
-.It Sy ETHER_STAT_LINK_PAUSE
+.Dv MAC_PROP_DUPLEX .
+.It Dv ETHER_STAT_LINK_PAUSE
 Indicates whether the link is currently configured to generate pause
 frames.
-.It Sy ETHER_STAT_LP_CAP_1000FDX
+.It Dv ETHER_STAT_LP_CAP_1000FDX
 Indicates the remote device supports 1 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_1000HDX
+.It Dv ETHER_STAT_LP_CAP_1000HDX
 Indicates the remote device supports 1 Gbit/s half-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_100FDX
+.It Dv ETHER_STAT_LP_CAP_100FDX
 Indicates the remote device supports 100 Mbit/s full-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_100GFDX
+.It Dv ETHER_STAT_LP_CAP_100GFDX
 Indicates the remote device supports 100 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_100HDX
+.It Dv ETHER_STAT_LP_CAP_100HDX
 Indicates the remote device supports 100 Mbit/s half-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_100T4
+.It Dv ETHER_STAT_LP_CAP_100T4
 Indicates the remote device supports 100 Mbit/s 100BASE-T4 operation.
-.It Sy ETHER_STAT_LP_CAP_10FDX
+.It Dv ETHER_STAT_LP_CAP_10FDX
 Indicates the remote device supports 10 Mbit/s full-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_10GFDX
+.It Dv ETHER_STAT_LP_CAP_10GFDX
 Indicates the remote device supports 10 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_10HDX
+.It Dv ETHER_STAT_LP_CAP_10HDX
 Indicates the remote device supports 10 Mbit/s half-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_2500FDX
+.It Dv ETHER_STAT_LP_CAP_2500FDX
 Indicates the remote device supports 2.5 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_40GFDX
+.It Dv ETHER_STAT_LP_CAP_40GFDX
 Indicates the remote device supports 40 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_5000FDX
+.It Dv ETHER_STAT_LP_CAP_5000FDX
 Indicates the remote device supports 5.0 Gbit/s full-duplex operation.
-.It Sy ETHER_STAT_LP_CAP_ASMPAUSE
+.It Dv ETHER_STAT_LP_CAP_ASMPAUSE
 Indicates that the remote device supports the ability to receive pause
 frames.
-.It Sy ETHER_STAT_LP_CAP_AUTONEG
+.It Dv ETHER_STAT_LP_CAP_AUTONEG
 Indicates that the remote device supports the ability to perform link
 auto-negotiation.
-.It Sy ETHER_STAT_LP_CAP_PAUSE
+.It Dv ETHER_STAT_LP_CAP_PAUSE
 Indicates that the remote device supports the ability to transmit pause
 frames.
-.It Sy ETHER_STAT_LP_CAP_REMFAULT
+.It Dv ETHER_STAT_LP_CAP_REMFAULT
 Indicates that the remote device supports the ability of detecting a
 remote fault in a link peer.
-.It Sy ETHER_STAT_MACRCV_ERRORS
+.It Dv ETHER_STAT_MACRCV_ERRORS
 Indicates the number of times that the internal MAC layer encountered an
 error when attempting to receive and process a frame.
-.It Sy ETHER_STAT_MACXMT_ERRORS
+.It Dv ETHER_STAT_MACXMT_ERRORS
 Indicates the number of times that the internal MAC layer encountered an
 error when attempting to process and transmit a frame.
-.It Sy ETHER_STAT_MULTI_COLLISIONS
+.It Dv ETHER_STAT_MULTI_COLLISIONS
 Indicates the number of times that a frame was eventually transmitted
 successfully, but only after more than one collision.
-.It Sy ETHER_STAT_SQE_ERRORS
+.It Dv ETHER_STAT_SQE_ERRORS
 Indicates the number of times that an SQE error occurred.
 The specific conditions for this error are documented in IEEE 802.3.
-.It Sy ETHER_STAT_TOOLONG_ERRORS
+.It Dv ETHER_STAT_TOOLONG_ERRORS
 Indicates the number of frames that were received that were longer than
 the maximum frame size supported by the device.
-.It Sy ETHER_STAT_TOOSHORT_ERRORS
+.It Dv ETHER_STAT_TOOSHORT_ERRORS
 Indicates the number of frames that were received that were shorter than
 the minimum frame size supported by the device.
-.It Sy ETHER_STAT_TX_LATE_COLLISIONS
+.It Dv ETHER_STAT_TX_LATE_COLLISIONS
 Indicates the number of times a collision was detected late on the
 device.
-.It Sy ETHER_STAT_XCVR_ADDR
+.It Dv ETHER_STAT_XCVR_ADDR
 Indicates the address of the MII/GMII receiver address.
-.It Sy ETHER_STAT_XCVR_ID
+.It Dv ETHER_STAT_XCVR_ID
 Indicates the id of the MII/GMII receiver address.
-.It Sy ETHER_STAT_XCVR_INUSE
-Indicates what kind of receiver is in use.
-The following values may be used:
-.Bl -tag -width Ds
-.It Sy XCVR_UNDEFINED
-The receiver type is undefined by the hardware.
-.It Sy XCVR_NONE
-There is no receiver in use by the hardware.
-.It Sy XCVR_10
-The receiver supports 10BASE-T operation.
-.It Sy XCVR_100T4
-The receiver supports 100BASE-T4 operation.
-.It Sy XCVR_100X
-The receiver supports 100BASE-TX operation.
-.It Sy XCVR_100T2
-The receiver supports 100BASE-T2 operation.
-.It Sy XCVR_1000X
-The receiver supports 1000BASE-X operation.
-This is used for all fiber receivers.
-.It Sy XCVR_1000T
-The receiver supports 1000BASE-T operation.
-This is used for all copper receivers.
-.El
+.It Dv ETHER_STAT_XCVR_INUSE
+Indicates what kind of transceiver is in use.
+Use the
+.Vt mac_ether_media_t
+enumeration values described in the discussion of
+.Dv MAC_PROP_MEDIA
+above.
+These definitions are compatible with the older subset of
+XCVR_* macros.
 .El
 .Ss Device Specific kstats
 In addition to the defined statistics above, if the device driver
@@ -1604,7 +2461,7 @@ aligned.
 The IP stack expects that the beginning of an IP header will be at a
 4-byte aligned address; however, a DMA allocation will be at a 4-
 or 8-byte aligned address by default.
-The IP hearder is at a 14 byte offset from the beginning of the Ethernet
+The IP header is at a 14 byte offset from the beginning of the Ethernet
 frame, leaving the IP header at a 2-byte alignment if the Ethernet frame
 starts at the beginning of the DMA buffer.
 If VLAN tagging is in place, then each VLAN tag adds 4 bytes, which
@@ -1691,7 +2548,7 @@ While a device driver does not need to indicate that it is capable of all such
 capabilities described in
 .Xr ddi_fm_init 9F ,
 we suggest that device drivers at least register the
-.Sy DDI_FM_EREPORT_CAPABLE
+.Dv DDI_FM_EREPORT_CAPABLE
 so as to allow the driver to report issues that it detects.
 .Pp
 If the driver registers with the fault management framework during its
@@ -1792,7 +2649,7 @@ The device driver should indicate that the device's service was lost
 with a call to
 .Xr ddi_fm_service_impact 9F
 using the symbol
-.Sy DDI_SERVICE_LOST .
+.Dv DDI_SERVICE_LOST .
 .It
 At this point the device driver should issue a device reset through some
 device-specific means.
@@ -1805,14 +2662,14 @@ MAC address filters, and more.
 Finally, when service has been restored, the device driver should call
 .Xr ddi_fm_service_impact 9F
 using the symbol
-.Sy DDI_SERVICE_RESTORED .
+.Dv DDI_SERVICE_RESTORED .
 .El
 .Pp
 When a non-fatal error occurs, then the device driver should submit an
 ereport and should optionally mark the device degraded using
 .Xr ddi_fm_service_impact 9F
 with the
-.Sy DDI_SERVICE_DEGRADED
+.Dv DDI_SERVICE_DEGRADED
 value depending on the nature of the problem that has occurred.
 .Pp
 Device drivers should never make the decision to remove a device from
@@ -1853,11 +2710,11 @@ The networking stack manages framed data through the use of the
 structure.
 The mblk allows for a single message to be made up of individual blocks.
 Each part is linked together through its
-.Sy b_cont
+.Fa b_cont
 member.
 However, it also allows for multiple messages to be chained together through the
 use of the
-.Sy b_next
+.Fa b_next
 member.
 While the networking stack works with these structures, device drivers generally
 work with DMA regions.
@@ -1880,7 +2737,7 @@ When receiving memory, it will allocate a mblk_t through the
 routine, copy the memory across with
 .Xr bcopy 9F ,
 and then increment the mblk_t's
-.Sy w_ptr
+.Fa b_wptr
 structure.
 .Pp
 If, when receiving, memory is not available for a new message block,
@@ -1953,16 +2810,19 @@ to switch from one format to the other.
 This way, data can be gathered to determine what the impact of each method is on
 a given platform.
 .Sh SEE ALSO
-.Xr dladm 1M ,
-.Xr driver.conf 4 ,
-.Xr ieee802.3 5 ,
-.Xr dlpi 7P ,
+.Xr dlpi 4P ,
+.Xr driver.conf 5 ,
+.Xr ieee802.3 7 ,
+.Xr dladm 8 ,
 .Xr _fini 9E ,
 .Xr _info 9E ,
 .Xr _init 9E ,
 .Xr attach 9E ,
 .Xr close 9E ,
 .Xr detach 9E ,
+.Xr mac_capab_led 9E ,
+.Xr mac_capab_rings 9E ,
+.Xr mac_capab_transceiver 9E ,
 .Xr mc_close 9E ,
 .Xr mc_getcapab 9E ,
 .Xr mc_getprop 9E ,
@@ -1993,14 +2853,17 @@ a given platform.
 .Xr freemsg 9F ,
 .Xr kstat_create 9F ,
 .Xr mac_alloc 9F ,
+.Xr mac_devt_to_instance 9F ,
 .Xr mac_fini_ops 9F ,
 .Xr mac_free 9F ,
+.Xr mac_getinfo 9F ,
 .Xr mac_hcksum_get 9F ,
 .Xr mac_hcksum_set 9F ,
 .Xr mac_init_ops 9F ,
 .Xr mac_link_update 9F ,
 .Xr mac_lso_get 9F ,
 .Xr mac_maxsdu_update 9F ,
+.Xr mac_private_minor 9F ,
 .Xr mac_prop_info_set_default_link_flowctrl 9F ,
 .Xr mac_prop_info_set_default_str 9F ,
 .Xr mac_prop_info_set_default_uint32 9F ,
@@ -2040,4 +2903,10 @@ a given platform.
 .%A Kastenholz, F.
 .%T RFC 1643 Definitions of Managed Objects for the Ethernet-like
 .%T Interface Types
+.Re
+.Rs
+.%A IEEE Computer Standard
+.%T IEEE 802.3
+.%T IEEE Standard for Ethernet
+.%D 2022
 .Re

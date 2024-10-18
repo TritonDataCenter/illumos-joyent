@@ -3,12 +3,11 @@
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH DDI_ADD_SOFTINTR 9F "Oct 19, 2005"
+.TH DDI_ADD_SOFTINTR 9F "Feb 17, 2023"
 .SH NAME
 ddi_add_softintr, ddi_get_soft_iblock_cookie, ddi_remove_softintr,
 ddi_trigger_softintr \- software interrupt handling routines
 .SH SYNOPSIS
-.LP
 .nf
 #include <sys/types.h>
 #include <sys/conf.h>
@@ -41,14 +40,10 @@ ddi_trigger_softintr \- software interrupt handling routines
 .fi
 
 .SH INTERFACE LEVEL
-.sp
-.LP
-Solaris DDI specific (Solaris DDI). These interfaces are obsolete. Use the new
+illumos DDI specific (illumos DDI). These interfaces are obsolete. Use the new
 interrupt interfaces referenced in \fBIntro\fR(9F). Refer to \fIWriting Device
 Drivers\fR for more information.
 .SH PARAMETERS
-.sp
-.LP
 \fBddi_get_soft_iblock_cookie()\fR
 .sp
 .ne 2
@@ -172,15 +167,13 @@ interrupt handler will be called.
 .RE
 
 .SH DESCRIPTION
-.sp
-.LP
 For \fBddi_get_soft_iblock_cookie()\fR:
 .sp
 .LP
 \fBddi_get_soft_iblock_cookie()\fR retrieves the interrupt block cookie
 associated with a particular soft interrupt preference level. This routine
 should be called before \fBddi_add_softintr()\fR to retrieve the interrupt
-block cookie needed to initialize locks ( \fBmutex\fR(9F), \fBrwlock\fR(9F))
+block cookie needed to initialize locks (\fBmutex\fR(9F), \fBrwlock\fR(9F))
 used by the software interrupt routine. \fIpreference\fR determines which type
 of soft interrupt to retrieve the cookie for. The possible values for
 \fIpreference\fR are:
@@ -294,8 +287,6 @@ identifier \fIid\fR is used to determine which soft interrupt to trigger. This
 function is used by device drivers when they wish to trigger a soft interrupt
 which has been set up using \fBddi_add_softintr()\fR.
 .SH RETURN VALUES
-.sp
-.LP
 \fBddi_add_softintr()\fR and \fBddi_get_soft_iblock_cookie()\fR return:
 .sp
 .ne 2
@@ -316,13 +307,10 @@ on failure
 .RE
 
 .SH CONTEXT
-.sp
-.LP
 These functions can be called from user or kernel context.
 \fBddi_trigger_softintr()\fR may be called from high-level interrupt context as
 well.
 .SH EXAMPLES
-.LP
 \fBExample 1 \fRdevice using high-level interrupts
 .sp
 .LP
@@ -508,9 +496,7 @@ xxsoftintr(caddr_t arg)
 .in -2
 
 .SH ATTRIBUTES
-.sp
-.LP
-See \fBattributes\fR(5) for descriptions of the following attributes:
+See \fBattributes\fR(7) for descriptions of the following attributes:
 .sp
 
 .sp
@@ -524,21 +510,21 @@ Interface Stability	Obsolete
 .TE
 
 .SH SEE ALSO
-.sp
-.LP
-\fBddi_add_intr\fR(9F), \fBddi_in_panic\fR(9F), \fBddi_intr_hilevel\fR(9F),
-\fBddi_remove_intr\fR(9F), \fBIntro\fR(9F), \fBmutex_init\fR(9F)
+.BR Intro (9F),
+.BR ddi_add_intr (9F),
+.BR ddi_in_panic (9F),
+.BR ddi_intr_hilevel (9F),
+.BR ddi_remove_intr (9F),
+.BR mutex_init (9F)
 .sp
 .LP
 \fIWriting Device Drivers\fR
 .SH NOTES
-.sp
-.LP
 \fBddi_add_softintr()\fR may not be used to add the same software interrupt
 handler more than once. This is true even if a different value is used for
 \fIint_handler_arg\fR in each of the calls to \fBddi_add_softintr()\fR.
 Instead, the argument passed to the interrupt handler should indicate what
 service(s) the interrupt handler should perform. For example, the argument
 could be a pointer to the device's soft state structure, which could contain
-a 'which_service' field that the handler examines. The driver must set this field
-to the appropriate value before calling \fBddi_trigger_softintr()\fR.
+a 'which_service' field that the handler examines. The driver must set this
+field to the appropriate value before calling \fBddi_trigger_softintr()\fR.

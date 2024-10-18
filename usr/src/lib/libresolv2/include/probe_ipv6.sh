@@ -3,7 +3,6 @@
 # Copyright 2003 by Sun Microsystems, Inc. All rights reserved.
 # Use is subject to license terms.
 #
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 set -e
 PATH=/bin:/usr/bin:$PATH; export PATH
@@ -27,6 +26,7 @@ EOF
 cat > tmp$$c.c <<EOF
 #include <sys/types.h>
 #include <netinet/in.h>
+
 struct sockaddr_in6 xx;
 main() { xx.sin6_scope_id = 0; }
 EOF
@@ -40,16 +40,16 @@ cat > ${new} <<EOF
 
 EOF
 
-if ${CC} -c tmp$$a.c > /dev/null 2>&1
+if ${CC} ${CPPFLAGS} -c tmp$$a.c > /dev/null 2>&1
 then
         echo "#define HAS_INET6_STRUCTS" >> ${new}
-        if ${CC} -c tmp$$b.c > /dev/null 2>&1
+        if ${CC} ${CPPFLAGS} -c tmp$$b.c > /dev/null 2>&1
         then
 		:
 	else
                 echo "#define in6_addr in_addr6" >> ${new}
         fi
-	if ${CC} -c tmp$$c.c > /dev/null 2>&1
+	if ${CC} ${CPPFLAGS} -c tmp$$c.c > /dev/null 2>&1
 	then
 		echo "#define HAVE_SIN6_SCOPE_ID" >> ${new}
 	else

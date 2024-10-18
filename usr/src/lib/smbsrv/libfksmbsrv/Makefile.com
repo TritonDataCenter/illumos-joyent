@@ -22,9 +22,10 @@
 # Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
-#
+# Copyright 2014-2021 Tintri by DDN, Inc. All rights reserved.
 # Copyright (c) 2018, Joyent, Inc.
+# Copyright 2020-2024 RackTop Systems, Inc.
+#
 
 LIBRARY =	libfksmbsrv.a
 VERS =		.1
@@ -36,9 +37,12 @@ OBJS_LOCAL = \
 		fksmb_idmap.o \
 		fksmb_init.o \
 		fksmb_kdoor.o \
+		fksmb_preauth_pkcs.o \
 		fksmb_sign_pkcs.o \
+		fake_ksocket.o \
 		fake_lookup.o \
 		fake_nblk.o \
+		fake_stream.o \
 		fake_vfs.o \
 		fake_vnode.o \
 		fake_vop.o \
@@ -161,6 +165,7 @@ OBJS_FS_SMBSRV = \
 		smb2_tree_disconn.o \
 		smb2_write.o \
 	        \
+	        smb3_kdf.o \
 	        smb3_encrypt.o
 
 # Can't just link with -lsmb because of user vs kernel API
@@ -183,6 +188,7 @@ OBJS_CMN_SMBSRV = \
 
 OBJS_MISC = \
 		acl_common.o \
+		avl.o \
 		pathname.o \
 		refstr.o \
 		smb_status2winerr.o \
@@ -220,7 +226,7 @@ INCS += -I$(SRC)/common
 
 LDLIBS +=	$(MACH_LDLIBS)
 LDLIBS +=	-lfakekernel -lidmap -lcmdutils
-LDLIBS +=	-lavl -lnvpair -lnsl -lpkcs11 -lreparse -lc
+LDLIBS +=	-lnvpair -lnsl -lpkcs11 -lreparse -lc
 
 CPPFLAGS += $(INCS) -D_REENTRANT -D_FAKE_KERNEL
 CPPFLAGS += -D_FILE_OFFSET_BITS=64
@@ -244,6 +250,11 @@ pics/%.o:	$(SRC)/uts/common/fs/smbsrv/%.c
 
 pics/acl_common.o:	   $(SRC)/common/acl/acl_common.c
 	$(COMPILE.c) -o $@ $(SRC)/common/acl/acl_common.c
+	$(POST_PROCESS_O)
+
+# build avl instead of using -lavl so we get debugging
+pics/avl.o:	   $(SRC)/common/avl/avl.c
+	$(COMPILE.c) -o $@ $(SRC)/common/avl/avl.c
 	$(POST_PROCESS_O)
 
 pics/pathname.o:	   $(SRC)/uts/common/fs/pathname.c

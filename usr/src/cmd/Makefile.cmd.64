@@ -23,14 +23,12 @@
 # Copyright 2004 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-#ident	"%Z%%M%	%I%	%E% SMI"
-#
 #	This makefile contains the compiler fiddling needed to build
 #	64-bit utilities.
 #
 
 include $(SRC)/Makefile.master.64
 
-V9CODESIZE = -xcode=abs44
-
-sparcv9_CFLAGS += $(V9CODESIZE)
+# For programs that are installed in the root filesystem,
+# build $(ROOTFS_PROG) rather than $(PROG)
+$(BUILD64)$(ROOTFS_PROG) := LDFLAGS += -Wl,-I/lib/$(MACH64)/ld.so.1

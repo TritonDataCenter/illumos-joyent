@@ -1,0 +1,227 @@
+#
+# CDDL HEADER START
+#
+# The contents of this file are subject to the terms of the
+# Common Development and Distribution License (the "License").
+# You may not use this file except in compliance with the License.
+#
+# You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+# or http://www.opensolaris.org/os/licensing.
+# See the License for the specific language governing permissions
+# and limitations under the License.
+#
+# When distributing Covered Code, include this CDDL HEADER in each
+# file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+# If applicable, add the following below this CDDL HEADER, with the
+# fields enclosed by brackets "[]" replaced with your own identifying
+# information: Portions Copyright [yyyy] [name of copyright owner]
+#
+# CDDL HEADER END
+#
+
+#
+# Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright 2012 Nexenta Systems, Inc. All rights reserved.
+# Copyright 2014 Gary Mills
+# Copyright 2020 Peter Tribble.
+# Copyright 2019 Joyent, Inc.
+# Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+#
+
+#
+# The default for payload-bearing actions in this package is to appear in the
+# global zone only.  See the include file for greater detail, as well as
+# information about overriding the defaults.
+#
+<include global_zone_only_component>
+set name=pkg.fmri value=pkg:/system/kernel/platform@$(PKGVERS)
+set name=pkg.summary value="Core Solaris Kernel Architecture"
+set name=pkg.description \
+    value="core kernel software for a specific hardware platform group"
+set name=info.classification value=org.opensolaris.category.2008:System/Core
+set name=variant.arch value=$(ARCH)
+dir  path=platform group=sys
+$(i386_ONLY)dir path=platform/i86pc group=sys
+$(i386_ONLY)dir path=platform/i86pc/$(ARCH64) group=sys
+$(i386_ONLY)dir path=platform/i86pc/kernel group=sys
+$(i386_ONLY)dir path=platform/i86pc/kernel/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/$(ARCH64)/unix group=sys mode=0755 \
+    pkg.depend.bypass-generate=dtracestubs
+$(i386_ONLY)dir path=platform/i86pc/kernel/cpu group=sys
+$(i386_ONLY)dir path=platform/i86pc/kernel/cpu/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/cpu/$(ARCH64)/cpu.generic \
+    group=sys mode=0755
+$(i386_ONLY)file path=platform/i86pc/kernel/cpu/$(ARCH64)/cpu_ms.AuthenticAMD \
+    group=sys mode=0755
+$(i386_ONLY)file \
+    path=platform/i86pc/kernel/cpu/$(ARCH64)/cpu_ms.AuthenticAMD.15 group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86pc/kernel/cpu/$(ARCH64)/cpu_ms.GenuineIntel \
+    group=sys mode=0755
+$(i386_ONLY)file \
+    path=platform/i86pc/kernel/cpu/$(ARCH64)/cpu_ms.GenuineIntel.6.46 \
+    group=sys mode=0755
+$(i386_ONLY)hardlink \
+    path=platform/i86pc/kernel/cpu/$(ARCH64)/cpu_ms.GenuineIntel.6.47 \
+    target=cpu_ms.GenuineIntel.6.46
+$(i386_ONLY)dir path=platform/i86pc/kernel/dacf group=sys
+$(i386_ONLY)dir path=platform/i86pc/kernel/dacf/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/dacf/$(ARCH64)/consconfig_dacf \
+    group=sys mode=0755
+$(i386_ONLY)dir path=platform/i86pc/kernel/drv group=sys
+$(i386_ONLY)dir path=platform/i86pc/kernel/drv/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/acpinex group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/acpippm group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/amd_iommu group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/cpudrv group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/isa group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/npe group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/pci group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/pit_beep group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/ppm group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/$(ARCH64)/rootnex group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/acpippm.conf group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/amd_iommu.conf group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/pit_beep.conf group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/ppm.conf group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/drv/rootnex.conf group=sys
+$(i386_ONLY)dir path=platform/i86pc/kernel/mach group=sys
+$(i386_ONLY)dir path=platform/i86pc/kernel/mach/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/mach/$(ARCH64)/apix group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86pc/kernel/mach/$(ARCH64)/pcplusmp group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86pc/kernel/mach/$(ARCH64)/uppc group=sys \
+    mode=0755
+$(i386_ONLY)dir path=platform/i86pc/kernel/misc group=sys
+$(i386_ONLY)dir path=platform/i86pc/kernel/misc/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86pc/kernel/misc/$(ARCH64)/acpidev group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86pc/kernel/misc/$(ARCH64)/gfx_private \
+    group=sys mode=0755
+$(i386_ONLY)file path=platform/i86pc/kernel/misc/$(ARCH64)/pci_prd group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86pc/kernel/misc/$(ARCH64)/pcie group=sys \
+    mode=0755
+$(i386_ONLY)dir path=platform/i86pc/ucode group=sys
+$(i386_ONLY)dir path=platform/i86xpv group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/$(ARCH64)/unix group=sys \
+    mode=0755 pkg.depend.bypass-generate=dtracestubs
+$(i386_ONLY)dir path=platform/i86xpv/kernel/cpu group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel/cpu/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/cpu/$(ARCH64)/cpu.generic \
+    group=sys mode=0755
+$(i386_ONLY)file path=platform/i86xpv/kernel/cpu/$(ARCH64)/cpu_ms.AuthenticAMD \
+    group=sys mode=0755
+$(i386_ONLY)file \
+    path=platform/i86xpv/kernel/cpu/$(ARCH64)/cpu_ms.AuthenticAMD.15 \
+    group=sys mode=0755
+$(i386_ONLY)file path=platform/i86xpv/kernel/cpu/$(ARCH64)/cpu_ms.GenuineIntel \
+    group=sys mode=0755
+$(i386_ONLY)dir path=platform/i86xpv/kernel/dacf group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel/dacf/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/dacf/$(ARCH64)/consconfig_dacf \
+    group=sys mode=0755
+$(i386_ONLY)dir path=platform/i86xpv/kernel/drv group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel/drv/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/balloon group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/domcaps group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/evtchn group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/isa group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/npe group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/pci group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/pit_beep group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/privcmd group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/rootnex group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xdb group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xdf group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xenbus group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xencons group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xnbe group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xnbo group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xnbu group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xnf group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xpvd group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/$(ARCH64)/xpvtap group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/pit_beep.conf group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/drv/xencons.conf group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel/mach group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel/mach/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/mach/$(ARCH64)/xpv_psm group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86xpv/kernel/mach/$(ARCH64)/xpv_uppc group=sys \
+    mode=0755
+$(i386_ONLY)dir path=platform/i86xpv/kernel/misc group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel/misc/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/misc/$(ARCH64)/gfx_private \
+    group=sys mode=0755
+$(i386_ONLY)file path=platform/i86xpv/kernel/misc/$(ARCH64)/pci_prd group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86xpv/kernel/misc/$(ARCH64)/pcie group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86xpv/kernel/misc/$(ARCH64)/xnb group=sys \
+    mode=0755
+$(i386_ONLY)file path=platform/i86xpv/kernel/misc/$(ARCH64)/xpv_autoconfig \
+    group=sys mode=0755
+$(i386_ONLY)dir path=platform/i86xpv/kernel/tod group=sys
+$(i386_ONLY)dir path=platform/i86xpv/kernel/tod/$(ARCH64) group=sys
+$(i386_ONLY)file path=platform/i86xpv/kernel/tod/$(ARCH64)/xpvtod group=sys \
+    mode=0755
+dir  path=usr/share/man
+dir  path=usr/share/man/man4d
+link path=usr/share/man/man4d/fdc.4d target=fd.4d
+$(i386_ONLY)file path=usr/share/man/man4d/npe.4d
+dir  path=usr/share/man/man5
+$(i386_ONLY)link path=usr/share/man/man5/isa.5 target=sysbus.5
+$(i386_ONLY)file path=usr/share/man/man5/sysbus.5
+$(i386_ONLY)driver name=acpinex alias=acpivirtnex
+$(i386_ONLY)driver name=acpippm
+$(i386_ONLY)driver name=amd_iommu perms="* 0644 root sys" \
+    alias=pci1002,5a23 \
+    alias=pci1022,11ff
+$(i386_ONLY)driver name=balloon perms="* 0444 root sys"
+$(i386_ONLY)driver name=cpudrv alias=cpu
+$(i386_ONLY)driver name=domcaps perms="* 0444 root sys"
+$(i386_ONLY)driver name=evtchn perms="* 0666 root sys"
+$(i386_ONLY)driver name=isa class=sysbus alias=pciclass,060100
+$(i386_ONLY)driver name=npe alias=pciex_root_complex
+$(i386_ONLY)driver name=pci class=pci
+$(i386_ONLY)driver name=pit_beep alias=SUNW,pit_beep
+driver name=ppm
+$(i386_ONLY)driver name=privcmd perms="* 0666 root sys"
+$(i386_ONLY)driver name=rootnex
+$(i386_ONLY)driver name=xdb
+$(i386_ONLY)driver name=xdf
+$(i386_ONLY)driver name=xenbus perms="* 0666 root sys"
+$(i386_ONLY)driver name=xencons
+$(i386_ONLY)driver name=xnbe alias=xnb,ioemu
+$(i386_ONLY)driver name=xnbo \
+    alias=xnb \
+    alias=xnb,SUNW_mac
+$(i386_ONLY)driver name=xnbu alias=xnb,netfront
+$(i386_ONLY)driver name=xnf
+$(i386_ONLY)driver name=xpvd
+$(i386_ONLY)driver name=xpvtap perms="* 0666 root sys"
+$(i386_ONLY)legacy pkg=SUNWcakr.i arch=$(ARCH).i86pc \
+    desc="core kernel software for a specific hardware platform group" \
+    name="Core Solaris Kernel Architecture (Root)"
+$(i386_ONLY)legacy pkg=SUNWcakrx.i arch=$(ARCH).i86pc \
+    desc="core kernel software for the i86xpv virtual hardware platform" \
+    name="Core Kernel Architecture i86xpv, (Root)"
+license cr_Sun license=cr_Sun
+license lic_CDDL license=lic_CDDL
+license usr/src/cmd/mdb/common/libstand/THIRDPARTYLICENSE \
+    license=usr/src/cmd/mdb/common/libstand/THIRDPARTYLICENSE
+license usr/src/common/bzip2/LICENSE license=usr/src/common/bzip2/LICENSE
+license usr/src/contrib/zlib/THIRDPARTYLICENSE \
+    license=usr/src/contrib/zlib/THIRDPARTYLICENSE
+license usr/src/uts/common/krtld/THIRDPARTYLICENSE.bootrd_cpio \
+    license=usr/src/uts/common/krtld/THIRDPARTYLICENSE.bootrd_cpio
+license usr/src/uts/common/sys/THIRDPARTYLICENSE.unicode \
+    license=usr/src/uts/common/sys/THIRDPARTYLICENSE.unicode
+$(i386_ONLY)license usr/src/uts/intel/THIRDPARTYLICENSE \
+    license=usr/src/uts/intel/THIRDPARTYLICENSE
+$(i386_ONLY)depend type=require fmri=system/microcode/amd
+$(i386_ONLY)depend type=require fmri=system/microcode/intel

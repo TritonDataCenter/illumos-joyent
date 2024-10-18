@@ -24,8 +24,8 @@
  */
 /*
  * Copyright 2012 Garrett D'Amore <garrett@damore.org>.  All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
-
 
 /*
  * usb multi interface and common class driver
@@ -366,10 +366,10 @@ usb_mid_post_detach(usb_mid_t *usb_mid, uint8_t ifno, struct detachspec *ds)
 /*ARGSUSED*/
 static int
 usb_mid_bus_ctl(dev_info_t *dip,
-	dev_info_t	*rdip,
-	ddi_ctl_enum_t	op,
-	void		*arg,
-	void		*result)
+    dev_info_t		*rdip,
+    ddi_ctl_enum_t	op,
+    void		*arg,
+    void		*result)
 {
 	usba_device_t *hub_usba_device = usba_get_usba_device(rdip);
 	dev_info_t *root_hub_dip = hub_usba_device->usb_root_hub_dip;
@@ -433,7 +433,7 @@ static int
 usb_mid_bus_config(dev_info_t *dip, uint_t flag, ddi_bus_config_op_t op,
     void *arg, dev_info_t **child)
 {
-	int		rval, circ;
+	int		rval;
 	usb_mid_t	*usb_mid = usb_mid_obtain_state(dip);
 
 	USB_DPRINTF_L2(DPRINT_MASK_ALL, usb_mid->mi_log_handle,
@@ -443,7 +443,7 @@ usb_mid_bus_config(dev_info_t *dip, uint_t flag, ddi_bus_config_op_t op,
 		flag |= NDI_DEVI_DEBUG;
 	}
 
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 
 	/* enumerate each interface below us */
 	mutex_enter(&usb_mid->mi_mutex);
@@ -451,7 +451,7 @@ usb_mid_bus_config(dev_info_t *dip, uint_t flag, ddi_bus_config_op_t op,
 	mutex_exit(&usb_mid->mi_mutex);
 
 	rval = ndi_busop_bus_config(dip, flag, op, arg, child, 0);
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 
 	return (rval);
 }
@@ -464,7 +464,7 @@ usb_mid_bus_unconfig(dev_info_t *dip, uint_t flag, ddi_bus_config_op_t op,
 	usb_mid_t  *usb_mid = usb_mid_obtain_state(dip);
 
 	dev_info_t	*cdip, *mdip;
-	int		interface, circular_count;
+	int		interface;
 	int		rval = NDI_SUCCESS;
 
 	USB_DPRINTF_L4(DPRINT_MASK_ALL, usb_mid->mi_log_handle,
@@ -482,7 +482,7 @@ usb_mid_bus_unconfig(dev_info_t *dip, uint_t flag, ddi_bus_config_op_t op,
 		flag &= ~(NDI_DEVI_REMOVE | NDI_UNCONFIG);
 	}
 
-	ndi_devi_enter(dip, &circular_count);
+	ndi_devi_enter(dip);
 	rval = ndi_busop_bus_unconfig(dip, flag, op, arg);
 
 	if (op == BUS_UNCONFIG_ALL && rval == NDI_SUCCESS &&
@@ -515,7 +515,7 @@ usb_mid_bus_unconfig(dev_info_t *dip, uint_t flag, ddi_bus_config_op_t op,
 	}
 	mutex_exit(&usb_mid->mi_mutex);
 
-	ndi_devi_exit(dip, circular_count);
+	ndi_devi_exit(dip);
 
 	USB_DPRINTF_L4(DPRINT_MASK_ALL, usb_mid->mi_log_handle,
 	    "usb_mid_bus_config: rval=%d", rval);
@@ -1046,7 +1046,7 @@ usb_mid_create_children(usb_mid_t *usb_mid)
  */
 static int
 usb_mid_busop_get_eventcookie(dev_info_t *dip,
-	dev_info_t *rdip, char *eventname, ddi_eventcookie_t *cookie)
+    dev_info_t *rdip, char *eventname, ddi_eventcookie_t *cookie)
 {
 	usb_mid_t  *usb_mid = usb_mid_obtain_state(dip);
 
@@ -1066,12 +1066,10 @@ usb_mid_busop_get_eventcookie(dev_info_t *dip,
 
 static int
 usb_mid_busop_add_eventcall(dev_info_t *dip,
-	dev_info_t *rdip,
-	ddi_eventcookie_t cookie,
-	void (*callback)(dev_info_t *dip,
-	    ddi_eventcookie_t cookie, void *arg,
-	    void *bus_impldata),
-	void *arg, ddi_callback_id_t *cb_id)
+    dev_info_t *rdip,
+    ddi_eventcookie_t cookie,
+    ddi_event_cb_f callback,
+    void *arg, ddi_callback_id_t *cb_id)
 {
 	usb_mid_t  *usb_mid = usb_mid_obtain_state(dip);
 	int	ifno = usba_get_ifno(rdip);
@@ -1139,9 +1137,9 @@ usb_mid_busop_remove_eventcall(dev_info_t *dip, ddi_callback_id_t cb_id)
 
 static int
 usb_mid_busop_post_event(dev_info_t *dip,
-	dev_info_t *rdip,
-	ddi_eventcookie_t cookie,
-	void *bus_impldata)
+    dev_info_t *rdip,
+    ddi_eventcookie_t cookie,
+    void *bus_impldata)
 {
 	usb_mid_t  *usb_mid = usb_mid_obtain_state(dip);
 
@@ -1218,7 +1216,7 @@ usb_mid_restore_device_state(dev_info_t *dip, usb_mid_t *usb_mid)
  */
 static void
 usb_mid_event_cb(dev_info_t *dip, ddi_eventcookie_t cookie,
-	void *arg, void *bus_impldata)
+    void *arg, void *bus_impldata)
 {
 	int		i, tag;
 	usb_mid_t	*usb_mid = usb_mid_obtain_state(dip);

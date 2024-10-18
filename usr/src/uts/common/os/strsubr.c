@@ -19,7 +19,7 @@
  * CDDL HEADER END
  */
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 
 /*
@@ -29,6 +29,7 @@
  * Copyright 2018 Joyent, Inc.
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2022 Garrett D'Amore
  */
 
 #include <sys/types.h>
@@ -74,7 +75,6 @@
 #include <sys/sunldi_impl.h>
 #include <sys/strsun.h>
 #include <sys/isa_defs.h>
-#include <sys/multidata.h>
 #include <sys/pattr.h>
 #include <sys/strft.h>
 #include <sys/fs/snode.h>
@@ -1902,36 +1902,9 @@ mlink_file(vnode_t *vp, int cmd, struct file *fpdown, cred_t *crp, int *rvalp,
 	 */
 	error = strdoioctl(stp, &strioc, FNATIVE,
 	    K_TO_K | STR_NOERROR | STR_NOSIG, crp, rvalp);
-	if (error != 0) {
-		lbfree(linkp);
+	if (error != 0)
+		goto cleanup;
 
-		if (!(passyncq->sq_flags & SQ_BLOCKED))
-			blocksq(passyncq, SQ_BLOCKED, 0);
-		/*
-		 * Restore the stream head queue and then remove
-		 * the passq. Turn off STPLEX before we turn on
-		 * the stream by removing the passq.
-		 */
-		rq->q_ptr = _WR(rq)->q_ptr = stpdown;
-		setq(rq, &strdata, &stwdata, NULL, QMTSAFE, SQ_CI|SQ_CO,
-		    B_TRUE);
-
-		mutex_enter(&stpdown->sd_lock);
-		stpdown->sd_flag &= ~STPLEX;
-		mutex_exit(&stpdown->sd_lock);
-
-		link_rempassthru(passq);
-
-		mutex_enter(&stpdown->sd_lock);
-		stpdown->sd_flag &= ~STRPLUMB;
-		/* Wakeup anyone waiting for STRPLUMB to clear. */
-		cv_broadcast(&stpdown->sd_monitor);
-		mutex_exit(&stpdown->sd_lock);
-
-		mutex_exit(&muxifier);
-		netstack_rele(ss->ss_netstack);
-		return (error);
-	}
 	mutex_enter(&fpdown->f_tlock);
 	fpdown->f_count++;
 	mutex_exit(&fpdown->f_tlock);
@@ -1943,9 +1916,16 @@ mlink_file(vnode_t *vp, int cmd, struct file *fpdown, cred_t *crp, int *rvalp,
 
 	ASSERT((cmd == I_LINK) || (cmd == I_PLINK));
 	if (cmd == I_LINK) {
-		ldi_mlink_fp(stp, fpdown, lhlink, LINKNORMAL);
+		error = ldi_mlink_fp(stp, fpdown, lhlink, LINKNORMAL);
 	} else {
-		ldi_mlink_fp(stp, fpdown, lhlink, LINKPERSIST);
+		error = ldi_mlink_fp(stp, fpdown, lhlink, LINKPERSIST);
+	}
+
+	if (error != 0) {
+		mutex_enter(&fpdown->f_tlock);
+		fpdown->f_count--;
+		mutex_exit(&fpdown->f_tlock);
+		goto cleanup;
 	}
 
 	link_rempassthru(passq);
@@ -1977,6 +1957,36 @@ mlink_file(vnode_t *vp, int cmd, struct file *fpdown, cred_t *crp, int *rvalp,
 	*rvalp = linkp->li_lblk.l_index;
 	netstack_rele(ss->ss_netstack);
 	return (0);
+
+cleanup:
+	lbfree(linkp);
+
+	if (!(passyncq->sq_flags & SQ_BLOCKED))
+		blocksq(passyncq, SQ_BLOCKED, 0);
+	/*
+	 * Restore the stream head queue and then remove
+	 * the passq. Turn off STPLEX before we turn on
+	 * the stream by removing the passq.
+	 */
+	rq->q_ptr = _WR(rq)->q_ptr = stpdown;
+	setq(rq, &strdata, &stwdata, NULL, QMTSAFE, SQ_CI|SQ_CO,
+	    B_TRUE);
+
+	mutex_enter(&stpdown->sd_lock);
+	stpdown->sd_flag &= ~STPLEX;
+	mutex_exit(&stpdown->sd_lock);
+
+	link_rempassthru(passq);
+
+	mutex_enter(&stpdown->sd_lock);
+	stpdown->sd_flag &= ~STRPLUMB;
+	/* Wakeup anyone waiting for STRPLUMB to clear. */
+	cv_broadcast(&stpdown->sd_monitor);
+	mutex_exit(&stpdown->sd_lock);
+
+	mutex_exit(&muxifier);
+	netstack_rele(ss->ss_netstack);
+	return (error);
 }
 
 int
@@ -2233,9 +2243,9 @@ munlink(stdata_t *stp, linkinfo_t *linkp, int flag, cred_t *crp, int *rvalp,
 
 	/* clean up the layered driver linkages */
 	if ((flag & LINKTYPEMASK) == LINKNORMAL) {
-		ldi_munlink_fp(stp, fpdown, LINKNORMAL);
+		VERIFY0(ldi_munlink_fp(stp, fpdown, LINKNORMAL));
 	} else {
-		ldi_munlink_fp(stp, fpdown, LINKPERSIST);
+		VERIFY0(ldi_munlink_fp(stp, fpdown, LINKPERSIST));
 	}
 
 	link_rempassthru(passq);
@@ -3007,7 +3017,7 @@ strwaitbuf(size_t size, int pri)
  *	GETWAIT		Check for read side errors, no M_READ
  *	WRITEWAIT	Check for write side errors.
  *	NOINTR		Do not return error if nonblocking or timeout.
- * 	STR_NOERROR	Ignore all errors except STPLEX.
+ *	STR_NOERROR	Ignore all errors except STPLEX.
  *	STR_NOSIG	Ignore/hold signals during the duration of the call.
  *	STR_PEEK	Pass through the strgeterr().
  */
@@ -6631,9 +6641,9 @@ drain_syncq(syncq_t *sq)
  *
  * qdrain_syncq can be called (currently) from only one of two places:
  *	drain_syncq
- * 	putnext  (or some variation of it).
+ *	putnext  (or some variation of it).
  * and eventually
- * 	qwait(_sig)
+ *	qwait(_sig)
  *
  * If called from drain_syncq, we found it in the list of queues needing
  * service, so there is work to be done (or it wouldn't be in the list).
@@ -6653,8 +6663,8 @@ drain_syncq(syncq_t *sq)
  *
  * ASSUMES:
  *	One claim
- * 	QLOCK held
- * 	SQLOCK not held
+ *	QLOCK held
+ *	SQLOCK not held
  *	Will release QLOCK before returning
  */
 void
@@ -7108,11 +7118,11 @@ static int
 propagate_syncq(queue_t *qp)
 {
 	mblk_t		*bp, *head, *tail, *prev, *next;
-	syncq_t 	*sq;
+	syncq_t		*sq;
 	queue_t		*nqp;
 	syncq_t		*nsq;
 	boolean_t	isdriver;
-	int 		moved = 0;
+	int		moved = 0;
 	uint16_t	flags;
 	pri_t		priority = curthread->t_pri;
 #ifdef DEBUG
@@ -7145,7 +7155,7 @@ propagate_syncq(queue_t *qp)
 			/* debug macro */
 			SQ_PUTLOCKS_HELD(nsq);
 #ifdef DEBUG
-			func = (void (*)())nqp->q_qinfo->qi_putp;
+			func = (void (*)())(uintptr_t)nqp->q_qinfo->qi_putp;
 #endif
 		}
 
@@ -8472,102 +8482,6 @@ mblk_copycred(mblk_t *mp, const mblk_t *src)
 		dbp->db_cpid = cpid;
 }
 
-
-/*
- * Now that NIC drivers are expected to deal only with M_DATA mblks, the
- * hcksum_assoc and hcksum_retrieve functions are deprecated in favor of their
- * respective mac_hcksum_set and mac_hcksum_get counterparts.
- */
-int
-hcksum_assoc(mblk_t *mp,  multidata_t *mmd, pdesc_t *pd,
-    uint32_t start, uint32_t stuff, uint32_t end, uint32_t value,
-    uint32_t flags, int km_flags)
-{
-	int rc = 0;
-
-	ASSERT(DB_TYPE(mp) == M_DATA || DB_TYPE(mp) == M_MULTIDATA);
-	if (mp->b_datap->db_type == M_DATA) {
-		/* Associate values for M_DATA type */
-		DB_CKSUMSTART(mp) = (intptr_t)start;
-		DB_CKSUMSTUFF(mp) = (intptr_t)stuff;
-		DB_CKSUMEND(mp) = (intptr_t)end;
-		DB_CKSUMFLAGS(mp) = flags;
-		DB_CKSUM16(mp) = (uint16_t)value;
-
-	} else {
-		pattrinfo_t pa_info;
-
-		ASSERT(mmd != NULL);
-
-		pa_info.type = PATTR_HCKSUM;
-		pa_info.len = sizeof (pattr_hcksum_t);
-
-		if (mmd_addpattr(mmd, pd, &pa_info, B_TRUE, km_flags) != NULL) {
-			pattr_hcksum_t *hck = (pattr_hcksum_t *)pa_info.buf;
-
-			hck->hcksum_start_offset = start;
-			hck->hcksum_stuff_offset = stuff;
-			hck->hcksum_end_offset = end;
-			hck->hcksum_cksum_val.inet_cksum = (uint16_t)value;
-			hck->hcksum_flags = flags;
-		} else {
-			rc = -1;
-		}
-	}
-	return (rc);
-}
-
-void
-hcksum_retrieve(mblk_t *mp, multidata_t *mmd, pdesc_t *pd,
-    uint32_t *start, uint32_t *stuff, uint32_t *end,
-    uint32_t *value, uint32_t *flags)
-{
-	ASSERT(DB_TYPE(mp) == M_DATA || DB_TYPE(mp) == M_MULTIDATA);
-	if (mp->b_datap->db_type == M_DATA) {
-		if (flags != NULL) {
-			*flags = DB_CKSUMFLAGS(mp) & HCK_FLAGS;
-			if ((*flags & (HCK_PARTIALCKSUM |
-			    HCK_FULLCKSUM)) != 0) {
-				if (value != NULL)
-					*value = (uint32_t)DB_CKSUM16(mp);
-				if ((*flags & HCK_PARTIALCKSUM) != 0) {
-					if (start != NULL)
-						*start =
-						    (uint32_t)DB_CKSUMSTART(mp);
-					if (stuff != NULL)
-						*stuff =
-						    (uint32_t)DB_CKSUMSTUFF(mp);
-					if (end != NULL)
-						*end =
-						    (uint32_t)DB_CKSUMEND(mp);
-				}
-			}
-		}
-	} else {
-		pattrinfo_t hck_attr = {PATTR_HCKSUM};
-
-		ASSERT(mmd != NULL);
-
-		/* get hardware checksum attribute */
-		if (mmd_getpattr(mmd, pd, &hck_attr) != NULL) {
-			pattr_hcksum_t *hck = (pattr_hcksum_t *)hck_attr.buf;
-
-			ASSERT(hck_attr.len >= sizeof (pattr_hcksum_t));
-			if (flags != NULL)
-				*flags = hck->hcksum_flags;
-			if (start != NULL)
-				*start = hck->hcksum_start_offset;
-			if (stuff != NULL)
-				*stuff = hck->hcksum_stuff_offset;
-			if (end != NULL)
-				*end = hck->hcksum_end_offset;
-			if (value != NULL)
-				*value = (uint32_t)
-				    hck->hcksum_cksum_val.inet_cksum;
-		}
-	}
-}
-
 void
 lso_info_set(mblk_t *mp, uint32_t mss, uint32_t flags)
 {
@@ -8647,23 +8561,6 @@ bcksum(uchar_t *bp, int len, unsigned int psum)
 	 * checksum. The max psum value before normalization is 0x3FDFE.
 	 */
 	return ((psum >> 16) + (psum & 0xFFFF));
-}
-
-boolean_t
-is_vmloaned_mblk(mblk_t *mp, multidata_t *mmd, pdesc_t *pd)
-{
-	boolean_t rc;
-
-	ASSERT(DB_TYPE(mp) == M_DATA || DB_TYPE(mp) == M_MULTIDATA);
-	if (DB_TYPE(mp) == M_DATA) {
-		rc = (((mp)->b_datap->db_struioflag & STRUIO_ZC) != 0);
-	} else {
-		pattrinfo_t zcopy_attr = {PATTR_ZCOPY};
-
-		ASSERT(mmd != NULL);
-		rc = (mmd_getpattr(mmd, pd, &zcopy_attr) != NULL);
-	}
-	return (rc);
 }
 
 void

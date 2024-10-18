@@ -22,19 +22,20 @@
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2011 Nexenta Systems. All rights reserved.
+ * Copyright 2017 RackTop Systems.
  */
 
 /*
  * log.c - debugging and logging functions
  *
  * Logging destinations
- *   svc.startd(1M) supports three logging destinations:  the system log, a
+ *   svc.startd(8) supports three logging destinations:  the system log, a
  *   daemon-specific log (in the /var/svc/log hierarchy by default), and to the
  *   standard output (redirected to the /var/svc/log/svc.startd.log file by
  *   default).  Any or all of these destinations may be used to
  *   communicate a specific message; the audiences for each destination differ.
  *
- *   Generic messages associated with svc.startd(1M) are made by the
+ *   Generic messages associated with svc.startd(8) are made by the
  *   log_framework() and log_error() functions.  For these messages, svc.startd
  *   logs under its own name and under the LOG_DAEMON facility when issuing
  *   events to the system log.  By design, severities below LOG_NOTICE are never
@@ -64,30 +65,30 @@
  *
  *   LOG_ALERT		An unrecoverable operation requiring external
  *			intervention has occurred.   Includes an inability to
- *			write to the smf(5) repository (due to svc.configd(1M)
+ *			write to the smf(7) repository (due to svc.configd(8)
  *			absence, due to permissions failures, etc.).  Message
  *			should identify component at fault.
  *
- *   LOG_CRIT		An unrecoverable operation internal to svc.startd(1M)
+ *   LOG_CRIT		An unrecoverable operation internal to svc.startd(8)
  *			has occurred.  Failure should be recoverable by restart
- *			of svc.startd(1M).
+ *			of svc.startd(8).
  *
- *   LOG_ERR		An smf(5) event requiring administrative intervention
+ *   LOG_ERR		An smf(7) event requiring administrative intervention
  *			has occurred.  Includes instance being moved to the
  *			maintenance state.
  *
- *   LOG_WARNING	A potentially destabilizing smf(5) event not requiring
+ *   LOG_WARNING	A potentially destabilizing smf(7) event not requiring
  *			administrative intervention has occurred.
  *
- *   LOG_NOTICE		A noteworthy smf(5) event has occurred.  Includes
+ *   LOG_NOTICE		A noteworthy smf(7) event has occurred.  Includes
  *			individual instance failures.
  *
- *   LOG_INFO		A noteworthy operation internal to svc.startd(1M) has
+ *   LOG_INFO		A noteworthy operation internal to svc.startd(8) has
  *			occurred.  Includes recoverable failures or otherwise
  *			unexpected outcomes.
  *
  *   LOG_DEBUG		An internal operation only of interest to a
- *			svc.startd(1M) developer has occurred.
+ *			svc.startd(8) developer has occurred.
  *
  *  Logging configuration
  *    The preferred approach is to set the logging property values
@@ -475,6 +476,10 @@ log_transition(const restarter_inst_t *inst, start_outcome_t outcome)
 		severity = LOG_INFO;
 	} else {
 		switch (outcome) {
+		case DEGRADE_REQUESTED:
+			action = gettext("transitioned to degraded by "
+			    "request (see 'svcs -xv' for details)");
+			break;
 		case MAINT_REQUESTED:
 			action = gettext("transitioned to maintenance by "
 			    "request (see 'svcs -xv' for details)");
@@ -494,6 +499,10 @@ log_transition(const restarter_inst_t *inst, start_outcome_t outcome)
 		case START_FAILED_TIMEOUT_FATAL:
 			action = gettext("timed out: transitioned to "
 			    "maintenance (see 'svcs -xv' for details)");
+			break;
+		case START_FAILED_DEGRADED:
+			action = gettext("transitioned to degraded "
+			    "(see 'svcs -xv' for details)");
 			break;
 		case START_FAILED_OTHER:
 			action = gettext("failed: transitioned to "

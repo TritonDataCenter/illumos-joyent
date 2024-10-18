@@ -26,6 +26,7 @@
 /*
  * Copyright (c) 2015, Joyent, Inc.  All rights reserved.
  * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2022 Garrett D'Amore
  */
 
 #include <sys/types.h>
@@ -58,7 +59,6 @@
 #include <fs/sockfs/socktpi_impl.h>
 #include <fs/sockfs/sodirect.h>
 #include <sys/tihdr.h>
-#include <fs/sockfs/nl7c.h>
 
 extern int xnet_skip_checks;
 extern int xnet_check_print;
@@ -174,7 +174,7 @@ so_bind(struct sonode *so, struct sockaddr *name, socklen_t namelen,
 		/*
 		 * Force a zero sa_family to match so_family.
 		 *
-		 * Some programs like inetd(1M) don't set the
+		 * Some programs like inetd(8) don't set the
 		 * family field. Other programs leave
 		 * sin_family set to garbage - SunOS 4.X does
 		 * not check the family field on a bind.
@@ -231,33 +231,6 @@ so_bind(struct sonode *so, struct sockaddr *name, socklen_t namelen,
 	default:
 		/* Just pass the request to the protocol */
 		goto dobind;
-	}
-
-	/*
-	 * First we check if either NCA or KSSL has been enabled for
-	 * the requested address, and if so, we fall back to TPI.
-	 * If neither of those two services are enabled, then we just
-	 * pass the request to the protocol.
-	 *
-	 * Note that KSSL can only be enabled on a socket if NCA is NOT
-	 * enabled for that socket, hence the else-statement below.
-	 */
-	if (nl7c_enabled && ((so->so_family == AF_INET ||
-	    so->so_family == AF_INET6) &&
-	    nl7c_lookup_addr(name, namelen) != NULL)) {
-		/*
-		 * NL7C is not supported in non-global zones,
-		 * we enforce this restriction here.
-		 */
-		if (so->so_zoneid == GLOBAL_ZONEID) {
-			/* NCA should be used, so fall back to TPI */
-			error = so_tpi_fallback(so, cr);
-			SO_UNBLOCK_FALLBACK(so);
-			if (error)
-				return (error);
-			else
-				return (SOP_BIND(so, name, namelen, flags, cr));
-		}
 	}
 
 dobind:
@@ -598,7 +571,7 @@ so_sendmblk(struct sonode *so, struct nmsghdr *msg, int fflag,
 int
 so_shutdown(struct sonode *so, int how, struct cred *cr)
 {
-	int error;
+	int error = 0;
 
 	SO_BLOCK_FALLBACK(so, SOP_SHUTDOWN(so, how, cr));
 
@@ -1838,8 +1811,8 @@ retry:
 			 */
 			control = kmem_zalloc(controllen, KM_SLEEP);
 
-			error = so_opt2cmsg(mctlp, opt, optlen,
-			    !(flags & MSG_XPG4_2), control, controllen);
+			error = so_opt2cmsg(mctlp, opt, optlen, flags, control,
+			    controllen);
 			if (error) {
 				freemsg(mctlp);
 				if (msg->msg_namelen != 0)
@@ -1897,8 +1870,8 @@ retry:
 			 */
 			control = kmem_zalloc(controllen, KM_SLEEP);
 
-			error = so_opt2cmsg(mctlp, opt, optlen,
-			    !(flags & MSG_XPG4_2), control, controllen);
+			error = so_opt2cmsg(mctlp, opt, optlen, flags, control,
+			    controllen);
 			if (error) {
 				freemsg(mctlp);
 				kmem_free(control, controllen);

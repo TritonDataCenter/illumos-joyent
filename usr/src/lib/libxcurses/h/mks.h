@@ -22,9 +22,9 @@
 /*
  * Copyright 2004 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2014 Garrett D'Amore <garrett@damore.org>
  */
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 /*
  * MKS header file.  Defines that make programming easier for us.
@@ -121,7 +121,7 @@ typedef	void	(*_sigfun_t)(int);
  */
 #ifndef P_tmpdir
 #  ifndef M_TMPDIR
-     # error  M_TMPDIR must be defined in mkslocal.h 
+     # error  M_TMPDIR must be defined in mkslocal.h
 #  endif
 #  define P_tmpdir        M_TMPDIR
 #endif /* P_tmpdir */
@@ -131,7 +131,7 @@ typedef	void	(*_sigfun_t)(int);
  */
 #ifndef L_cuserid
 #  ifndef M_L_CUSERID
-     # error  M_L_CUSERID must be defined in mkslocal.h 
+     # error  M_L_CUSERID must be defined in mkslocal.h
 #  endif
 #  define L_cuserid        M_L_CUSERID
 #endif /* L_cuserid */
@@ -161,7 +161,7 @@ LEXTERN	char	*m_audmode (int, int);
 
 #ifndef M_SH_MAX_FUNCTION_EVAL_DEPTH
 #define M_SH_MAX_FUNCTION_EVAL_DEPTH	100
-#endif 
+#endif
 
 #ifndef M_MANPAGER
 #define M_MANPAGER	"more -A -s"
@@ -177,7 +177,7 @@ LEXTERN	char	*m_audmode (int, int);
 #  define	M_ESCAPE '\033'		/* default to ASCII code for <ESC> */
 #endif /*M_ESCAPE*/
 
-#ifndef	SETVBUF	    
+#ifndef	SETVBUF
 /* if SETVBUF not previously defined, then use default ANSI-C definition */
 #  define	SETVBUF	setvbuf
 #endif
@@ -336,9 +336,6 @@ LEXTERN	void	crc16 (ushort *, ushort);
 LEXTERN	void	crcccitt (ushort *, ushort);
 LEXTERN	int	eprintf (const char *, ...);
 LEXTERN	void	eputs (const char *);
-LEXTERN	pid_t	fexecve (const char *, char *const *, char *const *);
-LEXTERN	pid_t	fexecvp (const char *, char *const *);
-LEXTERN	pid_t	fexecvep (const char *, char *const *, char *const *);
 LEXTERN int	execvep (const char *, char *const *, char *const *);
 LEXTERN	int	isabsname (const char *);
 LEXTERN	const char *m_cescape (wint_t);
@@ -401,7 +398,7 @@ extern wchar_t *m_sbtounicode(const char*);
 /* __m_popen() : alternate interface into popen() */
 LEXTERN FILE	*__m_popen (const char *, const char *,
 			    const char *, const char *);
-LEXTERN FILE	*__m_popenvp (const char *mode, const char *shell, 
+LEXTERN FILE	*__m_popenvp (const char *mode, const char *shell,
 			      char const * const *args);
 
 #if M_TFGETC
@@ -559,11 +556,11 @@ LEXTERN	time_t	_oftout (ushort, ushort);
 #ifdef M_NON_STATIC_GETENV
 #define __m_getenv getenv
 #else
-LEXTERN	char 	*__m_getenv(char const *);  /* Library safe getenv() */
+LEXTERN	char	*__m_getenv(char const *);  /* Library safe getenv() */
 #endif
 
 #ifndef M_CRON_MAILER
-/* 
+/*
  * Default case: assume only POSIX.2 mailx is available.
  * Must be careful when cron sends output to mailx.
  * We must ensure that lines with leading '~' are escaped
@@ -647,7 +644,7 @@ LEXTERN	void	(*m_errorfn) (const char *fmt, va_list args);
 #endif
 
 /*
- * m_tempname() generates a filename for a temp file using "code" 
+ * m_tempname() generates a filename for a temp file using "code"
  * in the name.
  */
 #ifndef M_TEMPNAME
@@ -668,12 +665,12 @@ struct getopt_state {
         int     index;                  /* argv[optind] index */
 #ifdef  M_I18N_MB
         mbstate_t st;                   /* State of argv[optind][index] */
-#endif 
+#endif
 };
 
 int __m_getopt(int argc, char * const *argv, char const *optstring,
                struct getopt_state *state);
-	
+
 
 #ifdef M_MKSEXTRA_H
 /* Any overrides etcetera for a particular system can go in here */

@@ -91,12 +91,6 @@ include	$(SRC)/cmd/sgs/Makefile.com
 
 SRCDIR =	$(SRC)/cmd/sgs/libconv
 
-CERRWARN	+= -_gcc=-Wno-type-limits
-CERRWARN	+= -_gcc=-Wno-switch
-
-# not linted
-SMATCH=off
-
 CTFCONVERT_O=
 
 README_REVISION= $(SGSHOME)/tools/readme_revision
@@ -109,7 +103,7 @@ CPPFLAGS +=	-I$(SRC)/lib/libc/inc -I$(ELFCAP) \
 
 ARFLAGS=	cr
 
-AS_CPPFLAGS=	-P -D_ASM $(CPPFLAGS)
+AS_CPPFLAGS=	-D_ASM $(CPPFLAGS)
 
 BLTDATA=	$(BLTOBJS:%.o=%.c) $(BLTOBJS:%.o=%.h) report_bufsize.h
 
@@ -120,3 +114,9 @@ MSGSRCS=	$(COMOBJS:%.o=../common/%.c) \
 SGSMSGTARG=	$(BLTOBJS:%_msg.o=../common/%.msg)
 
 CLEANFILES +=	$(BLTDATA) bld_vernote vernote.s
+
+#
+# Disable the stack protector due to issues with bootstrapping rtld. See
+# cmd/sgs/rtld/Makefile.com for more information.
+#
+STACKPROTECT = none

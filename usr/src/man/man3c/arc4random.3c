@@ -52,14 +52,14 @@ described in
 .Xr rand 3C ,
 .Xr random 3C ,
 and
-.Xr rand48 3C .
+.Xr drand48 3C .
 .Pp
 Use of these functions is encouraged for almost all random number
 consumption because the other interfaces are deficient in either
 quality, portability, standardization, or availability.
 These functions can be called in almost all coding environments,
 including
-.Xr pthreads 5
+.Xr pthreads 7
 and
 .Xr chroot 2 .
 .Pp
@@ -101,6 +101,6 @@ reserved to indicate an error.
 .Sh MT-LEVEL
 .Sy MT-Safe
 .Sh SEE ALSO
+.Xr drand48 3C ,
 .Xr rand 3C ,
-.Xr rand48 3C ,
 .Xr random 3C

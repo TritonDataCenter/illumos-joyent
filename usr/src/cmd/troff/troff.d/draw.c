@@ -25,7 +25,7 @@
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 /*
  * University Copyright- Copyright (c) 1982, 1986, 1988
@@ -36,8 +36,6 @@
  * software developed by the University of California, Berkeley, and its
  * contributors.
  */
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #include	<stdio.h>
 #include	<math.h>
@@ -63,10 +61,9 @@ int	maxdots	= 32000;	/* maximum number of dots in an object */
 #define	min(x,y)	((x) < (y) ? (x) : (y))
 #define	arcmove(x,y)	{ hgoto(x); vmot(-vpos-(y)); }
 
+/* draw line from here to dx, dy using s */
 int
-drawline(dx, dy, s)	/* draw line from here to dx, dy using s */
-int dx, dy;
-char *s;
+drawline(int dx, int dy, char *s)
 {
 	int xd, yd;
 	float val, slope;
@@ -148,8 +145,7 @@ char *s;
 }
 
 int
-drawwig(s)	/* draw wiggly line */
-	char *s;
+drawwig(char *s)	/* draw wiggly line */
 {
 	int x[50], y[50], xp, yp, pxp, pyp;
 	float t1, t2, t3, w;
@@ -201,8 +197,8 @@ drawwig(s)	/* draw wiggly line */
 	return (0);
 }
 
-char *getstr(p, temp)	/* copy next non-blank string from p to temp, update p */
-char *p, *temp;
+/* copy next non-blank string from p to temp, update p */
+char *getstr(char *p, char *temp)
 {
 	while (*p == ' ' || *p == '\t' || *p == '\n')
 		p++;
@@ -217,7 +213,7 @@ char *p, *temp;
 }
 
 int
-drawcirc(d)
+drawcirc(int d)
 {
 	int xc, yc;
 
@@ -230,8 +226,9 @@ drawcirc(d)
 	return (0);
 }
 
+/* integer distance from x1,y1 to x2,y2 */
 int
-dist(x1, y1, x2, y2)	/* integer distance from x1,y1 to x2,y2 */
+dist(int x1, int y1, int x2, int y2)
 {
 	float dx, dy;
 
@@ -241,7 +238,7 @@ dist(x1, y1, x2, y2)	/* integer distance from x1,y1 to x2,y2 */
 }
 
 int
-drawarc(dx1, dy1, dx2, dy2)
+drawarc(int dx1, int dy1, int dx2, int dy2)
 {
 	int x0, y0, x2, y2, r;
 
@@ -256,7 +253,7 @@ drawarc(dx1, dy1, dx2, dy2)
 }
 
 int
-drawellip(a, b)
+drawellip(int a, int b)
 {
 	int xc, yc;
 
@@ -272,7 +269,7 @@ drawellip(a, b)
 #define sqr(x) (long int)(x)*(x)
 
 int
-conicarc(x, y, x0, y0, x1, y1, a, b)
+conicarc(int x, int y, int x0, int y0, int x1, int y1, int a, int b)
 {
 	/* based on Bresenham, CACM, Feb 77, pp 102-3 */
 	/* by Chris Van Wyk */
@@ -301,8 +298,8 @@ conicarc(x, y, x0, y0, x1, y1, a, b)
 			xstep = 1;
 			ystep = (float)b / a;
 			radius = a;
-		} 
-	else {	/* a circular arc; radius is computed from center and first point */	
+		}
+	else {	/* a circular arc; radius is computed from center and first point */
 		xstep = ystep = 1;
 		radius = sqrt((float)(sqr(x0 - x) + sqr(y0 - y)));
 	}
@@ -352,7 +349,7 @@ conicarc(x, y, x0, y0, x1, y1, a, b)
 			M2y = -1;
 			M3x = 0;
 			M3y = -1;
-		} 
+		}
 	else if (ys < 0) {
 		Xs = abs(xs);
 		Ys = abs(ys);
@@ -387,7 +384,7 @@ conicarc(x, y, x0, y0, x1, y1, a, b)
 			Xt = abs(xt);
 			Yt = abs(yt);
 			qt = 2;
-		} 
+		}
 	else if (yt < 0) {
 		Xt = abs(xt);
 		Yt = abs(yt);
@@ -483,7 +480,7 @@ conicarc(x, y, x0, y0, x1, y1, a, b)
 }
 
 int
-putdot(x, y)
+putdot(int x, int y)
 {
 	arcmove(x, y);
 	put1(drawdot);

@@ -13,6 +13,7 @@
 # Copyright 2016 Toomas Soome <tsoome@me.com>
 #
 # Copyright 2020 Joyent, Inc.
+# Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
 
 LIBRARY=libficl-sys.a
 MAJOR = 4
@@ -27,19 +28,17 @@ OBJECTS= dictionary.o system.o fileaccess.o float.o double.o prefix.o search.o \
 include $(SRC)/lib/Makefile.lib
 
 LIBS=	$(DYNLIB)
+CSTD=	$(CSTD_GNU99)
+
 FICLDIR=	$(SRC)/common/ficl
 LZ4=		$(SRC)/common/lz4
-CSTD=	$(CSTD_GNU99)
 PNGLITE=	$(SRC)/common/pnglite
 CPPFLAGS +=	-I.. -I$(FICLDIR) -I$(FICLDIR)/emu -D_LARGEFILE64_SOURCE=1
-CPPFLAGS +=	-I$(PNGLITE) -I$(LZ4)
+# These in-gate headers must take precedence over any that may appear in an
+# adjunct.
+CPPFLAGS.first +=	-I$(PNGLITE) -I$(LZ4)
 CFLAGS += $(C_BIGPICFLAGS)
 CFLAGS64 += $(C_BIGPICFLAGS64)
-
-# As variable "count" is marked volatile, gcc 4.4.4 will complain about
-# function argument. So we switch this warning off
-# for time being, till gcc 4.4.4 will be replaced.
-pics/vm.o := CERRWARN += -_gcc=-Wno-clobbered
 
 LDLIBS +=	-lumem -luuid -lz -lc -lm
 NATIVE_LIBS +=	libz.so

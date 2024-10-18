@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 1994, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2020 The University of Queensland
  */
 
 #include <sys/systm.h>
@@ -428,7 +429,7 @@ getpolicy(caddr_t data)
  * by the value of the global zone's flags at the time the
  * local zone is created.
  *
- * While auditconfig(1M) allows setting and unsetting policies one bit
+ * While auditconfig(8) allows setting and unsetting policies one bit
  * at a time, the mask passed in from auditconfig() is created by a
  * syscall to getpolicy and then modified based on the auditconfig()
  * cmd line, so the input policy value is used to replace the existing
@@ -468,6 +469,10 @@ setpolicy(caddr_t data)
 	 * segv's, the audit state may be "auditing" but the door may
 	 * be closed.  Returning an error if the door is open makes it
 	 * impossible for Greenline to restart auditd.
+	 *
+	 * Note that auk_current_vp can change (e.g. to NULL) as long as we
+	 * aren't holding auk_svc_lock -- so au_door_upcall() will eventually
+	 * double-check this condition after it takes auk_svc_lock.
 	 */
 	if (kctx->auk_current_vp != NULL)
 		(void) au_doormsg(kctx, AU_DBUF_POLICY, &policy);

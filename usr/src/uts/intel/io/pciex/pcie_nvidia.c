@@ -21,6 +21,7 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -96,23 +97,9 @@ check_if_device_is_pciex(dev_info_t *cdip, uchar_t bus, uchar_t dev,
 				*slot_valid = B_TRUE;
 				*slot_number =
 				    PCIE_SLOTCAP_PHY_SLOT_NUM(slot_cap);
-
-				/* Is PCI Express HotPlug capability set? */
-				if (cdip &&
-				    (slot_cap & PCIE_SLOTCAP_HP_CAPABLE)) {
-					(void) ndi_prop_update_int(
-					    DDI_DEV_T_NONE, cdip,
-					    "pci-hotplug-type",
-					    INBAND_HPC_PCIE);
-				}
 			}
 
 			found_pciex = B_TRUE;
-		}
-
-		if (cdip && (cap == PCI_CAP_ID_PCI_HOTPLUG)) {
-			(void) ndi_prop_update_int(DDI_DEV_T_NONE, cdip,
-			    "pci-hotplug-type", INBAND_HPC_SHPC);
 		}
 
 		capsp = (*pci_getb_func)(bus, dev, func,
@@ -177,8 +164,6 @@ look_for_any_pciex_device(uchar_t bus)
 boolean_t
 create_pcie_root_bus(uchar_t bus, dev_info_t *dip)
 {
-	pcie_bus_t *bus_p;
-
 	/*
 	 * Currently this is being hard-coded.
 	 * We need to figure out if the root bus does indeed
@@ -199,10 +184,6 @@ create_pcie_root_bus(uchar_t bus, dev_info_t *dip)
 
 	pcie_rc_init_bus(dip);
 
-	/* save base addr in bus_t for pci_cfgacc_xxx() */
-	bus_p = PCIE_DIP2BUS(dip);
-	bus_p->bus_cfgacc_base = mcfg_mem_base;
-
 	return (B_TRUE);
 }
 
@@ -222,9 +203,7 @@ add_nvidia_isa_bridge_props(dev_info_t *dip, uchar_t bus, uchar_t dev,
 	pci_regspec_t regs[2] = {{0}};
 	pci_regspec_t assigned[2] = {{0}};
 
-	devloc = (uint_t)bus << PCI_REG_BUS_SHIFT |
-	    (uint_t)dev << PCI_REG_DEV_SHIFT |
-	    (uint_t)func << PCI_REG_FUNC_SHIFT;
+	devloc = PCI_REG_MAKE_BDFR(bus, dev, func, 0);
 	regs[0].pci_phys_hi = devloc;
 
 	/* System Control BAR i/o space */

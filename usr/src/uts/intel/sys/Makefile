@@ -22,6 +22,7 @@
 # Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
+# Copyright 2023 Oxide Computer Company
 
 include ../../../Makefile.master
 
@@ -85,11 +86,20 @@ HDRS	=			\
 	trap.h			\
 	traptrace.h		\
 	tss.h			\
+	ucode.h			\
+	ucode_amd.h		\
+	ucode_intel.h		\
 	ucontext.h		\
 	utrap.h			\
 	vmparam.h		\
 	x86_archext.h		\
 	xen_errno.h
+
+
+# Headers shared with the various machine architectures are installed via
+# different means, but are checked here, since it is a common point.
+include Makefile.psm
+CHECK_ONLY_HDRS = $(PSM_SHARED_HDRS)
 
 ROOTDIR=	$(ROOT)/usr/include/sys
 SCSIDIR=	$(ROOTDIR)/scsi
@@ -100,8 +110,9 @@ ROOTDIRS=	$(ROOTDIR) $(ROOTFSDIR)
 
 ROOTHDRS= $(HDRS:%=$(ROOTDIR)/%)
 
-CHECKHDRS= 			\
-	$(HDRS:%.h=%.check)
+CHECKHDRS = \
+	$(HDRS:%.h=%.check)		\
+	$(CHECK_ONLY_HDRS:%.h=%.check)	\
 
 # install rules
 $(ROOTDIR)/%: %

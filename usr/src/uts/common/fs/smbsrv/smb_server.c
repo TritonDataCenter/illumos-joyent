@@ -22,6 +22,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2017 by Delphix. All rights reserved.
  * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
+ * Copyright 2021-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -205,6 +206,10 @@
 #include <sys/cmn_err.h>
 #include <sys/priv.h>
 #include <sys/zone.h>
+#include <sys/sysmacros.h>
+#include <sys/callb.h>
+#include <sys/class.h>
+#include <sys/disp.h>
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
@@ -250,6 +255,13 @@ static uint16_t smb_spool_get_fid(smb_server_t *);
 static boolean_t smb_spool_lookup_doc_byfid(smb_server_t *, uint16_t,
     smb_kspooldoc_t *);
 
+#ifdef	_KERNEL
+int smb_create_process = 1;
+static void smb_server_delproc(smb_server_t *);
+static int smb_server_newproc(smb_server_t *);
+static void smb_server_proc_main(void *);
+#endif
+
 /*
  * How many "buckets" should our hash tables use?  On a "real" server,
  * make them much larger than the number of CPUs we're likely to have.
@@ -267,6 +279,9 @@ uint32_t SMB_LEASE_HASH_NBUCKETS = DEFAULT_HASH_NBUCKETS;
 int smb_event_debug = 0;
 
 static smb_llist_t	smb_servers;
+
+/* for smb_server_destroy_session() */
+static smb_llist_t smb_server_session_zombies;
 
 kmem_cache_t		*smb_cache_request;
 kmem_cache_t		*smb_cache_session;
@@ -340,6 +355,9 @@ smb_server_g_init(void)
 	smb_llist_constructor(&smb_servers, sizeof (smb_server_t),
 	    offsetof(smb_server_t, sv_lnd));
 
+	smb_llist_constructor(&smb_server_session_zombies,
+	    sizeof (smb_session_t), offsetof(smb_session_t, s_lnd));
+
 	return (0);
 
 errout:
@@ -387,11 +405,17 @@ smb_server_g_fini(void)
 /*
  * smb_server_create
  *
+ * Called by driver open
+ *
  * This function will fail if there's already a server associated with the
  * caller's zone.
+ *
+ * This object is one-to-one with zones, so we could instead
+ * create/destroy this via zone_key_create callbacks.
+ * See smb_server_delete() for destruction.
  */
 int
-smb_server_create(void)
+smb_server_create(dev_t dev)
 {
 	zoneid_t	zid;
 	smb_server_t	*sv;
@@ -400,11 +424,11 @@ smb_server_create(void)
 
 	smb_llist_enter(&smb_servers, RW_WRITER);
 	sv = smb_llist_head(&smb_servers);
-	while (sv) {
+	while (sv != NULL) {
 		SMB_SERVER_VALID(sv);
 		if (sv->sv_zid == zid) {
 			smb_llist_exit(&smb_servers);
-			return (EPERM);
+			return (SET_ERROR(EBUSY));
 		}
 		sv = smb_llist_next(&smb_servers, sv);
 	}
@@ -415,6 +439,8 @@ smb_server_create(void)
 	sv->sv_state = SMB_SERVER_STATE_CREATED;
 	sv->sv_zid = zid;
 	sv->sv_pid = ddi_get_pid();
+	sv->sv_dev = dev;
+	sv->sv_proc_state = SMB_THREAD_STATE_EXITED;
 
 	mutex_init(&sv->sv_mutex, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&sv->sv_cv, NULL, CV_DEFAULT, NULL);
@@ -445,7 +471,7 @@ smb_server_create(void)
 	    sizeof (smb_disp_stats_t), KM_SLEEP);
 
 	smb_thread_init(&sv->si_thread_timers, "smb_timers",
-	    smb_server_timers, sv, smbsrv_timer_pri);
+	    smb_server_timers, sv, smbsrv_timer_pri, sv);
 
 	smb_srqueue_init(&sv->sv_srqueue);
 
@@ -459,6 +485,8 @@ smb_server_create(void)
 	    smb_tcon_threshold, smb_tcon_timeout);
 	smb_threshold_init(&sv->sv_opipe_ct, SMB_OPIPE_CMD,
 	    smb_opipe_threshold, smb_opipe_timeout);
+	smb_threshold_init(&sv->sv_logoff_ct, SMB_LOGOFF_CMD,
+	    smb_logoff_threshold, smb_logoff_timeout);
 
 	smb_llist_insert_tail(&smb_servers, sv);
 	smb_llist_exit(&smb_servers);
@@ -468,6 +496,8 @@ smb_server_create(void)
 
 /*
  * smb_server_delete
+ *
+ * Called by driver close
  *
  * This function will delete the server passed in. It will make sure that all
  * activity associated that server has ceased before destroying it.
@@ -515,6 +545,7 @@ smb_server_delete(smb_server_t	*sv)
 	smb_threshold_fini(&sv->sv_ssetup_ct);
 	smb_threshold_fini(&sv->sv_tcon_ct);
 	smb_threshold_fini(&sv->sv_opipe_ct);
+	smb_threshold_fini(&sv->sv_logoff_ct);
 
 	smb_server_listener_destroy(&sv->sv_nbt_daemon);
 	smb_server_listener_destroy(&sv->sv_tcp_daemon);
@@ -546,22 +577,19 @@ smb_server_delete(smb_server_t	*sv)
 
 /*
  * smb_server_configure
+ *
+ * Called via SMB_IOC_CONFIG, for smbd startup or refresh.
  */
 int
-smb_server_configure(smb_ioc_cfg_t *ioc)
+smb_server_configure(smb_server_t *sv, smb_ioc_cfg_t *ioc)
 {
 	int		rc = 0;
-	smb_server_t	*sv;
 
 	/*
 	 * Reality check negotiation token length vs. #define'd maximum.
 	 */
 	if (ioc->negtok_len > SMB_PI_MAX_NEGTOK)
 		return (EINVAL);
-
-	rc = smb_server_lookup(&sv);
-	if (rc)
-		return (rc);
 
 	mutex_enter(&sv->sv_mutex);
 	switch (sv->sv_state) {
@@ -588,29 +616,34 @@ smb_server_configure(smb_ioc_cfg_t *ioc)
 	}
 	mutex_exit(&sv->sv_mutex);
 
-	smb_server_release(sv);
-
 	return (rc);
 }
 
 /*
  * smb_server_start
+ *
+ * Called via SMB_IOC_START during smbd startup.
+ * Bring up the activities requried for SMB service.
  */
 int
-smb_server_start(smb_ioc_start_t *ioc)
+smb_server_start(smb_server_t *sv, smb_ioc_start_t *ioc)
 {
 	int		rc = 0;
 	int		family;
-	smb_server_t	*sv;
 	cred_t		*ucr;
-
-	rc = smb_server_lookup(&sv);
-	if (rc)
-		return (rc);
+	struct proc	*tqproc;
 
 	mutex_enter(&sv->sv_mutex);
 	switch (sv->sv_state) {
 	case SMB_SERVER_STATE_CONFIGURED:
+
+#ifdef	_KERNEL
+		if (smb_create_process) {
+			rc = smb_server_newproc(sv);
+			if (rc != 0)
+				break;
+		}
+#endif	/* _KERNEL */
 
 		if ((rc = smb_server_fsop_start(sv)) != 0)
 			break;
@@ -644,20 +677,34 @@ smb_server_start(smb_ioc_start_t *ioc)
 			break;
 
 		/*
+		 * Create our taskq's (thread pools)
+		 *
 		 * NB: the proc passed here has to be a "system" one.
 		 * Normally that's p0, or the NGZ eqivalent.
+		 *
+		 * The notify pool is sized at a quarter the number of
+		 * worker threads (instead of another config item).
 		 */
+		tqproc = (sv->sv_proc_p != NULL) ?
+		    sv->sv_proc_p : curzone->zone_zsched;
+
+		sv->sv_notify_pool = taskq_create_proc("smb_notify",
+		    sv->sv_cfg.skc_maxworkers / 4, smbsrv_notify_pri,
+		    sv->sv_cfg.skc_maxworkers / 4, INT_MAX,
+		    tqproc, TASKQ_DYNAMIC|TASKQ_THREADS_LWP);
+
 		sv->sv_worker_pool = taskq_create_proc("smb_workers",
 		    sv->sv_cfg.skc_maxworkers, smbsrv_worker_pri,
 		    sv->sv_cfg.skc_maxworkers, INT_MAX,
-		    curzone->zone_zsched, TASKQ_DYNAMIC);
+		    tqproc, TASKQ_DYNAMIC|TASKQ_THREADS_LWP);
 
 		sv->sv_receiver_pool = taskq_create_proc("smb_receivers",
 		    sv->sv_cfg.skc_maxconnections, smbsrv_receive_pri,
 		    sv->sv_cfg.skc_maxconnections, INT_MAX,
-		    curzone->zone_zsched, TASKQ_DYNAMIC);
+		    tqproc, TASKQ_DYNAMIC|TASKQ_THREADS_LWP);
 
-		if (sv->sv_worker_pool == NULL ||
+		if (sv->sv_notify_pool == NULL ||
+		    sv->sv_worker_pool == NULL ||
 		    sv->sv_receiver_pool == NULL) {
 			rc = ENOMEM;
 			break;
@@ -696,19 +743,16 @@ smb_server_start(smb_ioc_start_t *ioc)
 		sv->sv_state = SMB_SERVER_STATE_RUNNING;
 		sv->sv_start_time = gethrtime();
 		mutex_exit(&sv->sv_mutex);
-		smb_server_release(sv);
 		smb_export_start(sv);
 		return (0);
 	default:
 		SMB_SERVER_STATE_VALID(sv->sv_state);
 		mutex_exit(&sv->sv_mutex);
-		smb_server_release(sv);
 		return (ENOTTY);
 	}
 
 	mutex_exit(&sv->sv_mutex);
 	smb_server_shutdown(sv);
-	smb_server_release(sv);
 	return (rc);
 }
 
@@ -716,13 +760,8 @@ smb_server_start(smb_ioc_start_t *ioc)
  * An smbd is shutting down.
  */
 int
-smb_server_stop(void)
+smb_server_stop(smb_server_t *sv)
 {
-	smb_server_t	*sv;
-	int		rc;
-
-	if ((rc = smb_server_lookup(&sv)) != 0)
-		return (rc);
 
 	mutex_enter(&sv->sv_mutex);
 	switch (sv->sv_state) {
@@ -739,7 +778,6 @@ smb_server_stop(void)
 	}
 	mutex_exit(&sv->sv_mutex);
 
-	smb_server_release(sv);
 	return (0);
 }
 
@@ -773,17 +811,12 @@ smb_server_cancel_event(smb_server_t *sv, uint32_t txid)
 }
 
 int
-smb_server_notify_event(smb_ioc_event_t *ioc)
+smb_server_notify_event(smb_server_t *sv, smb_ioc_event_t *ioc)
 {
-	smb_server_t	*sv;
-	int		rc;
 
-	if ((rc = smb_server_lookup(&sv)) == 0) {
-		smb_event_notify(sv, ioc->txid);
-		smb_server_release(sv);
-	}
+	smb_event_notify(sv, ioc->txid);
 
-	return (rc);
+	return (0);
 }
 
 /*
@@ -796,17 +829,12 @@ smb_server_notify_event(smb_ioc_event_t *ioc)
  *
  * rc - 0 success
  */
-
 int
-smb_server_spooldoc(smb_ioc_spooldoc_t *ioc)
+smb_server_spooldoc(smb_server_t *sv, smb_ioc_spooldoc_t *ioc)
 {
-	smb_server_t	*sv;
-	int		rc;
+	int		rc = 0;
 	smb_kspooldoc_t *spdoc;
 	uint16_t	fid;
-
-	if ((rc = smb_server_lookup(&sv)) != 0)
-		return (rc);
 
 	if (sv->sv_cfg.skc_print_enable == 0) {
 		rc = ENOTTY;
@@ -847,37 +875,27 @@ smb_server_spooldoc(smb_ioc_spooldoc_t *ioc)
 	kmem_free(spdoc, sizeof (*spdoc));
 
 out:
-	smb_server_release(sv);
 	return (rc);
 }
 
 int
-smb_server_set_gmtoff(smb_ioc_gmt_t *ioc)
+smb_server_set_gmtoff(smb_server_t *sv, smb_ioc_gmt_t *ioc)
 {
-	int		rc;
-	smb_server_t	*sv;
 
-	if ((rc = smb_server_lookup(&sv)) == 0) {
-		sv->si_gmtoff = ioc->offset;
-		smb_server_release(sv);
-	}
+	sv->si_gmtoff = ioc->offset;
 
-	return (rc);
+	return (0);
 }
 
 int
-smb_server_numopen(smb_ioc_opennum_t *ioc)
+smb_server_numopen(smb_server_t *sv, smb_ioc_opennum_t *ioc)
 {
-	smb_server_t	*sv;
-	int		rc;
 
-	if ((rc = smb_server_lookup(&sv)) == 0) {
-		ioc->open_users = sv->sv_users;
-		ioc->open_trees = sv->sv_trees;
-		ioc->open_files = sv->sv_files + sv->sv_pipes;
-		smb_server_release(sv);
-	}
-	return (rc);
+	ioc->open_users = sv->sv_users;
+	ioc->open_trees = sv->sv_trees;
+	ioc->open_files = sv->sv_files + sv->sv_pipes;
+
+	return (0);
 }
 
 /*
@@ -885,11 +903,10 @@ smb_server_numopen(smb_ioc_opennum_t *ioc)
  * enumeration context, i.e. what the caller want to get back.
  */
 int
-smb_server_enum(smb_ioc_svcenum_t *ioc)
+smb_server_enum(smb_server_t *sv, smb_ioc_svcenum_t *ioc)
 {
 	smb_svcenum_t	*svcenum = &ioc->svcenum;
-	smb_server_t	*sv;
-	int		rc;
+	int		rc = 0;
 	uint32_t	buflen_adjusted;
 
 	/*
@@ -914,9 +931,6 @@ smb_server_enum(smb_ioc_svcenum_t *ioc)
 	if (svcenum->se_buflen + sizeof (*ioc) > ioc->hdr.len)
 		return (EINVAL);
 
-	if ((rc = smb_server_lookup(&sv)) != 0)
-		return (rc);
-
 	svcenum->se_bavail = svcenum->se_buflen;
 	svcenum->se_bused = 0;
 	svcenum->se_nitems = 0;
@@ -933,7 +947,6 @@ smb_server_enum(smb_ioc_svcenum_t *ioc)
 		rc = EINVAL;
 	}
 
-	smb_server_release(sv);
 	return (rc);
 }
 
@@ -941,18 +954,11 @@ smb_server_enum(smb_ioc_svcenum_t *ioc)
  * Look for sessions to disconnect by client and user name.
  */
 int
-smb_server_session_close(smb_ioc_session_t *ioc)
+smb_server_session_close(smb_server_t *sv, smb_ioc_session_t *ioc)
 {
-	smb_server_t	*sv;
 	int		cnt;
-	int		rc;
-
-	if ((rc = smb_server_lookup(&sv)) != 0)
-		return (rc);
 
 	cnt = smb_server_session_disconnect(sv, ioc->client, ioc->username);
-
-	smb_server_release(sv);
 
 	if (cnt == 0)
 		return (ENOENT);
@@ -963,18 +969,12 @@ smb_server_session_close(smb_ioc_session_t *ioc)
  * Close a file by uniqid.
  */
 int
-smb_server_file_close(smb_ioc_fileid_t *ioc)
+smb_server_file_close(smb_server_t *sv, smb_ioc_fileid_t *ioc)
 {
 	uint32_t	uniqid = ioc->uniqid;
-	smb_server_t	*sv;
 	int		rc;
 
-	if ((rc = smb_server_lookup(&sv)) != 0)
-		return (rc);
-
 	rc = smb_server_fclose(sv, uniqid);
-
-	smb_server_release(sv);
 	return (rc);
 }
 
@@ -1135,6 +1135,140 @@ smb_server_disconnect_share(smb_server_t *sv, const char *sharename)
 
 	smb_llist_exit(ll);
 }
+
+#ifdef	_KERNEL
+
+/*
+ * Create a process to own SMB server threads (like zfs spa.c)
+ * so we can see the CPU usage etc. with "prstat -L".
+ * The new process MUST be in the same zone as the caller.
+ */
+static int
+smb_server_newproc(smb_server_t *sv)
+{
+	int rc;
+
+	/*
+	 * Todo: Fix newproc() for zones.
+	 * At present, it always creates in p0.
+	 * For now, only do this for the global zone.
+	 */
+	if (getzoneid() != GLOBAL_ZONEID)
+		return (0);
+
+	mutex_enter(&sv->sv_proc_lock);
+	if (sv->sv_proc_p != NULL) {
+		/* restart? re-use proc */
+		rc = 0;
+		goto out;
+	}
+
+	sv->sv_proc_state = SMB_THREAD_STATE_STARTING;
+	rc = newproc(smb_server_proc_main, (caddr_t)sv,
+	    syscid, smbsrv_base_pri, NULL, 0);
+	if (rc != 0) {
+		cmn_err(CE_WARN, "newproc failed, rc=%d", rc);
+		goto out;
+	}
+
+	/* Rendez-vous with new proc thread. */
+	while (sv->sv_proc_state == SMB_THREAD_STATE_STARTING) {
+		cv_wait(&sv->sv_proc_cv, &sv->sv_proc_lock);
+
+	}
+	if (sv->sv_proc_state != SMB_THREAD_STATE_RUNNING) {
+		rc = ESRCH;
+		goto out;
+	}
+	ASSERT(sv->sv_proc_p != NULL);
+
+out:
+	mutex_exit(&sv->sv_proc_lock);
+	return (rc);
+}
+
+/*
+ * Main thread for the process we create to own SMB server threads.
+ */
+static void
+smb_server_proc_main(void *arg)
+{
+	callb_cpr_t	cprinfo;
+	smb_server_t	*sv = arg;
+	user_t		*pu = PTOU(curproc);
+	zoneid_t	zid = getzoneid();
+
+	ASSERT(curproc != &p0);
+	ASSERT(zid == sv->sv_zid);
+
+	(void) strlcpy(pu->u_comm, "smbsrv", sizeof (pu->u_comm));
+	(void) snprintf(pu->u_psargs, sizeof (pu->u_psargs),
+	    "smbsrv %d", (int)zid);
+
+	CALLB_CPR_INIT(&cprinfo, &sv->sv_proc_lock, callb_generic_cpr,
+	    pu->u_psargs);
+
+	mutex_enter(&sv->sv_proc_lock);
+	ASSERT(sv->sv_proc_state == SMB_THREAD_STATE_STARTING);
+
+	sv->sv_proc_p = curproc;
+	sv->sv_proc_did = curthread->t_did;
+
+	sv->sv_proc_state = SMB_THREAD_STATE_RUNNING;
+	cv_broadcast(&sv->sv_proc_cv);
+
+	CALLB_CPR_SAFE_BEGIN(&cprinfo);
+	while (sv->sv_proc_state == SMB_THREAD_STATE_RUNNING)
+		cv_wait(&sv->sv_proc_cv, &sv->sv_proc_lock);
+	CALLB_CPR_SAFE_END(&cprinfo, &sv->sv_proc_lock);
+
+	ASSERT(sv->sv_proc_state == SMB_THREAD_STATE_EXITING);
+	sv->sv_proc_state = SMB_THREAD_STATE_EXITED;
+	sv->sv_proc_p = NULL;
+	cv_broadcast(&sv->sv_proc_cv);
+	CALLB_CPR_EXIT(&cprinfo);	/* mutex_exit sv_proc_lock */
+
+	/* Note: lwp_exit() expects p_lock entered. */
+	mutex_enter(&curproc->p_lock);
+	lwp_exit();
+}
+
+/*
+ * Delete the server proc (if any)
+ */
+static void
+smb_server_delproc(smb_server_t *sv)
+{
+
+	mutex_enter(&sv->sv_proc_lock);
+
+	if (sv->sv_proc_state != SMB_THREAD_STATE_RUNNING)
+		goto out;
+	ASSERT(sv->sv_proc_p != NULL);
+
+	sv->sv_proc_state = SMB_THREAD_STATE_EXITING;
+	cv_broadcast(&sv->sv_proc_cv);
+
+	/* Rendez-vous with proc thread. */
+	while (sv->sv_proc_state == SMB_THREAD_STATE_EXITING) {
+		cv_wait(&sv->sv_proc_cv, &sv->sv_proc_lock);
+
+	}
+	if (sv->sv_proc_state != SMB_THREAD_STATE_EXITED) {
+		cmn_err(CE_WARN, "smb_server_delproc, state=%d",
+		    sv->sv_proc_state);
+		goto out;
+	}
+	if (sv->sv_proc_did != 0) {
+		thread_join(sv->sv_proc_did);
+		sv->sv_proc_did = 0;
+	}
+
+out:
+	mutex_exit(&sv->sv_proc_lock);
+}
+
+#endif	/* _KERNEL */
 
 /*
  * *****************************************************************************
@@ -1357,6 +1491,12 @@ smb_server_kstat_fini(smb_server_t *sv)
 }
 
 /*
+ * Verify the defines in smb_kstat.h used by ks_reqs1 ks_reqs2
+ */
+CTASSERT(SMBSRV_KS_NREQS1 == SMB_COM_NUM);
+CTASSERT(SMBSRV_KS_NREQS2 == SMB2__NCMDS);
+
+/*
  * smb_server_kstat_update
  */
 static int
@@ -1435,6 +1575,8 @@ smb_server_legacy_kstat_update(kstat_t *ksp, int rw)
 
 }
 
+int smb_server_shutdown_wait1 = 15;	/* seconds */
+
 /*
  * smb_server_shutdown
  */
@@ -1443,19 +1585,22 @@ smb_server_shutdown(smb_server_t *sv)
 {
 	smb_llist_t *sl = &sv->sv_session_list;
 	smb_session_t *session;
-	clock_t	time;
+	clock_t	time0, time1, time2;
 
 	SMB_SERVER_VALID(sv);
 
 	/*
-	 * Stop the listeners first, so we don't get any more
-	 * new work while we're trying to shut down.
+	 * Stop the listeners first, so we can't get any more
+	 * new sessions while we're trying to shut down.
 	 */
 	smb_server_listener_stop(&sv->sv_nbt_daemon);
 	smb_server_listener_stop(&sv->sv_tcp_daemon);
-	smb_thread_stop(&sv->si_thread_timers);
 
-	/* Disconnect all of the sessions */
+	/*
+	 * Disconnect all of the sessions. This causes all the
+	 * smb_server_receiver threads to see a disconnect and
+	 * begin tear-down (in parallel) in smb_session_cancel.
+	 */
 	smb_llist_enter(sl, RW_READER);
 	session = smb_llist_head(sl);
 	while (session != NULL) {
@@ -1473,39 +1618,43 @@ smb_server_shutdown(smb_server_t *sv)
 	smb_threshold_wake_all(&sv->sv_ssetup_ct);
 	smb_threshold_wake_all(&sv->sv_tcon_ct);
 	smb_threshold_wake_all(&sv->sv_opipe_ct);
+	smb_threshold_wake_all(&sv->sv_logoff_ct);
 
 	/*
 	 * Wait for the session list to empty.
 	 * (cv_signal in smb_server_destroy_session)
 	 *
-	 * This should not take long, but if there are any leaked
-	 * references to ofiles, trees, or users, there could be a
-	 * session hanging around.  If that happens, the ll_count
-	 * never gets to zero and we'll never get the sv_signal.
-	 * Defend against that problem using timed wait, then
-	 * complain if we find sessions left over and continue
-	 * with shutdown in spite of any leaked sessions.
-	 * That's better than a server that won't reboot.
+	 * We must wait for all the SMB session readers to finish, or
+	 * we could proceed here while there might be worker threads
+	 * running in any of those sessions.  See smb_session_logoff
+	 * for timeouts applied to session tear-down. If this takes
+	 * longer than expected, make some noise, and fire a dtrace
+	 * probe one might use to investigate.
 	 */
-	time = SEC_TO_TICK(10) + ddi_get_lbolt();
+	time0 = ddi_get_lbolt();
+	time1 = SEC_TO_TICK(smb_server_shutdown_wait1) + time0;
 	mutex_enter(&sv->sv_mutex);
 	while (sv->sv_session_list.ll_count != 0) {
-		if (cv_timedwait(&sv->sv_cv, &sv->sv_mutex, time) < 0)
+		if (cv_timedwait(&sv->sv_cv, &sv->sv_mutex, time1) < 0) {
+			cmn_err(CE_NOTE, "!shutdown waited %d seconds"
+			    " with %d sessions still remaining",
+			    smb_server_shutdown_wait1,
+			    sv->sv_session_list.ll_count);
+			DTRACE_PROBE1(max__wait, smb_server_t *, sv);
 			break;
+		}
+	}
+	while (sv->sv_session_list.ll_count != 0) {
+		cv_wait(&sv->sv_cv, &sv->sv_mutex);
 	}
 	mutex_exit(&sv->sv_mutex);
-#ifdef	DEBUG
-	if (sv->sv_session_list.ll_count != 0) {
-		cmn_err(CE_NOTE, "shutdown leaked sessions");
-		debug_enter("shutdown leaked sessions");
-	}
-#endif
 
-	/*
-	 * Clean out any durable handles.  After this we should
-	 * have no ofiles remaining (and no more oplock breaks).
-	 */
-	smb2_dh_shutdown(sv);
+	time2 = ddi_get_lbolt();
+	if (time2 > time1) {
+		cmn_err(CE_NOTE, "!shutdown waited %d seconds"
+		    " for all sessions to finish",
+		    (int)TICK_TO_SEC(time2 - time0));
+	}
 
 	smb_kdoor_close(sv);
 #ifdef	_KERNEL
@@ -1515,6 +1664,7 @@ smb_server_shutdown(smb_server_t *sv)
 
 	smb_export_stop(sv);
 	smb_kshare_stop(sv);
+	smb_thread_stop(&sv->si_thread_timers);
 
 	/*
 	 * Both kshare and the oplock break sub-systems may have
@@ -1531,6 +1681,7 @@ smb_server_shutdown(smb_server_t *sv)
 		sv->sv_rootuser = NULL;
 	}
 	if (sv->sv_session != NULL) {
+		smb_session_cancel_requests(sv->sv_session, NULL, NULL);
 		smb_slist_wait_for_empty(&sv->sv_session->s_req_list);
 
 		/* Just in case import left users and trees */
@@ -1550,7 +1701,24 @@ smb_server_shutdown(smb_server_t *sv)
 		sv->sv_worker_pool = NULL;
 	}
 
+	if (sv->sv_notify_pool != NULL) {
+		taskq_destroy(sv->sv_notify_pool);
+		sv->sv_notify_pool = NULL;
+	}
+
+	/*
+	 * Clean out any durable handles.  After this we should
+	 * have no ofiles remaining (and no more oplock breaks).
+	 */
+	smb2_dh_shutdown(sv);
+
 	smb_server_fsop_stop(sv);
+
+#ifdef	_KERNEL
+	if (sv->sv_proc_p != NULL) {
+		smb_server_delproc(sv);
+	}
+#endif
 }
 
 /*
@@ -1586,7 +1754,7 @@ smb_server_listener_init(
 	}
 
 	smb_thread_init(&ld->ld_thread, name, smb_server_listener, ld,
-	    smbsrv_listen_pri);
+	    smbsrv_listen_pri, sv);
 	ld->ld_magic = SMB_LISTENER_MAGIC;
 }
 
@@ -1715,7 +1883,8 @@ smb_server_listener(smb_thread_t *thread, void *arg)
 
 	DTRACE_PROBE1(so__wait__accept, struct sonode *, ld->ld_so);
 
-	for (;;) {
+	while (smb_thread_continue_nowait(&ld->ld_thread) &&
+	    ld->ld_sv->sv_state != SMB_SERVER_STATE_STOPPING) {
 		int ret = ksocket_accept(ld->ld_so, NULL, NULL, &s_so, CRED());
 
 		switch (ret) {
@@ -1723,14 +1892,21 @@ smb_server_listener(smb_thread_t *thread, void *arg)
 			break;
 		case ECONNABORTED:
 			continue;
+
 		case EINTR:
-		case EBADF:	/* libfakekernel */
-			goto out;
+		case EBADF:
+		case ENOTSOCK:
+			/* These are normal during shutdown. Silence. */
+			if (ld->ld_sv->sv_state == SMB_SERVER_STATE_STOPPING)
+				goto out;
+			/* FALLTHROUGH */
 		default:
 			cmn_err(CE_WARN,
-			    "smb_server_listener: ksocket_accept(%d)",
+			    "smb_server_listener: ksocket_accept failed (%d)",
 			    ret);
-			goto out;
+			/* avoid a tight CPU-burn loop here */
+			delay(MSEC_TO_TICK(10));
+			continue;
 		}
 
 		DTRACE_PROBE1(so__accept, struct sonode *, s_so);
@@ -1772,7 +1948,6 @@ smb_server_receiver(void *arg)
 	/* We stay in here until socket disconnect. */
 	smb_session_receiver(session);
 
-	ASSERT(session->s_state == SMB_SESSION_STATE_SHUTDOWN);
 	smb_server_destroy_session(session);
 }
 
@@ -1810,7 +1985,7 @@ smb_server_lookup(smb_server_t **psv)
 		sv = smb_llist_next(&smb_servers, sv);
 	}
 	smb_llist_exit(&smb_servers);
-	return (EPERM);
+	return (ENXIO);
 }
 
 /*
@@ -1830,6 +2005,41 @@ smb_server_release(smb_server_t *sv)
 	if ((sv->sv_refcnt == 0) && (sv->sv_state == SMB_SERVER_STATE_DELETING))
 		cv_signal(&sv->sv_cv);
 	mutex_exit(&sv->sv_mutex);
+}
+
+/*
+ * smb_server_lookup_user
+ *
+ * Find an smb_user by its user_id
+ * Optional ssn_id (if non-zero) restricts search to a specific session.
+ *
+ * Returns smb_user_t * held. Caller must smb_user_rele(user)
+ * Returns NULL if not found.
+ */
+smb_user_t *
+smb_server_lookup_user(smb_server_t *sv, uint64_t ssn_id, uint64_t user_id)
+{
+	smb_llist_t	*slist = &sv->sv_session_list;
+	smb_session_t	*sn;
+	smb_user_t	*user = NULL;
+
+	smb_llist_enter(slist, RW_READER);
+
+	for (sn = smb_llist_head(slist);
+	    sn != NULL && user == NULL;
+	    sn = smb_llist_next(slist, sn)) {
+		SMB_SESSION_VALID(sn);
+
+		if (ssn_id != 0 && ssn_id != sn->s_kid)
+			continue;
+		if (sn->s_state != SMB_SESSION_STATE_NEGOTIATED)
+			continue;
+
+		user = smb_session_lookup_ssnid(sn, user_id);
+	}
+	smb_llist_exit(slist);
+
+	return (user);
 }
 
 /*
@@ -2012,6 +2222,10 @@ smb_server_fclose(smb_server_t *sv, uint32_t uniqid)
  * so it can force a logoff that we haven't noticed yet.
  * This is not called frequently, so we just walk the list of
  * connections searching for the user.
+ *
+ * Note that this must wait for any durable handles (ofiles)
+ * owned by this user to become "orphaned", so that a reconnect
+ * that may immediately follow can find and use such ofiles.
  */
 void
 smb_server_logoff_ssnid(smb_request_t *sr, uint64_t ssnid)
@@ -2019,6 +2233,10 @@ smb_server_logoff_ssnid(smb_request_t *sr, uint64_t ssnid)
 	smb_server_t	*sv = sr->sr_server;
 	smb_llist_t	*sess_list;
 	smb_session_t	*sess;
+	smb_user_t	*user = NULL;
+	boolean_t	do_logoff = B_FALSE;
+
+	SMB_SERVER_VALID(sv);
 
 	if (sv->sv_state != SMB_SERVER_STATE_RUNNING)
 		return;
@@ -2030,38 +2248,86 @@ smb_server_logoff_ssnid(smb_request_t *sr, uint64_t ssnid)
 	    sess != NULL;
 	    sess = smb_llist_next(sess_list, sess)) {
 
-		smb_user_t	*user;
-
 		SMB_SESSION_VALID(sess);
 
 		if (sess->dialect < SMB_VERS_2_BASE)
 			continue;
 
-		if (sess->s_state != SMB_SESSION_STATE_NEGOTIATED)
-			continue;
-
-		user = smb_session_lookup_ssnid(sess, ssnid);
-		if (user == NULL)
-			continue;
-
-		if (!smb_is_same_user(user->u_cred, sr->user_cr)) {
-			smb_user_release(user);
+		switch (sess->s_state) {
+		case SMB_SESSION_STATE_NEGOTIATED:
+		case SMB_SESSION_STATE_TERMINATED:
+		case SMB_SESSION_STATE_DISCONNECTED:
+			break;
+		default:
 			continue;
 		}
 
-		/* Treat this as if we lost the connection */
-		user->preserve_opens = SMB2_DH_PRESERVE_SOME;
-		smb_user_logoff(user);
-		smb_user_release(user);
+		/*
+		 * Normal situation is to find a LOGGED_ON user.
+		 */
+		user = smb_session_lookup_uid_st(sess, ssnid, 0,
+		    SMB_USER_STATE_LOGGED_ON);
+		if (user != NULL) {
+			if (smb_is_same_user(user->u_cred, sr->user_cr)) {
+				do_logoff = B_TRUE;
+				break;
+			}
+			smb_user_release(user);
+			user = NULL;
+		}
 
 		/*
-		 * The above may have left work on the delete queues
+		 * If we raced with disconnect, may find LOGGING_OFF,
+		 * in which case we want to just wait for it.
 		 */
-		smb_llist_flush(&sess->s_tree_list);
-		smb_llist_flush(&sess->s_user_list);
+		user = smb_session_lookup_uid_st(sess, ssnid, 0,
+		    SMB_USER_STATE_LOGGING_OFF);
+		if (user != NULL) {
+			if (smb_is_same_user(user->u_cred, sr->user_cr))
+				break;
+			smb_user_release(user);
+			user = NULL;
+		}
 	}
 
 	smb_llist_exit(sess_list);
+
+	/*
+	 * Note that smb_user_logoff() can block for a while if
+	 * smb_session_disconnect_owned_trees, smb_ofile_close_all
+	 * ends up blocked on locks held by running requests.
+	 * Do that while not holding the session list rwlock.
+	 */
+	if (user != NULL) {
+		if (do_logoff) {
+			/* Treat this as if we lost the connection */
+			user->preserve_opens = SMB2_DH_PRESERVE_SOME;
+			smb_user_logoff(user);
+		}
+
+		/*
+		 * Wait for durable handles to be orphaned.
+		 * Note: not holding the sess list rwlock.
+		 */
+		smb_user_wait_trees(user);
+
+		/*
+		 * Could be doing the last release on a user below,
+		 * which can leave work on the delete queues for
+		 * s_user_list or s_tree_list so flush those.
+		 * Must hold the session list after the user release
+		 * so that the session can't go away while we flush.
+		 */
+		smb_llist_enter(sess_list, RW_READER);
+
+		sess = user->u_session;
+		smb_user_release(user);
+
+		smb_llist_flush(&sess->s_tree_list);
+		smb_llist_flush(&sess->s_user_list);
+
+		smb_llist_exit(sess_list);
+	}
 }
 
 /* See also: libsmb smb_kmod_setcfg */
@@ -2077,7 +2343,6 @@ smb_server_store_cfg(smb_server_t *sv, smb_ioc_cfg_t *ioc)
 		    "forcing max_protocol to 3.0");
 		ioc->max_protocol = SMB_VERS_3_0;
 	}
-
 	sv->sv_cfg.skc_maxworkers = ioc->maxworkers;
 	sv->sv_cfg.skc_maxconnections = ioc->maxconnections;
 	sv->sv_cfg.skc_keepalive = ioc->keepalive;
@@ -2091,11 +2356,14 @@ smb_server_store_cfg(smb_server_t *sv, smb_ioc_cfg_t *ioc)
 	sv->sv_cfg.skc_ipv6_enable = ioc->ipv6_enable;
 	sv->sv_cfg.skc_print_enable = ioc->print_enable;
 	sv->sv_cfg.skc_traverse_mounts = ioc->traverse_mounts;
+	sv->sv_cfg.skc_short_names = ioc->short_names;
 	sv->sv_cfg.skc_max_protocol = ioc->max_protocol;
 	sv->sv_cfg.skc_min_protocol = ioc->min_protocol;
 	sv->sv_cfg.skc_encrypt = ioc->encrypt;
+	sv->sv_cfg.skc_encrypt_ciphers = ioc->encrypt_ciphers;
 	sv->sv_cfg.skc_execflags = ioc->exec_flags;
 	sv->sv_cfg.skc_negtok_len = ioc->negtok_len;
+	sv->sv_cfg.skc_max_opens = ioc->max_opens;
 	sv->sv_cfg.skc_version = ioc->version;
 	sv->sv_cfg.skc_initial_credits = ioc->initial_credits;
 	sv->sv_cfg.skc_maximum_credits = ioc->maximum_credits;
@@ -2476,15 +2744,17 @@ smb_spool_add_doc(smb_tree_t *tree, smb_kspooldoc_t *sp)
 static void
 smb_server_create_session(smb_listener_daemon_t *ld, ksocket_t s_so)
 {
-	smb_session_t		*session;
-	taskqid_t		tqid;
-	smb_llist_t		*sl;
 	smb_server_t		*sv = ld->ld_sv;
+	smb_session_t		*session;
+	smb_llist_t		*sl;
+	taskqid_t		tqid;
+	clock_t			now;
 
 	session = smb_session_create(s_so, ld->ld_port, sv,
 	    ld->ld_family);
 
 	if (session == NULL) {
+		/* This should be rare (create sleeps) */
 		smb_soshutdown(s_so);
 		smb_sodestroy(s_so);
 		cmn_err(CE_WARN, "SMB Session: alloc failed");
@@ -2493,6 +2763,17 @@ smb_server_create_session(smb_listener_daemon_t *ld, ksocket_t s_so)
 
 	sl = &sv->sv_session_list;
 	smb_llist_enter(sl, RW_WRITER);
+	if (smb_llist_get_count(sl) >= sv->sv_cfg.skc_maxconnections) {
+		/*
+		 * New session not in sv_session_list, so we can just
+		 * delete it directly.
+		 */
+		smb_llist_exit(sl);
+		DTRACE_PROBE1(maxconn, smb_session_t *, session);
+		smb_soshutdown(session->sock);
+		smb_session_delete(session);
+		goto logmaxconn;
+	}
 	smb_llist_insert_tail(sl, session);
 	smb_llist_exit(sl);
 
@@ -2502,14 +2783,33 @@ smb_server_create_session(smb_listener_daemon_t *ld, ksocket_t s_so)
 	 */
 	tqid = taskq_dispatch(sv->sv_receiver_pool,
 	    smb_server_receiver, session, TQ_NOQUEUE | TQ_SLEEP);
-	if (tqid == TASKQID_INVALID) {
-		smb_session_disconnect(session);
-		smb_server_destroy_session(session);
-		cmn_err(CE_WARN, "SMB Session: taskq_dispatch failed");
+	if (tqid != TASKQID_INVALID) {
+		/* Success */
 		return;
 	}
-	/* handy for debugging */
-	session->s_receiver_tqid = tqid;
+
+	/*
+	 * Have: tqid == TASKQID_INVALID
+	 * We never entered smb_server_receiver()
+	 * so need to do its return cleanup
+	 */
+	DTRACE_PROBE1(maxconn, smb_session_t *, session);
+	smb_session_disconnect(session);
+	smb_session_logoff(session);
+	smb_server_destroy_session(session);
+
+logmaxconn:
+	/*
+	 * If we hit max_connections, log something so an admin
+	 * can find out why new connections are failing, but
+	 * log this no more than once a minute.
+	 */
+	now = ddi_get_lbolt();
+	if (now > ld->ld_quiet) {
+		ld->ld_quiet = now + SEC_TO_TICK(60);
+		cmn_err(CE_WARN, "SMB can't create session: "
+		    "Would exceed max_connections.");
+	}
 }
 
 static void
@@ -2526,26 +2826,28 @@ smb_server_destroy_session(smb_session_t *session)
 	smb_llist_flush(&session->s_tree_list);
 	smb_llist_flush(&session->s_user_list);
 
-	/*
-	 * The user and tree lists should be empty now.
-	 */
-#ifdef DEBUG
-	if (session->s_user_list.ll_count != 0) {
-		cmn_err(CE_WARN, "user list not empty?");
-		debug_enter("s_user_list");
-	}
-	if (session->s_tree_list.ll_count != 0) {
-		cmn_err(CE_WARN, "tree list not empty?");
-		debug_enter("s_tree_list");
-	}
-#endif
-
 	smb_llist_enter(ll, RW_WRITER);
 	smb_llist_remove(ll, session);
 	count = ll->ll_count;
 	smb_llist_exit(ll);
 
-	smb_session_delete(session);
+	/*
+	 * Normally, the session should have state SHUTDOWN here.
+	 * If the session has any ofiles remaining, eg. due to
+	 * forgotten ofile references or something, the state
+	 * will be _DISCONNECTED or _TERMINATED.  Keep such
+	 * sessions in the list of zombies (for debugging).
+	 */
+	if (session->s_state == SMB_SESSION_STATE_SHUTDOWN) {
+		smb_session_delete(session);
+	} else {
+		cmn_err(CE_NOTE, "!Leaked session: 0x%p", (void *)session);
+		DTRACE_PROBE1(new__zombie, smb_session_t *, session);
+		smb_llist_enter(&smb_server_session_zombies, RW_WRITER);
+		smb_llist_insert_head(&smb_server_session_zombies, session);
+		smb_llist_exit(&smb_server_session_zombies);
+	}
+
 	if (count == 0) {
 		/* See smb_server_shutdown */
 		cv_signal(&sv->sv_cv);

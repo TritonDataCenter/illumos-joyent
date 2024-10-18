@@ -119,7 +119,7 @@ dladm_status_t
 dladm_walk_flowprop(int (*func)(void *, const char *), const char *flow,
     void *arg)
 {
-	int	i;
+	uint_t	i;
 
 	if (flow == NULL || func == NULL)
 		return (DLADM_STATUS_BADARG);
@@ -316,9 +316,8 @@ do_set_maxbw(dladm_handle_t handle, const char *flow, val_desc_t *vdp,
 	return (DLADM_STATUS_OK);
 }
 
-/* ARGSUSED */
 static dladm_status_t
-do_check_maxbw(fprop_desc_t *pdp, char **prop_val, uint_t val_cnt,
+do_check_maxbw(fprop_desc_t *pdp __unused, char **prop_val, uint_t val_cnt,
     val_desc_t **vdpp)
 {
 	uint64_t	*maxbw;
@@ -410,9 +409,8 @@ do_set_priority(dladm_handle_t handle, const char *flow, val_desc_t *vdp,
 	return (DLADM_STATUS_OK);
 }
 
-/* ARGSUSED */
 static dladm_status_t
-do_check_priority(fprop_desc_t *pdp, char **prop_val, uint_t val_cnt,
+do_check_priority(fprop_desc_t *pdp __unused, char **prop_val, uint_t val_cnt,
     val_desc_t **vdpp)
 {
 	mac_priority_level_t	pri;
@@ -426,9 +424,6 @@ do_check_priority(fprop_desc_t *pdp, char **prop_val, uint_t val_cnt,
 	if (status != DLADM_STATUS_OK)
 		return (status);
 
-	if (pri == -1)
-		return (DLADM_STATUS_BADVAL);
-
 	vdp = malloc(sizeof (val_desc_t));
 	if (vdp == NULL)
 		return (DLADM_STATUS_NOMEM);
@@ -441,7 +436,7 @@ do_check_priority(fprop_desc_t *pdp, char **prop_val, uint_t val_cnt,
 static dladm_status_t
 flow_proplist_check(dladm_arg_list_t *proplist)
 {
-	int		i, j;
+	uint_t		i, j;
 	boolean_t	matched;
 
 	for (i = 0; i < proplist->al_count; i++) {
@@ -484,9 +479,9 @@ static dladm_status_t
 i_dladm_flow_proplist_extract_one(dladm_arg_list_t *proplist,
     const char *name, void *arg)
 {
-	dladm_status_t		status;
+	dladm_status_t		status = DLADM_STATUS_OK;
 	dladm_arg_info_t	*aip = NULL;
-	int			i, j;
+	uint_t			i, j;
 
 	/* Find named property in proplist */
 	for (i = 0; i < proplist->al_count; i++) {
@@ -499,6 +494,9 @@ i_dladm_flow_proplist_extract_one(dladm_arg_list_t *proplist,
 	if (i == proplist->al_count)
 		return (DLADM_STATUS_OK);
 
+	if (aip->ai_val[0] == NULL)
+		return (DLADM_STATUS_BADARG);
+
 	for (i = 0; i < DLADM_MAX_FLOWPROPS; i++) {
 		fprop_desc_t	*pdp = &prop_table[i];
 		val_desc_t	*vdp;
@@ -509,9 +507,6 @@ i_dladm_flow_proplist_extract_one(dladm_arg_list_t *proplist,
 
 		if (strcasecmp(aip->ai_name, pdp->pd_name) != 0)
 			continue;
-
-		if (aip->ai_val == NULL)
-			return (DLADM_STATUS_BADARG);
 
 		/* Check property value */
 		if (pdp->pd_check != NULL) {
@@ -572,7 +567,7 @@ i_dladm_set_flow_proplist_db(dladm_handle_t handle, char *flow,
 {
 	dladm_status_t		status, ssave = DLADM_STATUS_OK;
 	dladm_arg_info_t	ai;
-	int			i;
+	uint_t			i;
 
 	for (i = 0; i < proplist->al_count; i++) {
 		ai = proplist->al_info[i];

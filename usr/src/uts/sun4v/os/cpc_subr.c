@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2021 Joyent, Inc.
  */
 
 /*
@@ -93,8 +94,7 @@ kcpc_hw_startup_cpu(ushort_t cpflags)
 	if (kcpc_counts_include_idle)
 		return;
 
-	installctx(t, cp, kcpc_idle_save, kcpc_idle_restore, NULL, NULL,
-	    NULL, NULL);
+	kcpc_idle_ctxop_install(t, cp);
 }
 
 /*

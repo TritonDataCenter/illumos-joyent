@@ -19,6 +19,7 @@
  * CDDL HEADER END
  *
  * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include "defs.h"
@@ -2418,14 +2419,14 @@ ndpd_delete_addrs(const char *ifname)
 	}
 	if (IN6_IS_ADDR_UNSPECIFIED(&pi->pi_token)) {
 		logmsg(LOG_ERR, "token does not exist for %s", ifname);
-		return (EINVAL);
+		return (ENOENT);
 	}
 
 	if (ifsock < 0) {
 		ifsock = socket(AF_INET6, SOCK_DGRAM, 0);
 		if (ifsock < 0) {
 			err = errno;
-			logperror("ndpd_create_addrs: socket");
+			logperror("ndpd_delete_addrs: socket");
 			return (err);
 		}
 	}
@@ -2475,6 +2476,7 @@ ndpd_delete_addrs(const char *ifname)
 	 * until a new interface ID is provided.
 	 */
 	pi->pi_token = in6addr_any;
+	pi->pi_ifaddr = in6addr_any;
 	pi->pi_token_length = 0;
 	pi->pi_autoconf = _B_FALSE;
 	pi->pi_ipadm_aobjname[0] = '\0';

@@ -21,7 +21,7 @@
 
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
  */
 
@@ -58,7 +58,7 @@
 #define	DFSTAB_NOTICE_LINES	5
 static char *notice[DFSTAB_NOTICE_LINES] =	{
 	"# Do not modify this file directly.\n",
-	"# Use the sharemgr(1m) command for all share management\n",
+	"# Use the sharemgr(8) command for all share management\n",
 	"# This file is reconstructed and only maintained for backward\n",
 	"# compatibility. Configuration lines could be lost.\n",
 	"#\n"
@@ -318,7 +318,7 @@ finddfsentry(xfs_sharelist_t *list, char *path)
 
 	for (item = list; item != NULL; item = item->next) {
 		if (item->path != NULL && strcmp(item->path, path) == 0)
-		return (item);
+			return (item);
 	}
 	return (NULL);
 }
@@ -782,7 +782,7 @@ sa_is_share(void *object)
 {
 	if (object != NULL) {
 		if (strcmp((char *)((xmlNodePtr)object)->name, "share") == 0)
-		return (1);
+			return (1);
 	}
 	return (0);
 }
@@ -1081,7 +1081,7 @@ dfs_free_list(xfs_sharelist_t *list)
 		if (entry->group != NULL)
 			free(entry->group);
 		list = list->next;
-			free(entry);
+		free(entry);
 	}
 }
 
@@ -1548,7 +1548,7 @@ parse_sharetab_impl(sa_handle_t handle, xfs_sharelist_t *tmplist,
 			xmlNodePtr node;
 			node = xmlNewChild((xmlNodePtr)share, NULL,
 			    (xmlChar *)"description", NULL);
-			xmlNodeSetContent(node,
+			(void) xmlNodeSetContent(node,
 			    (xmlChar *)tmplist->description);
 		}
 		legacy = 1;
@@ -1604,7 +1604,6 @@ parse_sharetab(sa_handle_t handle)
 	sa_group_t lgroup;
 	xfs_sharelist_t *list = get_share_list(&err);
 
-	list = get_share_list(&err);
 	if (list == NULL)
 		return (legacy);
 

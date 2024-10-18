@@ -23,10 +23,13 @@
  * Use is subject to license terms.
  *
  * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2022-2023 RackTop Systems, Inc.
  */
 
 /*
  * Dispatch function for SMB2_QUERY_DIRECTORY
+ * MS-SMB2 sec. 3.3.5.18
+ * and MS-FSA sec. 2.1.15
  *
  * Similar to smb_trans2_find.c (from SMB1)
  */
@@ -70,7 +73,7 @@ static uint32_t smb2_find_mbc_encode(smb_request_t *, smb2_find_args_t *);
  * Tunable parameter to limit the maximum
  * number of entries to be returned.
  */
-uint16_t smb2_find_max = 128;
+uint16_t smb2_find_max = 1024;
 
 smb_sdrc_t
 smb2_query_dir(smb_request_t *sr)
@@ -261,17 +264,7 @@ smb2_query_dir(smb_request_t *sr)
 errout:
 	sr->smb2_status = status;
 	DTRACE_SMB2_DONE(op__QueryDirectory, smb_request_t *, sr);
-
-	/*
-	 * Note: NT_STATUS_NO_MORE_FILES is a warning
-	 * used to tell the client that this data return
-	 * is the last of the enumeration.  Returning this
-	 * warning now (with the data) saves the client a
-	 * round trip that would otherwise be needed to
-	 * find out it's at the end.
-	 */
-	if (status != 0 &&
-	    status != NT_STATUS_NO_MORE_FILES) {
+	if (status != 0) {
 		smb2sr_put_error(sr, status);
 		return (SDRC_SUCCESS);
 	}
@@ -282,15 +275,13 @@ errout:
 	StructSize = 9;
 	DataOff = SMB2_HDR_SIZE + 8;
 	DataLen = MBC_LENGTH(&sr->raw_data);
+	ASSERT(DataLen != 0);
 	rc = smb_mbc_encodef(
 	    &sr->reply, "wwlC",
 	    StructSize,		/* w */
 	    DataOff,		/* w */
 	    DataLen,		/* l */
 	    &sr->raw_data);	/* C */
-	if (DataLen == 0)
-		(void) smb_mbc_encodef(&sr->reply, ".");
-
 	if (rc)
 		sr->smb2_status = NT_STATUS_INTERNAL_ERROR;
 
@@ -441,7 +432,7 @@ smb2_find_mbc_encode(smb_request_t *sr, smb2_find_args_t *args)
 	int		shortlen = 0;
 	int		rc, starting_offset;
 	uint32_t	next_entry_offset;
-	uint32_t	mb_flags = SMB_MSGBUF_UNICODE;
+	uint32_t	mb_flags = SMB_MSGBUF_UNICODE | SMB_MSGBUF_NOTERM;
 	uint32_t	resume_key;
 
 	namelen = smb_wcequiv_strlen(fileinfo->fi_name);
@@ -527,8 +518,11 @@ smb2_find_mbc_encode(smb_request_t *sr, smb2_find_args_t *args)
 	case FileBothDirectoryInformation:	/* 3 */
 		bzero(buf83, sizeof (buf83));
 		smb_msgbuf_init(&mb, buf83, sizeof (buf83), mb_flags);
-		if (!smb_msgbuf_encode(&mb, "U", fileinfo->fi_shortname))
-			shortlen = smb_wcequiv_strlen(fileinfo->fi_shortname);
+		shortlen = smb_msgbuf_encode(&mb, "U", fileinfo->fi_shortname);
+		if (shortlen < 0) {
+			shortlen = 0;
+			bzero(buf83, sizeof (buf83));
+		}
 
 		rc = smb_mbc_encodef(
 		    &sr->raw_data, "llTTTTqqlllb.24c",
@@ -553,8 +547,11 @@ smb2_find_mbc_encode(smb_request_t *sr, smb2_find_args_t *args)
 	case FileIdBothDirectoryInformation:	/* 37 */
 		bzero(buf83, sizeof (buf83));
 		smb_msgbuf_init(&mb, buf83, sizeof (buf83), mb_flags);
-		if (!smb_msgbuf_encode(&mb, "U", fileinfo->fi_shortname))
-			shortlen = smb_wcequiv_strlen(fileinfo->fi_shortname);
+		shortlen = smb_msgbuf_encode(&mb, "U", fileinfo->fi_shortname);
+		if (shortlen < 0) {
+			shortlen = 0;
+			bzero(buf83, sizeof (buf83));
+		}
 
 		rc = smb_mbc_encodef(
 		    &sr->raw_data, "llTTTTqqlllb.24c..q",

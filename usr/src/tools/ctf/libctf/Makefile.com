@@ -17,7 +17,6 @@ include $(SRC)/lib/libctf/Makefile.shared.com
 include ../../Makefile.ctf
 
 CSTD = $(CSTD_GNU99)
-C99LMODE = -Xc99=%all
 
 CPPFLAGS +=	-I$(SRC)/lib/libctf/common/ \
 		-I$(SRC)/lib/libdwarf/common/ \
@@ -28,6 +27,10 @@ CPPFLAGS +=	-I$(SRC)/lib/libctf/common/ \
 LDLIBS += -lc -lelf -L$(ROOTONBLDLIBMACH) -ldwarf -lavl
 NATIVE_LIBS += libelf.so libavl.so libc.so
 DYNFLAGS += '-R$$ORIGIN/../../lib/$(MACH)'
+
+# As a bootstrapping issue, we can't use the real mapfile because we build
+# early in tools and thus don't have support for assertions.
+MAPFILES=
 
 .KEEP_STATE:
 

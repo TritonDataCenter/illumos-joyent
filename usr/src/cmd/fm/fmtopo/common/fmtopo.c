@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2019, Joyent, Inc. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 
@@ -49,12 +50,13 @@ static const char *g_fmri = NULL;
 
 static const char *opt_R = "/";
 static const char *opt_s = FM_FMRI_SCHEME_HC;
-static const char optstr[] = "bCdem:P:pR:s:StVx";
+static const char optstr[] = "bCdelm:P:pR:s:StVx";
 static const char *opt_m;
 
 static int opt_b = 0;
 static int opt_d = 0;
 static int opt_e = 0;
+static int opt_l = 0;
 static int opt_p = 0;
 static int opt_S = 0;
 static int opt_t = 0;
@@ -76,7 +78,7 @@ static int
 usage(FILE *fp)
 {
 	(void) fprintf(fp,
-	    "Usage: %s [-bCedpSVx] [-P group.property[=type:value]] "
+	    "Usage: %s [-bCedlpSVx] [-P group.property[=type:value]] "
 	    "[-R root] [-m method] [-s scheme] [fmri]\n", g_pname);
 
 	(void) fprintf(fp,
@@ -84,6 +86,7 @@ usage(FILE *fp)
 	    "\t-C  dump core after completing execution\n"
 	    "\t-d  set debug mode for libtopo modules\n"
 	    "\t-e  display FMRIs as paths using esc/eft notation\n"
+	    "\t-l  list available schemes rather than print a tree\n"
 	    "\t-m  execute given method\n"
 	    "\t-P  get/set specified properties\n"
 	    "\t-p  display of FMRI protocol properties\n"
@@ -430,7 +433,7 @@ uint32_def:
 			(void) nvpair_value_uint32_array(pv_nvp, &val, &nelem);
 			(void) printf(" [ ");
 			for (i = 0; i < nelem; i++)
-				(void) printf("%u ", val[i]);
+				(void) printf("0x%x ", val[i]);
 			(void) printf("]");
 			break;
 		}
@@ -450,7 +453,7 @@ uint32_def:
 			(void) nvpair_value_uint64_array(pv_nvp, &val, &nelem);
 			(void) printf(" [ ");
 			for (i = 0; i < nelem; i++)
-				(void) printf("%llu ", val[i]);
+				(void) printf("0x%llx ", val[i]);
 			(void) printf("]");
 			break;
 		}
@@ -892,7 +895,8 @@ static void
 get_pargs(int argc, char *argv[])
 {
 	struct prop_args *pp;
-	char c, *s, *p;
+	char *s, *p;
+	int c;
 	int i = 0;
 
 	if ((pargs = malloc(sizeof (struct prop_args *) * pcnt)) == NULL) {
@@ -961,6 +965,34 @@ get_pargs(int argc, char *argv[])
 		free(pargs);
 		pargs = NULL;
 	}
+}
+
+static int
+walk_schemes_cb(topo_hdl_t *thp, const topo_scheme_info_t *info, void *arg)
+{
+	const char *type;
+	char unknown[32];
+
+	if (g_fmri != NULL && fnmatch(g_fmri, info->tsi_scheme, 0) != 0) {
+		return (TOPO_WALK_NEXT);
+	}
+
+	switch (info->tsi_type) {
+	case TOPO_SCHEME_TREE:
+		type = "tree";
+		break;
+	case TOPO_SCHEME_DIGRAPH:
+		type = "directed graph";
+		break;
+	default:
+		(void) snprintf(unknown, sizeof (unknown), "unknown (0x%x)",
+		    info->tsi_type);
+		type = unknown;
+		break;
+	}
+
+	(void) printf("%-15s %s\n", type, info->tsi_scheme);
+	return (TOPO_WALK_NEXT);
 }
 
 static int
@@ -1223,6 +1255,9 @@ main(int argc, char *argv[])
 			case 'e':
 				opt_e++;
 				break;
+			case 'l':
+				opt_l++;
+				break;
 			case 'm':
 				opt_m = optarg;
 				break;
@@ -1298,6 +1333,13 @@ main(int argc, char *argv[])
 			return (fmtopo_exit(thp, uuid, FMTOPO_EXIT_USAGE));
 		}
 
+		if (opt_l) {
+			(void) fprintf(stderr,
+			    "%s: -l and -x cannot be specified together\n",
+			    g_pname);
+			return (fmtopo_exit(thp, uuid, FMTOPO_EXIT_USAGE));
+		}
+
 		err = 0;
 		if (topo_xml_print(thp, stdout, opt_s, &err) < 0)
 			(void) fprintf(stderr, "%s: failed to print xml "
@@ -1306,6 +1348,20 @@ main(int argc, char *argv[])
 
 		return (fmtopo_exit(thp, uuid, err ? FMTOPO_EXIT_ERROR :
 		    FMTOPO_EXIT_SUCCESS));
+	}
+
+	if (opt_l) {
+		if (opt_b || opt_e || opt_m || pcnt > 0 || opt_p || opt_V ||
+		    opt_S || opt_x) {
+			(void) fprintf(stderr,
+			    "%s: -l may only be used with -c, -d, and -R\n",
+			    g_pname);
+			return (fmtopo_exit(thp, uuid, FMTOPO_EXIT_USAGE));
+		}
+
+		(void) printf("%-15s %s\n", "TYPE", "NAME");
+		(void) topo_scheme_walk(thp, walk_schemes_cb, NULL);
+		return (fmtopo_exit(thp, uuid, FMTOPO_EXIT_SUCCESS));
 	}
 
 	if (opt_t || walk_topo(thp, uuid) < 0) {

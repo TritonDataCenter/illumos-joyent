@@ -27,8 +27,6 @@
 #ifndef	_LIBC_SPARCV9_INC_SYS_H
 #define	_LIBC_SPARCV9_INC_SYS_H
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * This file defines common code sequences for system calls.  Note that
  * it is assumed that __cerror is within the short branch distance from
@@ -69,7 +67,7 @@
  */
 #define	__SYSTRAP(name)			\
 	/* CSTYLED */			\
-	mov	SYS_/**/name, %g1;	\
+	mov	SYS_##name, %g1;	\
 	ta	SYSCALL_TRAPNUM
 
 #define	SYSTRAP_RVAL1(name)		__SYSTRAP(name)
@@ -83,7 +81,7 @@
  */
 #define	SYSFASTTRAP(name)		\
 	/* CSTYLED */			\
-	ta	ST_/**/name
+	ta	ST_##name
 
 /*
  * SYSCERROR provides the sequence to branch to __cerror if an error is
@@ -116,7 +114,7 @@
 	ENTRY(name);				\
 	stn	%o0, [%sp + SAVE_OFFSET];	\
 /* CSTYLED */					\
-.restart_/**/name:
+.restart_##name:
 
 /*
  * SYSRESTART provides the error handling sequence for restartable
@@ -171,13 +169,13 @@
 	SYSREENTRY(name);					\
 	SYSTRAP_2RVALS(name);					\
 	/* CSTYLED */						\
-	SYSRESTART(.restart_/**/name)
+	SYSRESTART(.restart_##name)
 
 #define	SYSCALL_RESTART_RVAL1(name)				\
 	SYSREENTRY(name);					\
 	SYSTRAP_RVAL1(name);					\
 	/* CSTYLED */						\
-	SYSRESTART(.restart_/**/name)
+	SYSRESTART(.restart_##name)
 
 /*
  * SYSCALL2 provides a common system call sequence when the entry name
@@ -201,13 +199,13 @@
 	SYSREENTRY(entryname);					\
 	SYSTRAP_2RVALS(trapname);				\
 	/* CSTYLED */						\
-	SYSRESTART(.restart_/**/entryname)
+	SYSRESTART(.restart_##entryname)
 
 #define	SYSCALL2_RESTART_RVAL1(entryname, trapname)		\
 	SYSREENTRY(entryname);					\
 	SYSTRAP_RVAL1(trapname);				\
 	/* CSTYLED */						\
-	SYSRESTART(.restart_/**/entryname)
+	SYSRESTART(.restart_##entryname)
 
 /*
  * SYSCALL_NOERROR provides the most common system call sequence for those

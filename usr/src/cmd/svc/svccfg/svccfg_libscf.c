@@ -25,6 +25,7 @@
  * Copyright 2012 Milan Jurik. All rights reserved.
  * Copyright 2017 RackTop Systems.
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2023 Oxide Computer Company
  */
 
 
@@ -756,7 +757,7 @@ remove_tempfile(void)
 }
 
 /*
- * Launch private svc.configd(1M) for manipulating alternate repositories.
+ * Launch private svc.configd(8) for manipulating alternate repositories.
  */
 static void
 start_private_repository(engine_state_t *est)
@@ -832,7 +833,7 @@ void
 lscf_cleanup(void)
 {
 	/*
-	 * In the case where we've launched a private svc.configd(1M)
+	 * In the case where we've launched a private svc.configd(8)
 	 * instance, we must terminate our child and remove the temporary
 	 * rendezvous point.
 	 */
@@ -891,6 +892,21 @@ lscf_prep_hndl(void)
 			scfdie();
 
 		scf_value_destroy(repo_value);
+	} else if (g_do_zone != 0) {
+		scf_value_t *zone;
+
+		if ((zone = scf_value_create(g_hndl)) == NULL)
+			scfdie();
+
+		if (scf_value_set_astring(zone, g_zonename) != SCF_SUCCESS)
+			scfdie();
+
+		if (scf_handle_decorate(g_hndl, "zone", zone) != SCF_SUCCESS) {
+			uu_die(gettext("zone '%s': %s\n"),
+			    g_zonename, scf_strerror(scf_error()));
+		}
+
+		scf_value_destroy(zone);
 	}
 
 	if (scf_handle_bind(g_hndl) != 0)
@@ -12604,7 +12620,7 @@ lscf_service_delete(scf_service_t *svc, int force)
 static int
 delete_callback(void *data, scf_walkinfo_t *wip)
 {
-	int force = (int)data;
+	int force = (int)(intptr_t)data;
 
 	if (wip->inst != NULL)
 		(void) lscf_instance_delete(wip->inst, force);
@@ -12684,7 +12700,7 @@ lscf_delete(const char *fmri, int force)
 	 * Match FMRI to entity.
 	 */
 	if ((ret = scf_walk_fmri(g_hndl, 1, (char **)&fmri, SCF_WALK_SERVICE,
-	    delete_callback, (void *)force, NULL, semerr)) != 0) {
+	    delete_callback, (void *)(intptr_t)force, NULL, semerr)) != 0) {
 		semerr(gettext("Failed to walk instances: %s\n"),
 		    scf_strerror(ret));
 	}
@@ -14379,7 +14395,7 @@ out:
 }
 
 int
-lscf_editprop()
+lscf_editprop(void)
 {
 	char *buf, *editor;
 	size_t bufsz;
@@ -16254,7 +16270,7 @@ create_instance_list(scf_service_t *svc, int wohandcrafted)
 	scf_instance_t  *inst;
 	scf_iter_t	*inst_iter;
 	uu_list_t	*instances;
-	char		*instname;
+	char		*instname = NULL;
 	int		r;
 
 	inst_iter = scf_iter_create(g_hndl);
@@ -16470,7 +16486,7 @@ find_add_svc_mfst(const char *svnbuf, const char *mfst)
  * Create the service to manifest avl tree.
  *
  * Walk each of the manifests currently installed in the supported
- * directories, /lib/svc/manifests and /var/svc/manifests.  For
+ * directories, /lib/svc/manifest and /var/svc/manifest.  For
  * each of the manifests, inventory the services and add them to
  * the tree.
  *

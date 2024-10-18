@@ -51,6 +51,12 @@
 #include "check.h"
 #include "y.tab.h"
 
+struct lut *Dicts;
+struct lut *Ident;
+struct lut *Timesuffixlut;
+int Pragma_trust_ereports;
+int Pragma_new_errors_only;
+
 /* ridiculously long token buffer -- disallow any token longer than this */
 #define	MAXTOK	8192
 static char Tok[MAXTOK];
@@ -287,7 +293,7 @@ closefile(void)
  */
 
 int
-yylex()
+yylex(void)
 {
 	int c;
 	int nextc;
@@ -773,12 +779,13 @@ dumpline(int flags)
  * yyerror -- report a pareser error, called yyerror because yacc wants it
  */
 
-void
+int
 yyerror(const char *s)
 {
 	Errcount++;
 	outfl(O_ERR|O_NONL, File, Line, "%s, tokens: ", s);
 	dumpline(O_ERR);
+	return (0);
 }
 
 /*

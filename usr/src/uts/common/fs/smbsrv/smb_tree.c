@@ -21,8 +21,9 @@
 
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 /*
@@ -178,7 +179,7 @@
 #include <smbsrv/smb_fsops.h>
 #include <smbsrv/smb_share.h>
 
-int smb_tcon_mute = 0;
+int smb_tcon_mute = 1;
 
 uint32_t	smb_tree_connect_core(smb_request_t *);
 uint32_t	smb_tree_connect_disk(smb_request_t *, smb_arg_tcon_t *);
@@ -188,6 +189,7 @@ static void smb_tree_dealloc(void *);
 static boolean_t smb_tree_is_connected_locked(smb_tree_t *);
 static char *smb_tree_get_sharename(char *);
 static int smb_tree_getattr(const smb_kshare_t *, smb_node_t *, smb_tree_t *);
+static void smb_tree_get_creation(smb_node_t *, smb_tree_t *);
 static void smb_tree_get_volname(vfs_t *, smb_tree_t *);
 static void smb_tree_get_flags(const smb_kshare_t *, vfs_t *, smb_tree_t *);
 static void smb_tree_log(smb_request_t *, const char *, const char *, ...);
@@ -392,7 +394,7 @@ smb_tree_release(
 	SMB_TREE_VALID(tree);
 
 	/* flush the ofile and odir lists' delete queues */
-	smb_llist_flush(&tree->t_ofile_list);
+	smb_lavl_flush(&tree->t_ofile_list);
 	smb_llist_flush(&tree->t_odir_list);
 
 	mutex_enter(&tree->t_mutex);
@@ -454,17 +456,17 @@ smb_tree_has_feature(smb_tree_t *tree, uint32_t flags)
 int
 smb_tree_enum(smb_tree_t *tree, smb_svcenum_t *svcenum)
 {
-	smb_llist_t	*of_list;
+	smb_lavl_t	*lavl;
 	smb_ofile_t	*of;
 	int		rc = 0;
 
 	if (svcenum->se_type == SMB_SVCENUM_TYPE_TREE)
 		return (smb_tree_enum_private(tree, svcenum));
 
-	of_list = &tree->t_ofile_list;
-	smb_llist_enter(of_list, RW_READER);
+	lavl = &tree->t_ofile_list;
+	smb_lavl_enter(lavl, RW_READER);
 
-	of = smb_llist_head(of_list);
+	of = smb_lavl_first(lavl);
 	while (of) {
 		if (smb_ofile_hold(of)) {
 			rc = smb_ofile_enum(of, svcenum);
@@ -472,10 +474,10 @@ smb_tree_enum(smb_tree_t *tree, smb_svcenum_t *svcenum)
 		}
 		if (rc != 0)
 			break;
-		of = smb_llist_next(of_list, of);
+		of = smb_lavl_next(lavl, of);
 	}
 
-	smb_llist_exit(of_list);
+	smb_lavl_exit(lavl);
 
 	return (rc);
 }
@@ -625,7 +627,7 @@ smb_tree_chkaccess(smb_request_t *sr, smb_kshare_t *shr, vnode_t *vp)
 		return (0);
 	}
 
-	if ((shr->shr_flags & SMB_SHRF_ADMIN) && !smb_user_is_admin(user)) {
+	if ((shr->shr_flags & SMB_SHRF_ADMIN) && !SMB_USER_IS_ADMIN(user)) {
 		smb_tree_log(sr, sharename, "access denied: not admin");
 		return (0);
 	}
@@ -636,6 +638,9 @@ smb_tree_chkaccess(smb_request_t *sr, smb_kshare_t *shr, vnode_t *vp)
 		return (0);
 	}
 
+	/*
+	 * This checks the "share" ACL, which is normally "open"
+	 */
 	acl_access = smb_tree_acl_access(sr, shr, vp);
 	if ((acl_access & ACE_ALL_PERMS) == 0) {
 		smb_tree_log(sr, sharename, "access denied: share ACL");
@@ -742,14 +747,13 @@ smb_tree_connect_disk(smb_request_t *sr, smb_arg_tcon_t *tcon)
 	if (si->shr_flags & SMB_SHRF_DFSROOT)
 		tcon->optional_support |= SMB_SHARE_IS_IN_DFS;
 
-	/* if 'smb' zfs property: shortnames=disabled */
-	if (!smb_shortnames)
-		sr->arg.tcon.optional_support |= SMB_UNIQUE_FILE_NAME;
-
 	tree = smb_tree_alloc(sr, si, snode, access, sr->sr_cfg->skc_execflags);
 
 	if (tree == NULL)
 		return (NT_STATUS_INSUFF_SERVER_RESOURCES);
+
+	if (tree->t_flags & SMB_TREE_SHORTNAMES)
+		tcon->optional_support |= SMB_UNIQUE_FILE_NAME;
 
 	if (tree->t_execflags & SMB_EXEC_MAP) {
 		smb_tree_set_execinfo(tree, &execinfo, SMB_EXEC_MAP);
@@ -917,10 +921,6 @@ smb_tree_alloc(smb_request_t *sr, const smb_kshare_t *si,
 	tree->t_session = session;
 	tree->t_server = session->s_server;
 
-	/* grab a ref for tree->t_owner */
-	smb_user_hold_internal(sr->uid_user);
-	tree->t_owner = sr->uid_user;
-
 	if (STYPE_ISDSK(stype) || STYPE_ISPRN(stype)) {
 		if (smb_tree_getattr(si, snode, tree) != 0) {
 			smb_idpool_free(&session->s_tid_pool, tid);
@@ -942,7 +942,8 @@ smb_tree_alloc(smb_request_t *sr, const smb_kshare_t *si,
 		return (NULL);
 	}
 
-	smb_llist_constructor(&tree->t_ofile_list, sizeof (smb_ofile_t),
+	smb_lavl_constructor(&tree->t_ofile_list,
+	    smb_ofile_avl_compare,  sizeof (smb_ofile_t),
 	    offsetof(smb_ofile_t, f_tree_lnd));
 
 	smb_llist_constructor(&tree->t_odir_list, sizeof (smb_odir_t),
@@ -963,6 +964,11 @@ smb_tree_alloc(smb_request_t *sr, const smb_kshare_t *si,
 	tree->t_access = access;
 	tree->t_connect_time = gethrestime_sec();
 	tree->t_execflags = execflags;
+
+	/* grab a ref for tree->t_owner */
+	smb_user_hold_internal(sr->uid_user);
+	smb_user_inc_trees(sr->uid_user);
+	tree->t_owner = sr->uid_user;
 
 	/* if FS is readonly, enforce that here */
 	if (tree->t_flags & SMB_TREE_READONLY)
@@ -1024,12 +1030,13 @@ smb_tree_dealloc(void *arg)
 		smb_node_release(tree->t_snode);
 
 	mutex_destroy(&tree->t_mutex);
-	smb_llist_destructor(&tree->t_ofile_list);
+	smb_lavl_destructor(&tree->t_ofile_list);
 	smb_llist_destructor(&tree->t_odir_list);
 	smb_idpool_destructor(&tree->t_fid_pool);
 	smb_idpool_destructor(&tree->t_odid_pool);
 
 	SMB_USER_VALID(tree->t_owner);
+	smb_user_dec_trees(tree->t_owner);
 	smb_user_release(tree->t_owner);
 
 	kmem_cache_free(smb_cache_tree, tree);
@@ -1094,36 +1101,58 @@ smb_tree_get_sharename(char *unc_path)
 
 /*
  * Obtain the tree attributes: volume name, typename and flags.
+ * Called only with DISK and PRINTQ shares.
  */
 static int
 smb_tree_getattr(const smb_kshare_t *si, smb_node_t *node, smb_tree_t *tree)
 {
 	vfs_t *vfsp = SMB_NODE_VFS(node);
-	smb_cfg_val_t srv_encrypt;
+	vfs_t *realvfsp;
 
 	ASSERT(vfsp);
 
-	if (getvfs(&vfsp->vfs_fsid) != vfsp)
-		return (ESTALE);
-
+	smb_tree_get_creation(node, tree);
 	smb_tree_get_volname(vfsp, tree);
-	smb_tree_get_flags(si, vfsp, tree);
 
-	srv_encrypt = tree->t_session->s_server->sv_cfg.skc_encrypt;
-	if (tree->t_session->dialect >= SMB_VERS_3_0) {
-		if (si->shr_encrypt == SMB_CONFIG_REQUIRED ||
-		    srv_encrypt == SMB_CONFIG_REQUIRED)
-			tree->t_encrypt = SMB_CONFIG_REQUIRED;
-		else if (si->shr_encrypt == SMB_CONFIG_ENABLED ||
-		    srv_encrypt == SMB_CONFIG_ENABLED)
-			tree->t_encrypt = SMB_CONFIG_ENABLED;
-		else
-			tree->t_encrypt = SMB_CONFIG_DISABLED;
-	} else
+	/*
+	 * In the case of an lofs mount, we need to ask the (real)
+	 * underlying filesystem about capabilities, where the
+	 * passed in vfs_t will be from lofs.
+	 */
+	realvfsp = getvfs(&vfsp->vfs_fsid);
+	if (realvfsp != NULL) {
+		smb_tree_get_flags(si, realvfsp, tree);
+		VFS_RELE(realvfsp);
+	} else {
+		cmn_err(CE_NOTE, "Failed getting info for share: %s",
+		    si->shr_name);
+		/* do the best we can without realvfsp */
+		smb_tree_get_flags(si, vfsp, tree);
+	}
+
+	if (tree->t_session->dialect >= SMB_VERS_3_0)
+		tree->t_encrypt = si->shr_encrypt;
+	else
 		tree->t_encrypt = SMB_CONFIG_DISABLED;
 
-	VFS_RELE(vfsp);
 	return (0);
+}
+
+/*
+ * File volume creation time
+ */
+static void
+smb_tree_get_creation(smb_node_t *node, smb_tree_t *tree)
+{
+	smb_attr_t	attr;
+	cred_t		*kcr = zone_kcred();
+
+	bzero(&attr, sizeof (attr));
+	attr.sa_mask = SMB_AT_CRTIME;
+	(void) smb_node_getattr(NULL, node, kcr, NULL, &attr);
+	/* On failure we'll have time zero, which is OK */
+
+	tree->t_create_time = attr.sa_crtime;
 }
 
 /*
@@ -1154,6 +1183,9 @@ smb_tree_get_volname(vfs_t *vfsp, smb_tree_t *tree)
 }
 
 /*
+ * Get flags from the VFS (and other places) for a new tree.
+ * Called only with DISK and PRINTQ shares.
+ *
  * Always set "unicode on disk" because we always use utf8 names locally.
  * Always set ACL support because the VFS will fake ACLs for file systems
  * that don't support them.
@@ -1205,17 +1237,13 @@ smb_tree_get_flags(const smb_kshare_t *si, vfs_t *vfsp, smb_tree_t *tree)
 	if (si->shr_flags & SMB_SHRF_FSO)
 		flags |= SMB_TREE_FORCE_L2_OPLOCK;
 
-	if (ssn->s_cfg.skc_oplock_enable) {
-		/* if 'smb' zfs property: oplocks=enabled */
+	if (ssn->s_cfg.skc_oplock_enable)
 		flags |= SMB_TREE_OPLOCKS;
-	}
 
-	/* Global config option for now.  Later make per-share. */
 	if (ssn->s_cfg.skc_traverse_mounts)
 		flags |= SMB_TREE_TRAVERSE_MOUNTS;
 
-	/* if 'smb' zfs property: shortnames=enabled */
-	if (smb_shortnames)
+	if (ssn->s_cfg.skc_short_names)
 		flags |= SMB_TREE_SHORTNAMES;
 
 	if (vfsp->vfs_flag & VFS_RDONLY)

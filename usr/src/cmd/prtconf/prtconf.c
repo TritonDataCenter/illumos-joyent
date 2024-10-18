@@ -23,6 +23,8 @@
  * Copyright (c) 1990, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2011, Joyent, Inc. All rights reserved.
  * Copyright (c) 2019 Peter Tribble.
+ * Copyright (c) 2022 Sachidananda Urs <sacchi@gmail.com>
+ * Copyright 2022 Oxide Computer Company
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
@@ -36,6 +38,7 @@
 #include <sys/systeminfo.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <err.h>
 #include "prtconf.h"
 
 struct prt_opts	opts;
@@ -54,7 +57,7 @@ setpname(const char *name)
 
 	if (name == NULL)
 		opts.o_progname = "prtconf";
-	else if (p = strrchr(name, '/'))
+	else if ((p = strrchr(name, '/')) != NULL)
 		opts.o_progname = (const char *) p + 1;
 	else
 		opts.o_progname = name;
@@ -77,85 +80,6 @@ indent_to_level(int ilev)
 {
 	(void) printf("%*s", INDENT_LENGTH * ilev, "");
 }
-
-static void
-cleanup_path(const char *input_path, char *path)
-{
-	char	*ptr, *ptr2;
-	size_t	len;
-
-	if ((input_path == NULL) || (path == NULL))
-		return;
-
-	(void) strcpy(path, input_path);
-
-	/*LINTED*/
-	while (1) {
-		len = strlen(path);
-		if (len == 0)
-			break;
-
-		/* change substring "//" into "/" */
-		if (ptr = strstr(path, "//")) {
-			len = strlen(ptr + 1);
-			(void) memmove(ptr, ptr + 1, len + 1);
-			continue;
-		}
-		/* change substring "/./" into "/" */
-		if (ptr = strstr(path, "/./")) {
-			len = strlen(ptr + 2);
-			(void) memmove(ptr, ptr + 2, len + 1);
-			continue;
-		}
-
-		/* change substring "/<foo>/../" into "/" */
-		if (ptr = strstr(path, "/../")) {
-			len = strlen(ptr + 3);
-			*ptr = '\0';
-			ptr2 = strrchr(path, (int)'/');
-			if (ptr2 == NULL) {
-				/* path had a leading "/../" */
-				ptr2 = path;
-			}
-			(void) memmove(ptr2, ptr + 3, len + 1);
-			continue;
-		}
-
-		/* change trailing "/<foo>/.." into "/" */
-		if ((len >= 3) &&
-		    (path[len - 3] == '/') &&
-		    (path[len - 2] == '.') &&
-		    (path[len - 1] == '.')) {
-			path[len - 3] = '\0';
-			ptr2 = strrchr(path, (int)'/');
-			if (ptr2 != NULL) {
-				ptr2[1] = '\0';
-			} else {
-				/* path was "/.." */
-				path[0] = '/';
-				path[1] = '\0';
-			}
-			continue;
-		}
-
-		/* change trailing "/." into "/" */
-		if ((len >= 2) &&
-		    (path[len - 2] == '/') &&
-		    (path[len - 1] == '.')) {
-			path[len - 1] = '\0';
-			continue;
-		}
-
-		/* remove trailing "/" unless it's the root */
-		if ((len > 1) && (path[len - 1] == '/')) {
-			path[len - 1] = '\0';
-			continue;
-		}
-
-		break;
-	}
-}
-
 
 /*
  * debug version has two more flags:
@@ -242,6 +166,14 @@ main(int argc, char *argv[])
 
 	(void) uname(&opts.o_uts);
 
+	if (opts.o_verbose || opts.o_pciid) {
+		opts.o_pcidb = pcidb_open(PCIDB_VERSION);
+		if (opts.o_pcidb == NULL) {
+			warn("pcidb facility not available, PCI names will "
+			    "not be translated");
+		}
+	}
+
 	if (opts.o_fbname)
 		return (do_fbname());
 
@@ -275,7 +207,7 @@ main(int argc, char *argv[])
 			return (1);
 		}
 
-		if (error = stat(path, &sinfo)) {
+		if ((error = stat(path, &sinfo)) != 0) {
 
 			/* an invalid path was specified */
 			(void) fprintf(stderr, "%s: invalid path specified\n",
@@ -291,8 +223,12 @@ main(int argc, char *argv[])
 		} else if ((sinfo.st_mode & S_IFMT) == S_IFDIR) {
 			size_t	len, plen;
 
-			/* clean up the path */
-			cleanup_path(path, new_path);
+			if (realpath(path, new_path) == NULL) {
+				(void) fprintf(stderr, "%s: invalid device"
+				    " path specified\n",
+				    opts.o_progname);
+				return (1);
+			}
 
 			len = strlen(new_path);
 			plen = strlen("/devices");

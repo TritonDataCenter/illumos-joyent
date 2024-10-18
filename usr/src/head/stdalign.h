@@ -10,33 +10,12 @@
  */
 
 /*
- * Copyright 2016 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #ifndef _STDALIGN_H
 #define	_STDALIGN_H
 
-/*
- * ISO/IEC C11 stdalign.h
- */
-#include <sys/feature_tests.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#if !defined(_STRICT_SYMBOLS) || defined(_STDC_C11)
-
-#define	alignas	_Alignas
-#define	alignof	_Alignof
-
-#define	__alignas_is_defined	1
-#define	__alignof_is_defined	1
-
-#endif	/* !_STRICT_SYMBOLS || _STDC_C11 */
-
-#ifdef __cplusplus
-}
-#endif
+#include <sys/stdalign.h>
 
 #endif /* _STDALIGN_H */

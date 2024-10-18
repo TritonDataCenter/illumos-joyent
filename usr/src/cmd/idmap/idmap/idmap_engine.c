@@ -23,10 +23,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -78,7 +74,7 @@ extern int optind, optopt, opterr;
 static int
 options_parse(int argc, char *argv[], const char *options)
 {
-	char c;
+	int c;
 
 	optind = 1;
 

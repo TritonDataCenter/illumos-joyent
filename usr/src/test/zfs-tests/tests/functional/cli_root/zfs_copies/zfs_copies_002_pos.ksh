@@ -39,7 +39,7 @@
 # STRATEGY:
 #	1. Create filesystems with copies set as 2,3 respectively;
 #	2. Copy specified size data into each filesystem;
-#	3. Verify that the space is charged as expected with zfs list, ls -s, df(1m),
+#	3. Verify that the space is charged as expected with zfs list, ls -s, df(8),
 #	   du(1) commands;
 #
 
@@ -68,13 +68,13 @@ done
 #
 # Sync up the filesystem
 #
-sync
+sync_all_pools
 
 #
 # Verify 'zfs list' can correctly list the space charged
 #
 log_note "Verify 'zfs list' can correctly list the space charged."
-fsize=${FILESIZE%[m|M]}
+fsize=${FILESIZE%[m\|M]}
 for val in 1 2 3; do
 	used=$(get_used_prop $TESTPOOL/fs_$val)
 	check_used $used $val
@@ -83,20 +83,22 @@ done
 log_note "Verify 'ls -s' can correctly list the space charged."
 for val in 1 2 3; do
 	blks=`ls -ls /$TESTPOOL/fs_$val/$FILE | awk '{print $1}'`
-	(( used = blks * 512 / (1024 * 1024) ))
+	(( used = blks * 512 ))
 	check_used $used $val
 done
 
-log_note "Verify df(1M) can corectly display the space charged."
+log_note "Verify df(8) can corectly display the space charged."
 for val in 1 2 3; do
-	used=`df -F zfs -h /$TESTPOOL/fs_$val/$FILE | grep $TESTPOOL/fs_$val \
+	used=`df -F zfs -k /$TESTPOOL/fs_$val/$FILE | grep $TESTPOOL/fs_$val \
 		| awk '{print $3}'`
+	(( used = used * 1024 )) # kb -> bytes
 	check_used $used $val
 done
 
 log_note "Verify du(1) can correctly display the space charged."
 for val in 1 2 3; do
-	used=`du -h /$TESTPOOL/fs_$val/$FILE | awk '{print $1}'`
+	used=`du -k /$TESTPOOL/fs_$val/$FILE | awk '{print $1}'`
+	(( used = used * 1024 )) # kb -> bytes
 	check_used $used $val
 done
 

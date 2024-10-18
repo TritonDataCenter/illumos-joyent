@@ -23,10 +23,12 @@
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright (c) 2014 Joyent, Inc.  All rights reserved.
 # Copyright 2016 RackTop Systems.
+# Copyright 2021 Joyent, Inc.
 #
 
 # rebind basic build macros to 64-bit versions
 
+ASFLAGS=	$(ASFLAGS64)
 CFLAGS=		$(CFLAGS64)
 CCFLAGS=	$(CCFLAGS64)
 COPTFLAG=	$(COPTFLAG64)
@@ -38,7 +40,9 @@ COMPILE.d=	$(COMPILE64.d)
 COMPILE.b=	$(COMPILE64.b)
 LINK.c=		$(LINK64.c)
 LINK.cc=	$(LINK64.cc)
-LINT.c=		$(LINT64.c)
+NATIVE_CFLAGS=	$(NATIVE_CFLAGS64)
+NATIVE_CCFLAGS=	$(NATIVE_CCFLAGS64)
+NATIVE_ASFLAGS=	$(NATIVE_ASFLAGS64)
 
 CTF_FLAGS=	$(CTF_FLAGS_64)
 
@@ -56,14 +60,18 @@ LDLIBS.lib =	$(LDLIBS64)
 GCCLIBDIR=	$(GCCLIBDIR64)
 
 #
-# Override Makefile.master's settings of CC, CCC, AS and LINT
+# Override Makefile.master's settings
 #
 CC=		$(CC64)
 CCC=		$(CCC64)
 CPP=		$(CPP64)
 AS=		$(AS64)
 LD=		$(LD64)
-LINT=		$(LINT64)
+NATIVECC=	$(NATIVECC64)
+NATIVECCC=	$(NATIVECCC64)
+NATIVECPP=	$(NATIVECPP64)
+NATIVEAS=	$(NATIVEAS64)
+NATIVELD=	$(NATIVELD64)
 
 BUILD.SO=	$(BUILD64.SO)
 BUILDCCC.SO=	$(BUILDCCC64.SO)

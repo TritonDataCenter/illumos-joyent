@@ -4,7 +4,7 @@
  */
 
 /*	Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 /*
  * Copyright (c) 1980, 1986, 1990 The Regents of the University of California.
@@ -83,6 +83,18 @@ static caddr_t calcsb_names[] = {
 	"<UNKNOWN>", "MKFS", "NEWFS", "<OUT OF RANGE>"
 };
 
+fsck_ino_t lfdir;
+int64_t numacls, aclmax, aclplast;
+int64_t numdirs, listmax, inplast;
+char havesb;
+int fsreadfd;
+int isdirty;
+int pid;
+int secsize;
+size_t dev_bsize;
+struct bufarea sblk;
+static struct bufarea asblk;	/* alternate superblock */
+struct inoinfo **inphead, **inpsort;
 struct shadowclientinfo *shadowclientinfo = NULL;
 struct shadowclientinfo *attrclientinfo = NULL;
 int maxshadowclients = 1024;	/* allocation size, not limit  */
@@ -498,7 +510,7 @@ open_and_intro(caddr_t devstr, int corefs)
 		fflag = 1;
 	}
 	pid = getpid();
-	if (nflag || roflag || (fswritefd = open64(devstr, O_WRONLY)) < 0) {
+	if (nflag || (fswritefd = open64(devstr, O_WRONLY)) < 0) {
 		fswritefd = -1;
 		if (preen && !debug)
 			pfatal("(NO WRITE ACCESS)\n");
@@ -628,7 +640,7 @@ find_superblock(caddr_t devstr)
 			    "YOU MUST USE THE -o b OPTION\n"
 			    "TO FSCK TO SPECIFY THE LOCATION OF A VALID "
 			    "ALTERNATE SUPERBLOCK TO\n"
-			    "SUPPLY NEEDED INFORMATION; SEE fsck(1M).\n");
+			    "SUPPLY NEEDED INFORMATION; SEE fsck(8).\n");
 			bflag = 0;
 			retval = -1;
 			goto finish;
@@ -657,7 +669,7 @@ find_superblock(caddr_t devstr)
 			if (cg >= 0) {
 				pwarn("Please verify that the indicated block "
 				    "contains a proper\nsuperblock for the "
-				    "filesystem (see fsdb(1M)).\n");
+				    "filesystem (see fsdb(8)).\n");
 				if (yflag)
 					pwarn("\nFSCK was running in YES "
 					    "mode.  If you wish to run in "
@@ -1219,7 +1231,7 @@ badsb(int listerr, caddr_t s)
 		pwarn("e.g. fsck [-F ufs] -o b=# [special ...] \n");
 		exitstat = EXERRFATAL;
 		pfatal(
-	    "where # is the alternate super block. SEE fsck_ufs(1M). \n");
+	    "where # is the alternate super block. SEE fsck_ufs(8). \n");
 	}
 	/* we're expected to return if not preening */
 }

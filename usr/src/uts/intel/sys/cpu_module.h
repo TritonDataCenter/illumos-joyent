@@ -23,6 +23,7 @@
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Co.
  */
 
 #ifndef _SYS_CPU_MODULE_H
@@ -33,6 +34,7 @@
 #include <sys/nvpair.h>
 #include <sys/mc.h>
 #include <sys/sunddi.h>
+#include <sys/x86_archext.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,7 +70,12 @@ typedef enum cmi_errno {
 	CMIERR_MC_ADDRBITS,		/* Too few valid addr bits */
 	CMIERR_MC_INVALUNUM,		/* Invalid input unum */
 	CMIERR_MC_PARTIALUNUMTOPA,	/* unum to pa reflected physaddr */
-	CMIERR_MC_NOTDIMMADDR		/* Address not backed by DRAM */
+	CMIERR_MC_NOTDIMMADDR,		/* Address not backed by DRAM */
+	/*
+	 * Cache related errors
+	 */
+	CMIERR_C_NODATA,		/* CPU didn't provide required data */
+	CMIERR_C_BADCACHENO		/* Invalid cache number */
 } cmi_errno_t;
 
 /*
@@ -157,7 +164,7 @@ extern uint_t cmi_hdl_strandid(cmi_hdl_t);
 extern uint_t cmi_hdl_strand_apicid(cmi_hdl_t);
 extern uint_t cmi_hdl_procnodes_per_pkg(cmi_hdl_t);
 extern boolean_t cmi_hdl_is_cmt(cmi_hdl_t);
-extern uint32_t cmi_hdl_chiprev(cmi_hdl_t);
+extern x86_chiprev_t cmi_hdl_chiprev(cmi_hdl_t);
 extern const char *cmi_hdl_chiprevstr(cmi_hdl_t);
 extern uint32_t cmi_hdl_getsockettype(cmi_hdl_t);
 extern const char *cmi_hdl_getsocketstr(cmi_hdl_t);
@@ -222,6 +229,9 @@ extern cmi_errno_t cmi_mc_unumtopa(mc_unum_t *, nvlist_t *, uint64_t *);
 extern void cmi_mc_logout(cmi_hdl_t, boolean_t, boolean_t);
 
 extern void cmi_panic_callback(void);
+
+extern cmi_errno_t cmi_cache_ncaches(cmi_hdl_t, uint32_t *);
+extern cmi_errno_t cmi_cache_info(cmi_hdl_t, uint32_t, x86_cache_t *);
 
 #endif /* _KERNEL */
 

@@ -23,6 +23,10 @@
  * Use is subject to license terms.
  */
 
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 #ifndef _SYS_DR_H
 #define	_SYS_DR_H
 
@@ -267,10 +271,9 @@ typedef struct dr_handle {
 	dev_t		h_dev;		/* dev_t of opened device */
 	int		h_cmd;		/* PIM ioctl argument */
 	int		h_mode;		/* device open mode */
-	sbd_cmd_t 	h_sbdcmd;	/* copied-in ioctl cmd struct */
+	sbd_cmd_t	h_sbdcmd;	/* copied-in ioctl cmd struct */
 	sbd_ioctl_arg_t	*h_iap;		/* ptr to caller-space cmd struct */
 	dr_devset_t	h_devset;	/* based on h_dev */
-	uint_t		h_ndi;
 	drmach_opts_t	h_opts;		/* command-line platform options */
 } dr_handle_t;
 

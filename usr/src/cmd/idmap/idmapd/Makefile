@@ -23,6 +23,7 @@
 # Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
 #
 # Copyright (c) 2018, Joyent, Inc.
+# Copyright 2022-2023 RackTop Systems, Inc.
 
 PROG =		idmapd
 MANIFEST =	idmap.xml
@@ -48,7 +49,7 @@ GENOBJS =				\
 	rpc_svc.o
 
 SERVERSRCS =	$(SERVEROBJS:%.o=%.c)
-GENSRCS = 	$(GENOBJS:%.o=%.c)
+GENSRCS =	$(GENOBJS:%.o=%.c)
 OBJS =		$(SERVEROBJS) $(GENOBJS)
 SRCS =		$(SERVERSRCS)
 POFILES =	$(OBJS:%.o=%.po)
@@ -59,6 +60,7 @@ clean :=	TARGET = clean
 clobber :=	TARGET = clobber
 
 include ../../Makefile.cmd
+include ../../Makefile.ctf
 
 CERRWARN +=	-_gcc=-Wno-type-limits
 CERRWARN +=	-_gcc=-Wno-switch
@@ -95,10 +97,9 @@ INCS += -I $(ROOT)/usr/include/kerberosv5
 $(OBJS) := CPPFLAGS += $(INCS) -D_REENTRANT
 $(POFILE) := CPPFLAGS += $(INCS)
 
-LINTFLAGS += -xerroff=E_NAME_DEF_NOT_USED2
-LINTFLAGS += -xerroff=E_NAME_USED_NOT_DEF2
-
 CFLAGS += $(CCVERBOSE)
+$(NOT_RELEASE_BUILD)CPPFLAGS += -DIDMAPD_DEBUG
+
 LDLIBS += \
 	-lsqlite-sys \
 	-lsecdb \
@@ -119,14 +120,10 @@ LDLIBS += \
 
 rpc_svc.o := CFLAGS += $(RPC_MSGOUT_OPT)
 
-$(PROG) := MAPFILES = $(MAPFILE.INT) $(MAPFILE.NGB)
-$(PROG) := LDFLAGS += $(MAPFILES:%=-M%) \
-	-R /usr/lib/smbsrv
+LDFLAGS += -R /usr/lib/smbsrv
 
 DIRMODE = 0755
 FILEMODE = 0555
-
-lint_SRCS := CPPFLAGS += $(INCS) -D_REENTRANT $(RPC_MSGOUT_OPT)
 
 .KEEP_STATE:
 
@@ -134,7 +131,7 @@ lint_SRCS := CPPFLAGS += $(INCS) -D_REENTRANT $(RPC_MSGOUT_OPT)
 
 all: $(PROG)
 
-$(PROG): $(OBJS) $$(MAPFILES)
+$(PROG): $(OBJS)
 	$(LINK.c) -o $@ $(OBJS) $(LDLIBS)
 	$(POST_PROCESS)
 
@@ -149,15 +146,11 @@ check: $(CHKMANIFEST)
 clean:
 	$(RM) $(OBJS) $(GENSRCS)
 
-lint:   lint_SRCS
-
-lint_SRCS:
-
 RPCGENFLAGS = -CMN
 
 adspriv_srv.o : adspriv_srv.c
 
-adspriv_srv.c: 
+adspriv_srv.c:
 	$(RPCGEN) $(RPCGENFLAGS) -m $(ADS_CMN)/ads_priv.x > $@
 
 rpc_svc.o : rpc_svc.c

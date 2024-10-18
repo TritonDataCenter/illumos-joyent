@@ -36,6 +36,8 @@ SYMTESTS = \
 	stdnoreturn_h \
 	string_h \
 	strings_h \
+	sys_atomic_h \
+	sys_mman_h \
 	sys_stat_h \
 	sys_time_h \
 	sys_timeb_h \

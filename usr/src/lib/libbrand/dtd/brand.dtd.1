@@ -212,17 +212,36 @@
 <!ATTLIST initname>
 
 <!--
-  restartinit
+  restartinit, restartinit0 and restartinitreboot
 
-    Boolean indicating that the program specified by the initname attr
-    should be restarted, or not, if it exits.  By default, the init program
-    will be restarted if this attribute is not provided.  Specifying false
-    for this attr will prevent that.
+    These three boolean elements control what action is taken when the
+    program specified by the 'initname' element exits.
 
-    It has no attributes.
+    The default values are:
+
+        restartinit:       true
+        restartinit0:      false
+        restartinitreboot: false
+
+    If 'restartinit' is set to false then the init process will never be
+    restarted and the zone will shut down once init exits. In this case, the
+    other restartinit elements are ignored.
+
+    When 'restartinit0' is set, init will only be restarted if it exited with
+    an exit status of 0, otherwise the zone will shut down.
+
+    If 'restartinitreboot' is set to true then whenever init should be
+    restarted, based on the other restartinit elements, the zone will instead
+    be rebooted.
+
+    These have no attributes.
 -->
 <!ELEMENT restartinit	(#PCDATA) >
 <!ATTLIST restartinit>
+<!ELEMENT restartinit0	(#PCDATA) >
+<!ATTLIST restartinit0>
+<!ELEMENT restartinitreboot	(#PCDATA) >
+<!ATTLIST restartinitreboot>
 
 <!--
   login_cmd
@@ -259,13 +278,13 @@
 <!--
   user_cmd
 
-    Path to the binary that will translate a user name to a passwd(4) entry.
+    Path to the binary that will translate a user name to a passwd(5) entry.
 
     The following replacements are performed:
 
       %u        User login name
 
-    It has no attributes.  The passwd(4) entry is used to determine $LOGNAME,
+    It has no attributes.  The passwd(5) entry is used to determine $LOGNAME,
     $HOME, and $SHELL for non-interactive "zlogin -l <user> <cmd>".
 -->
 <!ELEMENT user_cmd   (#PCDATA) >
@@ -603,18 +622,26 @@
 <!ATTLIST query>
 
 <!--
+  security-flags
+    Specifies the default security flags applied to zones of this brand. This
+    set can be overridden via security-flags in zonecfg(8).
+-->
+<!ELEMENT security-flags	(#PCDATA) >
+<!ATTLIST security-flags>
+
+<!--
   privilege
 
     Add a privilege to the default, prohibited, or required set for all
     zones of this brand with ip-type matched.  If a privilege is added
     to the default set all zones of this brand with ip-type matched on
     the system will inherit this privilege unless the privilege is
-    removed via limitpriv in zonecfg(1m).  If a privilege is added to
+    removed via limitpriv in zonecfg(8).  If a privilege is added to
     the prohibited set it can not be added to any zones with ip-type
-    matched via limitpriv in zonecfg(1m).  If a privilege is added to
+    matched via limitpriv in zonecfg(8).  If a privilege is added to
     the required set then all zones of this brand with ip-type matched
     on the system will inherit this privilege and it can't be removed via
-    limitpriv in zonecfg(1m).
+    limitpriv in zonecfg(8).
 
     Its attributes are
       set	The name of the set the privilege should go into.
@@ -627,7 +654,7 @@
 
 -->
 <!ELEMENT privilege	(#PCDATA) >
-<!ATTLIST privilege	set	( default | prohibited | required ) #REQUIRED 
+<!ATTLIST privilege	set	( default | prohibited | required ) #REQUIRED
 			name	CDATA #REQUIRED
 			ip-type ( shared | exclusive ) "all" >
 
@@ -642,7 +669,9 @@
 		directory in which the configuration file is stored.
 -->
 
-<!ELEMENT brand		(modname?, initname, restartinit?, login_cmd,
+<!ELEMENT brand		(modname?, initname, restartinit?,
+			restartinit0?, restartinitreboot?,
+			login_cmd,
 			forcedlogin_cmd, user_cmd, install,
 			installopts?, boot?, sysboot?, halt?, shutdown?,
 			verify_cfg?, verify_adm?, postattach?, postclone?,
@@ -650,6 +679,6 @@
 			presnap?, postsnap?, validatesnap?,
 			preuninstall?, uninstall?,
 			prestatechange?, poststatechange?, query?,
-			privilege+)>
+			security-flags?, privilege+)>
 
 <!ATTLIST brand		name		CDATA #REQUIRED>

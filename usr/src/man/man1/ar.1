@@ -43,12 +43,12 @@
 .\" Copyright 1989 AT&T
 .\" Portions Copyright (c) 1992, X/Open Company Limited  All Rights Reserved
 .\" Copyright (c) 2009, Sun Microsystems, Inc.  All Rights Reserved.
+.\" Copyright 2022 Oxide Computer Company
 .\"
-.TH AR 1 "Sep 10, 2013"
+.TH AR 1 "January 23, 2022"
 .SH NAME
 ar \- maintain portable archive or library
 .SH SYNOPSIS
-.LP
 .nf
 \fB/usr/bin/ar\fR \fB-d\fR [\fB-Vv\fR] \fIarchive\fR \fIfile\fR...
 .fi
@@ -65,12 +65,17 @@ ar \- maintain portable archive or library
 
 .LP
 .nf
-\fB/usr/bin/ar\fR \fB-q\fR [\fB-cVv\fR] \fIarchive\fR \fIfile\fR...
+\fB/usr/bin/ar\fR \fB-q\fR [\fB-csVv\fR] \fIarchive\fR \fIfile\fR...
 .fi
 
 .LP
 .nf
 \fB/usr/bin/ar\fR \fB-r\fR [\fB-abciuVv\fR] [\fIposname\fR] \fIarchive\fR \fIfile\fR...
+.fi
+
+.LP
+.nf
+\fB/usr/bin/ar\fR \fB-s\fR [\fB-Vv\fR] \fIarchive\fR
 .fi
 
 .LP
@@ -119,8 +124,6 @@ ar \- maintain portable archive or library
 .fi
 
 .SH DESCRIPTION
-.sp
-.LP
 The \fBar\fR utility maintains groups of files combined into a single archive
 file. Its main use is to create and update library files. However, it can be
 used for any similar purpose. The magic string and the file headers used by
@@ -140,8 +143,6 @@ accessible to the user. Whenever the \fBar\fR command is used to create or
 update the contents of such an archive, the symbol table is rebuilt. The
 \fB-s\fR option described below forces the symbol table to be rebuilt.
 .SH OPTIONS
-.sp
-.LP
 The following options are supported:
 .sp
 .ne 2
@@ -200,7 +201,7 @@ Deletes one or more \fIfile\fRs from \fIarchive\fR.
 .ad
 .RS 6n
 Positions new \fIfile\fRs in \fIarchive\fR before the file named by the
-\fIposname\fR operand. This option is quivalent to \fB-b\fR.
+\fIposname\fR operand. This option is equivalent to \fB-b\fR.
 .RE
 
 .sp
@@ -331,8 +332,6 @@ Prints its version number on standard error.
 .RE
 
 .SS "\fB/usr/xpg4/bin/ar\fR"
-.sp
-.LP
 The following options are supported for \fB/usr/xpg4/bin/ar\fR:
 .sp
 .ne 2
@@ -360,8 +359,6 @@ is being extracted, the results are undefined. The modification time of each
 .RE
 
 .SH OPERANDS
-.sp
-.LP
 The following operands are supported:
 .sp
 .ne 2
@@ -396,9 +393,7 @@ options \fB-m\fR and \fB-r\fR.
 .RE
 
 .SH ENVIRONMENT VARIABLES
-.sp
-.LP
-See \fBenviron\fR(5) for descriptions of the following environment variables
+See \fBenviron\fR(7) for descriptions of the following environment variables
 that affect the execution of \fBar\fR: \fBLANG\fR, \fBLC_ALL\fR,
 \fBLC_CTYPE\fR, \fBLC_MESSAGES\fR, \fBLC_TIME\fR, and \fBNLSPATH\fR.
 .sp
@@ -423,8 +418,6 @@ timezone is used.
 .RE
 
 .SH EXIT STATUS
-.sp
-.LP
 The following exit values are returned:
 .sp
 .ne 2
@@ -445,13 +438,8 @@ An error occurred.
 .RE
 
 .SH ATTRIBUTES
-.sp
-.LP
-See \fBattributes\fR(5) for descriptions of the following attributes:
+See \fBattributes\fR(7) for descriptions of the following attributes:
 .SS "\fB/usr/bin/ar\fR"
-.sp
-
-.sp
 .TS
 box;
 c | c
@@ -462,9 +450,6 @@ Interface Stability	Committed
 .TE
 
 .SS "\fB/usr/xpg4/bin/ar\fR"
-.sp
-
-.sp
 .TS
 box;
 c | c
@@ -473,18 +458,22 @@ ATTRIBUTE TYPE	ATTRIBUTE VALUE
 _
 Interface Stability	Committed
 _
-Standard	See \fBstandards\fR(5).
+Standard	See \fBstandards\fR(7).
 .TE
 
 .SH SEE ALSO
-.sp
-.LP
-\fBbasename\fR(1), \fBcpio\fR(1), \fBld\fR(1), \fBlorder\fR(1), \fBstrip\fR(1),
-\fBtar\fR(1), \fBar.h\fR(3HEAD), \fBa.out\fR(4), \fBattributes\fR(5),
-\fBenviron\fR(5), \fBstandards\fR(5)
+.BR basename (1),
+.BR cpio (1),
+.BR ld (1),
+.BR lorder (1),
+.BR strip (1),
+.BR tar (1),
+.BR ar.h (3HEAD),
+.BR a.out (5),
+.BR attributes (7),
+.BR environ (7),
+.BR standards (7)
 .SH NOTES
-.sp
-.LP
 If the same file is mentioned twice in an argument list, it may be put in the
 archive twice.
 .sp

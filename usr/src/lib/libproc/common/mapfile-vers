@@ -25,6 +25,7 @@
 # Copyright (c) 2013 by Delphix. All rights reserved.
 # Copyright (c) 2019 Carlos Neira <cneirabustos@gmail.com>
 # Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2023 Oxide Computer Company
 #
 
 #
@@ -76,14 +77,20 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	Ldstop;
 	Lfree;
 	Lgetareg;
+	Lgetfpregs;
+	Lgetregs;
+	Lgetxregs;
 	Lgrab;
 	Lgrab_error;
-	_libproc_debug;
+	_libproc_debug	{ ASSERT = { TYPE = OBJECT; SIZE = 4; }; };
 	Lmain_stack;
 	Lprochandle;
 	Lpsinfo;
 	Lputareg;
+	Lsetfpregs;
+	Lsetregs;
 	Lsetrun;
+	Lsetxregs;
 	Lstack;
 	Lstate;
 	Lstatus;
@@ -106,6 +113,8 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	Pcreate_error;
 	Pcred;
 	Pctlfd;
+	Pcwd;
+	Pcwd_free;
 	Pdelbkpt;
 	Pdelwapt;
 	Pdestroy_agent;
@@ -137,16 +146,19 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	Plookup_by_addr;
 	Plookup_by_name;
 	Plwp_alt_stack;
+	Plwp_freexregs;
 	Plwp_getfpregs;
 	Plwp_getname;
 	Plwp_getpsinfo;
 	Plwp_getregs;
 	Plwp_getspymaster;
+	Plwp_getxregs;
 	Plwp_iter;
 	Plwp_iter_all;
 	Plwp_main_stack;
 	Plwp_setfpregs;
 	Plwp_setregs;
+	Plwp_setxregs;
 	Plwp_stack;
 	Pmapping_iter;
 	Pmapping_iter_resolved;
@@ -221,7 +233,9 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	proc_get_fdinfo;
 	proc_get_priv;
 	proc_get_psinfo;
-        proc_get_secflags;
+	proc_get_lwpsinfo;
+	proc_get_lwpstatus;
+	proc_get_secflags;
 	proc_get_status;
 	proc_initstdio;
 	proc_lwp_in_set;
@@ -271,25 +285,28 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	ps_lcontinue;
 	ps_lgetfpregs;
 	ps_lgetregs;
+	ps_lgetxregs;
+	ps_lgetxregsize;
 	ps_lsetfpregs;
 	ps_lsetregs;
+	ps_lsetxregs;
 	ps_lstop;
 	ps_pauxv;
 	ps_pbrandname;
 	ps_pcontinue;
 	ps_pdmodel;
-	ps_pdread		{ FLAGS = NODYNSORT };	# Alias of ps_pread
-	ps_pdwrite		{ FLAGS = NODYNSORT };	# Alias of ps_pwrite
+	ps_pdread	{ FLAGS = NODYNSORT; };	# Alias of ps_pread
+	ps_pdwrite	{ FLAGS = NODYNSORT; };	# Alias of ps_pwrite
 	ps_pglobal_lookup;
 	ps_pglobal_sym;
 	ps_plog;
 	ps_pread;
 	ps_pstop;
-	ps_ptread		{ FLAGS = NODYNSORT };	# Alias of ps_pread
-	ps_ptwrite		{ FLAGS = NODYNSORT };	# Alias of ps_pwrite
+	ps_ptread	{ FLAGS = NODYNSORT; };	# Alias of ps_pread
+	ps_ptwrite	{ FLAGS = NODYNSORT; };	# Alias of ps_pwrite
 	ps_pwrite;
 	Psecflags;
-        Psecflags_free;
+	Psecflags_free;
 	Pstack_iter;
 	Pstate;
 	Pstatus;
@@ -307,6 +324,8 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	Punsetflags;
 	Pupdate_maps;
 	Pupdate_syms;
+	Pupanic;
+	Pupanic_free;
 	Pwait;
 	Pwrite;
 	Pxcreate;
@@ -329,12 +348,6 @@ $endif
 
 $if _sparc
 	Plwp_getgwindows;
-	Plwp_getxregs;
-	Plwp_setxregs;
-	ps_lgetxregs;
-	ps_lgetxregsize;
-	ps_lsetxregs;
-
 $if _ELF64
 	Plwp_getasrs;
 	Plwp_setasrs;

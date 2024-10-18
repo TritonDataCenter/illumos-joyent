@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -42,9 +40,6 @@
 #include <AudioDebug.h>
 #include <libaudio.h>
 #include <audio_hdr.h>
-
-// XX64  This should go away when <sys/mman.h> gets fixed.
-extern "C" int madvise(caddr_t, size_t, int);
 
 // class AudioFile methods
 
@@ -271,15 +266,15 @@ OpenPath(
 			pathname = new char[strlen(prefix) + flen + 2];
 			(void) sprintf(pathname, "%s/%s", prefix, filename);
 			err = tryopen(pathname, openmode);
-			delete pathname;
+			delete[] pathname;
 			switch (err) {
 			case AUDIO_SUCCESS:	// found the file
-				delete wrk;
+				delete[] wrk;
 				return (RaiseError(err));
 			// XXX - if file found but not audio, stop looking??
 			}
 		}
-		delete wrk;
+		delete[] wrk;
 	}
 	// Can't find file.  Return the original error condition.
 	return (RaiseError(tryopen(filename, openmode)));
@@ -581,7 +576,8 @@ AsyncCopy(
 	}
 
 	tohdr = to->GetHeader();
-	if (err = tohdr.Validate())
+	err = tohdr.Validate();
+	if (err != AUDIO_SUCCESS)
 		return (err);
 	if (limit < 0.)
 		return (RaiseError(AUDIO_ERR_BADARG));

@@ -1,0 +1,184 @@
+#
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+
+#
+# Copyright 2024 Oxide Computer Company
+#
+
+<include global_zone_only_component>
+set name=pkg.fmri value=pkg:/driver/cpu/amd/zen@$(PKGVERS)
+set name=pkg.summary value="AMD Zen Nexus Driver"
+set name=pkg.description value="AMD Zen Nexus Driver"
+set name=info.classification value=org.opensolaris.category.2008:System/Hardware
+set name=variant.arch value=i386
+dir  path=kernel group=sys
+dir  path=kernel/drv group=sys
+dir  path=kernel/drv/$(ARCH64) group=sys
+file path=kernel/drv/$(ARCH64)/amdzen group=sys
+file path=kernel/drv/$(ARCH64)/amdzen_stub group=sys
+file path=kernel/drv/$(ARCH64)/zen_umc group=sys
+file path=kernel/drv/amdzen.conf group=sys
+dir  path=usr/share/man
+dir  path=usr/share/man/man4d
+file path=usr/share/man/man4d/amdzen.4d
+link path=usr/share/man/man4d/amdzen_stub.4d target=amdzen.4d
+driver name=amdzen
+#
+# 12c0-12c7: f1ah m00-1fh df
+# 1440-1447: f17h m70-7fh, f19h m20-2f df
+# 1448-144f: f17h m60-6fh df
+# 1450: f17h m00-0f nb
+# 1460-1467: f17h m00-0f df
+# 1480: f17h m30-3f/70-7f, f19h m00-0f, m20-2f nb
+# 1490-1497: f17h m30-3f df
+# 14a4: f19h m10-1f, m1a0-af nb
+# 14ad-14b4: f19h m10-1fh, a0-af df
+# 14b5: f17h ma0-af, f19h m40-4f nb
+# 14d8: f19h m60-6f, f1ah m40-4f nb
+# 14e8: f19h m70-7f nb
+# 14e0-14e7: f19h m60-6f, f1ah m40-4f df
+# 14f0-14f7: f19h m70-7f df
+# 1507: f1ah m20-2f nb
+# 153a: f1ah m00-1f nb
+# 15d0: f17h m10-m2f nb
+# 15e8-15ef: f17h m10-m2f df
+# 1630: f17h m60-6f, f19h m50-5f nb
+# 1650-1657: f19h m00-0f df
+# 166a-1671: f19h m50-5f df
+# 1679-1680: f19h m40-4f df
+# 16f8-16ff: f1ah m20-2f df
+# 1724-172b: f17h ma0-af df
+#
+driver name=amdzen_stub \
+    alias=pci1022,12c0,p \
+    alias=pci1022,12c1,p \
+    alias=pci1022,12c2,p \
+    alias=pci1022,12c3,p \
+    alias=pci1022,12c4,p \
+    alias=pci1022,12c5,p \
+    alias=pci1022,12c6,p \
+    alias=pci1022,12c7,p \
+    alias=pci1022,1440,p \
+    alias=pci1022,1441,p \
+    alias=pci1022,1442,p \
+    alias=pci1022,1443,p \
+    alias=pci1022,1444,p \
+    alias=pci1022,1445,p \
+    alias=pci1022,1446,p \
+    alias=pci1022,1447,p \
+    alias=pci1022,1448,p \
+    alias=pci1022,1449,p \
+    alias=pci1022,144a,p \
+    alias=pci1022,144b,p \
+    alias=pci1022,144c,p \
+    alias=pci1022,144d,p \
+    alias=pci1022,144e,p \
+    alias=pci1022,144f,p \
+    alias=pci1022,1450,p \
+    alias=pci1022,1460,p \
+    alias=pci1022,1461,p \
+    alias=pci1022,1462,p \
+    alias=pci1022,1463,p \
+    alias=pci1022,1464,p \
+    alias=pci1022,1465,p \
+    alias=pci1022,1466,p \
+    alias=pci1022,1467,p \
+    alias=pci1022,1480,p \
+    alias=pci1022,1490,p \
+    alias=pci1022,1491,p \
+    alias=pci1022,1492,p \
+    alias=pci1022,1493,p \
+    alias=pci1022,1494,p \
+    alias=pci1022,1495,p \
+    alias=pci1022,1496,p \
+    alias=pci1022,1497,p \
+    alias=pci1022,14a4,p \
+    alias=pci1022,14ad,p \
+    alias=pci1022,14ae,p \
+    alias=pci1022,14af,p \
+    alias=pci1022,14b0,p \
+    alias=pci1022,14b1,p \
+    alias=pci1022,14b2,p \
+    alias=pci1022,14b3,p \
+    alias=pci1022,14b4,p \
+    alias=pci1022,14b5,p \
+    alias=pci1022,14d8,p \
+    alias=pci1022,14e0,p \
+    alias=pci1022,14e1,p \
+    alias=pci1022,14e2,p \
+    alias=pci1022,14e3,p \
+    alias=pci1022,14e4,p \
+    alias=pci1022,14e5,p \
+    alias=pci1022,14e6,p \
+    alias=pci1022,14e7,p \
+    alias=pci1022,14e8,p \
+    alias=pci1022,14f0,p \
+    alias=pci1022,14f1,p \
+    alias=pci1022,14f2,p \
+    alias=pci1022,14f3,p \
+    alias=pci1022,14f4,p \
+    alias=pci1022,14f5,p \
+    alias=pci1022,14f6,p \
+    alias=pci1022,14f7,p \
+    alias=pci1022,1507,p \
+    alias=pci1022,153a,p \
+    alias=pci1022,15d0,p \
+    alias=pci1022,15e8,p \
+    alias=pci1022,15e9,p \
+    alias=pci1022,15ea,p \
+    alias=pci1022,15eb,p \
+    alias=pci1022,15ec,p \
+    alias=pci1022,15ed,p \
+    alias=pci1022,15ee,p \
+    alias=pci1022,15ef,p \
+    alias=pci1022,1630,p \
+    alias=pci1022,1650,p \
+    alias=pci1022,1651,p \
+    alias=pci1022,1652,p \
+    alias=pci1022,1653,p \
+    alias=pci1022,1654,p \
+    alias=pci1022,1655,p \
+    alias=pci1022,1656,p \
+    alias=pci1022,1657,p \
+    alias=pci1022,166a,p \
+    alias=pci1022,166b,p \
+    alias=pci1022,166c,p \
+    alias=pci1022,166d,p \
+    alias=pci1022,166e,p \
+    alias=pci1022,166f,p \
+    alias=pci1022,1670,p \
+    alias=pci1022,1671,p \
+    alias=pci1022,1679,p \
+    alias=pci1022,167a,p \
+    alias=pci1022,167b,p \
+    alias=pci1022,167c,p \
+    alias=pci1022,167d,p \
+    alias=pci1022,167e,p \
+    alias=pci1022,167f,p \
+    alias=pci1022,1680,p \
+    alias=pci1022,16f8,p \
+    alias=pci1022,16f9,p \
+    alias=pci1022,16fa,p \
+    alias=pci1022,16fb,p \
+    alias=pci1022,16fc,p \
+    alias=pci1022,16fd,p \
+    alias=pci1022,16fe,p \
+    alias=pci1022,16ff,p \
+    alias=pci1022,1724,p \
+    alias=pci1022,1725,p \
+    alias=pci1022,1726,p \
+    alias=pci1022,1727,p \
+    alias=pci1022,1728,p \
+    alias=pci1022,1729,p \
+    alias=pci1022,172a,p \
+    alias=pci1022,172b,p
+driver name=zen_umc
+license lic_CDDL license=lic_CDDL

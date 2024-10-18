@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  *
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -92,8 +93,8 @@
  *	- Through the nexus driver interface, ndi_hp_state_change_req. PCIe
  *	nexus drivers that pass a hotplug interrupt through to pciehpc will kick
  *	off state changes in this way.
- *	- Through coordinated removal, ddihp_modctl. Both cfgadm(1M) and
- *	hotplug(1M) pass state change requests through hotplugd, which uses
+ *	- Through coordinated removal, ddihp_modctl. Both cfgadm(8) and
+ *	hotplug(8) pass state change requests through hotplugd, which uses
  *	modctl to request state changes to the DDI hotplug framework. That
  *	interface is ultimately implemented by ddihp_modctl.
  *
@@ -131,7 +132,7 @@
  * of some key components are below.
  *
  *				+------------+
- *				| cfgadm(1M) |
+ *				| cfgadm(8)  |
  *				+------------+
  *				      |
  *			    +-------------------+
@@ -139,7 +140,7 @@
  *			    +-------------------+
  *				      |
  *	+-------------+		 +------------+
- *	| hotplug(1M) |----------| libhotplug |
+ *	| hotplug(8)  |----------| libhotplug |
  *	+-------------+		 +------------+
  *				      |
  *				 +----------+
@@ -193,14 +194,14 @@
  *
  * KEY HOTPLUG SOFTWARE COMPONENTS
  *
- *	CFGADM(1M)
+ *	cfgadm(8)
  *
  *	cfgadm is the canonical tool for hotplug operations. It can be used to
  *	list connections on the system and change their state in a coordinated
  *	fashion. For more information, see its manual page.
  *
  *
- *	HOTPLUG(1M)
+ *	hotplug(8)
  *
  *	hotplug is a command line tool for managing hotplug connections for
  *	connectors. For more information, see its manual page.
@@ -306,10 +307,10 @@ int
 ddihp_modctl(int hp_op, char *path, char *cn_name, uintptr_t arg,
     uintptr_t rval)
 {
-	dev_info_t		*dip;
+	dev_info_t		*pdip, *dip;
 	ddi_hp_cn_handle_t	*hdlp;
 	ddi_hp_op_t		op = (ddi_hp_op_t)hp_op;
-	int			count, rv, error;
+	int			rv, error;
 
 	/* Get the dip of nexus node */
 	dip = e_ddi_hold_devi_by_path(path, 0);
@@ -326,8 +327,19 @@ ddihp_modctl(int hp_op, char *path, char *cn_name, uintptr_t arg,
 		return (ENOTSUP);
 	}
 
+	/*
+	 * We know that some of the functions that are called further from here
+	 * on may enter critical sections on the parent of this node.  In order
+	 * to prevent deadlocks, we maintain the invariant that, if we lock a
+	 * child, the parent must already be locked.  This is the first place
+	 * in the call stack where we may do so, so we lock the parent here.
+	 */
+	pdip = ddi_get_parent(dip);
+	if (pdip != NULL)
+		ndi_devi_enter(pdip);
+
 	/* Lock before access */
-	ndi_devi_enter(dip, &count);
+	ndi_devi_enter(dip);
 
 	hdlp = ddihp_cn_name_to_handle(dip, cn_name);
 
@@ -382,7 +394,9 @@ ddihp_modctl(int hp_op, char *path, char *cn_name, uintptr_t arg,
 	}
 
 done:
-	ndi_devi_exit(dip, count);
+	ndi_devi_exit(dip);
+	if (pdip != NULL)
+		ndi_devi_exit(pdip);
 
 	ddi_release_devi(dip);
 

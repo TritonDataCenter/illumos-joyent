@@ -29,7 +29,7 @@
  * Copyright 2015 Toomas Soome <tsoome@me.com>
  * Copyright 2015 Gary Mills
  * Copyright (c) 2016 Martin Matuska. All rights reserved.
- * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #include <assert.h>
@@ -47,6 +47,7 @@
 
 #include <libbe.h>
 #include <libbe_priv.h>
+#include <libzfsbootenv.h>
 
 /*
  * Callback data used for zfs_iter calls.
@@ -444,8 +445,12 @@ be_get_list_callback(zpool_handle_t *zlp, void *data)
 	/*
 	 * Generate string for the BE container dataset
 	 */
-	be_make_container_ds(rpool, be_container_ds,
-	    sizeof (be_container_ds));
+	if (be_make_container_ds(rpool, be_container_ds,
+	    sizeof (be_container_ds)) != BE_SUCCESS) {
+		/* Move on to the next pool */
+		zpool_close(zlp);
+		return (0);
+	}
 
 	/*
 	 * If a BE name was specified we use it's root dataset in place of
@@ -453,12 +458,17 @@ be_get_list_callback(zpool_handle_t *zlp, void *data)
 	 * the information for the specified BE.
 	 */
 	if (cb->be_name != NULL) {
+		int rv;
+
 		if (!be_valid_be_name(cb->be_name))
 			return (BE_ERR_INVAL);
 		/*
 		 * Generate string for the BE root dataset
 		 */
-		be_make_root_ds(rpool, cb->be_name, be_ds, sizeof (be_ds));
+		if ((rv = be_make_root_ds(rpool, cb->be_name, be_ds,
+		    sizeof (be_ds))) != BE_SUCCESS) {
+			return (rv);
+		}
 		open_ds = be_ds;
 	} else {
 		open_ds = be_container_ds;
@@ -986,13 +996,8 @@ be_qsort_compare_datasets(const void *x, const void *y)
  *		Private
  */
 static int
-be_get_node_data(
-	zfs_handle_t *zhp,
-	be_node_list_t *be_node,
-	char *be_name,
-	const char *rpool,
-	char *current_be,
-	char *be_ds)
+be_get_node_data(zfs_handle_t *zhp, be_node_list_t *be_node, char *be_name,
+    const char *rpool, char *current_be, char *be_ds)
 {
 	char prop_buf[MAXPATHLEN];
 	nvlist_t *userprops = NULL;
@@ -1041,11 +1046,23 @@ be_get_node_data(
 	be_node->be_space_used = zfs_prop_get_int(zhp, ZFS_PROP_USED);
 
 	if (getzoneid() == GLOBAL_ZONEID) {
+		char *nextboot;
+
 		if ((zphp = zpool_open(g_zfs, rpool)) == NULL) {
 			be_print_err(gettext("be_get_node_data: failed to open "
 			    "pool (%s): %s\n"), rpool,
 			    libzfs_error_description(g_zfs));
 			return (zfs_err_to_be_err(g_zfs));
+		}
+
+		/* Set nextboot info */
+		be_node->be_active_next = B_FALSE;
+		if (lzbe_get_boot_device(rpool, &nextboot) == 0) {
+			if (nextboot != NULL) {
+				if (strcmp(nextboot, be_ds) == 0)
+					be_node->be_active_next = B_TRUE;
+				free(nextboot);
+			}
 		}
 
 		(void) zpool_get_prop(zphp, ZPOOL_PROP_BOOTFS, prop_buf,

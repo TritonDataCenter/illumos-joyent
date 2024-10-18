@@ -26,7 +26,6 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/lib/libutil/expand_number.c 255069 2013-08-30 11:21:52Z pluknet $");
 
 #include <sys/types.h>
 #include <ctype.h>
@@ -47,8 +46,10 @@ expand_number(const char *buf, uint64_t *num)
 	serrno = errno;
 	errno = 0;
 	umaxval = strtoumax(buf, &endptr, 0);
+#ifdef __FreeBSD__
 	if (umaxval > UINT64_MAX)
 		errno = ERANGE;
+#endif
 	if (errno != 0)
 		return (-1);
 	errno = serrno;

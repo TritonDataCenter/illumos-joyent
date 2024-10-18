@@ -24,6 +24,7 @@
 # Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
 # Copyright 2019 Joyent, Inc.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2022 Oxide Computer Company
 #
 
 #	This Makefile defines the build rules for the directory uts/i86pc
@@ -121,14 +122,6 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/ioat/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/imc/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(SRC)/common/mc/imc/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
 $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/pci/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -145,7 +138,7 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/pcplusmp/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/pcplusmp/%.s
+$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/pcplusmp/%.S
 	$(COMPILE.s) -o $@ $<
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/apix/%.c
@@ -156,21 +149,21 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/ppm/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/ppm/%.s
+$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/ppm/%.S
 	$(COMPILE.s) -o $@ $<
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/psm/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/psm/%.s
+$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/psm/%.S
 	$(COMPILE.s) -o $@ $<
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/tzmon/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/ml/%.s
+$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/ml/%.S
 	$(COMPILE.s) -o $@ $<
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/os/%.c
@@ -178,6 +171,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/os/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/os/cpupm/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/promif/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -225,35 +222,6 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/dboot/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/vmm/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/vmm/amd/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/vmm/intel/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/vmm/io/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/vmm/%.s
-	$(COMPILE.s) -o $@ $<
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/vmm/intel/%.s
-	$(COMPILE.s) -o $@ $<
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/vmm/amd/%.s
-	$(COMPILE.s) -o $@ $<
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/io/viona/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
 #
 # dboot stuff is always 32 bit, linked to run with phys_addr == virt_addr
 #
@@ -264,20 +232,16 @@ DBOOT_DEFS	= -D_BOOT $(DBOOT_MACH_$(CLASS))
 DBOOT_DEFS	+= -D_MACHDEP -U_KERNEL -D_I32LPx
 DBOOT_FLAGS	= $(CFLAGS_XARCH_32) $(CCVERBOSE) $(CSTD) $(CERRWARN)
 DBOOT_FLAGS	+= $(CCNOAUTOINLINE)
+DBOOT_ASFLAGS	= $(ASFLAGS_XARCH_32) -D_ASM
 
 DBOOT_CC_INCL	= -I$(SRC)/common -I$(SRC)/common/util $(INCLUDE_PATH)
 DBOOT_AS_INCL	= $(AS_INC_PATH)
-
-DBOOT_AS	= $(ONBLD_TOOLS)/bin/$(MACH)/aw
 
 $(DBOOT_OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/boot/%.c
 	$(i386_CC) $(DBOOT_FLAGS) -O $(DBOOT_DEFS) $(DBOOT_CC_INCL) -c -o $@ $<
 
 $(DBOOT_OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/dboot/%.c
 	$(i386_CC) $(DBOOT_FLAGS) -O $(DBOOT_DEFS) $(DBOOT_CC_INCL) -c -o $@ $<
-
-$(DBOOT_OBJS_DIR)/%.o:		$(UTSBASE)/intel/ia32/%.s
-	$(DBOOT_AS) -P -D_ASM $(DBOOT_DEFS) $(DBOOT_AS_INCL) -o $@ $<
 
 $(DBOOT_OBJS_DIR)/%.o:		$(SRC)/common/font/%.c
 	$(i386_CC) $(DBOOT_FLAGS) -O $(DBOOT_DEFS) $(DBOOT_CC_INCL) -c -o $@ $<
@@ -297,19 +261,19 @@ $(DBOOT_OBJS_DIR)/%.o:		$(DBOOT_OBJS_DIR)/%.c
 $(DBOOT_OBJS_DIR)/%.o:		$(COMMONBASE)/util/%.c
 	$(i386_CC) $(DBOOT_FLAGS) -O $(DBOOT_DEFS) $(DBOOT_CC_INCL) -c -o $@ $<
 
-$(DBOOT_OBJS_DIR)/%.o:		$(COMMONBASE)/util/i386/%.s
-	$(DBOOT_AS) -P -D_ASM $(DBOOT_DEFS) $(DBOOT_AS_INCL) -o $@ $<
+$(DBOOT_OBJS_DIR)/%.o:		$(COMMONBASE)/util/i386/%.S
+	$(AS) $(DBOOT_DEFS) $(DBOOT_ASFLAGS) $(DBOOT_AS_INCL) -c -o $@ $<
 
-$(DBOOT_OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/dboot/%.s
-	$(DBOOT_AS) -P -D_ASM $(DBOOT_DEFS) $(DBOOT_AS_INCL) -o $@ $<
+$(DBOOT_OBJS_DIR)/%.o:		$(UTSBASE)/i86pc/dboot/%.S
+	$(AS) $(DBOOT_DEFS) $(DBOOT_ASFLAGS) $(DBOOT_AS_INCL) -c -o $@ $<
 
 #
 # Stuff to build bios_call.o for the kernel.
 #
 MAPFILE_BIOS	= $(UTSBASE)/i86pc/conf/Mapfile.bios
-$(OBJS_DIR)/bios_call.o:    $(UTSBASE)/i86pc/ml/bios_call_src.s
+$(OBJS_DIR)/bios_call.o:    $(UTSBASE)/i86pc/ml/bios_call_src.S
 	$(COMPILE.s) -o $(OBJS_DIR)/bios_call_src.o \
-		$(UTSBASE)/i86pc/ml/bios_call_src.s
+		$(UTSBASE)/i86pc/ml/bios_call_src.S
 	$(LD) -dn -M $(MAPFILE_BIOS)  \
 		-o $(OBJS_DIR)/bios_call_src $(OBJS_DIR)/bios_call_src.o
 	@echo "  .data"				> $(OBJS_DIR)/bios_call.s
@@ -326,9 +290,9 @@ $(OBJS_DIR)/bios_call.o:    $(UTSBASE)/i86pc/ml/bios_call_src.s
 # Stuff to build fb_swtch.o for the kernel.
 #
 MAPFILE_FBSWTCH	= $(UTSBASE)/i86pc/conf/Mapfile.fb_swtch
-$(OBJS_DIR)/fb_swtch.o:    $(UTSBASE)/i86pc/ml/fb_swtch_src.s
+$(OBJS_DIR)/fb_swtch.o:    $(UTSBASE)/i86pc/ml/fb_swtch_src.S
 	$(COMPILE.s) -o $(OBJS_DIR)/fb_swtch_src.o \
-		$(UTSBASE)/i86pc/ml/fb_swtch_src.s
+		$(UTSBASE)/i86pc/ml/fb_swtch_src.S
 	$(LD) -dn -M $(MAPFILE_FBSWTCH)  \
 		-o $(OBJS_DIR)/fb_swtch_src $(OBJS_DIR)/fb_swtch_src.o
 	@echo "  .data"				> $(OBJS_DIR)/fb_swtch.s
@@ -347,6 +311,9 @@ ATOMIC_SUBDIR_64	= amd64
 ATOMIC_SUBDIR		= $(ATOMIC_SUBDIR_$(CLASS))
 
 $(OBJS_DIR)/%.o:		$(SRC)/common/atomic/$(ATOMIC_SUBDIR)/%.s
+	$(COMPILE.s) -o $@ $<
+
+$(OBJS_DIR)/%.o:		$(SRC)/common/atomic/$(ATOMIC_SUBDIR)/%.S
 	$(COMPILE.s) -o $@ $<
 
 #

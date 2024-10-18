@@ -29,16 +29,12 @@ OBJS=	dfshares.o
 
 ROOTLINK= $(ROOTUSRSBIN)/dfmounts
 
-CFLAGS += -s
-
 include ../../Makefile.cmd
-
-CERRWARN += -_gcc=-Wno-parentheses
-CERRWARN += $(CNOWARN_UNINIT)
+include ../../Makefile.ctf
 
 .KEEP_STATE:
 
-all: $(PROG) 
+all: $(PROG)
 
 $(PROG): dfshares.o
 	$(LINK.c) -o $@ $(OBJS) $(LDFLAGS) $(LDLIBS)
@@ -51,7 +47,5 @@ $(ROOTLINK): $(ROOTUSRSBINPROG)
 
 clean:
 	$(RM) $(OBJS)
-
-lint: lint_PROG
 
 include ../../Makefile.targ

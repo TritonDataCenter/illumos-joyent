@@ -158,9 +158,9 @@ dladm_walk_hwgrp(dladm_handle_t handle, datalink_id_t linkid, void *arg,
 
 	ret = ioctl(dladm_dld_fd(handle), DLDIOC_GETHWGRP, iomp);
 	if (ret == 0) {
-		int			i;
-		int			j;
-		dld_hwgrpinfo_t 	*dhip;
+		uint_t			i;
+		uint_t			j;
+		dld_hwgrpinfo_t		*dhip;
 		dladm_hwgrp_attr_t	attr;
 
 		dhip = (dld_hwgrpinfo_t *)(iomp + 1);
@@ -211,7 +211,7 @@ dladm_walk_macaddr(dladm_handle_t handle, datalink_id_t linkid, void *arg,
 
 	ret = ioctl(dladm_dld_fd(handle), DLDIOC_MACADDRGET, iomp);
 	if (ret == 0) {
-		int i;
+		uint_t i;
 		dld_macaddrinfo_t *dmip;
 		dladm_macaddr_attr_t attr;
 
@@ -240,7 +240,7 @@ dladm_walk_macaddr(dladm_handle_t handle, datalink_id_t linkid, void *arg,
 }
 
 /*
- * These routines are used by administration tools such as dladm(1M) to
+ * These routines are used by administration tools such as dladm(8) to
  * iterate through the list of MAC interfaces
  */
 
@@ -256,9 +256,8 @@ typedef struct macadm_walk {
 /*
  * Local callback invoked for each DDI_NT_NET node.
  */
-/* ARGSUSED */
 static int
-i_dladm_mac_walk(di_node_t node, di_minor_t minor, void *arg)
+i_dladm_mac_walk(di_node_t node, di_minor_t minor __unused, void *arg)
 {
 	dladm_mac_walk_t	*dmwp = arg;
 	dladm_mac_dev_t		*dmdp = dmwp->dmd_dev_list;
@@ -439,7 +438,7 @@ i_dladm_aggr_link_hold(dladm_handle_t handle, datalink_id_t aggrid, void *arg)
 	link_hold_arg_t		*hold_arg = arg;
 	dladm_aggr_grp_attr_t	ginfo;
 	dladm_status_t		status;
-	int			i;
+	uint_t			i;
 
 	status = dladm_aggr_info(handle, aggrid, &ginfo, hold_arg->flags);
 	if (status != DLADM_STATUS_OK)
@@ -636,7 +635,7 @@ dladm_rename_link(dladm_handle_t handle, const char *zonename,
 	datalink_class_t	class1, class2;
 	uint32_t		media1, media2;
 	boolean_t		remphy2 = B_FALSE;
-	dladm_status_t  	status;
+	dladm_status_t		status;
 
 	(void) dladm_zname2info(handle, zonename, link1, &linkid1, &flags1,
 	    &class1, &media1);
@@ -724,7 +723,7 @@ i_dladm_aggr_link_del(dladm_handle_t handle, datalink_id_t aggrid, void *arg)
 	dladm_aggr_grp_attr_t		ginfo;
 	dladm_status_t			status;
 	dladm_aggr_port_attr_db_t	port[1];
-	int				i;
+	uint_t				i;
 
 	status = dladm_aggr_info(handle, aggrid, &ginfo, DLADM_OPT_PERSIST);
 	if (status != DLADM_STATUS_OK)
@@ -1003,12 +1002,16 @@ dladm_linkid2legacyname(dladm_handle_t handle, datalink_id_t linkid, char *dev,
 	if (vid != VLAN_ID_NONE) {
 		char		drv[MAXNAMELEN];
 		uint_t		ppa;
+		int		rv;
 
 		if (parse_devname(devname, drv, &ppa, MAXNAMELEN) != 0) {
 			status = DLADM_STATUS_BADARG;
 			goto done;
 		}
-		if (snprintf(dev, len, "%s%d", drv, vid * 1000 + ppa) >= len)
+		rv = snprintf(dev, len, "%s%d", drv, vid * 1000 + ppa);
+		if (rv < 0)
+			status = DLADM_STATUS_FAILED;
+		else if ((size_t)rv >= len)
 			status = DLADM_STATUS_TOOSMALL;
 	} else {
 		if (strlcpy(dev, devname, len) >= len)

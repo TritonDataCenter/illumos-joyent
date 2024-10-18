@@ -23,6 +23,7 @@
  * Copyright 2012 Marcel Telka <marcel@telka.sk>
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2021 Racktop Systems, Inc.
  */
 
 /*
@@ -1026,8 +1027,8 @@ svc_xprt_cleanup(SVCMASTERXPRT *xprt, bool_t detached)
  * table for an entry with a matching RPC program number `prog'
  * and a version range that covers `vers'.
  * - if it finds a matching entry it returns pointer to the dispatch routine
- * - otherwise it returns NULL and, if `minp' or `maxp' are not NULL,
- *   fills them with, respectively, lowest version and highest version
+ * - otherwise it returns NULL and fills both vers_min and vers_max
+ *   with, respectively, lowest version and highest version
  *   supported for the program `prog'
  */
 static SVC_DISPATCH *
@@ -2867,4 +2868,23 @@ rpc_msg_free(struct rpc_msg **msg, int cb_verf_oa_length)
 
 	kmem_free(m, sizeof (*m));
 	m = NULL;
+}
+
+/*
+ * Generally 'cr_ref' should be 1, otherwise reference is kept
+ * in underlying calls, so reset it.
+ */
+cred_t *
+svc_xprt_cred(SVCXPRT *xprt)
+{
+	cred_t *cr = xprt->xp_cred;
+
+	ASSERT(cr != NULL);
+
+	if (crgetref(cr) != 1) {
+		crfree(cr);
+		cr = crget();
+		xprt->xp_cred = cr;
+	}
+	return (cr);
 }

@@ -26,14 +26,13 @@
 #
 # Path to the base of the uts directory tree (usually /usr/src/uts).
 #
-UTSBASE		= ../../
+UTSBASE		= ../..
 
 #
 #	Define the module and object file sets.
 #
 MODULE		= oce
 OBJECTS		= $(OCE_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(OCE_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_DRV_DIR)/$(MODULE)
 
 #
@@ -46,7 +45,6 @@ include ../Makefile.$(ARCHDIR)
 #	Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
@@ -54,7 +52,7 @@ INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 #
 INC_PATH	+= -I$(UTSBASE)/common/sys/fibre-channel/fca/oce
 
-LDFLAGS		+= -dy -Nmisc/mac
+LDFLAGS		+= -Nmisc/mac
 
 CERRWARN	+= -_gcc=-Wno-switch
 CERRWARN	+= -_gcc=-Wno-unused-label
@@ -73,12 +71,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

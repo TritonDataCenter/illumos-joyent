@@ -25,7 +25,7 @@
  */
 
 /*
- * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #ifndef	_INET_IPCLASSIFIER_H
@@ -186,6 +186,7 @@ typedef struct crb_s {
 	crbb_recvslla : 1,		/* IP_RECVSLLA option */
 
 	crbb_recvttl : 1,		/* IP_RECVTTL option */
+	crbb_recvtos : 1,		/* IP_RECVTOS option */
 	crbb_ip_recvpktinfo : 1,	/* IP*_RECVPKTINFO option  */
 	crbb_ipv6_recvhoplimit : 1,	/* IPV6_RECVHOPLIMIT option */
 	crbb_ipv6_recvhopopts : 1,	/* IPV6_RECVHOPOPTS option */
@@ -209,6 +210,7 @@ typedef struct crb_s {
 #define	crb_recvif			crbu.crbb.crbb_recvif
 #define	crb_recvslla			crbu.crbb.crbb_recvslla
 #define	crb_recvttl			crbu.crbb.crbb_recvttl
+#define	crb_recvtos			crbu.crbb.crbb_recvtos
 #define	crb_ip_recvpktinfo		crbu.crbb.crbb_ip_recvpktinfo
 #define	crb_ipv6_recvhoplimit		crbu.crbb.crbb_ipv6_recvhoplimit
 #define	crb_ipv6_recvhopopts		crbu.crbb.crbb_ipv6_recvhopopts
@@ -404,6 +406,7 @@ struct conn_s {
 	uint_t		conn_rcvlowat;		/* Recv buffer low water mark */
 
 	uint8_t		conn_default_ttl;	/* Default TTL/hoplimit */
+	uint8_t		conn_min_ttl;		/* IP_MINTTL+IPV6_MINHOPLIMIT */
 
 	uint32_t	conn_flowinfo;	/* Connected flow id and tclass */
 

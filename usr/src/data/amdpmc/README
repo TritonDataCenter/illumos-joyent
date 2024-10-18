@@ -13,3 +13,15 @@ FAMILY	CORE	DOCUMENT
 			Model 31h, Revision B0 Processors (55803 Rev 0.54 - Sep 12, 2019)
 		Processor Programming Reference (PPR) for AMD Family 17h
 			Model 71h, Revision B0 Processors (56176 Rev 3.06 - Jul 17, 2019)
+19h	Zen 3	Preliminary Processor Programming Reference (PPR) for AMD Family 19h
+			Model 01h, Revision B1 Processors Volume 1 of 2 (55898 Rev 0.35 - Feb 5, 2021)
+		Processor Programming Reference (PPR) for AMD Family 19h
+			Model 21h, Revision B0 Processors (56214-B0 Rev 3.05 - Apr 22, 2021)
+19h	Zen 4	Preliminary Processor Programming Reference (PPR) for AMD Family 19h
+			Model 11h, Revision B1 Processors (55901 Rev 0.25 - Oct 6, 2022)
+		Processor Programming Reference (PPR) for AMD Family 19h
+			Model 61h, Revision B1 Processors (56713 Rev 3.04 - Jan 31, 2023)
+		Processor Programming Reference (PPR) for AMD Family 19h
+			Model 70h, Revision A0 Processors (57019 Rev 3.00 - Feb 7, 2023)
+1ah	Zen 5	Performance Monitor Counters for AMD Family 1Ah Model 00h-0Fh Processors
+			(58550 Rev 0.02 - March 5, 2024)

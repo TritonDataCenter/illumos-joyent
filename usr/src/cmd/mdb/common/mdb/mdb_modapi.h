@@ -23,6 +23,9 @@
  * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2013 by Delphix. All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 RackTop Systems, Inc.
+ * Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #ifndef	_MDB_MODAPI_H
@@ -193,6 +196,8 @@ extern int mdb_walk(const char *, mdb_walk_cb_t, void *);
 
 extern int mdb_pwalk_dcmd(const char *, const char *,
 	int, const mdb_arg_t *, uintptr_t);
+extern int mdb_fpwalk_dcmd(const char *, const char *,
+	int, const mdb_arg_t *, uintptr_t, uint_t);
 
 extern int mdb_walk_dcmd(const char *, const char *, int, const mdb_arg_t *);
 
@@ -242,6 +247,7 @@ typedef uintptr_t mdb_tid_t;
 typedef uint64_t mdb_reg_t;
 
 extern int mdb_getareg(mdb_tid_t, const char *, mdb_reg_t *);
+extern int mdb_thread_name(mdb_tid_t, char *, size_t);
 
 #define	MDB_OPT_SETBITS	1			/* Set specified flag bits */
 #define	MDB_OPT_CLRBITS	2			/* Clear specified flag bits */
@@ -266,6 +272,7 @@ extern void mdb_free(void *, size_t);
 
 extern int mdb_snprintfrac(char *, int, uint64_t, uint64_t, int);
 extern void mdb_nicenum(uint64_t, char *);
+extern void mdb_nicetime(int64_t, char *, size_t);
 
 extern size_t mdb_snprintf(char *, size_t, const char *, ...);
 extern void mdb_printf(const char *, ...);

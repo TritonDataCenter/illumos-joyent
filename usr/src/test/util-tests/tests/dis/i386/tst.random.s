@@ -23,7 +23,7 @@
 .type libdis_test, @function
 libdis_test:
 	rdrand	%bx
-	rdrand	%bx
-	rdseed	%ebx
+	rdrand	%ebx
+	rdseed	%bx
 	rdseed	%ebx
 .size libdis_test, [.-libdis_test]

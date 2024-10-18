@@ -3,11 +3,10 @@
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH MKIOCB 9F "Jan 16, 2006"
+.TH MKIOCB 9F "May 21, 2022"
 .SH NAME
 mkiocb \- allocates a STREAMS ioctl block for M_IOCTL messages in the kernel.
 .SH SYNOPSIS
-.LP
 .nf
 #include <sys/stream.h>
 
@@ -17,11 +16,8 @@ mkiocb \- allocates a STREAMS ioctl block for M_IOCTL messages in the kernel.
 .fi
 
 .SH INTERFACE LEVEL
-.sp
-.LP
-Solaris DDI specific (Solaris DDI).
+illumos DDI specific (illumos DDI).
 .SH PARAMETERS
-.sp
 .ne 2
 .na
 \fB\fIcommand\fR\fR
@@ -31,8 +27,6 @@ ioctl command for the \fBioc_cmd\fR field.
 .RE
 
 .SH DESCRIPTION
-.sp
-.LP
 STREAMS modules or drivers might need to issue an ioctl to a lower module or
 driver. The \fBmkiocb()\fR function tries to allocate (using \fBallocb\fR(9F))
 a STREAMS \fBM_IOCTL\fR message block (\fBiocblk\fR(9S)). Buffer allocation
@@ -42,7 +36,8 @@ failure.
 .sp
 .LP
 The \fBmkiocb\fR function returns a \fBmblk_t\fR structure which is large
-enough to hold any of the ioctl messages (\fBiocblk\fR(9S), \fBcopyreq\fR(9S)
+enough to hold any of the ioctl messages (\fBiocblk\fR(9S),
+.BR copyreq (9S)
 or \fBcopyresp\fR(9S)), and has the following special properties:
 .sp
 .ne 2
@@ -59,7 +54,7 @@ Set to \fBb_rptr + sizeof(struct iocblk)\fR.
 \fB\fBb_cont\fR\fR
 .ad
 .RS 20n
-Set to \fINULL.\fR.
+Set to \fINULL\fR.
 .RE
 
 .sp
@@ -139,20 +134,15 @@ Set to \fBIOC_NATIVE\fR to reflect that this is native to the running kernel.
 .RE
 
 .SH RETURN VALUES
-.sp
-.LP
 Upon success, the \fBmkiocb()\fR function returns a pointer to the allocated
 \fBmblk_t\fR of type \fBM_IOCTL\fR.
 .sp
 .LP
 On failure, it returns a null pointer.
 .SH CONTEXT
-.sp
-.LP
 The \fBmkiocb()\fR function can be called from user, interrupt, or kernel
 context.
 .SH EXAMPLES
-.LP
 \fBExample 1 \fR\fBM_IOCTL\fR Allocation
 .sp
 .LP
@@ -244,10 +234,13 @@ is available.
 .in -2
 
 .SH SEE ALSO
-.sp
-.LP
-\fBallocb\fR(9F), \fBputnext\fR(9F), \fBqbufcall\fR(9F), \fBqwait_sig\fR(9F),
-\fBcopyreq\fR(9S), \fBcopyresp\fR(9S), \fBiocblk\fR(9S)
+.BR allocb (9F),
+.BR putnext (9F),
+.BR qbufcall (9F),
+.BR qwait_sig (9F),
+.BR copyreq (9S),
+.BR copyresp (9S),
+.BR iocblk (9S)
 .sp
 .LP
 \fIWriting Device Drivers\fR
@@ -255,8 +248,6 @@ is available.
 .LP
 \fISTREAMS Programming Guide\fR
 .SH WARNINGS
-.sp
-.LP
 It is the module's responsibility to remember the \fBID\fR value of the
 \fBM_IOCTL\fR that was allocated. This will ensure proper cleanup and \fBID\fR
 matching when the \fBM_IOCACK\fR or \fBM_IOCNAK\fR is received.

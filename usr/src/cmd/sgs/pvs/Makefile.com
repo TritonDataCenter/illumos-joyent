@@ -40,17 +40,12 @@ SGSCOMMONOBJ =	alist.o
 OBJS=		$(BLTOBJ) $(COMOBJ) $(SGSCOMMONOBJ)
 
 MAPFILE=	$(MAPFILE.NGB)
-MAPOPTS=	$(MAPFILE:%=-M%)
+MAPOPTS=	$(MAPFILE:%=-Wl,-M%)
 
 CPPFLAGS +=	-I$(SRC)/lib/libc/inc
-LLDFLAGS =	'-R$$ORIGIN/../lib'
-LLDFLAGS64 =	'-R$$ORIGIN/../../lib/$(MACH64)'
-LDFLAGS +=	$(VERSREF) $(MAPOPTS) $(LLDFLAGS)
-LDLIBS +=	$(LDDBGLIBDIR) -llddbg $(ELFLIBDIR) -lelf \
-		    $(CONVLIBDIR) -lconv
-
-# not linted
-SMATCH=off
+LDFLAGS +=	$(VERSREF) $(MAPOPTS) '-R$$ORIGIN/../../lib/$(MACH64)'
+LDLIBS +=	$(LDDBGLIBDIR64) -llddbg $(ELFLIBDIR64) -lelf \
+		    $(CONVLIBDIR64) -lconv
 
 BLTDEFS=	msg.h
 BLTDATA=	msg.c

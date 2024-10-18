@@ -222,6 +222,8 @@ tem_internal_init(struct tem_vt_state *ptem, cred_t *credp,
 		    kmem_alloc(ptem->tvs_pix_data_size, KM_SLEEP);
 	}
 
+	ptem->tvs_stateflags = TVS_AUTOWRAP;
+
 	ptem->tvs_outbuf_size = tems.ts_c_dimension.width *
 	    sizeof (*ptem->tvs_outbuf);
 	ptem->tvs_outbuf = kmem_alloc(ptem->tvs_outbuf_size, KM_SLEEP);
@@ -235,6 +237,10 @@ tem_internal_init(struct tem_vt_state *ptem, cred_t *credp,
 	ptem->tvs_screen_buf = kmem_alloc(ptem->tvs_screen_buf_size, KM_SLEEP);
 	ptem->tvs_screen_rows = kmem_alloc(ptem->tvs_screen_history_size *
 	    sizeof (term_char_t *), KM_SLEEP);
+
+	ptem->tvs_maxtab = width / 8;
+	ptem->tvs_tabs = kmem_alloc(ptem->tvs_maxtab * sizeof (*ptem->tvs_tabs),
+	    KM_SLEEP);
 
 	tem_safe_reset_display(ptem, credp, CALLED_FROM_NORMAL,
 	    clear_screen, init_color);
@@ -272,7 +278,7 @@ tem_initialized(tem_vt_state_t tem_arg)
 }
 
 tem_vt_state_t
-tem_init(cred_t *credp)
+tem_init(cred_t *credp, queue_t *rq)
 {
 	struct tem_vt_state *ptem;
 
@@ -284,6 +290,7 @@ tem_init(cred_t *credp)
 
 	ptem->tvs_isactive = B_FALSE;
 	ptem->tvs_fbmode = KD_TEXT;
+	ptem->tvs_queue = rq;
 
 	/*
 	 * A tem is regarded as initialized only after tem_internal_init(),
@@ -339,6 +346,10 @@ tem_free_buf(struct tem_vt_state *tem)
 	if (tem->tvs_screen_rows != NULL) {
 		kmem_free(tem->tvs_screen_rows, tem->tvs_screen_history_size *
 		    sizeof (term_char_t *));
+	}
+	if (tem->tvs_tabs != NULL) {
+		kmem_free(tem->tvs_tabs, tem->tvs_maxtab *
+		    sizeof (*tem->tvs_tabs));
 	}
 }
 
@@ -524,10 +535,41 @@ tems_check_videomode(struct vis_devinit *tp)
 }
 
 static void
-tems_setup_terminal(struct vis_devinit *tp, size_t height, size_t width)
+tems_setup_font(screen_size_t height, screen_size_t width)
 {
 	bitmap_data_t *font_data;
 	int i;
+
+	/*
+	 * set_font() will select an appropriate sized font for
+	 * the number of rows and columns selected. If we don't
+	 * have a font that will fit, then it will use the
+	 * default builtin font and adjust the rows and columns
+	 * to fit on the screen.
+	 */
+	font_data = set_font(&tems.ts_c_dimension.height,
+	    &tems.ts_c_dimension.width, height, width);
+
+	/*
+	 * To use loaded font, we assign the loaded font data to tems.ts_font.
+	 * In case of next load, the previously loaded data is freed
+	 * when loading the new font.
+	 */
+	for (i = 0; i < VFNT_MAPS; i++) {
+		tems.ts_font.vf_map[i] =
+		    font_data->font->vf_map[i];
+		tems.ts_font.vf_map_count[i] =
+		    font_data->font->vf_map_count[i];
+	}
+
+	tems.ts_font.vf_bytes = font_data->font->vf_bytes;
+	tems.ts_font.vf_width = font_data->font->vf_width;
+	tems.ts_font.vf_height = font_data->font->vf_height;
+}
+
+static void
+tems_setup_terminal(struct vis_devinit *tp, size_t height, size_t width)
+{
 	int old_blank_buf_size = tems.ts_c_dimension.width *
 	    sizeof (*tems.ts_blank_line);
 
@@ -546,6 +588,9 @@ tems_setup_terminal(struct vis_devinit *tp, size_t height, size_t width)
 		tems.ts_c_dimension.height = tp->height;
 		tems.ts_callbacks = &tem_safe_text_callbacks;
 
+		tems_setup_font(16 * tp->height + BORDER_PIXELS,
+		    8 * tp->width + BORDER_PIXELS);
+
 		break;
 
 	case VIS_PIXEL:
@@ -559,33 +604,11 @@ tems_setup_terminal(struct vis_devinit *tp, size_t height, size_t width)
 		}
 		tems.ts_c_dimension.height = (screen_size_t)height;
 		tems.ts_c_dimension.width = (screen_size_t)width;
-
 		tems.ts_p_dimension.height = tp->height;
 		tems.ts_p_dimension.width = tp->width;
-
 		tems.ts_callbacks = &tem_safe_pix_callbacks;
 
-		/*
-		 * set_font() will select a appropriate sized font for
-		 * the number of rows and columns selected. If we don't
-		 * have a font that will fit, then it will use the
-		 * default builtin font. set_font() will adjust the rows
-		 * and columns to fit on the screen.
-		 */
-		font_data = set_font(&tems.ts_c_dimension.height,
-		    &tems.ts_c_dimension.width,
-		    tems.ts_p_dimension.height,
-		    tems.ts_p_dimension.width);
-
-		for (i = 0; i < VFNT_MAPS; i++) {
-			tems.ts_font.vf_map[i] =
-			    font_data->font->vf_map[i];
-			tems.ts_font.vf_map_count[i] =
-			    font_data->font->vf_map_count[i];
-		}
-		tems.ts_font.vf_bytes = font_data->font->vf_bytes;
-		tems.ts_font.vf_width = font_data->font->vf_width;
-		tems.ts_font.vf_height = font_data->font->vf_height;
+		tems_setup_font(tp->height, tp->width);
 
 		tems.ts_p_offset.y = (tems.ts_p_dimension.height -
 		    (tems.ts_c_dimension.height * tems.ts_font.vf_height)) / 2;
@@ -594,9 +617,7 @@ tems_setup_terminal(struct vis_devinit *tp, size_t height, size_t width)
 
 		tems.ts_pix_data_size =
 		    tems.ts_font.vf_width * tems.ts_font.vf_height;
-
 		tems.ts_pix_data_size *= 4;
-
 		tems.ts_pdepth = tp->depth;
 
 		break;
@@ -946,16 +967,20 @@ tems_get_initial_color(tem_color_t *pcolor)
 {
 	boolean_t inverse, inverse_screen;
 	unsigned short  flags = 0;
+	uint8_t fg, bg;
 
-	pcolor->fg_color = DEFAULT_ANSI_FOREGROUND;
-	pcolor->bg_color = DEFAULT_ANSI_BACKGROUND;
+	fg = DEFAULT_ANSI_FOREGROUND;
+	bg = DEFAULT_ANSI_BACKGROUND;
 #ifndef _HAVE_TEM_FIRMWARE
 	/*
 	 * _HAVE_TEM_FIRMWARE is defined on SPARC, at this time, the
 	 * plat_tem_get_colors() is implemented only on x86.
 	 */
-	plat_tem_get_colors(&pcolor->fg_color, &pcolor->bg_color);
+
+	plat_tem_get_colors(&fg, &bg);
 #endif
+	pcolor->fg_color.n = fg;
+	pcolor->bg_color.n = bg;
 
 	tems_get_inverses(&inverse, &inverse_screen);
 	if (inverse)
@@ -963,6 +988,7 @@ tems_get_initial_color(tem_color_t *pcolor)
 	if (inverse_screen)
 		flags |= TEM_ATTR_SCREEN_REVERSE;
 
+#ifdef _HAVE_TEM_FIRMWARE
 	if (flags != 0) {
 		/*
 		 * If either reverse flag is set, the screen is in
@@ -977,9 +1003,24 @@ tems_get_initial_color(tem_color_t *pcolor)
 		 * uses the bright white background colour so we
 		 * match it here.
 		 */
-		if (pcolor->bg_color == ANSI_COLOR_WHITE)
+		if (pcolor->bg_color.n == ANSI_COLOR_WHITE)
 			flags |= TEM_ATTR_BRIGHT_BG;
 	}
+#else
+	if (flags != 0) {
+		if (pcolor->fg_color.n == ANSI_COLOR_WHITE)
+			flags |= TEM_ATTR_BRIGHT_BG;
+
+		if (pcolor->fg_color.n == ANSI_COLOR_BLACK)
+			flags &= ~TEM_ATTR_BRIGHT_BG;
+	} else {
+		/*
+		 * In case of black on white we want bright white for BG.
+		 */
+		if (pcolor->bg_color.n == ANSI_COLOR_WHITE)
+			flags |= TEM_ATTR_BRIGHT_BG;
+	}
+#endif
 
 	pcolor->a_flags = flags;
 }

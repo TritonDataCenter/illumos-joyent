@@ -30,6 +30,7 @@ static const char rcsid[] = "$Id: inet_net_ntop.c,v 1.5 2006/06/20 02:50:14 mark
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 
 #include "port_after.h"
 
@@ -191,13 +192,13 @@ inet_net_ntop_ipv6(const u_char *src, int bits, char *dst, size_t size) {
 		*cp++ = ':';
 		*cp = '\0';
 	} else {
-		/* Copy src to private buffer.  Zero host part. */	
+		/* Copy src to private buffer.  Zero host part. */
 		p = (bits + 7) / 8;
 		memcpy(inbuf, src, p);
 		memset(inbuf + p, 0, 16 - p);
 		b = bits % 8;
 		if (b != 0) {
-			m = ~0 << (8 - b);
+			m = UINT_MAX << (8 - b);
 			inbuf[p-1] &= m;
 		}
 
@@ -207,7 +208,7 @@ inet_net_ntop_ipv6(const u_char *src, int bits, char *dst, size_t size) {
 		words = (bits + 15) / 16;
 		if (words == 1)
 			words = 2;
-		
+
 		/* Find the longest substring of zero's */
 		zero_s = zero_l = tmp_zero_s = tmp_zero_l = 0;
 		for (i = 0; i < (words * 2); i += 2) {
@@ -268,7 +269,7 @@ inet_net_ntop_ipv6(const u_char *src, int bits, char *dst, size_t size) {
 	if (strlen(outbuf) + 1 > size)
 		goto emsgsize;
 	strcpy(dst, outbuf);
-	
+
 	return (dst);
 
 emsgsize:

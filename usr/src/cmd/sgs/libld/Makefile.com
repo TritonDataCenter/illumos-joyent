@@ -99,22 +99,29 @@ SMOFF += no_if_block
 
 # Location of the shared relocation engines maintained under usr/src/uts.
 #
-KRTLD_I386 = $(SRC)/uts/$(VAR_PLAT_i386)/krtld
-KRTLD_AMD64 = $(SRC)/uts/$(VAR_PLAT_amd64)/krtld
-KRTLD_SPARC = $(SRC)/uts/$(VAR_PLAT_sparc)/krtld
+KRTLD_I386 = $(SRC)/uts/intel/ia32/krtld
+KRTLD_AMD64 = $(SRC)/uts/intel/amd64/krtld
+KRTLD_SPARC = $(SRC)/uts/sparc/krtld
 
 
 CPPFLAGS +=	-DUSE_LIBLD_MALLOC -I$(SRC)/lib/libc/inc \
 		    -I$(SRC)/uts/common/krtld -I$(SRC)/uts/sparc \
-		    $(VAR_LIBLD_CPPFLAGS)
+		    -I $(SRC)/uts/common
 LDLIBS +=	$(CONVLIBDIR) -lconv $(LDDBGLIBDIR) -llddbg \
 		    $(ELFLIBDIR) -lelf $(DLLIB) -lc
 
 DYNFLAGS +=	$(VERSREF) '-R$$ORIGIN'
 
 # too hairy
-pics/sections32.o := SMATCH=off
-pics/sections64.o := SMATCH=off
+pics/sections32.o :=	SMATCH=off
+pics/sections64.o :=	SMATCH=off
+# confused about our strange allocation choices
+pics/syms32.o :=	SMOFF += check_kmalloc_wrong_size
+pics/syms64.o :=	SMOFF += check_kmalloc_wrong_size
+pics/entry32.o :=	SMOFF += check_kmalloc_wrong_size
+pics/entry64.o :=	SMOFF += check_kmalloc_wrong_size
+pics/relocate32.o :=	SMOFF += check_kmalloc_wrong_size
+pics/relocate64.o :=	SMOFF += check_kmalloc_wrong_size
 
 BLTDEFS =	msg.h
 BLTDATA =	msg.c
@@ -146,7 +153,7 @@ CHKSRCS =	$(SRC)/uts/common/krtld/reloc.h \
 LIBSRCS =	$(SGSCOMMONOBJ:%.o=$(SGSCOMMON)/%.c) \
 		$(SGSCOMMONOBJ:%.o=$(SGSCOMMON)/%.c) \
 		$(COMOBJS:%.o=$(SRCDIR)/common/%.c) \
-		$(AVLOBJS:%.o=$(VAR_AVLDIR)/%.c) \
+		$(AVLOBJS:%.o=$(SRC)/common/avl/%.c) \
 		$(BLTDATA)
 
 CLEANFILES +=	$(BLTFILES)

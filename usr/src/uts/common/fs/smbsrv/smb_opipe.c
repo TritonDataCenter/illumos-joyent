@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2011-2021 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 /*
@@ -36,6 +37,8 @@
 #include <smbsrv/smb_kproto.h>
 #include <smbsrv/smb_xdr.h>
 #include <smb/winioctl.h>
+
+static uint32_t smb_opipe_wait(smb_request_t *, smb_fsctl_t *);
 
 /*
  * Allocate a new opipe and return it, or NULL, in which case
@@ -148,6 +151,27 @@ smb_opipe_connect(smb_request_t *sr, smb_opipe_t *opipe)
 	return (rc);
 }
 
+static int
+smb_opipe_exists(char *name)
+{
+	struct sockaddr_un saddr;
+	vnode_t		*vp;	/* Underlying filesystem vnode */
+	int err;
+
+	bzero(&saddr, sizeof (saddr));
+	saddr.sun_family = AF_UNIX;
+	(void) snprintf(saddr.sun_path, sizeof (saddr.sun_path),
+	    "%s/%s", SMB_PIPE_DIR, name);
+
+	err = lookupname(saddr.sun_path, UIO_SYSSPACE, FOLLOW, NULLVPP, &vp);
+	if (err == 0) {
+		VN_RELE(vp);		/* release hold from lookup */
+	}
+
+	return (err);
+}
+
+
 /*
  * Helper for open: encode and send the user info.
  *
@@ -189,6 +213,9 @@ smb_opipe_send_userinfo(smb_request_t *sr, smb_opipe_t *opipe,
 	if (!smb_netuserinfo_xdr(&xdrs, &nui))
 		goto out;
 
+	/*
+	 * Prepare for cancellable send/recv.
+	 */
 	mutex_enter(&sr->sr_mutex);
 	if (sr->sr_state != SMB_REQ_STATE_ACTIVE) {
 		mutex_exit(&sr->sr_mutex);
@@ -210,23 +237,30 @@ smb_opipe_send_userinfo(smb_request_t *sr, smb_opipe_t *opipe,
 	if (rc == 0 && iocnt != sizeof (status))
 		rc = EIO;
 
+	/*
+	 * Did the send/recv. complete or was it cancelled?
+	 */
 	mutex_enter(&sr->sr_mutex);
-	sr->cancel_method = NULL;
-	sr->cancel_arg2 = NULL;
+switch_state:
 	switch (sr->sr_state) {
 	case SMB_REQ_STATE_WAITING_PIPE:
+		/* Normal wakeup.  Keep rc from above. */
 		sr->sr_state = SMB_REQ_STATE_ACTIVE;
 		break;
 	case SMB_REQ_STATE_CANCEL_PENDING:
-		sr->sr_state = SMB_REQ_STATE_CANCELLED;
+		/* cancel_method running. wait. */
+		cv_wait(&sr->sr_st_cv, &sr->sr_mutex);
+		goto switch_state;
+	case SMB_REQ_STATE_CANCELLED:
 		rc = EINTR;
 		break;
 	default:
 		/* keep rc from above */
 		break;
 	}
+	sr->cancel_method = NULL;
+	sr->cancel_arg2 = NULL;
 	mutex_exit(&sr->sr_mutex);
-
 
 	/*
 	 * Return the status we read from the pipe service,
@@ -439,6 +473,9 @@ smb_opipe_read(smb_request_t *sr, struct uio *uio)
 	if (sock == NULL)
 		return (EBADF);
 
+	/*
+	 * Prepare for cancellable recvmsg.
+	 */
 	mutex_enter(&sr->sr_mutex);
 	if (sr->sr_state != SMB_REQ_STATE_ACTIVE) {
 		mutex_exit(&sr->sr_mutex);
@@ -461,21 +498,29 @@ smb_opipe_read(smb_request_t *sr, struct uio *uio)
 	rc = ksocket_recvmsg(sock, &msghdr, 0,
 	    &recvcnt, ofile->f_cr);
 
+	/*
+	 * Did the recvmsg complete or was it cancelled?
+	 */
 	mutex_enter(&sr->sr_mutex);
-	sr->cancel_method = NULL;
-	sr->cancel_arg2 = NULL;
+switch_state:
 	switch (sr->sr_state) {
 	case SMB_REQ_STATE_WAITING_PIPE:
+		/* Normal wakeup.  Keep rc from above. */
 		sr->sr_state = SMB_REQ_STATE_ACTIVE;
 		break;
 	case SMB_REQ_STATE_CANCEL_PENDING:
-		sr->sr_state = SMB_REQ_STATE_CANCELLED;
+		/* cancel_method running. wait. */
+		cv_wait(&sr->sr_st_cv, &sr->sr_mutex);
+		goto switch_state;
+	case SMB_REQ_STATE_CANCELLED:
 		rc = EINTR;
 		break;
 	default:
 		/* keep rc from above */
 		break;
 	}
+	sr->cancel_method = NULL;
+	sr->cancel_arg2 = NULL;
 	mutex_exit(&sr->sr_mutex);
 
 	if (rc != 0)
@@ -573,9 +618,11 @@ smb_opipe_fsctl(smb_request_t *sr, smb_fsctl_t *fsctl)
 		break;
 
 	case FSCTL_PIPE_PEEK:
+		status = NT_STATUS_INVALID_DEVICE_REQUEST;
+		break;
+
 	case FSCTL_PIPE_WAIT:
-		/* XXX todo */
-		status = NT_STATUS_NOT_SUPPORTED;
+		status = smb_opipe_wait(sr, fsctl);
 		break;
 
 	default:
@@ -590,7 +637,7 @@ smb_opipe_fsctl(smb_request_t *sr, smb_fsctl_t *fsctl)
 uint32_t
 smb_opipe_transceive(smb_request_t *sr, smb_fsctl_t *fsctl)
 {
-	smb_vdb_t	vdb;
+	smb_vdb_t	*vdb;
 	smb_ofile_t	*ofile;
 	struct mbuf	*mb;
 	uint32_t	status;
@@ -605,33 +652,38 @@ smb_opipe_transceive(smb_request_t *sr, smb_fsctl_t *fsctl)
 	if (ofile->f_ftype != SMB_FTYPE_MESG_PIPE)
 		return (NT_STATUS_INVALID_HANDLE);
 
+	/*
+	 * The VDB is a bit large.  Allocate.
+	 * This is automatically free'd with the SR
+	 */
+	vdb = smb_srm_zalloc(sr, sizeof (*vdb));
 	rc = smb_mbc_decodef(fsctl->in_mbc, "#B",
-	    fsctl->InputCount, &vdb);
+	    fsctl->InputCount, vdb);
 	if (rc != 0) {
 		/* Not enough data sent. */
 		return (NT_STATUS_INVALID_PARAMETER);
 	}
 
-	rc = smb_opipe_write(sr, &vdb.vdb_uio);
+	rc = smb_opipe_write(sr, &vdb->vdb_uio);
 	if (rc != 0)
 		return (smb_errno2status(rc));
 
-	vdb.vdb_tag = 0;
-	vdb.vdb_uio.uio_iov = &vdb.vdb_iovec[0];
-	vdb.vdb_uio.uio_iovcnt = MAX_IOVEC;
-	vdb.vdb_uio.uio_segflg = UIO_SYSSPACE;
-	vdb.vdb_uio.uio_extflg = UIO_COPY_DEFAULT;
-	vdb.vdb_uio.uio_loffset = (offset_t)0;
-	vdb.vdb_uio.uio_resid = fsctl->MaxOutputResp;
-	mb = smb_mbuf_allocate(&vdb.vdb_uio);
+	vdb->vdb_tag = 0;
+	vdb->vdb_uio.uio_iov = &vdb->vdb_iovec[0];
+	vdb->vdb_uio.uio_iovcnt = MAX_IOVEC;
+	vdb->vdb_uio.uio_segflg = UIO_SYSSPACE;
+	vdb->vdb_uio.uio_extflg = UIO_COPY_DEFAULT;
+	vdb->vdb_uio.uio_loffset = (offset_t)0;
+	vdb->vdb_uio.uio_resid = fsctl->MaxOutputResp;
+	mb = smb_mbuf_allocate(&vdb->vdb_uio);
 
-	rc = smb_opipe_read(sr, &vdb.vdb_uio);
+	rc = smb_opipe_read(sr, &vdb->vdb_uio);
 	if (rc != 0) {
 		m_freem(mb);
 		return (smb_errno2status(rc));
 	}
 
-	len = fsctl->MaxOutputResp - vdb.vdb_uio.uio_resid;
+	len = fsctl->MaxOutputResp - vdb->vdb_uio.uio_resid;
 	smb_mbuf_trim(mb, len);
 	MBC_ATTACH_MBUF(fsctl->out_mbc, mb);
 
@@ -646,7 +698,7 @@ smb_opipe_transceive(smb_request_t *sr, smb_fsctl_t *fsctl)
 	 */
 	status = NT_STATUS_SUCCESS;
 	if (fsctl->MaxOutputResp < SMB_PIPE_MAX_MSGSIZE &&
-	    vdb.vdb_uio.uio_resid == 0) {
+	    vdb->vdb_uio.uio_resid == 0) {
 		int nread = 0, trval;
 		rc = smb_opipe_ioctl(sr, FIONREAD, &nread, &trval);
 		if (rc == 0 && nread != 0)
@@ -654,4 +706,49 @@ smb_opipe_transceive(smb_request_t *sr, smb_fsctl_t *fsctl)
 	}
 
 	return (status);
+}
+
+static uint32_t
+smb_opipe_wait(smb_request_t *sr, smb_fsctl_t *fsctl)
+{
+	char		*name;
+	uint64_t	timeout;
+	uint32_t	namelen;
+	int		rc;
+	uint8_t		tflag;
+
+	rc = smb_mbc_decodef(fsctl->in_mbc, "qlb.",
+	    &timeout,	/* q */
+	    &namelen,	/* l */
+	    &tflag);	/* b */
+	if (rc != 0)
+		return (NT_STATUS_INVALID_PARAMETER);
+	rc = smb_mbc_decodef(fsctl->in_mbc, "%#U",
+	    sr,		/* % */
+	    namelen,	/* # */
+	    &name);	/* U */
+	if (rc != 0)
+		return (NT_STATUS_INVALID_PARAMETER);
+
+	rc = smb_opipe_exists(name);
+	if (rc != 0)
+		return (NT_STATUS_OBJECT_NAME_NOT_FOUND);
+
+	/*
+	 * At this point we know the pipe exists.
+	 *
+	 * If the tflag is set, we're supposed to wait for up to
+	 * timeout (100s of milliseconds) for a pipe "instance"
+	 * to become "available" (so pipe open would work).
+	 * However, this implementation has no need to wait,
+	 * so just take a short delay instead.
+	 */
+	if (tflag != 0) {
+		clock_t ticks = MSEC_TO_TICK(timeout * 100);
+		if (ticks > MSEC_TO_TICK(100))
+			ticks = MSEC_TO_TICK(100);
+		delay(ticks);
+	}
+
+	return (0);
 }

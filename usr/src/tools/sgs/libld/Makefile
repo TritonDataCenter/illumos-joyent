@@ -25,33 +25,44 @@
 #
 #
 
-include		../Makefile.com
 include		../../Makefile.tools
-include		$(SGSHOME)/libld/Makefile.com
+include		$(SRC)/cmd/sgs/libld/Makefile.com
+include		../Makefile.com
 
 .KEEP_STATE:
 
-CW_LINKER =
-
-CPPFLAGS = $(NATIVE_CPPFLAGS) -DUSE_LIBLD_MALLOC -I$(SRC)/lib/libc/inc \
-		    -I$(SRC)/uts/common/krtld -I$(SRC)/uts/sparc \
-		    $(VAR_LIBLD_CPPFLAGS)
-LDLIBS +=	-L$(ROOTONBLDLIBMACH) -L../libconv -lconv -llddbg -lelf -lc
+#
+# By using libld's Makefile.com LDLIBS ends up pointing to the proto
+# area and many of the directories of cmd/sgs. As such, we need to reset
+# that and just make sure to find everything relative to the tools proto
+# area.
+#
+LDLIBS =	-L../libconv -lconv -L$(ROOTONBLDLIBMACH64) -llddbg -lelf -lc
 NATIVE_LIBS +=	libc.so
 
-DYNFLAGS +=	$(VERSREF) '-R$$ORIGIN'
-CFLAGS = $(NATIVE_CFLAGS)
+CPPFLAGS += -DUSE_LIBLD_MALLOC -I$(SRC)/lib/libc/inc \
+	    -I$(SRC)/uts/common/krtld -I$(SRC)/uts/sparc \
+	    -I$(SRC)/uts/common
+
+DYNFLAGS +=	$(VERSREF) '-Wl,-R$$ORIGIN'
+
+# Necessary because we're a non-debug build in a debug environment, because
+# of being in src/tools
+CERRWARN += -_gcc=-Wno-unused-but-set-variable
+
+include		$(SRC)/Makefile.native
+include		$(SRC)/Makefile.master.64
 
 all:		$(DYNLIB) $(LIBLINKS)
 
-install:	all $(ROOTONBLDLIBMACH)/$(DYNLIB) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
+install:	all $(ROOTONBLDLIBMACH64)/$(DYNLIB) $(ROOTONBLDLIBMACH64)/$(LIBLINKS)
 
-$(ROOTONBLDLIBMACH)/$(DYNLIB): $(PICS) $(ROOTONBLDLIBMACH)
+$(ROOTONBLDLIBMACH64)/$(DYNLIB): $(PICS) $(ROOTONBLDLIBMACH64)
 		$(BUILD.SO)
 		$(POST_PROCESS_SO)
 
-$(ROOTONBLDLIBMACH)/$(LIBLINKS): $(ROOTONBLDLIBMACH)/$(DYNLIB)
-		@$(RM) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
-		$(SYMLINK) $(DYNLIB) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
+$(ROOTONBLDLIBMACH64)/$(LIBLINKS): $(ROOTONBLDLIBMACH64)/$(DYNLIB)
+		@$(RM) $(ROOTONBLDLIBMACH64)/$(LIBLINKS)
+		$(SYMLINK) $(DYNLIB) $(ROOTONBLDLIBMACH64)/$(LIBLINKS)
 
 include		$(SGSHOME)/libld/Makefile.targ

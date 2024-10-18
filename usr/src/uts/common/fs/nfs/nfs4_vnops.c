@@ -39,6 +39,7 @@
 
 /*
  * Copyright (c) 2014, Joyent, Inc. All rights reserved.
+ * Copyright 2022 Oxide Computer Company
  */
 
 #include <sys/param.h>
@@ -602,7 +603,7 @@ nfs4args_copen_free(OPEN4cargs *open_args)
 }
 
 /*
- * XXX:  This is referenced in modstubs.s
+ * XXX:  This is referenced in modstubs.S
  */
 struct vnodeops *
 nfs4_getvnodeops(void)
@@ -2596,12 +2597,6 @@ nfs4close_otw(rnode4_t *rp, cred_t *cred_otw, nfs4_open_owner_t *oop,
 	osp->os_ref_count--;
 
 	if (ep->error == 0) {
-		/*
-		 * Avoid a deadlock with the r_serial thread waiting for
-		 * os_sync_lock in nfs4_get_otw_cred_by_osp() which might be
-		 * held by us. We will wait in nfs4_attr_cache() for the
-		 * completion of the r_serial thread.
-		 */
 		mutex_exit(&osp->os_sync_lock);
 		*have_sync_lockp = 0;
 
@@ -10858,8 +10853,20 @@ nfs4_frlock(vnode_t *vp, int cmd, struct flock64 *bfp, int flag,
 		return (EIO);
 
 	/* check for valid cmd parameter */
-	if (cmd != F_GETLK && cmd != F_SETLK && cmd != F_SETLKW)
+	switch (cmd) {
+	case F_FLOCK:
+	case F_FLOCKW:
+	case F_OFD_GETLK:
+	case F_OFD_SETLK:
+	case F_OFD_SETLKW:
+		return (EOPNOTSUPP);
+	case F_GETLK:
+	case F_SETLK:
+	case F_SETLKW:
+		break;
+	default:
 		return (EINVAL);
+	}
 
 	/* Verify l_type. */
 	switch (bfp->l_type) {

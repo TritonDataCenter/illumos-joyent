@@ -26,7 +26,8 @@
  * Copyright 2013 Joyent, Inc.  All rights reserved.
  * Copyright (c) 2014 Gary Mills
  * Copyright (c) 2016 by Delphix. All rights reserved.
- * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2022 Sebastian Wiedenroth
+ * Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
@@ -194,6 +195,7 @@ struct event {
 			struct shared *tz;	/* timezone of this event */
 			struct shared *home;	/* directory for this event */
 			struct shared *shell;	/* shell for this event */
+			uint32_t max_random_delay;	/* max. random delay */
 		} ct;
 		struct { /* for at events */
 			short exists;	/* for revising at events	*/
@@ -351,7 +353,7 @@ static void *get_obj(struct shared *obj);
  * it's original intended use.
  */
 static time_t last_time, init_time, t_old;
-static int reset_needed; /* set to 1 when cron(1M) needs to re-initialize */
+static int reset_needed; /* set to 1 when cron(8) needs to re-initialize */
 
 static int		refresh;
 static sigset_t		defmask, sigmask;
@@ -368,8 +370,8 @@ extern int	audit_cron_delete_anc_file(char *, char *);
 extern int	audit_cron_is_anc_name(char *);
 extern int	audit_cron_mode();
 
-static int cron_conv(int, struct pam_message **,
-		struct pam_response **, void *);
+static int cron_conv(int, const struct pam_message **,
+    struct pam_response **, void *);
 
 static struct pam_conv pam_conv = {cron_conv, NULL};
 static pam_handle_t *pamh;	/* Authentication handle */
@@ -435,7 +437,7 @@ main(int argc, char *argv[])
 
 	/*
 	 * reset_needed is set to 1 whenever el_add() finds out that a cron
-	 * job is scheduled to be run before the time when cron(1M) daemon
+	 * job is scheduled to be run before the time when cron(8) daemon
 	 * initialized.
 	 * Other cases where a reset is needed is when ex() finds that the
 	 * event to be executed is being run at the wrong time, or when idle()
@@ -687,7 +689,7 @@ initialize(int firstpass)
 					    REMOVE_FIFO|CONSOLE_MSG);
 			} else {
 				if (NOFORK) {
-					/* didn't fork... init(1M) is waiting */
+					/* didn't fork... init(8) is waiting */
 					(void) sleep(60);
 				}
 				perror("FIFO");
@@ -696,7 +698,7 @@ initialize(int firstpass)
 			}
 		} else {
 			if (NOFORK) {
-				/* didn't fork... init(1M) is waiting */
+				/* didn't fork... init(8) is waiting */
 				(void) sleep(60);
 				/*
 				 * the wait is painful, but we don't want
@@ -1221,7 +1223,9 @@ readcronfile(FILE *cf, struct usr *u, time_t reftime)
 	struct shared *tz = NULL;
 	struct shared *home = NULL;
 	struct shared *shell = NULL;
+	uint32_t max_random_delay = 0;
 	int lineno = 0;
+	const char *errstr;
 
 	/* read the crontab file */
 	cte_init();		/* Init error handling */
@@ -1282,6 +1286,23 @@ readcronfile(FILE *cf, struct usr *u, time_t reftime)
 			continue;
 		}
 
+		if (strncmp(&line[cursor], ENV_RANDOM_DELAY,
+		    strlen(ENV_RANDOM_DELAY)) == 0) {
+			if ((tmp = strchr(&line[cursor], '\n')) != NULL) {
+				*tmp = '\0';
+			}
+
+			max_random_delay = strtonum(
+			    &line[cursor + strlen(ENV_RANDOM_DELAY)], 0,
+			    UINT32_MAX / 60, &errstr);
+			if (errstr != NULL) {
+				cte_add(lineno, line);
+				break;
+			}
+
+			continue;
+		}
+
 		e = xmalloc(sizeof (struct event));
 		e->etype = CRONEVENT;
 
@@ -1336,6 +1357,8 @@ again:
 		e->of.ct.shell = dup_shared(shell);
 		/* set the home of this entry */
 		e->of.ct.home = dup_shared(home);
+		/* set the maximum random delay */
+		e->of.ct.max_random_delay = max_random_delay;
 		/* have the event point to it's owner	*/
 		e->u = u;
 		/* insert this event at the front of this user's event list */
@@ -1925,18 +1948,22 @@ recalc:
 static time_t
 next_time(struct event *e, time_t tflag)
 {
-	if (e->of.ct.tz != NULL) {
-		time_t ret;
+	time_t ret;
 
+	if (e->of.ct.tz != NULL) {
 		(void) putenv((char *)get_obj(e->of.ct.tz));
 		tzset();
 		ret = tz_next_time(e, tflag);
 		(void) putenv(tzone);
 		tzset();
-		return (ret);
 	} else {
-		return (tz_next_time(e, tflag));
+		ret = tz_next_time(e, tflag);
 	}
+
+	if (e->of.ct.max_random_delay > 0) {
+		ret += arc4random_uniform(e->of.ct.max_random_delay * 60 - 1);
+	}
+	return (ret);
 }
 
 /*
@@ -3493,10 +3520,10 @@ process_anc_files(int del)
 }
 
 static int
-cron_conv(int num_msg, struct pam_message **msgs,
+cron_conv(int num_msg, const struct pam_message **msgs,
     struct pam_response **response __unused, void *appdata_ptr __unused)
 {
-	struct pam_message	**m = msgs;
+	const struct pam_message **m = msgs;
 	int i;
 
 	for (i = 0; i < num_msg; i++) {

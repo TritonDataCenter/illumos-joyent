@@ -36,7 +36,6 @@ iwscn 30
 kb8042 31
 keysock 32
 kmdb 33
-kssl 34
 llc1 35
 lofi 36
 log 37
@@ -194,6 +193,7 @@ bpf 193
 lsimega 194
 vioif 195
 overlay 196
+vio9f 197
 mpt_sas 198
 mr_sas 199
 mega_sas 200
@@ -261,7 +261,6 @@ ibp 264
 blkdev 265
 smbsrv 266
 aac 267
-xsvc 268
 vioblk 53
 iscsit 269
 vmxnet 270
@@ -269,7 +268,6 @@ ipd 188
 tap 271
 tun 272
 ipmi 273
-dr_sas 274
 t4nex 275
 cxgbe 276
 virtio 277
@@ -298,6 +296,7 @@ smrt 300
 iwn 301
 xhci 302
 qede 303
+vioscsi 304
 vmm 305
 viona 306
 ppt 307
@@ -309,3 +308,13 @@ ufmtest 312
 imcstub 313
 imc 314
 ccid 315
+ksensor 316
+mlxcx 317
+amdzen_stub 318
+amdzen 319
+smntemp 320
+ena 321
+zen_umc 322
+lmrc 323
+smartpqi 324
+igc 325

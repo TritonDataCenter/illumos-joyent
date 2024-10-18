@@ -20,8 +20,9 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
+ * Copyright 2020 Tintri by DDN, Inc. All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright 2022-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -205,6 +206,8 @@
 #include <sys/types.h>
 #include <sys/sid.h>
 #include <sys/priv_names.h>
+#include <sys/priv.h>
+#include <sys/policy.h>
 #include <smbsrv/smb_kproto.h>
 #include <smbsrv/smb_door.h>
 
@@ -497,6 +500,7 @@ smb_user_auth_tmo(void *arg)
 {
 	smb_user_t *user = arg;
 	smb_request_t *sr;
+	taskqid_t tqid;
 
 	SMB_USER_VALID(user);
 
@@ -529,10 +533,10 @@ smb_user_auth_tmo(void *arg)
 	sr->uid_user = user;
 	sr->user_cr = user->u_cred;
 	sr->sr_state = SMB_REQ_STATE_SUBMITTED;
-
-	(void) taskq_dispatch(
+	tqid = taskq_dispatch(
 	    user->u_server->sv_worker_pool,
 	    smb_user_logoff_tq, sr, TQ_SLEEP);
+	VERIFY(tqid != TASKQID_INVALID);
 }
 
 /*
@@ -566,9 +570,9 @@ smb_user_is_admin(smb_user_t *user)
 #ifdef	_KERNEL
 	char		sidstr[SMB_SID_STRSZ];
 	ksidlist_t	*ksidlist;
-	ksid_t		ksid1;
-	ksid_t		*ksid2;
-	int		i;
+	ksid_t		*ksid;
+	uint32_t	rid;
+	int		ret;
 #endif	/* _KERNEL */
 	boolean_t	rc = B_FALSE;
 
@@ -579,34 +583,25 @@ smb_user_is_admin(smb_user_t *user)
 		return (B_TRUE);
 
 #ifdef	_KERNEL
-	bzero(&ksid1, sizeof (ksid_t));
 	(void) strlcpy(sidstr, ADMINISTRATORS_SID, SMB_SID_STRSZ);
-	ASSERT(smb_sid_splitstr(sidstr, &ksid1.ks_rid) == 0);
-	ksid1.ks_domain = ksid_lookupdomain(sidstr);
+	ret = smb_sid_splitstr(sidstr, &rid);
+	ASSERT3S(ret, ==, 0);
 
 	ksidlist = crgetsidlist(user->u_cred);
 	ASSERT(ksidlist);
-	ASSERT(ksid1.ks_domain);
-	ASSERT(ksid1.ks_domain->kd_name);
 
-	i = 0;
-	ksid2 = crgetsid(user->u_cred, KSID_USER);
-	do {
-		ASSERT(ksid2->ks_domain);
-		ASSERT(ksid2->ks_domain->kd_name);
+	ksid = crgetsid(user->u_cred, KSID_USER);
+	ASSERT(ksid != NULL);
+	ASSERT(ksid->ks_domain != NULL);
+	ASSERT(ksid->ks_domain->kd_name != NULL);
 
-		if (strcmp(ksid1.ks_domain->kd_name,
-		    ksid2->ks_domain->kd_name) == 0 &&
-		    ksid1.ks_rid == ksid2->ks_rid) {
-			user->u_flags |= SMB_USER_FLAG_ADMIN;
-			rc = B_TRUE;
-			break;
-		}
+	if ((rid == ksid->ks_rid &&
+	    strcmp(sidstr, ksid_getdomain(ksid)) == 0) ||
+	    ksidlist_has_sid(ksidlist, sidstr, rid)) {
+		user->u_flags |= SMB_USER_FLAG_ADMIN;
+		rc = B_TRUE;
+	}
 
-		ksid2 = &ksidlist->ksl_sids[i];
-	} while (i++ < ksidlist->ksl_nsid);
-
-	ksid_rele(&ksid1);
 #endif	/* _KERNEL */
 	return (rc);
 }
@@ -658,6 +653,55 @@ smb_user_enum(smb_user_t *user, smb_svcenum_t *svcenum)
 		return (smb_user_enum_private(user, svcenum));
 
 	return (rc);
+}
+
+/*
+ * Count references by trees this user owns,
+ * and allow waiting for them to go away.
+ */
+void
+smb_user_inc_trees(smb_user_t *user)
+{
+	mutex_enter(&user->u_mutex);
+	user->u_owned_tree_cnt++;
+	mutex_exit(&user->u_mutex);
+}
+
+void
+smb_user_dec_trees(smb_user_t *user)
+{
+	mutex_enter(&user->u_mutex);
+	user->u_owned_tree_cnt--;
+	if (user->u_owned_tree_cnt == 0)
+		cv_broadcast(&user->u_owned_tree_cv);
+	mutex_exit(&user->u_mutex);
+}
+
+int smb_user_wait_tree_tmo = 30;
+
+/*
+ * Wait (up to 30 sec.) for trees to go away.
+ * Should happen in less than a second.
+ */
+void
+smb_user_wait_trees(smb_user_t *user)
+{
+	clock_t	time;
+
+	time = SEC_TO_TICK(smb_user_wait_tree_tmo) + ddi_get_lbolt();
+	mutex_enter(&user->u_mutex);
+	while (user->u_owned_tree_cnt != 0) {
+		if (cv_timedwait(&user->u_owned_tree_cv,
+		    &user->u_mutex, time) < 0)
+			break;
+	}
+	mutex_exit(&user->u_mutex);
+	if (user->u_owned_tree_cnt != 0) {
+#ifdef	DEBUG
+		cmn_err(CE_NOTE, "!smb_user_wait_trees failed");
+#endif
+		DTRACE_PROBE1(max__wait, smb_user_t *, user);
+	}
 }
 
 /* *************************** Static Functions ***************************** */
@@ -831,6 +875,45 @@ smb_user_setcred(smb_user_t *user, cred_t *cr, uint32_t privileges)
 #endif	/* _KERNEL */
 
 /*
+ * Determines whether a user can be granted ACCESS_SYSTEM_SECURITY
+ */
+boolean_t
+smb_user_has_security_priv(smb_user_t *user, cred_t *cr)
+{
+	/* Need SeSecurityPrivilege to get/set SACL */
+	if ((user->u_privileges & SMB_USER_PRIV_SECURITY) != 0)
+		return (B_TRUE);
+
+#ifdef _KERNEL
+	/*
+	 * ACCESS_SYSTEM_SECURITY is also granted if the file is opened with
+	 * BACKUP/RESTORE intent by a user with BACKUP/RESTORE privilege,
+	 * which means we'll be using u_privcred.
+	 *
+	 * We translate BACKUP as DAC_READ and RESTORE as DAC_WRITE,
+	 * to account for our various SMB_USER_* privileges.
+	 */
+	if (PRIV_POLICY_ONLY(cr,
+	    priv_getbyname(PRIV_FILE_DAC_READ, 0), B_FALSE) ||
+	    PRIV_POLICY_ONLY(cr,
+	    priv_getbyname(PRIV_FILE_DAC_WRITE, 0), B_FALSE))
+		return (B_TRUE);
+#else
+	/*
+	 * No "real" privileges in fksmbsrv, so use the SMB privs instead.
+	 */
+	if ((user->u_privileges &
+	    (SMB_USER_PRIV_BACKUP |
+	    SMB_USER_PRIV_RESTORE |
+	    SMB_USER_PRIV_READ_FILE |
+	    SMB_USER_PRIV_WRITE_FILE)) != 0)
+		return (B_TRUE);
+#endif
+
+	return (B_FALSE);
+}
+
+/*
  * Private function to support smb_user_enum.
  */
 static int
@@ -895,6 +978,7 @@ smb_user_netinfo_init(smb_user_t *user, smb_netuserinfo_t *info)
 	ASSERT(session->workstation);
 
 	info->ui_session_id = session->s_kid;
+	info->ui_user_id = user->u_ssnid;
 	info->ui_native_os = session->native_os;
 	info->ui_ipaddr = session->ipaddr;
 	info->ui_numopens = session->s_file_cnt;
@@ -931,6 +1015,8 @@ smb_user_netinfo_fini(smb_netuserinfo_t *info)
 	bzero(info, sizeof (smb_netuserinfo_t));
 }
 
+uint64_t smb_user_auth_logoff_failures;
+
 /*
  * Tell smbd this user is going away so it can clean up their
  * audit session, autohome dir, etc.
@@ -948,9 +1034,16 @@ smb_user_auth_logoff(smb_user_t *user)
 	if (sv->sv_state != SMB_SERVER_STATE_RUNNING)
 		return;
 
+	if (smb_threshold_enter(&sv->sv_logoff_ct) != 0) {
+		smb_user_auth_logoff_failures++;
+		return;
+	}
+
 	audit_sid = user->u_audit_sid;
 	(void) smb_kdoor_upcall(sv, SMB_DR_USER_AUTH_LOGOFF,
 	    &audit_sid, xdr_uint32_t, NULL, NULL);
+
+	smb_threshold_exit(&sv->sv_logoff_ct);
 }
 
 boolean_t
@@ -959,6 +1052,9 @@ smb_is_same_user(cred_t *cr1, cred_t *cr2)
 	ksid_t *ks1 = crgetsid(cr1, KSID_USER);
 	ksid_t *ks2 = crgetsid(cr2, KSID_USER);
 
+	if (ks1 == NULL || ks2 == NULL) {
+		return (B_FALSE);
+	}
 	return (ks1->ks_rid == ks2->ks_rid &&
 	    strcmp(ks1->ks_domain->kd_name, ks2->ks_domain->kd_name) == 0);
 }

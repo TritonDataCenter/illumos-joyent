@@ -36,7 +36,6 @@ SN1_BASE =	$(UTSBASE)/common/brand/sn1
 #
 MODULE =	sn1_brand
 OBJECTS =	$(SN1_BRAND_OBJS:%=$(OBJS_DIR)/%)
-LINTS =		$(SN1_BRAND_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE =	$(USR_BRAND_DIR)/$(MODULE)
 
 #
@@ -48,7 +47,6 @@ include $(UTSBASE)/intel/Makefile.intel
 #	Define targets
 #
 ALL_TARGET =		$(BINARY)
-LINT_TARGET =		$(MODULE).lint
 INSTALL_TARGET =	$(BINARY) $(ROOTMODULE)
 
 
@@ -57,7 +55,7 @@ INSTALL_TARGET =	$(BINARY) $(ROOTMODULE)
 #
 INC_PATH +=	-I$(SN1_BASE) -I$(OBJS_DIR)
 AS_INC_PATH	+= -I$(UTSBASE)/i86pc/genassym/$(OBJS_DIR)
-LDFLAGS +=	-dy -Nexec/elfexec
+LDFLAGS +=	-Nexec/elfexec
 
 #
 # Ugh, this is a gross hack.  Sn1_brand_asm.s uses lots of defines
@@ -82,12 +80,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

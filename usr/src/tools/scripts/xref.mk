@@ -43,7 +43,7 @@
 #
 # Note that XRINCDIRS and XRINCS are for specifying header paths that are
 # not already included in CPPFLAGS and HDRDIR.
-#	
+#
 # These macros are assumed to be set in a file named `Makefile', but this
 # too can be overridden via the -m option to `xref'.
 #
@@ -62,8 +62,13 @@ CSCOPE	= $(BUILD_TOOLS)/onbld/bin/$(MACH)/cscope-fast
 CSFLAGS	= -bq
 CTAGS	= /usr/bin/ctags
 CTFLAGS	= -wt
-ETAGS	= $(SPRO_VROOT)/bin/etags
-ETFLAGS	= -t
+
+# etags was historically part of the Sun compiler distribution and is now
+# distributed in various ways for illumos, we do a path search lacking better
+# options.
+ETAGS	= etags
+ETFLAGS	=
+
 FLGFLP	= $(BUILD_TOOLS)/onbld/bin/flg.flp
 
 XRDIRS	= .
@@ -71,10 +76,10 @@ XRINCS	= $(XRINCDIRS:%=-I%) $(HDRDIR:%=-I%) $(CPPFLAGS)
 
 include $(XRMAKEFILE)
 
-XRADDLIST	= $(XRADD) *.[Ccdshlxy] Makefile* *.il* *.cc llib-* *.xml \
+XRADDLIST	= $(XRADD) *.[CcdSshlxy] Makefile* *.cc *.xml \
 		  *.dtd.* *.ndl
-XRDELLIST	= $(XRDEL) *.ln
-XRPRUNELIST	= $(XRPRUNE) .hg
+XRDELLIST	= $(XRDEL)
+XRPRUNELIST	= $(XRPRUNE) .hg .git
 XRFINDADD	= $(XRADDLIST:%=-o -name '%')
 XRFINDDEL	= $(XRDELLIST:%=-a ! -name '%')
 XRFINDPRUNE	= $(XRPRUNELIST:%=-o -name '%')
@@ -108,7 +113,7 @@ XRSEDPRUNE	= $(XRPRUNELIST:%=/\/%\//d; /^%\//d;)
 #
 xref.files:
 	$(TOUCH) xref.flg
-	$(FIND) $(XRDIRS) `$(CAT) xref.flg` 			\
+	$(FIND) $(XRDIRS) `$(CAT) xref.flg`			\
 	    -type d \( -name SCCS $(XRFINDPRUNE) \) -prune -o	\
 	    -type f \( \( -name '' $(XRFINDADD) \) $(XRFINDDEL) \) -print |\
 	    $(PERL) -ne 's:^\./::; next if ($$seen{$$_}++); print' > xref.tmp
@@ -135,11 +140,11 @@ xref.flg:
 #
 # Note that we don't remove the old cscope.out since cscope is smart enough
 # to rebuild only what has changed.  It can become confused, however, if files
-# are renamed or removed, so it may be necessary to do an `xref -c' if 
+# are renamed or removed, so it may be necessary to do an `xref -c' if
 # a lot of reorganization has occured.
 #
 xref.cscope: xref.files
-	-$(ECHO) $(XRINCS) | $(XARGS) -n1 | $(GREP) '^-I' | 		\
+	-$(ECHO) $(XRINCS) | $(XARGS) -n1 | $(GREP) '^-I' |		\
 	    $(CAT) - xref.files > cscope.files
 	$(CSCOPE) $(CSFLAGS)
 

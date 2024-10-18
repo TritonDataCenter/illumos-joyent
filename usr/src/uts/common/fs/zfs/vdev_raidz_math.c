@@ -53,6 +53,11 @@ static raidz_impl_ops_t vdev_raidz_fastest_impl = {
 const raidz_impl_ops_t *raidz_all_maths[] = {
 	&vdev_raidz_original_impl,
 	&vdev_raidz_scalar_impl,
+#if defined(__amd64)
+	&vdev_raidz_sse2_impl,
+	&vdev_raidz_ssse3_impl,
+	&vdev_raidz_avx2_impl,
+#endif
 };
 
 /* Indicate that benchmark has been completed */
@@ -106,15 +111,8 @@ static raidz_impl_kstat_t raidz_impl_kstats[ARRAY_SIZE(raidz_all_maths) + 1];
 const raidz_impl_ops_t *
 vdev_raidz_math_get_ops(void)
 {
-	/*
-	 * illumos porting note:
-	 * The following check from OpenZFS is disabled since we don't have
-	 * this compiled in yet and we need to be able to change the
-	 * implementation for the user-level test suite.
-	 *
-	 * if (!kfpu_allowed())
-	 *	return (&vdev_raidz_scalar_impl);
-	 */
+	if (!kfpu_allowed())
+		return (&vdev_raidz_scalar_impl);
 
 	raidz_impl_ops_t *ops = NULL;
 	const uint32_t impl = RAIDZ_IMPL_READ(zfs_vdev_raidz_impl);
@@ -287,7 +285,7 @@ const char *raidz_rec_name[] = {
 #define	BENCH_D_COLS	(8ULL)
 #define	BENCH_COLS	(BENCH_D_COLS + PARITY_PQR)
 #define	BENCH_ZIO_SIZE	(1ULL << SPA_OLD_MAXBLOCKSHIFT)	/* 128 kiB */
-#define	BENCH_NS	MSEC2NSEC(25)			/* 25ms */
+#define	BENCH_NS	MSEC2NSEC(1)			/* 1ms */
 
 typedef void (*benchmark_fn)(raidz_map_t *rm, const int fn);
 
@@ -337,7 +335,7 @@ benchmark_raidz_impl(raidz_map_t *bench_rm, const int fn, benchmark_fn bench_fn)
 		t_start = gethrtime();
 
 		do {
-			for (i = 0; i < 25; i++, run_cnt++)
+			for (i = 0; i < 5; i++, run_cnt++)
 				bench_fn(bench_rm, fn);
 
 			t_diff = gethrtime() - t_start;
@@ -487,7 +485,7 @@ static const struct {
 int
 vdev_raidz_impl_set(const char *val)
 {
-	int err = -EINVAL;
+	int err = EINVAL;
 	char req_name[RAIDZ_IMPL_NAME_MAX];
 	uint32_t impl = RAIDZ_IMPL_READ(user_sel_impl);
 	size_t i;

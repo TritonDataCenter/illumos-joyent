@@ -25,6 +25,7 @@
 # Use is subject to license terms.
 #
 # Copyright (c) 2018, Joyent, Inc.
+# Copyright 2024 RackTop Systems, Inc.
 
 #
 #	intel architecture dependent
@@ -40,11 +41,17 @@ UTSBASE	= ../..
 #
 MODULE		= nsmb
 OBJECTS		= $(NSMB_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(NSMB_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(USR_DRV_DIR)/$(MODULE)
 CONF_SRCDIR	= $(UTSBASE)/common/fs/smbclnt/netsmb
 OFFSETS_SRC	= $(CONF_SRCDIR)/offsets.in
 IOC_CHECK_H	= $(OBJS_DIR)/ioc_check.h
+
+# What symbols we export (e.g. _init(), ...)
+MAPFILE		= $(CONF_SRCDIR)/$(MODULE).mapfile
+
+# The symbols we link against
+MAPFILE_EXT	= $(CONF_SRCDIR)/nsmb_ext.mapfile
+MAPFILES	+= tlimod ddi
 
 #
 #	Include common rules.
@@ -55,7 +62,6 @@ include $(UTSBASE)/intel/Makefile.intel
 #	Define targets
 #
 ALL_TARGET	= $(ALL_TARGET_$(OBJS_DIR))
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(INSTALL_TARGET_$(OBJS_DIR))
 
 #
@@ -85,22 +91,19 @@ INSTALL_TARGET_obj64	= $(BINARY) $(ROOTMODULE) $(ROOT_CONFFILE)
 #
 # Now the normal overrides...
 #
-MODSTUBS_DIR	= $(OBJS_DIR)
-$(MODSTUBS_O)	:= AS_CPPFLAGS += -DNSMB_MODULE
-CLEANFILES	+= $(MODSTUBS_O) $(IOC_CHECK_H)
-CERRWARN	+= -erroff=E_STATEMENT_NOT_REACHED
+CLEANFILES	+= $(IOC_CHECK_H)
 INC_PATH	+= -I$(UTSBASE)/common/fs/smbclnt
-LDFLAGS         += -dy -Ncrypto/md4 -Ncrypto/md5 -Nmisc/tlimod
+LDFLAGS         += -Ncrypto/md4 -Ncrypto/md5 -Nmisc/kcf -Nmisc/tlimod
+LDFLAGS         += -M $(MAPFILE) -M $(MAPFILE_EXT)
 
-# Until CR 4994570 is fixed...
-LINTTAGS	+= -erroff=E_BAD_FORMAT_ARG_TYPE2
+#
+# For now, disable these warnings; maintainers should endeavor
+# to investigate and remove these for maximum coverage.
+# Please do not carry these forward to new Makefiles.
+#
 
 # The mb_put/md_get functions are intentionally used with and without
-# return value checks, so filter those out like LGREP.2 does.
-LGREP.nsmb =	egrep -v ' ignored: (mb_init|mb_put|md_get)'
-LTAIL	+=	2>&1 | $(LGREP.2) | $(LGREP.nsmb) || true
-
-# same for smatch
+# return value checks, so filter those.
 SMOFF += all_func_returns
 
 # needs work
@@ -119,12 +122,6 @@ clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
 
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
-
 install:	$(INSTALL_DEPS)
 
 #
@@ -140,4 +137,5 @@ $(IOC_CHECK_H): $(OFFSETS_SRC)
 #
 #	Include common targets.
 #
+include $(UTSBASE)/Makefile.mapfile
 include $(UTSBASE)/intel/Makefile.targ

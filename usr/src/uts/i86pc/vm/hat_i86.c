@@ -29,6 +29,7 @@
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2018 Joyent, Inc.  All rights reserved.
  * Copyright (c) 2014, 2015 by Delphix. All rights reserved.
+ * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
  */
 
 /*
@@ -392,9 +393,9 @@ extern pfn_t memseg_get_start(struct memseg *);
 #define	PP_SETRO(pp)		PP_SETRM(pp, P_RO)
 
 #define	PP_CLRRM(pp, rm)	atomic_andb(&(pp->p_nrm), ~(rm))
-#define	PP_CLRMOD(pp)   	PP_CLRRM(pp, P_MOD)
-#define	PP_CLRREF(pp)   	PP_CLRRM(pp, P_REF)
-#define	PP_CLRRO(pp)    	PP_CLRRM(pp, P_RO)
+#define	PP_CLRMOD(pp)		PP_CLRRM(pp, P_MOD)
+#define	PP_CLRREF(pp)		PP_CLRRM(pp, P_REF)
+#define	PP_CLRRO(pp)		PP_CLRRM(pp, P_RO)
 #define	PP_CLRALL(pp)		PP_CLRRM(pp, P_MOD | P_REF | P_RO)
 
 /*
@@ -547,10 +548,8 @@ hat_alloc(struct as *as)
 	ht = htable_create(hat, (uintptr_t)0, TOP_LEVEL(hat), NULL);
 	hat->hat_htable = ht;
 
-#if defined(__amd64)
 	if (hat->hat_flags & HAT_COPIED)
 		goto init_done;
-#endif
 
 	for (r = 0; r < num_kernel_ranges; ++r) {
 		rp = &kernel_ranges[r];
@@ -572,14 +571,6 @@ hat_alloc(struct as *as)
 				cnt = htable_va2entry(rp->hkr_end_va, ht) -
 				    start;
 
-#if defined(__i386) && !defined(__xpv)
-			if (ht->ht_flags & HTABLE_COPIED) {
-				bcopy(&pcp_page[start],
-				    &hat->hat_copied_ptes[start],
-				    cnt * sizeof (x86pte_t));
-				continue;
-			}
-#endif
 			src = htable_lookup(kas.a_hat, va, rp->hkr_level);
 			ASSERT(src != NULL);
 			x86pte_copy(src, ht, start, cnt);
@@ -594,9 +585,7 @@ init_done:
 	 * Pin top level page tables after initializing them
 	 */
 	xen_pin(hat->hat_htable->ht_pfn, mmu.max_level);
-#if defined(__amd64)
 	xen_pin(hat->hat_user_ptable, mmu.max_level);
-#endif
 #endif
 	XPV_ALLOW_MIGRATE();
 
@@ -706,9 +695,7 @@ hat_free_end(hat_t *hat)
 	 */
 	VERIFY3U(hat->hat_flags & HAT_PCP, ==, 0);
 	xen_unpin(hat->hat_htable->ht_pfn);
-#if defined(__amd64)
 	xen_unpin(hat->hat_user_ptable);
-#endif
 #endif
 
 	/*
@@ -720,15 +707,11 @@ hat_free_end(hat_t *hat)
 	 * Decide which kmem cache the hash table came from, then free it.
 	 */
 	if (hat->hat_flags & HAT_COPIED) {
-#if defined(__amd64)
 		if (hat->hat_flags & HAT_COPIED_32) {
 			cache = hat32_hash_cache;
 		} else {
 			cache = hat_hash_cache;
 		}
-#else
-		cache = hat32_hash_cache;
-#endif
 	} else {
 		cache = hat_hash_cache;
 	}
@@ -750,9 +733,6 @@ hat_free_end(hat_t *hat)
 uintptr_t
 hat_kernelbase(uintptr_t va)
 {
-#if defined(__i386)
-	va &= LEVEL_MASK(1);
-#endif
 	if (IN_VA_HOLE(va))
 		panic("_userlimit %p will fall in VA hole\n", (void *)va);
 	return (va);
@@ -871,6 +851,18 @@ mmu_init(void)
 	 */
 	cpuid_get_addrsize(CPU, &pa_bits, &va_bits);
 
+	/*
+	 * Check if 5 level paging is on, we dont support that (yet).
+	 * X86_64 processors that support 5 level paging report
+	 * the number of va bits for 5 level paging even if
+	 * not in 5 level paging mode.  So we need
+	 * to adjust va_bits to max for 4 level paging if not in 5 level mode.
+	 */
+	if ((getcr4() & CR4_LA57) != 0)
+		panic("5 Level paging enabled but not yet supported");
+	else if (va_bits > MMU_MAX4LEVELVABITS)
+		va_bits = MMU_MAX4LEVELVABITS;
+
 	if (va_bits < sizeof (void *) * NBBY) {
 		mmu.hole_start = (1ul << (va_bits - 1));
 		mmu.hole_end = 0ul - mmu.hole_start - 1;
@@ -908,7 +900,6 @@ mmu_init(void)
 	if (!is_x86_feature(x86_featureset, X86FSET_CX8))
 		panic("Processor does not support cmpxchg8b instruction");
 
-#if defined(__amd64)
 
 	mmu.num_level = 4;
 	mmu.max_level = 3;
@@ -925,29 +916,6 @@ mmu_init(void)
 	mmu.level_shift[2] = 30;
 	mmu.level_shift[3] = 39;
 
-#elif defined(__i386)
-
-	if (mmu.pae_hat) {
-		mmu.num_level = 3;
-		mmu.max_level = 2;
-		mmu.ptes_per_table = 512;
-		mmu.top_level_count = 4;
-
-		mmu.level_shift[0] = 12;
-		mmu.level_shift[1] = 21;
-		mmu.level_shift[2] = 30;
-
-	} else {
-		mmu.num_level = 2;
-		mmu.max_level = 1;
-		mmu.ptes_per_table = 1024;
-		mmu.top_level_count = 1024;
-
-		mmu.level_shift[0] = 12;
-		mmu.level_shift[1] = 22;
-	}
-
-#endif	/* __i386 */
 
 	for (i = 0; i < mmu.num_level; ++i) {
 		mmu.level_size[i] = 1UL << mmu.level_shift[i];
@@ -978,10 +946,6 @@ mmu_init(void)
 	for (i = 1; i < mmu.num_level; ++i)
 		mmu.ptp_bits[i] = PT_PTPBITS;
 
-#if defined(__i386)
-	mmu.ptp_bits[2] = PT_VALID;
-#endif
-
 	/*
 	 * Compute how many hash table entries to have per process for htables.
 	 * We start with 1 page's worth of entries.
@@ -994,7 +958,6 @@ mmu_init(void)
 		mmu.hash_cnt >>= 1;
 	mmu.hat32_hash_cnt = mmu.hash_cnt;
 
-#if defined(__amd64)
 	/*
 	 * If running in 64 bits and physical memory is large,
 	 * increase the size of the cache to cover all of memory for
@@ -1003,7 +966,6 @@ mmu_init(void)
 #define	HASH_MAX_LENGTH 4
 	while (mmu.hash_cnt * HASH_MAX_LENGTH < max_htables)
 		mmu.hash_cnt <<= 1;
-#endif
 }
 
 
@@ -1013,17 +975,6 @@ mmu_init(void)
 void
 hat_init()
 {
-#if defined(__i386)
-	/*
-	 * _userlimit must be aligned correctly
-	 */
-	if ((_userlimit & LEVEL_MASK(1)) != _userlimit) {
-		prom_printf("hat_init(): _userlimit=%p, not aligned at %p\n",
-		    (void *)_userlimit, (void *)LEVEL_SIZE(1));
-		halt("hat_init(): Unable to continue");
-	}
-#endif
-
 	cv_init(&hat_list_cv, NULL, CV_DEFAULT, NULL);
 
 	/*
@@ -1202,8 +1153,8 @@ hat_pcp_setup(struct cpu *cpu)
 	 */
 	hati_cpu_punchin(cpu, (uintptr_t)&kdi_idt, PROT_READ);
 
-	CTASSERT(((uintptr_t)&kpti_tramp_start % MMU_PAGESIZE) == 0);
-	CTASSERT(((uintptr_t)&kpti_tramp_end % MMU_PAGESIZE) == 0);
+	VERIFY0((uintptr_t)&kpti_tramp_start % MMU_PAGESIZE);
+	VERIFY0((uintptr_t)&kpti_tramp_end % MMU_PAGESIZE);
 	for (va = (uintptr_t)&kpti_tramp_start;
 	    va < (uintptr_t)&kpti_tramp_end; va += MMU_PAGESIZE) {
 		hati_cpu_punchin(cpu, va, PROT_READ | PROT_EXEC);
@@ -1237,8 +1188,8 @@ hat_pcp_setup(struct cpu *cpu)
 		}
 	}
 
-	CTASSERT(((uintptr_t)&kdi_isr_start % MMU_PAGESIZE) == 0);
-	CTASSERT(((uintptr_t)&kdi_isr_end % MMU_PAGESIZE) == 0);
+	VERIFY0((uintptr_t)&kdi_isr_start % MMU_PAGESIZE);
+	VERIFY0((uintptr_t)&kdi_isr_end % MMU_PAGESIZE);
 	for (va = (uintptr_t)&kdi_isr_start;
 	    va < (uintptr_t)&kdi_isr_end; va += MMU_PAGESIZE) {
 		hati_cpu_punchin(cpu, va, PROT_READ | PROT_EXEC);
@@ -1303,29 +1254,11 @@ hat_init_finish(void)
 	 * User HATs are initialized with copies of all kernel mappings in
 	 * higher level page tables. Ensure that those entries exist.
 	 */
-#if defined(__amd64)
 
 	NEXT_HKR(r, 3, kernelbase, 0);
 #if defined(__xpv)
 	NEXT_HKR(r, 3, HYPERVISOR_VIRT_START, HYPERVISOR_VIRT_END);
 #endif
-
-#elif defined(__i386)
-
-#if !defined(__xpv)
-	if (mmu.pae_hat) {
-		va = kernelbase;
-		if ((va & LEVEL_MASK(2)) != va) {
-			va = P2ROUNDUP(va, LEVEL_SIZE(2));
-			NEXT_HKR(r, 1, kernelbase, va);
-		}
-		if (va != 0)
-			NEXT_HKR(r, 2, va, 0);
-	} else
-#endif /* __xpv */
-		NEXT_HKR(r, 1, kernelbase, 0);
-
-#endif /* __i386 */
 
 	num_kernel_ranges = r;
 
@@ -1382,11 +1315,7 @@ hat_init_finish(void)
 	 * for 32 bit we map from segmap_start .. ekernelheap
 	 * for 64 bit we map from segmap_start .. segmap_start + segmapsize;
 	 */
-#if defined(__i386)
-	size = (uintptr_t)ekernelheap - segmap_start;
-#elif defined(__amd64)
 	size = segmapsize;
-#endif
 	hat_kmap_init((uintptr_t)segmap_start, size);
 
 #if !defined(__xpv)
@@ -1395,38 +1324,6 @@ hat_init_finish(void)
 	    MAKECR3(kas.a_hat->hat_htable->ht_pfn, PCID_KERNEL));
 #endif
 }
-
-/*
- * On 32 bit PAE mode, PTE's are 64 bits, but ordinary atomic memory references
- * are 32 bit, so for safety we must use atomic_cas_64() to install these.
- */
-#ifdef __i386
-static void
-reload_pae32(hat_t *hat, cpu_t *cpu)
-{
-	x86pte_t *src;
-	x86pte_t *dest;
-	x86pte_t pte;
-	int i;
-
-	/*
-	 * Load the 4 entries of the level 2 page table into this
-	 * cpu's range of the pcp_page and point cr3 at them.
-	 */
-	ASSERT(mmu.pae_hat);
-	src = hat->hat_copied_ptes;
-	dest = pcp_page + (cpu->cpu_id + 1) * MAX_COPIED_PTES;
-	for (i = 0; i < MAX_COPIED_PTES; ++i) {
-		for (;;) {
-			pte = dest[i];
-			if (pte == src[i])
-				break;
-			if (atomic_cas_64(dest + i, pte, src[i]) != src[i])
-				break;
-		}
-	}
-}
-#endif
 
 /*
  * Update the PCP data on the CPU cpu to the one on the hat. If this is a 32-bit
@@ -1974,12 +1871,10 @@ hati_pte_map(
 		} else {
 			ASSERT(flags & HAT_LOAD_NOCONSIST);
 		}
-#if defined(__amd64)
 		if (ht->ht_flags & HTABLE_COPIED) {
 			cpu_t *cpu = CPU;
 			hat_pcp_update(cpu, hat);
 		}
-#endif
 		HTABLE_INC(ht->ht_valid_cnt);
 		PGCNT_INC(hat, l);
 		return (rv);
@@ -2158,9 +2053,9 @@ hat_kmap_load(
  *
  * Flags for hat_memload/hat_devload/hat_*attr.
  *
- * 	HAT_LOAD	Default flags to load a translation to the page.
+ *	HAT_LOAD	Default flags to load a translation to the page.
  *
- * 	HAT_LOAD_LOCK	Lock down mapping resources; hat_map(), hat_memload(),
+ *	HAT_LOAD_LOCK	Lock down mapping resources; hat_map(), hat_memload(),
  *			and hat_devload().
  *
  *	HAT_LOAD_NOCONSIST Do not add mapping to page_t mapping list.
@@ -2565,11 +2460,7 @@ hati_demap_func(xc_arg_t a1, xc_arg_t a2, xc_arg_t a3)
 	 * PTEs.
 	 */
 	if (hat->hat_flags & HAT_COPIED) {
-#if defined(__amd64)
 		hat_pcp_update(CPU, hat);
-#elif defined(__i386)
-		reload_pae32(hat, CPU);
-#endif
 	}
 
 	mmu_flush_tlb(FLUSH_TLB_NONGLOBAL, NULL);
@@ -3987,18 +3878,16 @@ hat_page_inval(struct page *pp, uint_t pg_szcd, struct hat *curhat)
 	htable_t	*ht;
 	uint_t		entry;
 	level_t		level;
-	ulong_t		cnt;
+	ulong_t		cnt = 0;
 
 	XPV_DISALLOW_MIGRATE();
 
-#if defined(__amd64)
 	/*
 	 * clear the vpm ref.
 	 */
 	if (vpm_enable) {
 		pp->p_vpmref = 0;
 	}
-#endif
 	/*
 	 * The loop with next_size handles pages with multiple pagesize mappings
 	 */
@@ -4366,8 +4255,8 @@ try_again:
 		/*
 		 * can stop short if we found a ref'd or mod'd page
 		 */
-		if ((flags & HAT_SYNC_STOPON_MOD) && PP_ISMOD(save_pp) ||
-		    (flags & HAT_SYNC_STOPON_REF) && PP_ISREF(save_pp)) {
+		if (((flags & HAT_SYNC_STOPON_MOD) && PP_ISMOD(save_pp)) ||
+		    ((flags & HAT_SYNC_STOPON_REF) && PP_ISREF(save_pp))) {
 			x86_hm_exit(pp);
 			goto done;
 		}
@@ -4396,11 +4285,9 @@ hat_page_getshare(page_t *pp)
 {
 	uint_t cnt;
 	cnt = hment_mapcnt(pp);
-#if defined(__amd64)
 	if (vpm_enable && pp->p_vpmref) {
 		cnt += 1;
 	}
-#endif
 	return (cnt);
 }
 
@@ -4636,7 +4523,7 @@ hat_mempte_remap(
 /*
  * Hat locking functions
  * XXX - these two functions are currently being used by hatstats
- * 	they can be removed by using a per-as mutex for hatstats.
+ *	they can be removed by using a per-as mutex for hatstats.
  */
 void
 hat_enter(hat_t *hat)

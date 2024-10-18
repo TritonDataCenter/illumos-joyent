@@ -21,6 +21,7 @@
 #
 # Copyright 2015 Toomas Soome <tsoome@me.com>
 # Copyright 2016 Nexenta Systems, Inc.
+# Copyright 2023 Oxide Computer Company
 #
 # Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
@@ -120,6 +121,16 @@ if ($doxygen_comments) {
 } else {
 	$hdr_comment_start = qr/^\s*\/\*$/;
 }
+
+# FreeBSD uses comments styled as such for their license headers:
+# /*-
+#  * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+#  *
+#  ...
+#
+# In order to apply other cstyle checks to those files without stumbling over
+# the license header, tolerate such comment openings as well.
+my $fbsd_comment_start = qr/^\s*\/\*-$/;
 
 # Note, following must be in single quotes so that \s and \w work right.
 my $typename = '(int|char|short|long|unsigned|float|double' .
@@ -463,7 +474,7 @@ line: while (<$filehandle>) {
 		$comment_done = 0;
 	}
 	# does this looks like the start of a block comment?
-	if (/$hdr_comment_start/) {
+	if (/$hdr_comment_start/ || /$fbsd_comment_start/) {
 		if (!/^\t*\/\*/) {
 			err("block comment not indented by tabs");
 		}
@@ -602,14 +613,14 @@ line: while (<$filehandle>) {
 	if (/\S   *(&&|\|\|)/ || /(&&|\|\|)   *\S/) {
 		err("more than one space around boolean operator");
 	}
-	if (/\b(for|if|while|switch|sizeof|return|case)\(/) {
+	if (/\b(for|if|while|switch|sizeof|alignof|return|case)\(/) {
 		err("missing space between keyword and paren");
 	}
 	if (/(\b(for|if|while|switch|return)\b.*){2,}/ && !/^#define/) {
 		# multiple "case" and "sizeof" allowed
 		err("more than one keyword on line");
 	}
-	if (/\b(for|if|while|switch|sizeof|return|case)\s\s+\(/ &&
+	if (/\b(for|if|while|switch|sizeof|alignof|return|case)\s\s+\(/ &&
 	    !/^#if\s+\(/) {
 		err("extra space between keyword and paren");
 	}
@@ -618,7 +629,7 @@ line: while (<$filehandle>) {
 	if (/\w\s\(/) {
 		my $s = $_;
 		# strip off all keywords on the line
-		s/\b(for|if|while|switch|return|case|sizeof)\s\(/XXX(/g;
+		s/\b(for|if|while|switch|return|case|alignof|sizeof)\s\(/XXX(/g;
 		s/#elif\s\(/XXX(/g;
 		s/^#define\s+\w+\s+\(/XXX(/;
 		# do not match things like "void (*f)();"
@@ -650,6 +661,9 @@ line: while (<$filehandle>) {
 	}
 	if (/\bsizeof\b/ && !/\bsizeof\s*\(.*\)/) {
 		err("unparenthesized sizeof expression");
+	}
+	if (/\balignof\b/ && !/\balignof\s*\(.*\)/) {
+		err("unparenthesized alignof expression");
 	}
 	if (/\(\s/) {
 		err("whitespace after left paren");

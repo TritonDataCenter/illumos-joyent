@@ -27,8 +27,6 @@
 #ifndef	_DEVFSEVENT_SIGNAL_H
 #define	_DEVFSEVENT_SIGNAL_H
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #ifdef	__cplusplus
 extern "C" {
 #endif
@@ -37,6 +35,9 @@ extern "C" {
 #include <signal.h>
 
 typedef void se_signal_f(int, siginfo_t *, ucontext_t *, void *);
+
+#define	SE_SIG_DFL	(se_signal_f *)0
+#define	SE_SIG_IGN	(se_signal_f *)1
 
 extern int se_signal_sethandler(int, se_signal_f *, void *);
 extern se_signal_f *se_signal_gethandler(int, void **);

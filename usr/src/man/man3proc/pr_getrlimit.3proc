@@ -11,15 +11,16 @@
 .\"
 .\" Copyright 2015 Joyent, Inc.
 .\"
-.Dd May 11, 2016
+.Dd November 27, 2023
 .Dt PR_GETRLIMIT 3PROC
 .Os
 .Sh NAME
 .Nm pr_getrlimit ,
 .Nm pr_getrlimit64
 .Nd inject getrlimit system call into victim process
-.Sh SYNOPSIS
+.Sh LIBRARY
 .Lb libproc
+.Sh SYNOPSIS
 .In libproc.h
 .Ft int
 .Fo pr_getrlimit
@@ -74,7 +75,7 @@ function is equivalent to
 however, rather than having the rlimit information be subject to the data model
 of the target process, they always provide 64-bit rlimit information.
 See
-.Xr lf64 5
+.Xr lf64 7
 for more information.
 .Sh RETURN VALUES
 Upon successful completion, the
@@ -116,5 +117,5 @@ in
 .Sh SEE ALSO
 .Xr getrlimit 2 ,
 .Xr libproc 3LIB ,
-.Xr proc 4 ,
-.Xr lf64 5
+.Xr proc 5 ,
+.Xr lf64 7

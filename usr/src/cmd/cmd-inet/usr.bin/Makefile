@@ -25,6 +25,7 @@
 # Copyright 2011 Nexenta Systems, Inc. All rights reserved.
 # Copyright 2016 Toomas Soome <tsoome@me.com>
 # Copyright (c) 2018, Joyent, Inc.
+# Copyright 2022 Garrett D'Amore
 #
 
 PROG=		finger rdate ruptime rwho whois
@@ -33,20 +34,15 @@ ALL=		$(PROG) $(SUIDPROG)
 SRCS=		$(ALL:%=%.c)
 KCMDPROGS=	rcp rlogin rsh
 
-SUBDIRS=	chat dns-sd ftp nc nca netstat \
+SUBDIRS=	chat dns-sd ftp nc netstat \
 		pppd pppdump pppstats rdist talk telnet tftp
 SUBDIR1=	talk
-MSGSUBDIRS=	nca talk
+MSGSUBDIRS=	talk
 
 # As programs get lint-clean, add them here.  Eventually.
 # This hack should go away, and all in PROG should be lint-clean.
+# NB: This still applies to enabling compiler warnings and is not lint specific
 LINTCLEAN=	rlogin.c rsh.c rcp.c rdate.c rwho.c whois.c
-
-# Likewise, as subdirs get lint-clean, add them here.  Once
-# they're all clean, replace the dependency of the lint target
-# with SUBDIRS.  Also (sigh) deal with the commented-out build lines
-# for the lint rule.
-LINTSUBDIRS=	nca netstat pppd pppstats tftp
 
 include ../../Makefile.cmd
 include ../Makefile.cmd-inet
@@ -65,7 +61,6 @@ all:=		TARGET= all
 install:=	TARGET= install
 clean:=		TARGET= clean
 clobber:=	TARGET= clobber
-lint:=		TARGET= lint
 _msg:=		TARGET= _msg
 
 ROOTSUIDPROG=	$(SUIDPROG:%=$(ROOTBIN)/%)
@@ -87,38 +82,26 @@ finger :=	CFLAGS += $(CCVERBOSE)
 finger :=	CPPFLAGS += -D_FILE_OFFSET_BITS=64
 
 finger :=		LDLIBS += -lnsl -lcurses -lsocket
-rcp lint-rcp :=		LDLIBS += -lsocket -lsec -lsendfile
-rdate lint-rdate:=	LDLIBS += -lsocket
-rlogin lint-rlogin :=	LDLIBS += -lnsl -lsocket
-rsh lint-rsh :=		LDLIBS += -lsocket
-whois lint-whois :=	LDLIBS += -lsocket
+rcp :=		LDLIBS += -lsocket -lsec -lsendfile
+rdate:=	LDLIBS += -lsocket
+rlogin :=	LDLIBS += -lnsl -lsocket
+rsh :=		LDLIBS += -lsocket
+whois :=	LDLIBS += -lsocket
 
 include  $(SRC)/lib/gss_mechs/mech_krb5/Makefile.mech_krb5
 $(KCMDPROGS)	:=	LDLIBS += -lnsl -lmech_krb5
 $(KCMDPROGS)	:=	LDFLAGS += $(ZIGNORE) $(KRUNPATH) \
 				-L$(ROOT)$(KLIBDIR_DO) \
 				-L$(ROOT)$(KLIBDIR_GL)
-KCMDLINTS=	$(KCMDPROGS:%=lint-%)
 
 $(COMMONPOFILES) \
 rlogin.po rcp.po rsh.po \
-$(KCMDPROGS) \
-$(KCMDLINTS)	:=	CPPFLAGS += -DKERBEROS \
+$(KCMDPROGS) :=	CPPFLAGS += -DKERBEROS \
 			-I$(CMDINETCOMMONDIR) \
 			-I$(SRC)/lib/gss_mechs/mech_krb5 \
 			-I$(SRC)/uts/common/gssapi/mechs/krb5/include \
 			-I$(SRC)/lib/gss_mechs/mech_krb5/include \
 			-I$(SRC)/lib/gss_mechs/mech_krb5/include/krb5
-
-# "-erroff=E_NAME_USED_NOT_DEF2" and "-erroff=E_NAME_DEF_NOT_USED2"
-# are required because lint problems in the Kerberos 5 framework.
-$(KCMDLINTS)	:=	LINTFLAGS += -lnsl \
-			-erroff=E_NAME_USED_NOT_DEF2 \
-			-erroff=E_NAME_DEF_NOT_USED2
-
-# Extra source files to lint with
-LINTXTRA=
-$(KCMDLINTS)	:=	LINTXTRA += $(COMMONSRCS)
 
 ROOTSUNWRCP=	$(ROOT)/usr/lib/sunw,rcp
 ROOTRSHSYMLINK=	$(ROOT)/usr/ucb/rsh
@@ -170,7 +153,7 @@ $(ROOTREMSHSYMLINK):
 	$(RM) $@; $(SYMLINK) rsh $@
 
 $(SUBDIRS): FRC
-	@cd $@; pwd; $(MAKE) $(MFLAGS) $(TARGET)
+	@cd $@; pwd; $(MAKE) $(TARGET)
 
 FRC:
 
@@ -182,9 +165,3 @@ clobber: $(SUBDIRS) clobber_local
 clobber_local: clean_local
 	$(RM) $(CLOBBERFILES)
 
-LINTLOCALS=	$(LINTCLEAN:%.c=lint-%)
-
-lint:	$(LINTSUBDIRS) $(LINTLOCALS)
-
-$(LINTLOCALS):
-	$(LINT.c) $(@:lint-%=%.c) $(LINTXTRA) $(LDLIBS)

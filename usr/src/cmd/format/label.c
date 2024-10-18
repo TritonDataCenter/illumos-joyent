@@ -173,7 +173,7 @@ trim_id(char *id)
  * in this margin, then such illegal geometries can slip through the cracks.
  */
 static int
-do_geometry_sanity_check()
+do_geometry_sanity_check(void)
 {
 	struct scsi_capacity_16	 capacity;
 
@@ -250,7 +250,7 @@ SMI_vtoc_to_EFI(int fd, struct dk_gpt **new_vtoc)
  * the label and partition information it has written on the disk.
  */
 int
-write_label()
+write_label(void)
 {
 	int	error = 0, head, sec;
 	struct dk_label label;
@@ -670,7 +670,7 @@ read_efi_label(int fd, struct efi_info *label, struct disk_info *disk_info)
 /*
  * We've read a 64-bit label which has no geometry information.  Use
  * some heuristics to fake up a geometry that would match the disk in
- * order to make the rest of format(1M) happy.
+ * order to make the rest of format(8) happy.
  */
 static int
 vtoc64_to_label(struct efi_info *label, struct dk_gpt *vtoc)

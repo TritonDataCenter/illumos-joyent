@@ -62,13 +62,13 @@ static secobj_class_info_t secobj_class_table[] = {
 static boolean_t
 dladm_check_secobjclass(dladm_secobj_class_t class)
 {
-	return (class >= 0 && class < NSECOBJCLASS);
+	return (class >= 0 && (uint_t)class < NSECOBJCLASS);
 }
 
 dladm_status_t
 dladm_str2secobjclass(const char *str, dladm_secobj_class_t *class)
 {
-	int			i;
+	uint_t			i;
 	secobj_class_info_t	*sp;
 
 	for (i = 0; i < NSECOBJCLASS; i++) {
@@ -110,7 +110,7 @@ static boolean_t
 dladm_convert_dldsecobjclass(dld_secobj_class_t dldclass,
     dladm_secobj_class_t *class)
 {
-	int			i;
+	uint_t			i;
 	secobj_class_info_t	*sp;
 
 	for (i = 0; i < NSECOBJCLASS; i++) {
@@ -318,15 +318,14 @@ struct secobj_db_state {
 /*
  * Update or generate a secobj entry using the info in ssp->ss_info.
  */
-/* ARGSUSED */
 static boolean_t
-process_secobj_set(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
-    secobj_info_t *sip, dladm_status_t *statusp)
+process_secobj_set(dladm_handle_t handle __unused, secobj_db_state_t *ssp,
+    char *buf, secobj_info_t *sip, dladm_status_t *statusp)
 {
 	char	tmpbuf[MAXLINELEN];
 	char	classbuf[DLADM_STRSIZE];
 	char	*ptr = tmpbuf, *lim = tmpbuf + MAXLINELEN;
-	int	i;
+	uint_t	i;
 
 	sip = &ssp->ss_info;
 
@@ -347,10 +346,9 @@ process_secobj_set(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
 	return (B_FALSE);
 }
 
-/* ARGSUSED */
 static boolean_t
-process_secobj_get(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
-    secobj_info_t *sip, dladm_status_t *statusp)
+process_secobj_get(dladm_handle_t handle __unused, secobj_db_state_t *ssp,
+    char *buf __unused, secobj_info_t *sip, dladm_status_t *statusp)
 {
 	if (*sip->si_lenp > *ssp->ss_info.si_lenp) {
 		*statusp = DLADM_STATUS_TOOSMALL;
@@ -362,10 +360,10 @@ process_secobj_get(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
 	return (B_FALSE);
 }
 
-/* ARGSUSED */
 static boolean_t
-process_secobj_unset(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
-    secobj_info_t *sip, dladm_status_t *statusp)
+process_secobj_unset(dladm_handle_t handle __unused,
+    secobj_db_state_t *ssp __unused, char *buf,
+    secobj_info_t *sip __unused, dladm_status_t *statusp __unused)
 {
 	/*
 	 * Delete line.
@@ -374,10 +372,9 @@ process_secobj_unset(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
 	return (B_FALSE);
 }
 
-/* ARGSUSED */
 static boolean_t
-process_secobj_walk(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
-    secobj_info_t *sip, dladm_status_t *statusp)
+process_secobj_walk(dladm_handle_t handle __unused, secobj_db_state_t *ssp,
+    char *buf __unused, secobj_info_t *sip, dladm_status_t *statusp __unused)
 {
 	secobj_name_t	*snp;
 
@@ -395,10 +392,9 @@ process_secobj_walk(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
 	return (B_TRUE);
 }
 
-/* ARGSUSED */
 static boolean_t
-process_secobj_init(dladm_handle_t handle, secobj_db_state_t *ssp, char *buf,
-    secobj_info_t *sip, dladm_status_t *statusp)
+process_secobj_init(dladm_handle_t handle, secobj_db_state_t *ssp __unused,
+    char *buf __unused, secobj_info_t *sip, dladm_status_t *statusp)
 {
 	*statusp = dladm_set_secobj(handle, sip->si_name, *sip->si_classp,
 	    sip->si_val, *sip->si_lenp,

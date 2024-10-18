@@ -67,12 +67,7 @@ CERRWARN	+= -_gcc=-Wno-unused-function
 # needs work
 $(OBJS_DIR)/acpi_video.o := SMOFF += all_func_returns
 
-LDFLAGS		+= -dy -N misc/acpica
-
-#
-#	Overrides
-#
-C99LMODE=	-Xc99=%all
+LDFLAGS		+= -N misc/acpica
 
 #
 #	Default build targets.

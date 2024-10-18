@@ -31,16 +31,16 @@ VERS=		.1
 OBJECTS=	0@0.o
 CRTI=		pics/crti.o
 CRTN=		pics/crtn.o
-CRTS=		$(CRTI)		$(CRTN)
+CRTS=		$(CRTI) $(CRTN)
 
 include		$(SRC)/lib/Makefile.lib
 
 MAPFILES=
-ASFLAGS=	-P -D_ASM	$(CPPFLAGS)
+ASFLAGS +=	-D_ASM $(CPPFLAGS)
+ASFLAGS64 +=	-D_ASM $(CPPFLAGS)
 DYNFLAGS +=	$(BLOCAL) $(ZNOVERSION) $(ZINITFIRST)
 LDLIBS +=	-lc
-BUILD.SO=       $(LD) -o $@ -G $(DYNFLAGS) $(CRTI) $(PICS) $(LDLIBS) $(CRTN)
-BUILD.s=	$(AS) $(ASFLAGS) $< -o $@
+BUILD.SO=       $(LD) -o $@ $(GSHARED) $(DYNFLAGS) $(CRTI) $(PICS) $(LDLIBS) $(CRTN)
 
 SRCS=		$(OBJECTS:%.o=../common/%.c)
 

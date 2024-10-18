@@ -24,6 +24,7 @@
 # Copyright 2019 Joyent, Inc.
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2019 Peter Tribble.
+# Copyright 2023 Oxide Computer Company
 #
 
 #
@@ -73,7 +74,6 @@ GENUNIX_OBJS +=		\
 	lwp_private.o	\
 	prom_enter.o	\
 	prom_exit.o	\
-	prom_panic.o	\
 	sendsig.o	\
 	syscall.o
 
@@ -90,7 +90,6 @@ GENUNIX_OBJS +=		\
 	prom_printf.o	\
 	prom_prop.o	\
 	prom_putchar.o	\
-	prom_reboot.o	\
 	prom_version.o
 
 #
@@ -124,6 +123,15 @@ LX_AUTOFS_OBJS +=	\
 	lx_autofs.o
 
 #
+#	shared hypervisor functionality
+#
+CORE_OBJS +=		\
+	hma.o		\
+	hma_asm.o	\
+	hma_fpu.o	\
+	smt.o		\
+
+#
 #	ZFS file system module
 #
 ZFS_OBJS +=		\
@@ -135,9 +143,9 @@ ZFS_OBJS +=		\
 CORE_OBJS += decompress.o
 
 #
-#	Microcode utilities
+#	Microcode
 #
-CORE_OBJS += ucode_utils.o
+CORE_OBJS += microcode.o
 
 #
 #	Driver modules
@@ -165,7 +173,7 @@ PCIEB_OBJS += pcieb_x86.o
 PIT_BEEP_OBJS += pit_beep.o
 POWER_OBJS += power.o
 PCI_AUTOCONFIG_OBJS += pci_autoconfig.o pci_boot.o pcie_nvidia.o \
-			pci_memlist.o pci_resource.o
+			pci_memlist.o
 RADEON_OBJS += r300_cmdbuf.o radeon_cp.o radeon_drv.o \
 			radeon_state.o radeon_irq.o radeon_mem.o
 SD_OBJS += sd.o sd_xbuf.o
@@ -241,7 +249,7 @@ ACPICA_OBJS	+= \
 		   utxferror.o utxfinit.o utxfmutex.o utresdecode.o \
 		   utstrsuppt.o utstrtoul64.o \
 		   \
-		   acpi_enum.o acpica_ec.o acpica.o ahids.o master_ops.o \
+		   acpi_enum.o acpica_ec.o acpica.o ahids.o isapnp_devs.o \
 		   osl_ml.o osl.o
 
 
@@ -356,12 +364,6 @@ LX_BRAND_OBJS  =		\
 	lx_wait.o		\
 	lx_xattr.o
 
-#
-#	special files
-#
-MODSTUB_OBJ +=		\
-	modstubs.o
-
 BOOTDEV_OBJS +=		\
 	bootdev.o
 
@@ -411,19 +413,9 @@ VMXNET3S_OBJS =	vmxnet3_main.o \
 		vmxnet3_utils.o
 
 #
-# VMware PVSCSI SCSI Controller
-#
-PVSCSI_OBJS =	pvscsi.o
-
-#
 # Intel Temperature Module
 #
 CORETEMP_OBJS =	coretemp.o
-
-#
-# AMD Family 17 northbridge driver
-#
-AMDF17NBDF_OBJS = amdf17nbdf.o
 
 #
 # Intel Platform Controller Hub Temperature Module
@@ -434,3 +426,45 @@ PCHTEMP_OBJS = pchtemp.o
 # AMD Family 10h-16h temperature driver
 #
 AMDNBTEMP_OBJS = amdnbtemp.o
+
+#
+# AMD Zen Nexus Driver
+#
+AMDZEN_OBJS = amdzen.o zen_fabric_utils.o
+AMDZEN_STUB_OBJS = amdzen_stub.o
+SMNTEMP_OBJS = smntemp.o
+USMN_OBJS = usmn.o
+ZEN_UDF_OBJS = zen_udf.o
+ZEN_UMC_OBJS = zen_umc.o zen_umc_decode.o zen_umc_dump.o
+
+#
+# Intel Integrated Memory Controller
+# (Sandy Bridge - Cascade Lake)
+#
+IMC_OBJS =	imc.o imc_decode.o imc_dump.o
+IMCSTUB_OBJS =	imcstub.o
+
+#
+# viona (VirtIO-Net Accelerated)
+#
+VIONA_OBJS = \
+	viona_main.o \
+	viona_ring.o \
+	viona_rx.o \
+	viona_tx.o \
+	viona_hook.o
+
+#
+# bhyve PCI-passthru
+#
+PPT_OBJS = ppt.o
+
+#
+# bhyve VT-d
+#
+VMM_VTD_OBJS = vtd.o
+
+#
+# bhyve drv test interface
+#
+VMM_DRV_TEST_OBJS = vmm_drv_test.o

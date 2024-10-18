@@ -23,7 +23,6 @@ UTSBASE	= ../..
 #
 MODULE		= axf
 OBJECTS		= $(AXF_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(AXF_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_DRV_DIR)/$(MODULE)
 
 #
@@ -34,24 +33,17 @@ include $(UTSBASE)/intel/Makefile.intel
 CPPFLAGS	+= -I$(UTSBASE)/common/io/usbgem
 CPPFLAGS	+= -DVERSION=\"2.0.2\"
 CPPFLAGS	+= -DUSBGEM_CONFIG_GLDv3
-LDFLAGS		+= -dy -N misc/mac -N drv/ip -N misc/usba -N misc/usbgem
+LDFLAGS		+= -N misc/mac -N drv/ip -N misc/usba -N misc/usbgem
 
 CERRWARN	+= -_gcc=-Wno-unused-function
 CERRWARN	+= -_gcc=-Wno-unused-variable
 CERRWARN	+= -_gcc=-Wno-unused-label
 
-LINTTAGS	+= -erroff=E_FUNC_VAR_UNUSED
-LINTTAGS	+= -erroff=E_FUNC_ARG_UNUSED
-LINTTAGS	+= -erroff=E_STATIC_UNUSED
-LINTTAGS	+= -erroff=E_FUNC_RET_ALWAYS_IGNOR2
-LINTTAGS	+= -erroff=E_FUNC_SET_NOT_USED
-LINTTAGS	+= -erroff=E_ASSIGN_NARROW_CONV
 
 #
 #	Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
@@ -66,12 +58,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

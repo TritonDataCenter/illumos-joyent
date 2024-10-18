@@ -20,7 +20,7 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
  */
 
 #ifndef	_LIBSMBNS_H
@@ -50,6 +50,7 @@ typedef struct smb_ads_host_info {
 	int port;		/* ldap port */
 	int priority;		/* DNS SRV record priority */
 	int weight;		/* DNS SRV record weight */
+	uint32_t flags;		/* DC flags */
 	smb_inaddr_t ipaddr;	/* network byte order */
 } smb_ads_host_info_t;
 
@@ -63,7 +64,9 @@ typedef enum smb_ads_status {
 	SMB_ADS_KRB5_INIT_CTX,
 	SMB_ADS_KRB5_CC_DEFAULT,
 	SMB_ADS_KRB5_PARSE_PRINCIPAL,
+	SMB_ADS_KRB5_GET_INIT_CREDS_OTHER,
 	SMB_ADS_KRB5_GET_INIT_CREDS_PW,
+	SMB_ADS_KRB5_GET_INIT_CREDS_SKEW,
 	SMB_ADS_KRB5_CC_INITIALIZE,
 	SMB_ADS_KRB5_CC_STORE_CRED,
 	SMB_ADS_CANT_LOCATE_DC,
@@ -105,7 +108,7 @@ extern int smb_ads_lookup_share(smb_ads_handle_t *, const char *, const char *,
     char *);
 extern int smb_ads_add_share(smb_ads_handle_t *, const char *, const char *,
     const char *);
-extern smb_ads_status_t smb_ads_join(char *, char *, char *, char *);
+extern smb_ads_status_t smb_ads_join(char *, char *, char *, char *, char *);
 extern void smb_ads_log_errmsg(smb_ads_status_t);
 extern const char *smb_ads_strerror(int);
 extern uint32_t smb_ads_lookup_msdcs(char *, smb_dcinfo_t *);

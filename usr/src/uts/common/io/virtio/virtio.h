@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #ifndef _VIRTIO_H
@@ -80,6 +81,18 @@
  * and applies to both direct and indirect descriptor based queues.  This cap
  * is usually either negotiated with the device, or determined structurally
  * based on the shape of the buffers required for device operation.
+ *
+ * FRAMEWORK INITIALISATION: CONFIGURATION SPACE CHANGE HANDLER
+ *
+ * During the initialisation phase, the client driver may register a handler
+ * function for receiving device configuration space change events.  Once
+ * initialisation has been completed, this cannot be changed without destroying
+ * the framework object and beginning again from scratch.
+ *
+ * When a configuration space change interrupt is received, the provided
+ * handler will be called with two arguments: first, the provided user data
+ * argument; and second, a pointer to the "virtio_t" object for this instance.
+ * The handler is called in an interrupt context.
  *
  * FRAMEWORK INITIALISATION: FINISHING
  *
@@ -281,6 +294,9 @@ int virtio_init_complete(virtio_t *, int);
 int virtio_quiesce(virtio_t *);
 void virtio_shutdown(virtio_t *);
 
+void virtio_register_cfgchange_handler(virtio_t *, ddi_intr_handler_t *,
+    void *);
+
 void *virtio_intr_pri(virtio_t *);
 
 void virtio_device_reset(virtio_t *);
@@ -334,6 +350,12 @@ uint_t virtio_dma_ncookies(virtio_dma_t *);
 uint64_t virtio_dma_cookie_pa(virtio_dma_t *, uint_t);
 size_t virtio_dma_cookie_size(virtio_dma_t *, uint_t);
 
+/*
+ * virtio_init_complete() accepts a mask of allowed interrupt types using the
+ * DDI_INTR_TYPE_* family of constants.  If no specific interrupt type is
+ * required, pass VIRTIO_ANY_INTR_TYPE instead:
+ */
+#define	VIRTIO_ANY_INTR_TYPE	0
 
 #ifdef __cplusplus
 }

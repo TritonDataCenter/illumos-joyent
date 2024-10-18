@@ -28,6 +28,7 @@
  * Copyright (c) 2013 Saso Kiselkov. All rights reserved.
  * Copyright 2016 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2020 Oxide Computer Company
  */
 
 #ifndef	_IXGBE_SW_H
@@ -74,6 +75,7 @@ extern "C" {
 #include <sys/fm/util.h>
 #include <sys/disp.h>
 #include <sys/fm/io/ddi.h>
+#include <sys/ddi_ufm.h>
 #include "ixgbe_api.h"
 
 #define	MODULE_NAME			"ixgbe"	/* module name */
@@ -214,6 +216,7 @@ extern "C" {
 #define	ATTACH_PROGRESS_LINK_TIMER	0x8000	/* link check timer */
 #define	ATTACH_PROGRESS_OVERTEMP_TASKQ	0x10000 /* Over-temp taskq created */
 #define	ATTACH_PROGRESS_PHY_TASKQ	0x20000 /* Ext. PHY taskq created */
+#define	ATTACH_PROGRESS_UFM		0x40000	/* UFM support */
 
 #define	PROP_DEFAULT_MTU		"default_mtu"
 #define	PROP_FLOW_CONTROL		"flow_control"
@@ -655,6 +658,7 @@ typedef struct ixgbe {
 	uint32_t		default_mtu;
 	uint32_t		max_frame_size;
 	ixgbe_link_speed	speeds_supported;
+	uint64_t		phys_supported;
 
 	uint32_t		rcb_pending;
 
@@ -747,6 +751,11 @@ typedef struct ixgbe {
 	boolean_t		ixgbe_led_blink;
 	uint32_t		ixgbe_led_reg;
 	uint32_t		ixgbe_led_index;
+
+	/*
+	 * UFM state
+	 */
+	ddi_ufm_handle_t	*ixgbe_ufmh;
 
 	/*
 	 * Kstat definitions
@@ -887,6 +896,7 @@ int ixgbe_rx_ring_intr_disable(mac_intr_handle_t);
 int ixgbe_transceiver_info(void *, uint_t, mac_transceiver_info_t *);
 int ixgbe_transceiver_read(void *, uint_t, uint_t, void *, size_t, off_t,
     size_t *);
+mac_ether_media_t ixgbe_phy_to_media(ixgbe_t *);
 
 /*
  * Function prototypes in ixgbe_gld.c

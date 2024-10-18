@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  *
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 /*
  * Copyright (c) 2017 Joyent, Inc.
@@ -43,62 +44,18 @@
 #include <sys/elf.h>
 #include <sys/kobj.h>
 #include <sys/kobj_impl.h>
-#include <sys/tnf.h>
-#include <sys/tnf_probe.h>
+#include <sys/sdt_impl.h>
 
 #include "reloc.h"
-
-
-/*
- * Probe Discovery
- */
-
-#define	PROBE_MARKER_SYMBOL	"__tnf_probe_version_1"
-#define	TAG_MARKER_SYMBOL	"__tnf_tag_version_1"
-
-extern int tnf_splice_probes(int, tnf_probe_control_t *, tnf_tag_data_t *);
-
-/*
- * The kernel run-time linker calls this to try to resolve a reference
- * it can't otherwise resolve.  We see if it's marking a probe control
- * block; if so, we do the resolution and return 0.  If not, we return
- * 1 to show that we can't resolve it, either.
- */
-static int
-tnf_reloc_resolve(char *symname, Addr *value_p,
-    Elf64_Sxword *addend_p,
-    long offset,
-    tnf_probe_control_t **probelist,
-    tnf_tag_data_t **taglist)
-{
-	if (strcmp(symname, PROBE_MARKER_SYMBOL) == 0) {
-		*addend_p = 0;
-		((tnf_probe_control_t *)offset)->next = *probelist;
-		*probelist = (tnf_probe_control_t *)offset;
-		return (0);
-	}
-	if (strcmp(symname, TAG_MARKER_SYMBOL) == 0) {
-		*addend_p = 0;
-		*value_p = (Addr)*taglist;
-		*taglist = (tnf_tag_data_t *)offset;
-		return (0);
-	}
-	return (1);
-}
-
-#define	SDT_NOP		0x90
-#define	SDT_NOPS	5
 
 static int
 sdt_reloc_resolve(struct module *mp, char *symname, uint8_t *instr)
 {
 	sdt_probedesc_t *sdp;
-	int i;
 
 	/*
-	 * The "statically defined tracing" (SDT) provider for DTrace uses
-	 * a mechanism similar to TNF, but somewhat simpler.  (Surprise,
-	 * surprise.)  The SDT mechanism works by replacing calls to the
+	 * The "statically defined tracing" (SDT) provider for DTrace.
+	 * The SDT mechanism works by replacing calls to the
 	 * undefined routine __dtrace_probe_[name] with nop instructions.
 	 * The relocations are logged, and SDT itself will later patch the
 	 * running binary appropriately.
@@ -116,8 +73,18 @@ sdt_reloc_resolve(struct module *mp, char *symname, uint8_t *instr)
 	sdp->sdpd_next = mp->sdt_probes;
 	mp->sdt_probes = sdp;
 
-	for (i = 0; i < SDT_NOPS; i++)
-		instr[i - 1] = SDT_NOP;
+	/*
+	 * The compiler may emit the probe call as a tail call (/sibling call).
+	 * On x86 that means instead of a CALL instruction, we get a JMP.  In
+	 * that case, we also need to patch in a RET instruction instead of just
+	 * NOPs.
+	 */
+	const boolean_t is_tailcall = instr[-1] != SDT_CALL;
+	instr[-1] = SDT_NOP;
+	instr[0] = SDT_NOP;
+	instr[1] = SDT_NOP;
+	instr[2] = SDT_NOP;
+	instr[SDT_OFF_RET_IDX] = is_tailcall ? SDT_RET : SDT_NOP;
 
 	return (0);
 }
@@ -178,15 +145,13 @@ do_relocate(struct module *mp, char *reltbl, int nreloc, int relocsize,
     Addr baseaddr)
 {
 	unsigned long stndx;
-	unsigned long off;	/* can't be register for tnf_reloc_resolve() */
+	unsigned long off;
 	register unsigned long reladdr, rend;
 	register unsigned int rtype;
 	unsigned long value;
 	Elf64_Sxword addend;
 	Sym *symref = NULL;
 	int err = 0;
-	tnf_probe_control_t *probelist = NULL;
-	tnf_tag_data_t *taglist = NULL;
 	int symnum;
 	reladdr = (unsigned long)reltbl;
 	rend = reladdr + nreloc * relocsize;
@@ -216,8 +181,7 @@ do_relocate(struct module *mp, char *reltbl, int nreloc, int relocsize,
 			    rtype);
 			_kobj_printf(ops, " at 0x%lx:", off);
 			_kobj_printf(ops, " file=%s\n", mp->filename);
-			err = 1;
-			continue;
+			return (-1);
 		}
 
 
@@ -266,9 +230,9 @@ do_relocate(struct module *mp, char *reltbl, int nreloc, int relocsize,
 			} else {
 				/*
 				 * It's global. Allow weak references.  If
-				 * the symbol is undefined, give TNF (the
-				 * kernel probes facility) a chance to see
-				 * if it's a probe site, and fix it up if so.
+				 * the symbol is undefined, give dtrace
+				 * a chance to see if it's a probe site,
+				 * and fix it up if so.
 				 */
 				if (symref->st_shndx == SHN_UNDEF &&
 				    sdt_reloc_resolve(mp, mp->strings +
@@ -280,10 +244,7 @@ do_relocate(struct module *mp, char *reltbl, int nreloc, int relocsize,
 				    symref->st_name, (uint8_t *)off) == 0)
 					continue;
 
-				if (symref->st_shndx == SHN_UNDEF &&
-				    tnf_reloc_resolve(mp->strings +
-				    symref->st_name, &symref->st_value,
-				    &addend, off, &probelist, &taglist) != 0) {
+				if (symref->st_shndx == SHN_UNDEF) {
 					if (ELF_ST_BIND(symref->st_info)
 					    != STB_WEAK) {
 						_kobj_printf(ops,
@@ -328,9 +289,6 @@ do_relocate(struct module *mp, char *reltbl, int nreloc, int relocsize,
 	} /* end of while loop */
 	if (err)
 		return (-1);
-
-	if (tnf_splice_probes(mp->flags & KOBJ_PRIM, probelist, taglist))
-		mp->flags |= KOBJ_TNF_PROBE;
 
 	return (0);
 }

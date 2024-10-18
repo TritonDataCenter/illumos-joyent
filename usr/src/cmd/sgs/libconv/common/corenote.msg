@@ -25,6 +25,8 @@
 #
 # Copyright 2012 DEY Storage Systems, Inc.  All rights reserved.
 # Copyright (c) 2018 Joyent, Inc.
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2024 Oxide Computer Company
 #
 
 @ MSG_NT_PRSTATUS		"[ NT_PRSTATUS ]"
@@ -50,6 +52,8 @@
 @ MSG_NT_SPYMASTER		"[ NT_SPYMASTER ]"
 @ MSG_NT_SECFLAGS		"[ NT_SECFLAGS ]"
 @ MSG_NT_LWPNAME		"[ NT_LWPNAME ]"
+@ MSG_NT_UPANIC			"[ NT_UPANIC ]"
+@ MSG_NT_CWD			"[ NT_CWD ]"
 
 
 @ MSG_AUXV_AF_SUN_SETUGID		"AF_SUN_SETUGID"
@@ -110,6 +114,7 @@
 @ MSG_AUXV_AT_SUN_COMMPAGE		"SUN_COMMPAGE"
 @ MSG_AUXV_AT_SUN_FPTYPE		"SUN_FPTYPE"
 @ MSG_AUXV_AT_SUN_FPSIZE		"SUN_FPSIZE"
+@ MSG_AUXV_AT_SUN_HWCAP3		"SUN_HWCAP3"
 
 
 @ MSG_CC_CONTENT_STACK		"STACK"
@@ -125,6 +130,7 @@
 @ MSG_CC_CONTENT_DISM		"DISM"
 @ MSG_CC_CONTENT_CTF		"CTF"
 @ MSG_CC_CONTENT_SYMTAB		"SYMTAB"
+@ MSG_CC_CONTENT_DEBUG		"DEBUG"
 
 
 @ MSG_ERRNO_EPERM		"[ EPERM ]"			# 1
@@ -290,6 +296,10 @@
 @ MSG_ASLR		"ASLR"
 @ MSG_FORBIDNULLMAP	"FORBIDNULLMAP"
 @ MSG_NOEXECSTACK	"NOEXECSTACK"
+
+@ MSG_MSG_VALID		"MSG_VALID"
+@ MSG_MSG_ERROR		"MSG_ERROR"
+@ MSG_MSG_TRUNC		"MSG_TRUNC"
 
 @ MSG_PS_NONE			"[ PS_NONE ]"
 @ MSG_PS_QUERY			"[ PS_QUERY ]"
@@ -829,10 +839,14 @@
 @ MSG_SYS_READV_ALT			"readv"
 @ MSG_SYS_WRITEV			"[ writev ]"			# 122
 @ MSG_SYS_WRITEV_ALT			"writev"
-@ MSG_SYS_123				"123"				# 123(u)
-@ MSG_SYS_124				"124"				# 124(u)
-@ MSG_SYS_125				"125"				# 125(u)
-@ MSG_SYS_126				"126"				# 126(u)
+@ MSG_SYS_PREADV			"[ preadv ]"			# 123
+@ MSG_SYS_PREADV_ALT			"preadv"
+@ MSG_SYS_PWRITEV			"[ pwritev ]"			# 124
+@ MSG_SYS_PWRITEV_ALT			"pwritev"
+@ MSG_SYS_UPANIC			"[ upanic ]"			# 125
+@ MSG_SYS_UPANIC_ALT			"upanic"
+@ MSG_SYS_GETRANDOM			"[ getrandom ]"			# 126
+@ MSG_SYS_GETRANDOM_ALT			"getrandom"
 @ MSG_SYS_MMAPOBJ			"[ mmapobj ]"			# 127
 @ MSG_SYS_MMAPOBJ_ALT			"mmapobj"
 @ MSG_SYS_SETRLIMIT			"[ setrlimit ]"			# 128
@@ -1106,6 +1120,10 @@
 @ MSG_PR_O_XATTR			"O_XATTR"
 @ MSG_PR_O_NOFOLLOW			"O_NOFOLLOW"
 @ MSG_PR_O_NOLINKS			"O_NOLINKS"
+@ MSG_PR___FLXPATH			"__FLXPATH"
+
+@ MSG_FD_CLOEXEC			"FD_CLOEXEC"
+@ MSG_FD_CLOFORK			"FD_CLOFORK"
 
 @ MSG_S_IFIFO				"S_IFIFO"
 @ MSG_S_IFCHR				"S_IFCHR"

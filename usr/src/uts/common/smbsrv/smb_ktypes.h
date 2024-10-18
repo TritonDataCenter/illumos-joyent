@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
+ * Copyright 2011-2022 Tintri by DDN, Inc.  All rights reserved.
+ * Copyright 2017-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -267,6 +268,7 @@ typedef struct _smb_thread {
 	uint32_t		sth_magic;
 	char			sth_name[32];
 	smb_thread_state_t	sth_state;
+	struct smb_server	*sth_server;
 	kthread_t		*sth_th;
 	kt_did_t		sth_did;
 	smb_thread_ep_t		sth_ep;
@@ -380,6 +382,16 @@ typedef struct smb_dtor {
 	void		*dt_object;
 	smb_dtorproc_t	dt_proc;
 } smb_dtor_t;
+
+typedef struct smb_lavl {
+	krwlock_t	la_lock;
+	avl_tree_t	la_tree;
+	uint64_t	la_wrop;
+	kmutex_t	la_mutex;
+	list_t		la_deleteq;
+	uint32_t	la_deleteq_count;
+	boolean_t	la_flushing;
+} smb_lavl_t;
 
 typedef struct smb_llist {
 	krwlock_t	ll_lock;
@@ -597,9 +609,11 @@ typedef struct smb_oplock {
  */
 typedef struct smb_oplock_grant {
 	/* smb protocol-level state */
-	uint32_t		og_state;	/* latest sent to client */
-	uint32_t		og_breaking;	/* BREAK_TO... flags */
+	uint32_t		og_state;	/* what client has now */
+	uint32_t		og_breakto;	/* level breaking to */
+	boolean_t		og_breaking;
 	uint16_t		og_dialect;	/* how to send breaks */
+	kcondvar_t		og_ack_cv;	/* Wait for ACK */
 	/* File-system level state */
 	uint8_t			onlist_II;
 	uint8_t			onlist_R;
@@ -612,7 +626,7 @@ typedef struct smb_oplock_grant {
 
 typedef struct smb_lease {
 	list_node_t		ls_lnd;		/* sv_lease_ht */
-	kmutex_t		ls_mutex;
+	kmutex_t		ls_mutex;	/* for ls_refcnt */
 	smb_llist_t		*ls_bucket;
 	struct smb_node		*ls_node;
 	/*
@@ -621,10 +635,13 @@ typedef struct smb_lease {
 	 */
 	void			*ls_oplock_ofile;
 	uint32_t		ls_refcnt;
-	uint32_t		ls_state;
-	uint32_t		ls_breaking;	/* BREAK_TO... flags */
+	uint32_t		ls_state;	/* what client has now */
+	uint32_t		ls_breakto;	/* level breaking to */
 	uint16_t		ls_epoch;
 	uint16_t		ls_version;
+	boolean_t		ls_breaking;
+	boolean_t		ls_destroying;
+	kcondvar_t		ls_ack_cv;	/* Wait for ACK */
 	uint8_t			ls_key[SMB_LEASE_KEY_SZ];
 	uint8_t			ls_clnt[SMB_LEASE_KEY_SZ];
 } smb_lease_t;
@@ -803,7 +820,7 @@ struct smb_sign {
  */
 struct smb_key {
 	uint_t len;
-	uint8_t key[SMB2_SESSION_KEY_LEN];
+	uint8_t key[32]; /* fit AES-256 key */
 };
 
 #define	SMB_SIGNING_ENABLED	1
@@ -888,6 +905,7 @@ struct smb_key {
     ASSERT(((p) != NULL) && ((p)->s_magic == SMB_SESSION_MAGIC))
 
 #define	SMB_CHALLENGE_SZ	8
+#define	SMB3_PREAUTH_HASHVAL_SZ	64
 
 typedef enum {
 	SMB_SESSION_STATE_INITIALIZED = 0,
@@ -911,7 +929,6 @@ typedef struct smb_session {
 	uint64_t		s_kid;
 	smb_session_state_t	s_state;
 	uint32_t		s_flags;
-	taskqid_t		s_receiver_tqid;
 	kthread_t		*s_thread;
 	kt_did_t		s_ktdid;
 	int	(*newrq_func)(struct smb_request *);
@@ -938,6 +955,7 @@ typedef struct smb_session {
 	struct smb_sign		signing;	/* SMB1 */
 	void			*sign_mech;	/* mechanism info */
 	void			*enc_mech;
+	void			*preauth_mech;
 
 	/* SMB2/SMB3 signing support */
 	int			(*sign_calc)(struct smb_request *,
@@ -976,6 +994,11 @@ typedef struct smb_session {
 	uint16_t		smb_max_mpx;
 	smb_srqueue_t		*s_srqueue;
 	uint64_t		start_time;
+
+	uint16_t		smb31_enc_cipherid;
+	uint16_t		smb31_preauth_hashid;
+	uint8_t			smb31_preauth_hashval[SMB3_PREAUTH_HASHVAL_SZ];
+
 	unsigned char		MAC_key[44];
 	char			ip_addr_str[INET6_ADDRSTRLEN];
 	uint8_t			clnt_uuid[16];
@@ -1057,6 +1080,8 @@ typedef struct smb_user {
 	uint32_t		u_privileges;
 	uint16_t		u_uid;		/* unique per-session */
 	uint32_t		u_audit_sid;
+	uint32_t		u_owned_tree_cnt;
+	kcondvar_t		u_owned_tree_cv;
 
 	uint32_t		u_sign_flags;
 	struct smb_key		u_sign_key;	/* SMB2 signing */
@@ -1067,6 +1092,9 @@ typedef struct smb_user {
 	uint8_t			u_nonce_fixed[4];
 	uint64_t		u_salt;
 	smb_cfg_val_t		u_encrypt;
+
+	/* SMB 3.1.1 preauth session hashval */
+	uint8_t			u_preauth_hashval[SMB3_PREAUTH_HASHVAL_SZ];
 } smb_user_t;
 
 #define	SMB_TREE_MAGIC			0x54524545	/* 'TREE' */
@@ -1125,7 +1153,7 @@ typedef struct smb_tree {
 	smb_user_t		*t_owner;
 	smb_node_t		*t_snode;
 
-	smb_llist_t		t_ofile_list;
+	smb_lavl_t		t_ofile_list;
 	smb_idpool_t		t_fid_pool;
 
 	smb_llist_t		t_odir_list;
@@ -1146,6 +1174,7 @@ typedef struct smb_tree {
 	time_t			t_connect_time;
 	volatile uint32_t	t_open_files;
 	smb_cfg_val_t		t_encrypt; /* Share.EncryptData */
+	timestruc_t		t_create_time;
 } smb_tree_t;
 
 #define	SMB_TREE_VFS(tree)	((tree)->t_snode->vp->v_vfsp)
@@ -1206,6 +1235,7 @@ typedef struct smb_tree {
 
 #define	SMB_ODIR_BUFSIZE	(8 * 1024)
 
+/* smb_odir_t d_flags */
 #define	SMB_ODIR_FLAG_WILDCARDS		0x0001
 #define	SMB_ODIR_FLAG_IGNORE_CASE	0x0002
 #define	SMB_ODIR_FLAG_XATTR		0x0004
@@ -1213,6 +1243,8 @@ typedef struct smb_tree {
 #define	SMB_ODIR_FLAG_CATIA		0x0010
 #define	SMB_ODIR_FLAG_ABE		0x0020
 #define	SMB_ODIR_FLAG_SHORTNAMES	0x0040
+#define	SMB_ODIR_FLAG_RESTRICTED	0x0080
+#define	SMB_ODIR_FLAG_ACEACCESS		0x0100
 
 typedef enum {
 	SMB_ODIR_STATE_OPEN = 0,
@@ -1365,10 +1397,12 @@ typedef enum {
 } smb_ofile_state_t;
 
 typedef struct smb_ofile {
-	list_node_t		f_tree_lnd;	/* t_ofile_list */
+	uint16_t		f_fid;		/* keep first */
+	uint16_t		f_ftype;
+	uint32_t		f_magic;
+	avl_node_t		f_tree_lnd;	/* t_ofile_list */
 	list_node_t		f_node_lnd;	/* n_ofile_list */
 	list_node_t		f_dh_lnd;	/* sv_persistid_ht */
-	uint32_t		f_magic;
 	kmutex_t		f_mutex;
 	smb_ofile_state_t	f_state;
 
@@ -1395,8 +1429,6 @@ typedef struct smb_ofile {
 	uint32_t		f_share_access;
 	uint32_t		f_create_options;
 	uint32_t		f_opened_by_pid;
-	uint16_t		f_fid;
-	uint16_t		f_ftype;
 	uint64_t		f_llf_pos;
 	int			f_mode;
 	cred_t			*f_cr;
@@ -1404,6 +1436,7 @@ typedef struct smb_ofile {
 	smb_attr_t		f_pending_attr;
 	boolean_t		f_written;
 	smb_oplock_grant_t	f_oplock;
+	boolean_t		f_oplock_closing;
 	uint8_t			TargetOplockKey[SMB_LEASE_KEY_SZ];
 	uint8_t			ParentOplockKey[SMB_LEASE_KEY_SZ];
 	struct smb_lease	*f_lease;
@@ -1641,7 +1674,9 @@ typedef struct smb_arg_lock {
 
 typedef struct smb_arg_olbrk {
 	uint32_t	NewLevel;
+	uint32_t	OldLevel;
 	boolean_t	AckRequired;
+	uint8_t		LeaseKey[SMB_LEASE_KEY_SZ];
 } smb_arg_olbrk_t;
 
 /*
@@ -1775,6 +1810,7 @@ typedef enum smb_req_state {
 	SMB_REQ_STATE_WAITING_FCN2,
 	SMB_REQ_STATE_WAITING_LOCK,
 	SMB_REQ_STATE_WAITING_PIPE,
+	SMB_REQ_STATE_WAITING_OLBRK,
 	SMB_REQ_STATE_COMPLETED,
 	SMB_REQ_STATE_CANCEL_PENDING,
 	SMB_REQ_STATE_CANCELLED,
@@ -1787,6 +1823,7 @@ typedef struct smb_request {
 	uint32_t		sr_magic;
 	kmutex_t		sr_mutex;
 	smb_req_state_t		sr_state;
+	kcondvar_t		sr_st_cv;
 	struct smb_server	*sr_server;
 	pid_t			*sr_pid;
 	int32_t			sr_gmtoff;
@@ -1799,12 +1836,6 @@ typedef struct smb_request {
 	struct smb_request	*sr_postwork;
 
 	list_node_t		sr_waiters;	/* smb_notify.c */
-
-	/* Info from session service header */
-	uint32_t		sr_req_length; /* Excluding NBT header */
-
-	/* Request buffer excluding NBT header */
-	void			*sr_request_buf;
 
 	struct mbuf_chain	command;
 	struct mbuf_chain	reply;
@@ -1864,10 +1895,10 @@ typedef struct smb_request {
 	/*
 	 * SMB3 transform header fields. [MS-SMB2 2.2.41]
 	 */
-	uint64_t		smb3_tform_ssnid;
-	smb_user_t		*tform_ssn;
-	uint32_t		msgsize;
-	uint8_t			nonce[16];
+	uint64_t		th_ssnid;
+	smb_user_t		*th_sid_user;
+	uint32_t		th_msglen;
+	uint8_t			th_nonce[16];
 
 	boolean_t		encrypted;
 	boolean_t		dh_nvl_dirty;
@@ -2037,11 +2068,13 @@ typedef struct {
 	int			ld_family;
 	struct sockaddr_in	ld_sin;
 	struct sockaddr_in6	ld_sin6;
+	clock_t			ld_quiet;
 } smb_listener_daemon_t;
 
 #define	SMB_SSETUP_CMD			"authentication"
 #define	SMB_TCON_CMD			"share mapping"
 #define	SMB_OPIPE_CMD			"pipe open"
+#define	SMB_LOGOFF_CMD			"logoff"
 #define	SMB_THRESHOLD_REPORT_THROTTLE	50
 typedef struct smb_cmd_threshold {
 	char			*ct_cmd;
@@ -2092,10 +2125,18 @@ typedef struct smb_server {
 	uint32_t		sv_refcnt;
 	pid_t			sv_pid;
 	zoneid_t		sv_zid;
+	dev_t			sv_dev;
 	smb_listener_daemon_t	sv_nbt_daemon;
 	smb_listener_daemon_t	sv_tcp_daemon;
 	krwlock_t		sv_cfg_lock;
 	smb_kmod_cfg_t		sv_cfg;
+
+	kmutex_t		sv_proc_lock;
+	kcondvar_t		sv_proc_cv;
+	smb_thread_state_t	sv_proc_state;
+	uint64_t		sv_proc_did;
+	struct proc		*sv_proc_p;
+
 	smb_session_t		*sv_session;
 	smb_user_t		*sv_rootuser;
 	smb_llist_t		sv_session_list;
@@ -2116,6 +2157,7 @@ typedef struct smb_server {
 
 	smb_thread_t		si_thread_timers;
 
+	taskq_t			*sv_notify_pool;
 	taskq_t			*sv_worker_pool;
 	taskq_t			*sv_receiver_pool;
 
@@ -2140,6 +2182,7 @@ typedef struct smb_server {
 	smb_cmd_threshold_t	sv_ssetup_ct;
 	smb_cmd_threshold_t	sv_tcon_ct;
 	smb_cmd_threshold_t	sv_opipe_ct;
+	smb_cmd_threshold_t	sv_logoff_ct;
 	kstat_t			*sv_legacy_ksp;
 	kmutex_t		sv_legacy_ksmtx;
 	smb_disp_stats_t	*sv_disp_stats1;
@@ -2228,6 +2271,14 @@ typedef struct smb_enumshare_info {
 	uint16_t	es_nsent;
 	uint16_t	es_datasize;
 } smb_enumshare_info_t;
+
+/*
+ * SMB 3.1.1 error id for error ctxs
+ */
+enum smb2_error_id {
+	SMB2_ERROR_ID_DEFAULT		= 0,
+	SMB2_ERROR_ID_SHARE_REDIRECT	= 0x72645253	/* not used */
+};
 
 #ifdef	__cplusplus
 }

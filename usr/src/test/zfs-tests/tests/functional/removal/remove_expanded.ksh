@@ -32,7 +32,7 @@
 #
 
 
-TMPDIR=${TMPDIR:-/tmp}
+TMPDIR=${TMPDIR:-$TEST_BASE_DIR}
 DISK0=$TMPDIR/dsk0
 DISK1=$TMPDIR/dsk1
 DISK2=$TMPDIR/dsk2
@@ -79,7 +79,7 @@ log_must wait_for_removal $TESTPOOL
 # Run sync once to ensure that the config actually changed.
 #
 log_must zpool add $TESTPOOL $DISK2
-log_must sync
+sync_all_pools
 
 #
 # Ensure that zdb does not find any problems with this.

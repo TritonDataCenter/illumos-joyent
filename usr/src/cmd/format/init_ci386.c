@@ -23,8 +23,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * This file defines the known controller types.  To add a new controller
  * type, simply add a new line to the array and define the necessary
@@ -63,6 +61,10 @@ struct	ctlr_type ctlr_types[] = {
 		&genericops,
 		CF_NOWLIST },
 
+	{ DKC_BLKDEV,
+		"generic-block-device",
+		&genericops,
+		CF_NOWLIST }
 };
 
 /*

@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2018, Joyent, Inc.
+ * Copyright 2022 MNX Cloud, Inc.
  */
 
 /*
@@ -43,7 +44,7 @@ usage()
 int
 main(int argc, char *argv[])
 {
-	int fd, c;
+	int fd, c, version;
 	char emsg[128];
 	boolean_t max_cpu = B_FALSE;
 	boolean_t verbose = B_FALSE;
@@ -61,6 +62,11 @@ main(int argc, char *argv[])
 		}
 	}
 
+/*
+ * Uggh, recent changes to sys/vmm.h exclude this from userland. Keep in synch.
+ * See illumos#14691 for the correct answer to this problem.
+ */
+#define	VM_MAXCPU 32
 	if (max_cpu) {
 		(void) printf("%d\n", VM_MAXCPU);
 	}
@@ -72,6 +78,15 @@ main(int argc, char *argv[])
 	}
 
 	emsg[0] = '\0';
+	version = ioctl(fd, VMM_INTERFACE_VERSION, 0);
+	if (version != VMM_CURRENT_INTERFACE_VERSION) {
+		if (verbose) {
+			fprintf(stderr, "mismatched interface version, "
+			    "expecting %d, got %d\n",
+			    VMM_CURRENT_INTERFACE_VERSION, version);
+		}
+		exit(1);
+	}
 	if (ioctl(fd, VMM_VM_SUPPORTED, emsg) < 0)  {
 		if (verbose)
 			fprintf(stderr, "%s\n", emsg);

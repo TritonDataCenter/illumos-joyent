@@ -23,16 +23,54 @@
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, Joyent, Inc. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <syslog.h>
 #include <stdarg.h>
+#include <nfs/nfs.h>
+#include <rpcsvc/daemon_utils.h>
+#include <sys/sysmacros.h>
 #include "smfcfg.h"
 
+/*
+ * NFS version strings translation table to numeric form.
+ */
+static struct str_val {
+	const char *str;
+	uint32_t val;
+} nfs_versions[] = {
+	{ "2",		NFS_VERS_2 },
+	{ "3",		NFS_VERS_3 },
+	{ "4",		NFS_VERS_4 },
+	{ "4.0",	NFS_VERS_4 },
+	{ "4.1",	NFS_VERS_4_1 },
+	{ "4.2",	NFS_VERS_4_2 }
+};
+
+/*
+ * Translate NFS version string to numeric form.
+ * Returns NFS_VERS_... value or zero for invalid version string.
+ */
+uint32_t
+nfs_convert_version_str(const char *version)
+{
+	uint32_t v = 0;
+
+	for (size_t i = 0; i < ARRAY_SIZE(nfs_versions); i++) {
+		if (strcmp(version, nfs_versions[i].str) == 0) {
+			v = nfs_versions[i].val;
+			break;
+		}
+	}
+
+	return (v);
+}
+
 fs_smfhandle_t *
-fs_smf_init(char *fmri, char *instance)
+fs_smf_init(const char *fmri, const char *instance)
 {
 	fs_smfhandle_t *handle = NULL;
 	char *svcname, srv[MAXPATHLEN];
@@ -41,7 +79,7 @@ fs_smf_init(char *fmri, char *instance)
 	 * svc name is of the form svc://network/fs/server:instance1
 	 * FMRI portion is /network/fs/server
 	 */
-	snprintf(srv, MAXPATHLEN, "%s", fmri + strlen("svc:/"));
+	(void) snprintf(srv, MAXPATHLEN, "%s", fmri + strlen("svc:/"));
 	svcname = strrchr(srv, ':');
 	if (svcname != NULL)
 		*svcname = '\0';
@@ -81,10 +119,13 @@ fs_smf_init(char *fmri, char *instance)
 
 out:
 	fs_smf_fini(handle);
-	fprintf(stderr, gettext("SMF Initialization problems..%s\n"), fmri);
+	if (scf_error() != SCF_ERROR_NOT_FOUND) {
+		fprintf(stderr,
+		    gettext("SMF Initialization problem(%s): %s\n"),
+		    fmri, scf_strerror(scf_error()));
+	}
 	return (NULL);
 }
-
 
 void
 fs_smf_fini(fs_smfhandle_t *handle)
@@ -97,7 +138,7 @@ fs_smf_fini(fs_smfhandle_t *handle)
 		scf_property_destroy(handle->fs_property);
 		scf_value_destroy(handle->fs_value);
 		if (handle->fs_handle != NULL) {
-			scf_handle_unbind(handle->fs_handle);
+			(void) scf_handle_unbind(handle->fs_handle);
 			scf_handle_destroy(handle->fs_handle);
 		}
 		free(handle);
@@ -126,15 +167,15 @@ fs_smf_set_prop(smf_fstype_t fstype, char *prop_name, char *valbuf,
 	 * The SVC names we are using currently are already
 	 * appended by default. Fix this for instances project.
 	 */
-	snprintf(srv, MAXPATHLEN, "%s", fmri);
+	(void) snprintf(srv, MAXPATHLEN, "%s", fmri);
 	p = strstr(fmri, ":default");
 	if (p == NULL) {
-		strcat(srv, ":");
+		(void) strcat(srv, ":");
 		if (instance == NULL)
 			instance = "default";
 		if (strlen(srv) + strlen(instance) > MAXPATHLEN)
 			goto out;
-		strncat(srv, instance, strlen(instance));
+		(void) strncat(srv, instance, strlen(instance));
 	}
 	svcname = srv;
 	phandle = fs_smf_init(fmri, instance);
@@ -224,9 +265,11 @@ fs_smf_set_prop(smf_fstype_t fstype, char *prop_name, char *valbuf,
 				ret = SMF_SYSTEM_ERR;
 			}
 			break;
+		default:
+			break;
 		}
 		if (ret != SMF_SYSTEM_ERR)
-			scf_transaction_commit(tran);
+			(void) scf_transaction_commit(tran);
 	}
 out:
 	if (tran != NULL)
@@ -257,15 +300,15 @@ fs_smf_get_prop(smf_fstype_t fstype, char *prop_name, char *cbuf,
 	 * The SVC names we are using currently are already
 	 * appended by default. Fix this for instances project.
 	 */
-	snprintf(srv, MAXPATHLEN, "%s", fmri);
+	(void) snprintf(srv, MAXPATHLEN, "%s", fmri);
 	p = strstr(fmri, ":default");
 	if (p == NULL) {
-		strcat(srv, ":");
+		(void) strcat(srv, ":");
 		if (instance == NULL)
 			instance = "default";
 		if (strlen(srv) + strlen(instance) > MAXPATHLEN)
 			goto out;
-		strncat(srv, instance, strlen(instance));
+		(void) strncat(srv, instance, strlen(instance));
 	}
 	svcname = srv;
 	phandle = fs_smf_init(fmri, instance);
@@ -313,7 +356,7 @@ fs_smf_get_prop(smf_fstype_t fstype, char *prop_name, char *cbuf,
 			}
 			ret = 0;
 			*bufsz = len;
-		break;
+			break;
 		case SCF_TYPE_INTEGER:
 			if (scf_value_get_integer(val, &valint) != 0) {
 				ret = scf_error();
@@ -325,7 +368,7 @@ fs_smf_get_prop(smf_fstype_t fstype, char *prop_name, char *cbuf,
 				goto out;
 			}
 			ret = 0;
-		break;
+			break;
 		case SCF_TYPE_BOOLEAN:
 			if (scf_value_get_boolean(val, &bval) != 0) {
 				ret = scf_error();
@@ -340,7 +383,9 @@ fs_smf_get_prop(smf_fstype_t fstype, char *prop_name, char *cbuf,
 				ret = SA_BAD_VALUE;
 				goto out;
 			}
-		break;
+			break;
+		default:
+			break;
 		}
 	} else {
 		ret = scf_error();
@@ -429,4 +474,117 @@ string_to_boolean(const char *str)
 		return (B_TRUE);
 	} else
 		return (B_FALSE);
+}
+
+/*
+ * upgrade server_versmin and server_versmax from int to string.
+ * This is needed to allow to specify version as major.minor.
+ */
+static void
+nfs_upgrade_server_vers(const char *fmri)
+{
+	fs_smfhandle_t *phandle;
+	scf_handle_t *handle;
+	scf_propertygroup_t *pg;
+	scf_instance_t *inst;
+	scf_value_t *vmin = NULL, *vmax = NULL;
+	scf_transaction_t *tran = NULL;
+	scf_transaction_entry_t *emin = NULL, *emax = NULL;
+	char versmax[32];
+	char versmin[32];
+	int bufsz;
+
+	/*
+	 * Read old integer values, stop in case of error - apparently
+	 * the upgrade is already done.
+	 */
+	bufsz = sizeof (versmax);
+	if (nfs_smf_get_prop("server_versmax", versmax, DEFAULT_INSTANCE,
+	    SCF_TYPE_INTEGER, (char *)fmri, &bufsz) != SA_OK) {
+		return;
+	}
+	bufsz = sizeof (versmin);
+	if (nfs_smf_get_prop("server_versmin", versmin, DEFAULT_INSTANCE,
+	    SCF_TYPE_INTEGER, (char *)fmri, &bufsz) != SA_OK) {
+		return;
+	}
+
+	/* Write back as SCF_TYPE_ASTRING */
+	phandle = fs_smf_init(fmri, NULL);
+	if (phandle == NULL)
+		return;
+
+	handle = phandle->fs_handle;
+	if (handle == NULL)
+		goto done;
+	pg = phandle->fs_pg;
+	inst = phandle->fs_instance;
+	tran = scf_transaction_create(handle);
+	vmin = scf_value_create(handle);
+	vmax = scf_value_create(handle);
+	emin = scf_entry_create(handle);
+	emax = scf_entry_create(handle);
+
+	if (pg == NULL || inst == NULL || tran == NULL ||
+	    emin == NULL || emax == NULL || vmin == NULL || vmax == NULL) {
+		goto done;
+	}
+
+	if (scf_handle_decode_fmri(handle, (char *)fmri,
+	    phandle->fs_scope, phandle->fs_service, inst, NULL, NULL, 0) != 0) {
+		goto done;
+	}
+
+	if (scf_instance_get_pg(inst, NFS_PROPS_PGNAME, pg) == -1)
+		goto done;
+
+	if (scf_pg_update(pg) == -1)
+		goto done;
+
+	if (scf_transaction_start(tran, pg) == -1)
+		goto done;
+
+	if (scf_transaction_property_change_type(tran, emax,
+	    "server_versmax", SCF_TYPE_ASTRING) != 0) {
+		goto done;
+	}
+	if (scf_value_set_astring(vmax, versmax) == 0) {
+		if (scf_entry_add_value(emax, vmax) != 0)
+			goto done;
+	} else {
+		goto done;
+	}
+
+	if (scf_transaction_property_change_type(tran, emin,
+	    "server_versmin", SCF_TYPE_ASTRING) != 0) {
+		goto done;
+	}
+	if (scf_value_set_astring(vmin, versmin) == 0) {
+		if (scf_entry_add_value(emin, vmin) != 0)
+			goto done;
+	} else {
+		goto done;
+	}
+
+	(void) scf_transaction_commit(tran);
+done:
+	if (tran != NULL)
+		scf_transaction_destroy(tran);
+	if (emin != NULL)
+		scf_entry_destroy(emin);
+	if (emax != NULL)
+		scf_entry_destroy(emax);
+	if (vmin != NULL)
+		scf_value_destroy(vmin);
+	if (vmax != NULL)
+		scf_value_destroy(vmax);
+	fs_smf_fini(phandle);
+}
+
+void
+nfs_config_upgrade(const char *svc_name)
+{
+	if (strcmp(svc_name, NFSD) == 0) {
+		nfs_upgrade_server_vers(svc_name);
+	}
 }

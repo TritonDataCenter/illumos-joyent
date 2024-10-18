@@ -37,40 +37,6 @@
 #include "Putil.h"
 
 /*
- * Place the new element on the list prior to the existing element.
- */
-void
-list_link(void *new, void *existing)
-{
-	plist_t *p = new;
-	plist_t *q = existing;
-
-	if (q) {
-		p->list_forw = q;
-		p->list_back = q->list_back;
-		q->list_back->list_forw = p;
-		q->list_back = p;
-	} else {
-		p->list_forw = p->list_back = p;
-	}
-}
-
-/*
- * Unchain the specified element from a list.
- */
-void
-list_unlink(void *old)
-{
-	plist_t *p = old;
-
-	if (p->list_forw != p) {
-		p->list_back->list_forw = p->list_forw;
-		p->list_forw->list_back = p->list_back;
-	}
-	p->list_forw = p->list_back = p;
-}
-
-/*
  * Routines to manipulate sigset_t, fltset_t, or sysset_t.  These routines
  * are provided as equivalents for the <sys/procfs.h> macros prfillset,
  * premptyset, praddset, and prdelset.  These functions are preferable
@@ -158,12 +124,14 @@ Perror_printf(struct ps_prochandle *P, const char *format, ...)
 static ssize_t
 Pdefault_ssizet()
 {
+	errno = ENOTSUP;
 	return (-1);
 }
 
 static int
 Pdefault_int()
 {
+	errno = ENOTSUP;
 	return (-1);
 }
 
@@ -175,6 +143,7 @@ Pdefault_void()
 static void *
 Pdefault_voidp()
 {
+	errno = ENOTSUP;
 	return (NULL);
 }
 
@@ -195,6 +164,7 @@ static const ps_ops_t P_default_ops = {
 	.pop_zonename	= (pop_zonename_t)Pdefault_voidp,
 	.pop_execname	= (pop_execname_t)Pdefault_voidp,
 	.pop_secflags	= (pop_secflags_t)Pdefault_int,
+	.pop_cwd	= (pop_cwd_t)Pdefault_int,
 #if defined(__i386) || defined(__amd64)
 	.pop_ldt	= (pop_ldt_t)Pdefault_int
 #endif
@@ -242,6 +212,8 @@ Pinit_ops(ps_ops_t *dst, const ps_ops_t *src)
 		dst->pop_execname = src->pop_execname;
 	if (src->pop_secflags != NULL)
 		dst->pop_secflags = src->pop_secflags;
+	if (src->pop_cwd != NULL)
+		dst->pop_cwd = src->pop_cwd;
 #if defined(__i386) || defined(__amd64)
 	if (src->pop_ldt != NULL)
 		dst->pop_ldt = src->pop_ldt;

@@ -23,7 +23,7 @@
  * Copyright (c) 1988, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2020 Joyent, Inc.
  * Copyright (c) 2011, 2017 by Delphix. All rights reserved.
- * Copyright 2017 RackTop Systems.
+ * Copyright 2016-2024 RackTop Systems, Inc.
  */
 
 /*	Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989 AT&T	*/
@@ -53,10 +53,10 @@
 #include <sys/kstat.h>
 #include <sys/kmem.h>
 #include <sys/list.h>
-#ifdef	_KERNEL
+#if defined(_KERNEL) || defined(_FAKE_KERNEL)
 #include <sys/buf.h>
 #include <sys/sdt.h>
-#endif	/* _KERNEL */
+#endif	/* _KERNEL || _FAKE_KERNEL */
 
 #ifdef	__cplusplus
 extern "C" {
@@ -816,7 +816,7 @@ typedef enum vnevent	{
 	VE_RMDIR	= 4,	/* Remove of directory vnode's name */
 	VE_CREATE	= 5,	/* Create with vnode's name which exists */
 	VE_LINK		= 6,	/* Link with vnode's name as source */
-	VE_RENAME_DEST_DIR = 7,	/* Rename with vnode as target dir */
+	VE_RENAME_DEST_DIR	= 7,	/* Rename with vnode as target dir */
 	VE_MOUNTEDOVER	= 8,	/* File or Filesystem got mounted over vnode */
 	VE_TRUNCATE = 9,	/* Truncate */
 	VE_PRE_RENAME_SRC = 10,	/* Pre-rename, with vnode as source */
@@ -899,7 +899,7 @@ struct as;
 struct pollhead;
 struct taskq;
 
-#ifdef	_KERNEL
+#if defined(_KERNEL) || defined(_FAKE_KERNEL)
 
 /*
  * VNODE_OPS defines all the vnode operations.  It is used to define
@@ -1114,7 +1114,7 @@ extern int	fop_reqzcbuf(vnode_t *, enum uio_rw, xuio_t *, cred_t *,
 				caller_context_t *);
 extern int	fop_retzcbuf(vnode_t *, xuio_t *, cred_t *, caller_context_t *);
 
-#endif	/* _KERNEL */
+#endif	/* _KERNEL || _FAKE_KERNEL */
 
 #define	VOP_OPEN(vpp, mode, cr, ct) \
 	fop_open(vpp, mode, cr, ct)
@@ -1266,6 +1266,8 @@ extern int	fop_retzcbuf(vnode_t *, xuio_t *, cred_t *, caller_context_t *);
 #define	LOOKUP_XATTR		0x02	/* lookup up extended attr dir */
 #define	CREATE_XATTR_DIR	0x04	/* Create extended attr dir */
 #define	LOOKUP_HAVE_SYSATTR_DIR	0x08	/* Already created virtual GFS dir */
+/* LOOKUP_CHECKREAD		0x10	- private lookuppnvp flag */
+#define	LOOKUP_NOACLCHECK	0x20	/* Dont check ACL when checking perms */
 
 /*
  * Flags for VOP_READDIR
@@ -1290,7 +1292,7 @@ extern int	fop_retzcbuf(vnode_t *, xuio_t *, cred_t *, caller_context_t *);
 /*
  * Public vnode manipulation functions.
  */
-#ifdef	_KERNEL
+#if defined(_KERNEL) || defined(_FAKE_KERNEL)
 
 vnode_t *vn_alloc(int);
 void	vn_reinit(vnode_t *);
@@ -1363,8 +1365,12 @@ void	vn_vfsunlock(struct vnode *vp);
 int	vn_vfswlock_held(struct vnode *vp);
 vnode_t *specvp(struct vnode *vp, dev_t dev, vtype_t type, struct cred *cr);
 vnode_t *makespecvp(dev_t dev, vtype_t type);
+
+#if !defined(_FAKE_KERNEL)
 vn_vfslocks_entry_t *vn_vfslocks_getlock(void *);
 void	vn_vfslocks_rele(vn_vfslocks_entry_t *);
+#endif
+
 boolean_t vn_is_reparse(vnode_t *, cred_t *, caller_context_t *);
 
 void vn_copypath(struct vnode *src, struct vnode *dst);
@@ -1535,7 +1541,7 @@ typedef enum {
 
 #define	VN_ISKAS(vp)	((vp) >= &kvps[0] && (vp) < &kvps[KV_MAX])
 
-#endif	/* _KERNEL */
+#endif	/* _KERNEL || _FAKE_KERNEL */
 
 /*
  * Flags to VOP_SETATTR/VOP_GETATTR.
@@ -1547,6 +1553,7 @@ typedef enum {
 #define	ATTR_REAL	0x10	/* yield attributes of the real vp */
 #define	ATTR_NOACLCHECK	0x20	/* Don't check ACL when checking permissions */
 #define	ATTR_TRIGGER	0x40	/* Mount first if vnode is a trigger mount */
+#define	ATTR_NOIMPLICIT	0x80	/* Disable any implicit owner rights */
 /*
  * Generally useful macros.
  */

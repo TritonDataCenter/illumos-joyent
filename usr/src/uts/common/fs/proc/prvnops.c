@@ -24,6 +24,8 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2017 by Delphix. All rights reserved.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2022 MNX Cloud, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*	Copyright (c) 1984,	 1986, 1987, 1988, 1989 AT&T	*/
@@ -169,12 +171,12 @@ static prdirent_t piddir[] = {
 		"contracts" },
 	{ PR_SECFLAGS,	28 * sizeof (prdirent_t), sizeof (prdirent_t),
 		"secflags" },
-	{ PR_ARGV,	28 * sizeof (prdirent_t), sizeof (prdirent_t),
+	{ PR_ARGV,	29 * sizeof (prdirent_t), sizeof (prdirent_t),
 		"argv" },
-	{ PR_CMDLINE,	29 * sizeof (prdirent_t), sizeof (prdirent_t),
+	{ PR_CMDLINE,	30 * sizeof (prdirent_t), sizeof (prdirent_t),
 		"cmdline" },
 #if defined(__x86)
-	{ PR_LDT,	30 * sizeof (prdirent_t), sizeof (prdirent_t),
+	{ PR_LDT,	31 * sizeof (prdirent_t), sizeof (prdirent_t),
 		"ldt" },
 #endif
 };
@@ -901,10 +903,8 @@ pr_read_fdinfo(prnode_t *pnp, uio_t *uiop, cred_t *cr)
 	prfdinfo_t *fdinfo;
 	list_t data;
 	proc_t *p;
-	vnode_t *vp;
 	uint_t fd;
 	file_t *fp;
-	cred_t *file_cred;
 	short ufp_flag;
 	int error = 0;
 
@@ -942,9 +942,6 @@ pr_read_fdinfo(prnode_t *pnp, uio_t *uiop, cred_t *cr)
 		goto out;
 	}
 
-	vp = fp->f_vnode;
-	VN_HOLD(vp);
-
 	/*
 	 * For fdinfo, we don't want to include the placeholder pr_misc at the
 	 * end of the struct. We'll terminate the data with an empty pr_misc
@@ -954,26 +951,20 @@ pr_read_fdinfo(prnode_t *pnp, uio_t *uiop, cred_t *cr)
 	fdinfo = pr_iol_newbuf(&data, offsetof(prfdinfo_t, pr_misc));
 	fdinfo->pr_fd = fd;
 	fdinfo->pr_fdflags = ufp_flag;
-	/* FEPOLLED on f_flag2 should never be user-visible */
-	fdinfo->pr_fileflags = (fp->f_flag2 & ~FEPOLLED) << 16 | fp->f_flag;
+	fdinfo->pr_fileflags = fp->f_flag2 << 16 | fp->f_flag;
 	if ((fdinfo->pr_fileflags & (FSEARCH | FEXEC)) == 0)
 		fdinfo->pr_fileflags += FOPEN;
 	fdinfo->pr_offset = fp->f_offset;
-	file_cred = fp->f_cred;
-	crhold(file_cred);
 	/*
 	 * Information from the vnode (rather than the file_t) is retrieved
 	 * later, in prgetfdinfo() - for example sock_getfasync()
 	 */
-	pr_releasef(p, fd);
 
 	prunlock(pnp);
 
-	error = prgetfdinfo(p, vp, fdinfo, cr, file_cred, &data);
+	error = prgetfdinfo(p, fp->f_vnode, fdinfo, cr, fp->f_cred, &data);
 
-	crfree(file_cred);
-
-	VN_RELE(vp);
+	pr_releasef(fp);
 
 out:
 	if (error == 0)
@@ -1134,7 +1125,7 @@ pr_read_cred(prnode_t *pnp, uio_t *uiop, cred_t *cr)
 	 * the number of supplementary groups is variable.
 	 */
 	pcrp =
-	    kmem_alloc(sizeof (prcred_t) + sizeof (gid_t) * (ngroups_max - 1),
+	    kmem_zalloc(sizeof (prcred_t) + sizeof (gid_t) * (ngroups_max - 1),
 	    KM_SLEEP);
 
 	if ((error = prlock(pnp, ZNO)) != 0)
@@ -1159,7 +1150,7 @@ pr_read_priv(prnode_t *pnp, uio_t *uiop, cred_t *cr)
 {
 	proc_t *p;
 	size_t psize = prgetprivsize();
-	prpriv_t *ppriv = kmem_alloc(psize, KM_SLEEP);
+	prpriv_t *ppriv = kmem_zalloc(psize, KM_SLEEP);
 	int error;
 
 	ASSERT(pnp->pr_type == PR_PRIV);
@@ -1746,24 +1737,59 @@ pr_read_lwpname(prnode_t *pnp, uio_t *uiop, cred_t *cr)
 static int
 pr_read_xregs(prnode_t *pnp, uio_t *uiop, cred_t *cr)
 {
-#if defined(__sparc)
 	proc_t *p;
 	kthread_t *t;
 	int error;
-	char *xreg;
+	void *xreg;
 	size_t size;
 
 	ASSERT(pnp->pr_type == PR_XREGS);
 
-	xreg = kmem_zalloc(sizeof (prxregset_t), KM_SLEEP);
-
 	if ((error = prlock(pnp, ZNO)) != 0)
-		goto out;
+		return (error);
 
 	p = pnp->pr_common->prc_proc;
 	t = pnp->pr_common->prc_thread;
 
-	size = prhasx(p)? prgetprxregsize(p) : 0;
+	/*
+	 * While we would prefer to do the allocation without holding the
+	 * process under a prlock(), we can only determine this size while
+	 * holding the process as the hold guarantees us:
+	 *
+	 *  o That the process in question actualy exists.
+	 *  o That the process in question cannot change the set of FPU features
+	 *    it has enabled.
+	 *
+	 * We will drop p_lock across the allocation call itself. This should be
+	 * safe as the enabled feature set should not change while the process
+	 * is locked (e.g. enabling extending FPU state like AMX on x86 should
+	 * require the process to be locked).
+	 */
+	size = prhasx(p) ? prgetprxregsize(p) : 0;
+	if (size == 0) {
+		prunlock(pnp);
+		return (0);
+	}
+
+	/*
+	 * To read the extended register set we require that the thread be
+	 * stopped as this state is only valid in the kernel when it is. An
+	 * exception made if the target thread and the current thread are one
+	 * and the same. We won't stop you from doing something... weird.
+	 */
+	thread_lock(t);
+	if (t != curthread && !ISTOPPED(t) && !VSTOPPED(t) && !DSTOPPED(t)) {
+		thread_unlock(t);
+		prunlock(pnp);
+		return (EBUSY);
+	}
+	thread_unlock(t);
+
+	mutex_exit(&p->p_lock);
+	xreg = kmem_zalloc(size, KM_SLEEP);
+	mutex_enter(&p->p_lock);
+	ASSERT3U(size, ==, prgetprxregsize(p));
+
 	if (uiop->uio_offset >= size) {
 		prunlock(pnp);
 		goto out;
@@ -1777,11 +1803,8 @@ pr_read_xregs(prnode_t *pnp, uio_t *uiop, cred_t *cr)
 
 	error = pr_uioread(xreg, size, uiop);
 out:
-	kmem_free(xreg, sizeof (prxregset_t));
+	kmem_free(xreg, size);
 	return (error);
-#else
-	return (0);
-#endif
 }
 
 static int
@@ -3285,11 +3308,35 @@ prgetattr(vnode_t *vp, vattr_t *vap, int flags, cred_t *cr,
 		return (0);
 	}
 
+	/* A subset of prlock(pnp...) */
 	p = pr_p_lock(pnp);
 	mutex_exit(&pr_pidlock);
 	if (p == NULL)
 		return (ENOENT);
 	pcp = pnp->pr_common;
+
+	/*
+	 * Because we're performing a subset of prlock() inline here, we must
+	 * follow prlock's semantics when encountering a zombie process
+	 * (PRC_DESTROY flag is set) or an exiting process (SEXITING flag is
+	 * set). Those semantics indicate acting as if the process is no
+	 * longer there (return ENOENT).
+	 *
+	 * If we chose to proceed here regardless, we may encounter issues
+	 * when we drop the p_lock (see PR_OBJECTDIR, PR_PATHDIR, PR_*MAP,
+	 * PR_LDT, and PR_*PAGEDATA below). A process-cleanup which was
+	 * blocked on p_lock may ignore the P_PR_LOCK flag we set above, since
+	 * it set one of PRC_DESTROY or SEXITING. If the process then gets
+	 * destroyed our "p" will be useless, as will its p_lock.
+	 *
+	 * It may be desirable to move this check to only places further down
+	 * prior to actual droppages of p->p_lock, but for now, we're playing
+	 * it safe and checking here immediately, like prlock() does..
+	 */
+	if (((pcp->prc_flags & PRC_DESTROY) || (p->p_flag & SEXITING))) {
+		prunlock(pnp);
+		return (ENOENT);
+	}
 
 	mutex_enter(&p->p_crlock);
 	vap->va_uid = crgetruid(p->p_cred);
@@ -3362,7 +3409,6 @@ prgetattr(vnode_t *vp, vattr_t *vap, int flags, cred_t *cr,
 		break;
 	case PR_FDINFO: {
 		file_t *fp;
-		vnode_t *vp;
 		int fd = pnp->pr_index;
 
 		fp = pr_getf(p, fd, NULL);
@@ -3370,13 +3416,10 @@ prgetattr(vnode_t *vp, vattr_t *vap, int flags, cred_t *cr,
 			prunlock(pnp);
 			return (ENOENT);
 		}
-		vp = fp->f_vnode;
-		VN_HOLD(vp);
-		pr_releasef(p, fd);
 		prunlock(pnp);
-		vap->va_size = prgetfdinfosize(p, vp, cr);
-		VN_RELE(vp);
+		vap->va_size = prgetfdinfosize(p, fp->f_vnode, cr);
 		vap->va_nblocks = (fsblkcnt64_t)btod(vap->va_size);
+		pr_releasef(fp);
 		return (0);
 	}
 	case PR_LWPDIR:
@@ -4437,7 +4480,7 @@ pr_lookup_lwpiddir(vnode_t *dp, char *comp)
 }
 
 /*
- * Lookup one of the process's open files.
+ * Lookup one of the process's file vnodes.
  */
 static vnode_t *
 pr_lookup_fddir(vnode_t *dp, char *comp)
@@ -4484,10 +4527,12 @@ pr_lookup_fddir(vnode_t *dp, char *comp)
 			pnp->pr_mode |= 0222;
 		vp = fp->f_vnode;
 		VN_HOLD(vp);
-		pr_releasef(p, fd);
 	}
 
 	prunlock(dpnp);
+	if (fp != NULL) {
+		pr_releasef(fp);
+	}
 
 	if (vp == NULL) {
 		prfreenode(pnp);
@@ -5145,9 +5190,11 @@ prfreecommon(prcommon_t *pcp)
 		mutex_exit(&pcp->prc_mutex);
 	else {
 		mutex_exit(&pcp->prc_mutex);
-		ASSERT(pcp->prc_pollhead.ph_list == NULL);
+
 		ASSERT(pcp->prc_refcnt == 0);
 		ASSERT(pcp->prc_selfopens == 0 && pcp->prc_writers == 0);
+
+		pollhead_clean(&pcp->prc_pollhead);
 		mutex_destroy(&pcp->prc_mutex);
 		cv_destroy(&pcp->prc_wait);
 		kmem_free(pcp, sizeof (prcommon_t));
@@ -6236,7 +6283,7 @@ prseek(vnode_t *vp, offset_t ooff, offset_t *noffp, caller_context_t *ct)
 /*
  * We use the p_execdir member of proc_t to expand the %d token in core file
  * paths (the directory path for the executable that dumped core; see
- * coreadm(1M) for details). We'd like gcore(1) to be able to expand %d in
+ * coreadm(8) for details). We'd like gcore(1) to be able to expand %d in
  * the same way as core dumping from the kernel, but there's no convenient
  * and comprehensible way to export the path name for p_execdir. To solve
  * this, we try to find the actual path to the executable that was used. In

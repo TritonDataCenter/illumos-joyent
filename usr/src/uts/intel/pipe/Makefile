@@ -41,7 +41,6 @@ UTSBASE	= ../..
 #
 MODULE		= pipe
 OBJECTS		= $(PIPE_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(PIPE_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_SYS_DIR)/$(MODULE)
 
 #
@@ -55,13 +54,12 @@ CERRWARN	+= -_gcc=-Wno-parentheses
 #	Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
 # Define dependency on fifofs
 #
-LDFLAGS += -dy -N fs/fifofs
+LDFLAGS += -N fs/fifofs
 
 #
 #	Default build targets.
@@ -75,12 +73,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

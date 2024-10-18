@@ -32,8 +32,6 @@
  * California.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
@@ -121,8 +119,7 @@ static char usage[] =
 	ypalias mapname\n";
 
 int
-main(argc, argv)
-char **argv;
+main(int argc, char **argv)
 {
 	char result[MAXNAMLEN] = {NULL};
 

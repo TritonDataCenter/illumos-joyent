@@ -187,9 +187,8 @@ nxge_hw_init_niu_common(p_nxge_t nxgep)
 	NXGE_DEBUG_MSG((nxgep, DDI_CTL, "<== nxge_hw_init_niu_common"));
 }
 
-/* ARGSUSED */
 uint_t
-nxge_intr(void *arg1, void *arg2)
+nxge_intr(char *arg1, char *arg2)
 {
 	p_nxge_ldv_t ldvp = (p_nxge_ldv_t)arg1;
 	p_nxge_t nxgep = (p_nxge_t)arg2;
@@ -202,6 +201,8 @@ nxge_intr(void *arg1, void *arg2)
 	uint64_t vector0 = 0, vector1 = 0, vector2 = 0;
 	int i, j, nldvs, nintrs = 1;
 	npi_status_t rs = NPI_SUCCESS;
+
+	VERIFY(ldvp != NULL);
 
 	/* DDI interface returns second arg as NULL (n2 niumx driver) !!! */
 	if (arg2 == NULL || (void *) ldvp->nxgep != arg2) {

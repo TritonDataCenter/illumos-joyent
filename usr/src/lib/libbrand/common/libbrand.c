@@ -63,6 +63,8 @@
 #define	DTD_ELEM_MODNAME	((const xmlChar *) "modname")
 #define	DTD_ELEM_MOUNT		((const xmlChar *) "mount")
 #define	DTD_ELEM_RESTARTINIT	((const xmlChar *) "restartinit")
+#define	DTD_ELEM_RESTARTINIT0	((const xmlChar *) "restartinit0")
+#define	DTD_ELEM_RESTARTINITREBOOT	((const xmlChar *) "restartinitreboot")
 #define	DTD_ELEM_POSTATTACH	((const xmlChar *) "postattach")
 #define	DTD_ELEM_POSTCLONE	((const xmlChar *) "postclone")
 #define	DTD_ELEM_POSTINSTALL	((const xmlChar *) "postinstall")
@@ -74,6 +76,7 @@
 #define	DTD_ELEM_PREUNINSTALL	((const xmlChar *) "preuninstall")
 #define	DTD_ELEM_PRIVILEGE	((const xmlChar *) "privilege")
 #define	DTD_ELEM_QUERY		((const xmlChar *) "query")
+#define	DTD_ELEM_SECFLAGS	((const xmlChar *) "security-flags")
 #define	DTD_ELEM_SHUTDOWN	((const xmlChar *) "shutdown")
 #define	DTD_ELEM_SYMLINK	((const xmlChar *) "symlink")
 #define	DTD_ELEM_SYSBOOT	((const xmlChar *) "sysboot")
@@ -136,21 +139,6 @@ libbrand_initialize()
 		return (B_FALSE);
 	}
 
-	/*
-	 * Note that here we're initializing per-process libxml2
-	 * state.  By doing so we're implicitly assuming that
-	 * no other code in this process is also trying to
-	 * use libxml2.  But in most case we know this not to
-	 * be true since we're almost always used in conjunction
-	 * with libzonecfg, which also uses libxml2.  Lucky for
-	 * us, libzonecfg initializes libxml2 to essentially
-	 * the same defaults as we're using below.
-	 */
-	(void) xmlLineNumbersDefault(1);
-	xmlLoadExtDtdDefaultValue |= XML_DETECT_IDS;
-	xmlDoValidityCheckingDefaultValue = 1;
-	(void) xmlKeepBlanksDefault(0);
-	xmlGetWarningsDefaultValue = 0;
 	xmlSetGenericErrorFunc(NULL, brand_error_func);
 
 	libbrand_initialized = B_TRUE;
@@ -195,7 +183,9 @@ open_xml_file(const char *file)
 	/*
 	 * Parse the file
 	 */
-	if ((doc = xmlParseFile(file)) == NULL)
+	doc = xmlReadFile(file, NULL, XML_PARSE_DTDLOAD |
+	    XML_PARSE_DTDVALID | XML_PARSE_NOBLANKS | XML_PARSE_NOWARNING);
+	if (doc == NULL)
 		return (NULL);
 
 	/*
@@ -530,19 +520,38 @@ brand_get_initname(brand_handle_t bh, char *buf, size_t len)
 	    buf, len, DTD_ELEM_INITNAME, B_FALSE, B_FALSE));
 }
 
-boolean_t
-brand_restartinit(brand_handle_t bh)
+static boolean_t
+i_brand_restartinit(brand_handle_t bh, const xmlChar *tagname, boolean_t deflt)
 {
 	struct brand_handle *bhp = (struct brand_handle *)bh;
 	char val[80];
 
 	if (brand_get_value(bhp, NULL, NULL, NULL, NULL,
-	    val, sizeof (val), DTD_ELEM_RESTARTINIT, B_FALSE, B_FALSE) != 0)
-		return (B_TRUE);
+	    val, sizeof (val), tagname, B_FALSE, B_FALSE) != 0) {
+		return (deflt);
+	}
 
 	if (strcmp(val, "false") == 0)
 		return (B_FALSE);
 	return (B_TRUE);
+}
+
+boolean_t
+brand_restartinit(brand_handle_t bh)
+{
+	return (i_brand_restartinit(bh, DTD_ELEM_RESTARTINIT, B_TRUE));
+}
+
+boolean_t
+brand_restartinit0(brand_handle_t bh)
+{
+	return (i_brand_restartinit(bh, DTD_ELEM_RESTARTINIT0, B_FALSE));
+}
+
+boolean_t
+brand_restartinitreboot(brand_handle_t bh)
+{
+	return (i_brand_restartinit(bh, DTD_ELEM_RESTARTINITREBOOT, B_FALSE));
 }
 
 int
@@ -688,6 +697,14 @@ brand_get_query(brand_handle_t bh, const char *zonename,
 	struct brand_handle *bhp = (struct brand_handle *)bh;
 	return (brand_get_value(bhp, zonename, zonepath, NULL, NULL,
 	    buf, len, DTD_ELEM_QUERY, B_TRUE, B_TRUE));
+}
+
+int
+brand_get_secflags(brand_handle_t bh, char *buf, size_t len)
+{
+	struct brand_handle *bhp = (struct brand_handle *)bh;
+	return (brand_get_value(bhp, NULL, NULL, NULL, NULL,
+	    buf, len, DTD_ELEM_SECFLAGS, B_FALSE, B_TRUE));
 }
 
 int

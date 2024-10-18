@@ -137,7 +137,7 @@ extern "C" {
  *	  bmap routines.
  *
  * SVR4 Extended Fundamental Type (EFT) support:
- * 	The inode structure has been enhanced to support
+ *	The inode structure has been enhanced to support
  *	32-bit user-id, 32-bit group-id, and 32-bit device number.
  *	Standard SVR4 ufs also supports 32-bit mode field.  For the reason
  *	of backward compatibility with the previous ufs disk format,
@@ -189,7 +189,7 @@ extern "C" {
 #define	i_fs	i_ufsvfs->vfs_bufp->b_un.b_fs
 #define	i_vfs	i_vnode->v_vfsp
 
-struct 	icommon {
+struct icommon {
 	o_mode_t ic_smode;	/*  0: mode and type of file */
 	short	ic_nlink;	/*  2: number of links to file */
 	o_uid_t	ic_suid;	/*  4: owner's user id */
@@ -240,7 +240,7 @@ typedef struct inode {
 	struct	inode *i_chain[2];	/* must be first */
 	struct inode *i_freef;	/* free list forward - must be before i_ic */
 	struct inode *i_freeb;	/* free list back - must be before i_ic */
-	struct 	icommon	i_ic;	/* Must be here */
+	struct	icommon	i_ic;	/* Must be here */
 	struct	vnode *i_vnode;	/* vnode associated with this inode */
 	struct	vnode *i_devvp;	/* vnode for block I/O */
 	dev_t	i_dev;		/* device where inode resides */
@@ -518,7 +518,7 @@ extern int		vttoif_tab[];
  * (Note that UFS's concept of time only keeps 32 bits of seconds
  * in the on-disk format).
  */
-struct timeval32 iuniqtime;
+extern struct timeval32 iuniqtime;
 extern kmutex_t ufs_iuniqtime_lock;
 
 #define	ITIMES_NOLOCK(ip) ufs_itimes_nolock(ip)
@@ -786,7 +786,7 @@ typedef struct ufsvfs {
 	 */
 	clock_t		vfs_lastwhinetime;
 
-	int 		vfs_nolog_si;	/* not logging summary info */
+	int		vfs_nolog_si;	/* not logging summary info */
 	int		vfs_validfs;	/* indicates mounted fs */
 
 	/*
@@ -962,7 +962,7 @@ extern int ufs_flush(struct vfs *);
 extern int ufs_fiolfs(struct vnode *, struct lockfs *, int);
 extern int ufs__fiolfs(struct vnode *, struct lockfs *, int, int);
 extern int ufs_fiolfss(struct vnode *, struct lockfs *);
-extern int ufs_fioffs(struct vnode *, char *, struct cred *);
+extern int ufs_fioffs(struct vfs *, struct cred *);
 extern int ufs_check_lockfs(struct ufsvfs *, struct ulockfs *, ulong_t);
 extern int ufs_lockfs_begin(struct ufsvfs *, struct ulockfs **, ulong_t);
 extern int ufs_lockfs_trybegin(struct ufsvfs *, struct ulockfs **, ulong_t);

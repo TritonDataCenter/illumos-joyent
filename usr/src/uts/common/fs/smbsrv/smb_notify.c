@@ -21,7 +21,8 @@
 
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Tintri by DDN, Inc.  All rights reserved.
+ * Copyright 2020-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -97,8 +98,8 @@
  * smb_notify_act1:
  *	Validate parameters, setup ofile buffer.
  *	If data already available, return it, all done.
- * 	(In the "all done" case, skip act2 & act3.)
- * 	If no data available, return a special error
+ *	(In the "all done" case, skip act2 & act3.)
+ *	If no data available, return a special error
  *	("STATUS_PENDING") to tell the caller they must
  *	proceed with calls to act2 & act3.
  *
@@ -198,7 +199,19 @@ smb_notify_act1(smb_request_t *sr, uint32_t buflen, uint32_t filter)
 		return (NT_STATUS_INVALID_PARAMETER);
 	}
 
+	if ((of->f_granted_access & FILE_LIST_DIRECTORY) == 0)
+		return (NT_STATUS_ACCESS_DENIED);
+
 	mutex_enter(&of->f_mutex);
+
+	/*
+	 * It's possible this ofile has started closing, in which case
+	 * we must not subscribe it for events etc.
+	 */
+	if (of->f_state != SMB_OFILE_STATE_OPEN) {
+		mutex_exit(&of->f_mutex);
+		return (NT_STATUS_FILE_CLOSED);
+	}
 
 	/*
 	 * On the first FCN call with this ofile, subscribe to
@@ -267,14 +280,9 @@ smb_notify_act2(smb_request_t *sr)
 		return (NT_STATUS_INVALID_HANDLE);
 	nc = &of->f_notify;
 
-	mutex_enter(&of->f_mutex);
-
 	/*
 	 * Prepare for a potentially long wait for events.
 	 * Normally transition from ACTIVE to WAITING_FCN1.
-	 *
-	 * Note we hold both of->f_mutex, sr->sr_mutex here,
-	 * taken in that order.
 	 */
 	mutex_enter(&sr->sr_mutex);
 	switch (sr->sr_state) {
@@ -286,7 +294,6 @@ smb_notify_act2(smb_request_t *sr)
 		sr->sr_state = SMB_REQ_STATE_WAITING_FCN1;
 		sr->cancel_method = smb_notify_cancel;
 		sr->sr_worker = NULL;
-		list_insert_tail(&nc->nc_waiters, sr);
 		status = NT_STATUS_PENDING;
 		break;
 
@@ -300,14 +307,24 @@ smb_notify_act2(smb_request_t *sr)
 	mutex_exit(&sr->sr_mutex);
 
 	/*
-	 * In case we missed any events before setting
-	 * state FCN1, schedule our own wakeup.
+	 * Arrange to get smb_notify_wakeup() calls,
+	 * and check for any notify change events that
+	 * may have arrived before we entered f_mutex
+	 *
+	 * Note that smb_notify_cancel may run after we drop
+	 * the sr_mutex, so sr_state may change to cancelled.
+	 * In that case, the smb_notify_wakeup does nothing.
+	 * Note that smb_notify_wakeup is exempt from the
+	 * "MUST NOT touch" (the SR) rule described above.
 	 */
-	if (status == NT_STATUS_PENDING && nc->nc_events != 0) {
-		smb_notify_wakeup(sr);
+	if (status == NT_STATUS_PENDING) {
+		mutex_enter(&of->f_mutex);
+		list_insert_tail(&nc->nc_waiters, sr);
+		if (nc->nc_events != 0) {
+			smb_notify_wakeup(sr);
+		}
+		mutex_exit(&of->f_mutex);
 	}
-
-	mutex_exit(&of->f_mutex);
 
 	/* Note: Never NT_STATUS_NOTIFY_ENUM_DIR here. */
 	ASSERT(status != NT_STATUS_NOTIFY_ENUM_DIR);
@@ -336,15 +353,11 @@ smb_notify_act3(smb_request_t *sr)
 	ASSERT(of != NULL);
 	nc = &of->f_notify;
 
-	mutex_enter(&of->f_mutex);
-
 	mutex_enter(&sr->sr_mutex);
 	ASSERT3P(sr->sr_worker, ==, NULL);
 	sr->sr_worker = curthread;
-	sr->cancel_method = NULL;
 
-	list_remove(&nc->nc_waiters, sr);
-
+switch_state:
 	switch (sr->sr_state) {
 	case SMB_REQ_STATE_WAITING_FCN2:
 		/*
@@ -353,23 +366,30 @@ smb_notify_act3(smb_request_t *sr)
 		sr->sr_state = SMB_REQ_STATE_ACTIVE;
 		status = 0;
 		break;
-
 	case SMB_REQ_STATE_CANCEL_PENDING:
+		/* cancel_method running. wait. */
+		cv_wait(&sr->sr_st_cv, &sr->sr_mutex);
+		goto switch_state;
+	case SMB_REQ_STATE_CANCELLED:
 		/*
 		 * Got smb_notify_cancel
 		 */
-		sr->sr_state = SMB_REQ_STATE_CANCELLED;
 		status = NT_STATUS_CANCELLED;
 		break;
 	default:
 		status = NT_STATUS_INTERNAL_ERROR;
 		break;
 	}
+	sr->cancel_method = NULL;
 	mutex_exit(&sr->sr_mutex);
 
+	/*
+	 * The actual SMB notify work.
+	 */
+	mutex_enter(&of->f_mutex);
+	list_remove(&nc->nc_waiters, sr);
 	if (status == 0)
 		status = smb_notify_get_events(sr);
-
 	mutex_exit(&of->f_mutex);
 
 	/*
@@ -396,7 +416,7 @@ smb_notify_get_events(smb_request_t *sr)
 	nc = &of->f_notify;
 
 	DTRACE_PROBE2(notify__get__events,
-	    smb_request_t, sr,
+	    smb_request_t *, sr,
 	    uint32_t, nc->nc_events);
 
 	/*
@@ -539,6 +559,7 @@ static void
 smb_notify_dispatch2(smb_request_t *sr)
 {
 	void (*tq_func)(void *);
+	taskqid_t tqid;
 
 	/*
 	 * Both of these call smb_notify_act3(), returning
@@ -549,8 +570,9 @@ smb_notify_dispatch2(smb_request_t *sr)
 	else
 		tq_func = smb_nt_transact_notify_finish;
 
-	(void) taskq_dispatch(sr->sr_server->sv_worker_pool,
+	tqid = taskq_dispatch(sr->sr_server->sv_notify_pool,
 	    tq_func, sr, TQ_SLEEP);
+	VERIFY(tqid != TASKQID_INVALID);
 }
 
 

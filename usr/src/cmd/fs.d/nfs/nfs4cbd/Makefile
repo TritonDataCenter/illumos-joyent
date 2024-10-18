@@ -35,7 +35,7 @@ SRCS=	$(TYPEPROG).c ../../fslib.c ../lib/nfs_tbind.c ../lib/thrpool.c
 
 LDLIBS += -lnsl
 CPPFLAGS += -I. -I../.. -I../lib
-CFLAGS += $(CCVERBOSE) 
+CFLAGS += $(CCVERBOSE)
 
 CERRWARN += -_gcc=-Wno-unused-variable
 CERRWARN += -_gcc=-Wno-parentheses
@@ -60,7 +60,5 @@ thrpool.o:	../lib/thrpool.c
 
 install:	$(TYPEPROG)
 
-lint:	lint_SRCS
-
-clean:     
+clean:
 	$(RM) $(OBJS)

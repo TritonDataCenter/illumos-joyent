@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2019, Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 /*
  * Copyright (c) 2010, Intel Corporation.
@@ -118,11 +119,13 @@ struct cmi_hdl_ops {
 	uint_t (*cmio_strandid)(cmi_hdl_impl_t *);
 	uint_t (*cmio_procnodes_per_pkg)(cmi_hdl_impl_t *);
 	uint_t (*cmio_strand_apicid)(cmi_hdl_impl_t *);
-	uint32_t (*cmio_chiprev)(cmi_hdl_impl_t *);
+	x86_chiprev_t (*cmio_chiprev)(cmi_hdl_impl_t *);
 	const char *(*cmio_chiprevstr)(cmi_hdl_impl_t *);
 	uint32_t (*cmio_getsockettype)(cmi_hdl_impl_t *);
 	const char *(*cmio_getsocketstr)(cmi_hdl_impl_t *);
 	uint_t (*cmio_chipsig)(cmi_hdl_impl_t *);
+	cmi_errno_t (*cmio_ncache)(cmi_hdl_impl_t *, uint32_t *);
+	cmi_errno_t (*cmio_cache)(cmi_hdl_impl_t *, uint32_t, x86_cache_t *);
 
 	id_t (*cmio_logical_id)(cmi_hdl_impl_t *);
 	/*
@@ -302,7 +305,7 @@ cmi_inj_tainted(void)
 
 #define	CMI_MSRI_HASHSZ		16
 #define	CMI_MSRI_HASHIDX(hdl, msr) \
-	(((uintptr_t)(hdl) >> 3 + (msr)) % (CMI_MSRI_HASHSZ - 1))
+	((((uintptr_t)(hdl) >> 3) + (msr)) % (CMI_MSRI_HASHSZ - 1))
 
 struct cmi_msri_bkt {
 	kmutex_t msrib_lock;
@@ -662,7 +665,7 @@ ntv_smb_bboard(cmi_hdl_impl_t *hdl)
 	return (hdl->cmih_smb_bboard);
 }
 
-static uint32_t
+static x86_chiprev_t
 ntv_chiprev(cmi_hdl_impl_t *hdl)
 {
 	return (cpuid_getchiprev(HDLPRIV(hdl)));
@@ -690,6 +693,35 @@ static uint_t
 ntv_chipsig(cmi_hdl_impl_t *hdl)
 {
 	return (cpuid_getsig(HDLPRIV(hdl)));
+}
+
+static cmi_errno_t
+cmi_cpuid_cache_to_cmi(int err)
+{
+	switch (err) {
+	case 0:
+		return (CMI_SUCCESS);
+	case ENOTSUP:
+		return (CMIERR_C_NODATA);
+	case EINVAL:
+		return (CMIERR_C_BADCACHENO);
+	default:
+		return (CMIERR_UNKNOWN);
+	}
+}
+
+static cmi_errno_t
+ntv_ncache(cmi_hdl_impl_t *hdl, uint32_t *ncache)
+{
+	int ret = cpuid_getncaches(HDLPRIV(hdl), ncache);
+	return (cmi_cpuid_cache_to_cmi(ret));
+}
+
+static cmi_errno_t
+ntv_cache(cmi_hdl_impl_t *hdl, uint32_t cno, x86_cache_t *cachep)
+{
+	int ret = cpuid_getcache(HDLPRIV(hdl), cno, cachep);
+	return (cmi_cpuid_cache_to_cmi(ret));
 }
 
 static id_t
@@ -969,9 +1001,9 @@ xpv_smb_bboard(cmi_hdl_impl_t *hdl)
 	return (hdl->cmih_smb_bboard);
 }
 
-extern uint32_t _cpuid_chiprev(uint_t, uint_t, uint_t, uint_t);
+extern x86_chiprev_t _cpuid_chiprev(uint_t, uint_t, uint_t, uint_t);
 
-static uint32_t
+static x86_chiprev_t
 xpv_chiprev(cmi_hdl_impl_t *hdl)
 {
 	return (_cpuid_chiprev(xpv_vendor(hdl), xpv_family(hdl),
@@ -1010,6 +1042,18 @@ static uint_t
 xpv_chipsig(cmi_hdl_impl_t *hdl)
 {
 	return (0);
+}
+
+static cmi_errno_t
+xpv_ncache(cmi_hdl_impl_t *hdl, uint32_t *ncache)
+{
+	return (CMIERR_NOTSUP);
+}
+
+static cmi_errno_t
+xpv_cache(cmi_hdl_impl_t *hdl, uint32_t cno, x86_cache_t *cachep)
+{
+	return (CMIERR_NOTSUP);
 }
 
 static id_t
@@ -1272,6 +1316,7 @@ cmi_hdl_create(enum cmi_hdl_class class, uint_t chipid, uint_t coreid,
 	switch (vendor) {
 	case X86_VENDOR_Intel:
 	case X86_VENDOR_AMD:
+	case X86_VENDOR_HYGON:
 		if (cmi_ext_topo_check == 0) {
 			cpuid_get_ext_topo((cpu_t *)priv, &cmi_core_nbits,
 			    &cmi_strand_nbits);
@@ -1630,7 +1675,7 @@ CMI_HDL_OPFUNC(coreid, uint_t)
 CMI_HDL_OPFUNC(strandid, uint_t)
 CMI_HDL_OPFUNC(procnodes_per_pkg, uint_t)
 CMI_HDL_OPFUNC(strand_apicid, uint_t)
-CMI_HDL_OPFUNC(chiprev, uint32_t)
+CMI_HDL_OPFUNC(chiprev, x86_chiprev_t)
 CMI_HDL_OPFUNC(chiprevstr, const char *)
 CMI_HDL_OPFUNC(getsockettype, uint32_t)
 CMI_HDL_OPFUNC(getsocketstr, const char *)
@@ -1996,6 +2041,19 @@ cmi_pci_putl(int bus, int dev, int func, int reg, ddi_acc_handle_t hdl,
 	cmi_pci_put_cmn(bus, dev, func, reg, 4, hdl, val);
 }
 
+cmi_errno_t
+cmi_cache_ncaches(cmi_hdl_t hdl, uint32_t *ncache)
+{
+	return (HDLOPS(IMPLHDL(hdl))->cmio_ncache(IMPLHDL(hdl), ncache));
+}
+
+
+cmi_errno_t
+cmi_cache_info(cmi_hdl_t hdl, uint32_t cno, x86_cache_t *cachep)
+{
+	return (HDLOPS(IMPLHDL(hdl))->cmio_cache(IMPLHDL(hdl), cno, cachep));
+}
+
 static const struct cmi_hdl_ops cmi_hdl_ops = {
 #ifdef __xpv
 	/*
@@ -2017,6 +2075,8 @@ static const struct cmi_hdl_ops cmi_hdl_ops = {
 	xpv_getsockettype,	/* cmio_getsockettype */
 	xpv_getsocketstr,	/* cmio_getsocketstr */
 	xpv_chipsig,		/* cmio_chipsig */
+	xpv_ncache,		/* cmio_ncache */
+	xpv_cache,		/* cmio_cache */
 	xpv_logical_id,		/* cmio_logical_id */
 	NULL,			/* cmio_getcr4 */
 	NULL,			/* cmio_setcr4 */
@@ -2050,6 +2110,8 @@ static const struct cmi_hdl_ops cmi_hdl_ops = {
 	ntv_getsockettype,	/* cmio_getsockettype */
 	ntv_getsocketstr,	/* cmio_getsocketstr */
 	ntv_chipsig,		/* cmio_chipsig */
+	ntv_ncache,		/* cmio_ncache */
+	ntv_cache,		/* cmio_cache */
 	ntv_logical_id,		/* cmio_logical_id */
 	ntv_getcr4,		/* cmio_getcr4 */
 	ntv_setcr4,		/* cmio_setcr4 */

@@ -25,6 +25,7 @@
  * Copyright 2014 Garrett D'Amore <garrett@damore.org>
  * Copyright 2016 James S. Blachly, MD <james.blachly@gmail.com>
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 
@@ -171,11 +172,12 @@ usba_owns_ia(dev_info_t *dip)
  * common bus ctl for hcd, usb_mid, and hubd
  */
 int
-usba_bus_ctl(dev_info_t	*dip,
-	dev_info_t		*rdip,
-	ddi_ctl_enum_t		op,
-	void			*arg,
-	void			*result)
+usba_bus_ctl(
+    dev_info_t		*dip,
+    dev_info_t		*rdip,
+    ddi_ctl_enum_t	op,
+    void		*arg,
+    void		*result)
 {
 	dev_info_t		*child_dip = (dev_info_t *)arg;
 	usba_device_t		*usba_device;
@@ -843,12 +845,12 @@ usba_clear_data_toggle(usba_device_t *usba_device)
  */
 int
 usba_create_child_devi(dev_info_t	*dip,
-		char			*node_name,
-		usba_hcdi_ops_t		*usba_hcdi_ops,
-		dev_info_t		*usb_root_hub_dip,
-		usb_port_status_t	port_status,
-		usba_device_t		*usba_device,
-		dev_info_t		**child_dip)
+    char				*node_name,
+    usba_hcdi_ops_t			*usba_hcdi_ops,
+    dev_info_t				*usb_root_hub_dip,
+    usb_port_status_t			port_status,
+    usba_device_t			*usba_device,
+    dev_info_t				**child_dip)
 {
 	int rval = USB_FAILURE;
 	int usba_device_allocated = 0;
@@ -1006,7 +1008,7 @@ usba_destroy_child_devi(dev_info_t *dip, uint_t flag)
  */
 void
 usba_init_list(usba_list_entry_t *element, usb_opaque_t private,
-	ddi_iblock_cookie_t	iblock_cookie)
+    ddi_iblock_cookie_t iblock_cookie)
 {
 	mutex_init(&element->list_mutex, NULL, MUTEX_DRIVER,
 	    iblock_cookie);
@@ -1093,7 +1095,9 @@ usba_add_to_list(usba_list_entry_t *head, usba_list_entry_t *element)
 	    "usba_add_to_list: head=0x%p element=0x%p count=%d",
 	    (void *)head, (void *)element, head->count);
 
+#ifdef DEBUG
 done:
+#endif
 	mutex_exit(&head->list_mutex);
 	mutex_exit(&element->list_mutex);
 }
@@ -1244,7 +1248,7 @@ usba_rm_first_pvt_from_list(usba_list_entry_t *head)
  */
 void
 usba_move_list(usba_list_entry_t *head, usba_list_entry_t *new,
-	ddi_iblock_cookie_t iblock_cookie)
+    ddi_iblock_cookie_t iblock_cookie)
 {
 	usba_init_list(new, NULL, iblock_cookie);
 	mutex_enter(&head->list_mutex);
@@ -1664,7 +1668,6 @@ usba_find_existing_node(dev_info_t *odip)
 	dev_info_t *ndip, *child, *pdip;
 	int	*odata, *ndata;
 	uint_t	n_odata, n_ndata;
-	int	circular;
 
 	pdip = ddi_get_parent(odip);
 	if (ddi_prop_lookup_int_array(DDI_DEV_T_ANY,
@@ -1677,7 +1680,7 @@ usba_find_existing_node(dev_info_t *odip)
 		return (NULL);
 	}
 
-	ndi_devi_enter(pdip, &circular);
+	ndi_devi_enter(pdip);
 	ndip = (dev_info_t *)(DEVI(pdip)->devi_child);
 	while ((child = ndip) != NULL) {
 
@@ -1722,7 +1725,7 @@ usba_find_existing_node(dev_info_t *odip)
 		}
 	}
 
-	ndi_devi_exit(pdip, circular);
+	ndi_devi_exit(pdip);
 
 	ddi_prop_free(odata);
 
@@ -1776,7 +1779,7 @@ usba_ready_device_node(dev_info_t *child_dip)
 	uint_t		n_ifs;	/* number of interfaces */
 	uint_t		port, bus_num;
 	size_t		usb_config_length;
-	uchar_t 	*usb_config;
+	uchar_t		*usb_config;
 	int		reg[1];
 	usb_addr_t	address = usb_get_addr(child_dip);
 	usb_if_descr_t	if_descr;
@@ -2320,9 +2323,10 @@ usba_ready_device_node(dev_info_t *child_dip)
  */
 /*ARGSUSED*/
 dev_info_t *
-usba_ready_interface_association_node(dev_info_t	*dip,
-					uint_t		first_if,
-					uint_t		*if_count)
+usba_ready_interface_association_node(
+    dev_info_t	*dip,
+    uint_t	first_if,
+    uint_t	*if_count)
 {
 	dev_info_t		*child_dip = NULL;
 	usba_device_t		*child_ud = usba_get_usba_device(dip);
@@ -2571,10 +2575,10 @@ usba_ready_interface_node(dev_info_t *dip, uint_t intf)
 {
 	dev_info_t		*child_dip = NULL;
 	usba_device_t		*child_ud = usba_get_usba_device(dip);
-	usb_dev_descr_t	*usb_dev_descr;
+	usb_dev_descr_t		*usb_dev_descr;
 	size_t			usb_cfg_length;
-	uchar_t 		*usb_cfg;
-	usb_if_descr_t	if_descr;
+	uchar_t			*usb_cfg;
+	usb_if_descr_t		if_descr;
 	int			i, n, rval;
 	int			reg[2];
 	size_t			size;

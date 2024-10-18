@@ -12,6 +12,8 @@
 #
 # Copyright 2013 Pluribus Networks Inc.
 # Copyright 2019 Joyent, Inc.
+# Copyright 2023 Oxide Computer Company
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 #
 
 #
@@ -32,8 +34,9 @@ $mapfile_version 2
 
 SYMBOL_VERSION ILLUMOSprivate {
 	global:
+		vcpu_ctx;
+		vcpu_id;
 		vcpu_reset;
-		vm_active_cpus;
 		vm_activate_cpu;
 		vm_active_cpus;
 		vm_apicid2vcpu;
@@ -45,19 +48,19 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_copy_teardown;
 		vm_copyin;
 		vm_copyout;
-		vm_create_devmem;
 		vm_create;
 		vm_create_devmem;
 		vm_debug_cpus;
 		vm_destroy;
-		vm_destroy;
+		vm_disable_pptdev_msix;
 		vm_get_capability;
 		vm_get_desc;
 		vm_get_device_fd;
 		vm_get_devmem_offset;
 		vm_get_gpa_pmap;
-		vm_get_hpet_capabilities;
+		vm_get_highmem_base;
 		vm_get_highmem_size;
+		vm_get_hpet_capabilities;
 		vm_get_intinfo;
 		vm_get_lowmem_limit;
 		vm_get_lowmem_size;
@@ -66,6 +69,7 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_get_pptdev_limits;
 		vm_get_register;
 		vm_get_register_set;
+		vm_get_run_state;
 		vm_get_seg_desc;
 		vm_get_stat_desc;
 		vm_get_stats;
@@ -74,11 +78,8 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_gla2gpa;
 		vm_gla2gpa_nofault;
 		vm_inject_exception;
+		vm_inject_fault;
 		vm_inject_nmi;
-		vm_isa_assert_irq;
-		vm_isa_deassert_irq;
-		vm_isa_pulse_irq;
-		vm_isa_set_irq_trigger;
 		vm_ioapic_assert_irq;
 		vm_ioapic_deassert_irq;
 		vm_ioapic_pincount;
@@ -94,10 +95,15 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_map_pptdev_mmio;
 		vm_mmap_getnext;
 		vm_mmap_memseg;
+		vm_munmap_memseg;
 		vm_open;
 		vm_parse_memsize;
+		vm_pmtmr_set_location;
+		vm_readwrite_kernemu_device;
 		vm_reinit;
 		vm_restart_instruction;
+		vm_resume_all_cpus;
+		vm_resume_cpu;
 		vm_rtc_gettime;
 		vm_rtc_read;
 		vm_rtc_settime;
@@ -109,16 +115,20 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_set_memflags;
 		vm_set_register;
 		vm_set_register_set;
+		vm_set_run_state;
 		vm_set_topology;
 		vm_set_x2apic_state;
 		vm_setup_memory;
 		vm_setup_pptdev_msi;
 		vm_setup_pptdev_msix;
 		vm_suspend;
+		vm_suspend_all_cpus;
 		vm_suspend_cpu;
-		vm_suspended_cpus;
-		vm_resume_cpu;
 		vm_unassign_pptdev;
+		vm_unmap_pptdev_mmio;
+		vm_vcpu_barrier;
+		vm_vcpu_close;
+		vm_vcpu_open;
 		vm_wrlock_cycle;
 
 	local:

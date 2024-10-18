@@ -411,7 +411,7 @@ dr_cpu_list_wrk(dr_cpu_hdr_t *req, dr_cpu_hdr_t **resp, int *resp_len)
 	case DR_CPU_FORCE_UNCONFIG:
 		drctl_flags = DRCTL_FLAG_FORCE;
 		force = B_TRUE;
-		_NOTE(FALLTHROUGH)
+		/* FALLTHROUGH */
 	case DR_CPU_UNCONFIGURE:
 		dr_fn = dr_cpu_unconfigure;
 		drctl_cmd = DRCTL_CPU_UNCONFIG_REQUEST;
@@ -1175,7 +1175,7 @@ dr_cpu_unconfigure(processorid_t cpuid, int *status, boolean_t force)
 		 * Otherwise, cpu_offline() might reject the request.  Note:
 		 * if the offline subsequently fails, the target cpu will be
 		 * left with interrupts enabled.  This is consistent with the
-		 * behavior of psradm(1M) and p_online(2).
+		 * behavior of psradm(8) and p_online(2).
 		 */
 		cpu_intr_enable(cp);
 

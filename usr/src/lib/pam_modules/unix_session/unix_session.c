@@ -23,9 +23,8 @@
  * Copyright 2005 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2016 Toomas Soome <tsoome@me.com>
+ * Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
  */
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #include <strings.h>
 #include <sys/types.h>
@@ -82,21 +81,20 @@ pam_sm_close_session(pam_handle_t *pamh, int flags, int argc,
 	return (PAM_SUCCESS);
 }
 
-/*ARGSUSED*/
 int
 pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
     const char **argv)
 {
-	int	error;
-	char    *ttyn, *rhost, *user;
-	int	fdl;
-	struct lastlog  newll;
+	int error;
+	const char *ttyn, *rhost, *user;
+	int fdl;
+	struct lastlog newll;
 	struct passwd pwd;
-	char    buffer[NSS_BUFLEN_PASSWD];
-	int	i;
-	int	debug = 0;
-	offset_t	offset;
-	time_t  cur_time;
+	char buffer[NSS_BUFLEN_PASSWD];
+	int i;
+	int debug = 0;
+	offset_t offset;
+	time_t cur_time;
 
 	for (i = 0; i < argc; i++) {
 		if (strcasecmp(argv[i], "debug") == 0)
@@ -111,11 +109,11 @@ pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
 		syslog(LOG_DEBUG,
 		    "pam_unix_session: inside pam_sm_open_session()");
 
-	if ((error = pam_get_item(pamh, PAM_TTY, (void **)&ttyn))
+	if ((error = pam_get_item(pamh, PAM_TTY, (const void **)&ttyn))
 	    != PAM_SUCCESS ||
-	    (error = pam_get_item(pamh, PAM_USER, (void **)&user))
+	    (error = pam_get_item(pamh, PAM_USER, (const void **)&user))
 	    != PAM_SUCCESS ||
-	    (error = pam_get_item(pamh, PAM_RHOST, (void **)&rhost))
+	    (error = pam_get_item(pamh, PAM_RHOST, (const void **)&rhost))
 	    != PAM_SUCCESS) {
 		return (error);
 	}

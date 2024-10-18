@@ -26,6 +26,7 @@
 /*
  * Copyright 2018 Joyent, Inc.  All rights reserved.
  * Copyright (c) 2012 by Delphix. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <mdb/mdb_param.h>
@@ -1010,7 +1011,7 @@ kmem_read_magazines(kmem_cache_t *cp, uintptr_t addr, int ncpus,
 	 * list plus at most two magazines per CPU (the loaded and the
 	 * spare).  Toss in 100 magazines as a fudge factor in case this
 	 * is live (the number "100" comes from the same fudge factor in
-	 * crash(1M)).
+	 * crash(8)).
 	 */
 	magmax = (cp->cache_full.ml_total + 2 * ncpus + 100) * magsize;
 	magbsize = offsetof(kmem_magazine_t, mag_round[magsize]);
@@ -1155,7 +1156,7 @@ kmem_walk_init_common(mdb_walk_state_t *wsp, int type)
 
 	size_t magmax, magcnt;
 	void **maglist = NULL;
-	uint_t chunksize, slabsize;
+	uint_t chunksize = 1, slabsize = 1;
 	int status = WALK_ERR;
 	uintptr_t addr = wsp->walk_addr;
 	const char *layered;
@@ -3808,7 +3809,7 @@ vmem_seg(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	}
 
 	if (verbose) {
-		mdb_printf("%<b>%16p%</b> %4s %16p %16p %16d\n",
+		mdb_printf("%<b>%16p%</b> %4s %16p %16p %16ld\n",
 		    addr, type, vs.vs_start, vs.vs_end, sz);
 
 		if (no_debug)
@@ -3937,7 +3938,7 @@ kmalog(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 }
 
 /*
- * As the final lure for die-hard crash(1M) users, we provide ::kmausers here.
+ * As the final lure for die-hard crash(8) users, we provide ::kmausers here.
  * The first piece is a structure which we use to accumulate kmem_cache_t
  * addresses of interest.  The kmc_add is used as a callback for the kmem_cache
  * walker; we either add all caches, or ones named explicitly as arguments.

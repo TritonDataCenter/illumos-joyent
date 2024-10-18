@@ -12,6 +12,7 @@
 /*
  * Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2021 Oxide Computer Company
  */
 
 #include "i40e_sw.h"
@@ -912,17 +913,7 @@ i40e_m_stat(void *arg, uint_t stat, uint64_t *val)
 		}
 		break;
 	case ETHER_STAT_XCVR_INUSE:
-		switch (hw->phy.link_info.phy_type) {
-		case I40E_PHY_TYPE_100BASE_TX:
-			*val = XCVR_100T2;
-			break;
-		case I40E_PHY_TYPE_1000BASE_T:
-			*val = XCVR_1000T;
-			break;
-		default:
-			*val = XCVR_UNDEFINED;
-			break;
-		}
+		*val = (uint64_t)i40e_link_to_media(i40e);
 		break;
 
 	/*
@@ -934,6 +925,12 @@ i40e_m_stat(void *arg, uint_t stat, uint64_t *val)
 		break;
 	case ETHER_STAT_CAP_1000FDX:
 		*val = (i40e->i40e_phy.link_speed & I40E_LINK_SPEED_1GB) != 0;
+		break;
+	case ETHER_STAT_CAP_2500FDX:
+		*val = (i40e->i40e_phy.link_speed & I40E_LINK_SPEED_2_5GB) != 0;
+		break;
+	case ETHER_STAT_CAP_5000FDX:
+		*val = (i40e->i40e_phy.link_speed & I40E_LINK_SPEED_5GB) != 0;
 		break;
 	case ETHER_STAT_CAP_10GFDX:
 		*val = (i40e->i40e_phy.link_speed & I40E_LINK_SPEED_10GB) != 0;
@@ -956,6 +953,12 @@ i40e_m_stat(void *arg, uint_t stat, uint64_t *val)
 		break;
 	case ETHER_STAT_ADV_CAP_1000FDX:
 		*val = (i40e->i40e_phy.link_speed & I40E_LINK_SPEED_1GB) != 0;
+		break;
+	case ETHER_STAT_ADV_CAP_2500FDX:
+		*val = (i40e->i40e_phy.link_speed & I40E_LINK_SPEED_2_5GB) != 0;
+		break;
+	case ETHER_STAT_ADV_CAP_5000FDX:
+		*val = (i40e->i40e_phy.link_speed & I40E_LINK_SPEED_5GB) != 0;
 		break;
 	case ETHER_STAT_ADV_CAP_10GFDX:
 		*val = (i40e->i40e_phy.link_speed & I40E_LINK_SPEED_10GB) != 0;
@@ -980,6 +983,12 @@ i40e_m_stat(void *arg, uint_t stat, uint64_t *val)
 	case ETHER_STAT_LP_CAP_1000FDX:
 		*val = i40e->i40e_link_speed == 1000;
 		break;
+	case ETHER_STAT_LP_CAP_2500FDX:
+		*val = i40e->i40e_link_speed == 2500;
+		break;
+	case ETHER_STAT_LP_CAP_5000FDX:
+		*val = i40e->i40e_link_speed == 5000;
+		break;
 	case ETHER_STAT_LP_CAP_10GFDX:
 		*val = i40e->i40e_link_speed == 10000;
 		break;
@@ -1003,8 +1012,6 @@ i40e_m_stat(void *arg, uint_t stat, uint64_t *val)
 	case ETHER_STAT_CAP_100T4:
 	case ETHER_STAT_CAP_100GFDX:
 	case ETHER_STAT_CAP_50GFDX:
-	case ETHER_STAT_CAP_2500FDX:
-	case ETHER_STAT_CAP_5000FDX:
 	case ETHER_STAT_ADV_CAP_1000HDX:
 	case ETHER_STAT_ADV_CAP_100HDX:
 	case ETHER_STAT_ADV_CAP_10FDX:
@@ -1012,8 +1019,6 @@ i40e_m_stat(void *arg, uint_t stat, uint64_t *val)
 	case ETHER_STAT_ADV_CAP_100T4:
 	case ETHER_STAT_ADV_CAP_100GFDX:
 	case ETHER_STAT_ADV_CAP_50GFDX:
-	case ETHER_STAT_ADV_CAP_2500FDX:
-	case ETHER_STAT_ADV_CAP_5000FDX:
 	case ETHER_STAT_LP_CAP_1000HDX:
 	case ETHER_STAT_LP_CAP_100HDX:
 	case ETHER_STAT_LP_CAP_10FDX:
@@ -1021,8 +1026,6 @@ i40e_m_stat(void *arg, uint_t stat, uint64_t *val)
 	case ETHER_STAT_LP_CAP_100T4:
 	case ETHER_STAT_LP_CAP_100GFDX:
 	case ETHER_STAT_LP_CAP_50GFDX:
-	case ETHER_STAT_LP_CAP_2500FDX:
-	case ETHER_STAT_LP_CAP_5000FDX:
 		*val = 0;
 		break;
 

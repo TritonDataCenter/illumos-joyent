@@ -23,6 +23,7 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2012 Milan Jurik. All rights reserved.
+ * Copyright 2020 Oxide Computer Company
  */
 
 /*
@@ -126,7 +127,7 @@ uint64_t interpret_ops(void *data, void *data_end,
  */
 void
 _Unw_Propagate_Registers(struct _Unwind_Context *old_ctx,
-	struct _Unwind_Context *new_ctx)
+    struct _Unwind_Context *new_ctx)
 {
 	new_ctx->current_regs[SP_RSP] = old_ctx->cfa;
 	new_ctx->pc = old_ctx->ra;
@@ -227,7 +228,7 @@ fix_reg(struct _Unwind_Context *ctx, struct register_state *rs, int index)
  */
 uint64_t
 _Unw_Rollback_Registers(struct eh_frame_fields *f,
-	struct _Unwind_Context *ctx)
+    struct _Unwind_Context *ctx)
 {
 	/* GPRs, RET_ADD, and CF_ADDR */
 	struct register_state func_state[18];
@@ -360,7 +361,7 @@ static uint64_t get_encoded_val(void **datap, ptrdiff_t reloc, int enc);
  */
 uint64_t
 _Unw_get_val(void **datap, ptrdiff_t reloc,
-	enum operand_desc opr, int daf, int caf, int enc)
+    enum operand_desc opr, int daf, int caf, int enc)
 {
 	intptr_t data = (intptr_t)*datap;
 	uint64_t res;
@@ -452,7 +453,7 @@ _Unw_get_val(void **datap, ptrdiff_t reloc,
 		/* max length of augmentation string is 4 */
 		rp = (char *)&res;
 		dp = (char *)data;
-		while (*rp++ = *dp++)
+		while ((*rp++ = *dp++) != '\0')
 			;
 		data = (intptr_t)dp;
 		break;
@@ -471,19 +472,25 @@ _Unw_get_val(void **datap, ptrdiff_t reloc,
 static uint64_t
 get_encoded_val(void **datap, ptrdiff_t reloc, int enc)
 {
-	int val = enc & 0xf;
-	int rel = (enc >> 4) & 0xf;
+	const uint8_t val = enc & 0xf;
+	const uint8_t rel = enc & 0x70;
+	const boolean_t indirect = (enc & 0x80) != 0;
 	intptr_t loc = ((intptr_t)*datap) + reloc;
 	uint64_t res = 0;
 
+	/*
+	 * Calculate the offset represented by the pointer encoding.  These
+	 * DWARF extensions are defined in the Core Generic document set of the
+	 * LSB specification.
+	 */
 	switch (val) {
 	case 0x01:
 		res = _Unw_get_val(datap, reloc, ULEB128, 1, 1, 0);
 		break;
-	case 0x2:
+	case 0x02:
 		res = _Unw_get_val(datap, reloc, UNUM16, 1, 1, 0);
 		break;
-	case 0x3:
+	case 0x03:
 		res = _Unw_get_val(datap, reloc, UNUM32, 1, 1, 0);
 		break;
 	case 0x04:
@@ -502,11 +509,11 @@ get_encoded_val(void **datap, ptrdiff_t reloc, int enc)
 		res = _Unw_get_val(datap, reloc, SNUM64, 1, 1, 0);
 		break;
 	}
-
 	switch (rel) {
-	case 0:
+	case 0x00:
 		break;
-	case 1:
+	case 0x10:
+		/* DW_EH_PE_pcrel */
 		if (res != 0)
 			res += loc;
 		break;
@@ -514,6 +521,26 @@ get_encoded_val(void **datap, ptrdiff_t reloc, int enc)
 		/* remainder not implemented */
 		break;
 	}
+
+	/*
+	 * The high bit of the pointer encoding (DW_EH_PE_indirect = 0x80)
+	 * indicates that a pointer-sized value should be read from the
+	 * calculated address as the final result.
+	 *
+	 * Shockingly, this is not documented in any specification to date, but
+	 * has been implemented in various unwind implementations through
+	 * reverse-engineering of GCC.
+	 */
+	if (indirect) {
+		void *addr = (void *)(uintptr_t)res;
+
+		/*
+		 * Built only for amd64, we can count on a 64-bit pointer size
+		 * for the indirect handling.
+		 */
+		res = _Unw_get_val(&addr, reloc, UNUM64, 1, 1, 0);
+	}
+
 	return (res);
 }
 
@@ -526,11 +553,11 @@ int interpret_op(void **datap, ptrdiff_t reloc,
 
 uint64_t
 interpret_ops(void *data, void *data_end,
-	ptrdiff_t reloc,
-	uint64_t start_pc, uint64_t pc,
-	struct register_state f_state[],
-	struct register_state f_start_state[],
-	int daf, int caf, int enc)
+    ptrdiff_t reloc,
+    uint64_t start_pc, uint64_t pc,
+    struct register_state f_state[],
+    struct register_state f_start_state[],
+    int daf, int caf, int enc)
 {
 	void *d = data;
 	uint64_t reached_pc = start_pc;
@@ -545,10 +572,10 @@ interpret_ops(void *data, void *data_end,
 
 int
 interpret_op(void **datap, ptrdiff_t reloc,
-	uint64_t *reached_pc_p, uint64_t pc,
-	struct register_state f_state[],
-	struct register_state f_start_state[],
-	int daf, int caf, int enc)
+    uint64_t *reached_pc_p, uint64_t pc,
+    struct register_state f_state[],
+    struct register_state f_start_state[],
+    int daf, int caf, int enc)
 {
 	enum CFA_ops op = separate_op(datap);
 	enum operand_desc opr1 = (cfa_operations[op]).op1;

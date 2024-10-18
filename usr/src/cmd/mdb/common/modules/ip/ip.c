@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -1028,6 +1029,7 @@ static const mdb_bitmask_t tcp_flags[] = {
 #define	TCPOPT_WS_LEN		3
 #define	TCPOPT_TSTAMP_LEN	10
 #define	TCPOPT_SACK_OK_LEN	2
+#define	TCPOPT_MD5_LEN		18
 
 static void
 tcphdr_print_options(uint8_t *opts, uint32_t opts_len)
@@ -1131,6 +1133,27 @@ tcphdr_print_options(uint8_t *opts, uint32_t opts_len)
 
 				sack_len -= 2 * sizeof (val);
 			}
+			break;
+		}
+
+		case TCPOPT_MD5: {
+			uint_t i;
+
+			if (len < TCPOPT_MD5_LEN || len < opts[1] ||
+			    opts[1] < TCPOPT_MD5_LEN) {
+				mdb_printf("<Truncated MD5>\n");
+				return;
+			}
+			if (opts[1] > TCPOPT_MD5_LEN) {
+				mdb_printf("<Oversize MD5>\n");
+				return;
+			}
+
+			mdb_printf(" MD5=0x");
+			for (i = 2; i < TCPOPT_MD5_LEN - 2; i++)
+				mdb_printf("%02x", opts[i]);
+
+			opts += TCPOPT_MD5_LEN;
 			break;
 		}
 
@@ -1420,8 +1443,9 @@ ip6hdr(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	mdb_printf("%<u>%-26s %-26s %4s %7s %5s %3s %3s%</u>\n",
 	    "SRC", "DST", "TCLS", "FLOW-ID", "PLEN", "NXT", "HOP");
 
-	class = (iph->ip6_vcf & IPV6_FLOWINFO_TCLASS) >> 20;
+	class = iph->ip6_vcf & IPV6_FLOWINFO_TCLASS;
 	mdb_nhconvert(&class, &class, sizeof (class));
+	class >>= 20;
 	flow = iph->ip6_vcf & IPV6_FLOWINFO_FLOWLABEL;
 	mdb_nhconvert(&flow, &flow, sizeof (flow));
 	mdb_nhconvert(&plen, &iph->ip6_plen, sizeof (plen));
@@ -2005,7 +2029,12 @@ static const mdb_walker_t walkers[] = {
 	{ NULL }
 };
 
-static const mdb_qops_t ip_qops = { ip_qinfo, ip_rnext, ip_wnext };
+static const mdb_qops_t ip_qops = {
+	.q_info = ip_qinfo,
+	.q_rnext = ip_rnext,
+	.q_wnext = ip_wnext
+};
+
 static const mdb_modinfo_t modinfo = { MDB_API_VERSION, dcmds, walkers };
 
 const mdb_modinfo_t *

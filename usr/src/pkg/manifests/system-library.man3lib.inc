@@ -39,6 +39,7 @@ file path=usr/share/man/man3lib/libform.3lib
 file path=usr/share/man/man3lib/libfstyp.3lib
 file path=usr/share/man/man3lib/libgen.3lib
 file path=usr/share/man/man3lib/libintl.3lib
+file path=usr/share/man/man3lib/libjedec.3lib
 file path=usr/share/man/man3lib/libkmf.3lib
 file path=usr/share/man/man3lib/libkstat.3lib
 file path=usr/share/man/man3lib/libkvm.3lib
@@ -60,6 +61,7 @@ file path=usr/share/man/man3lib/libnvpair.3lib
 file path=usr/share/man/man3lib/libpam.3lib
 file path=usr/share/man/man3lib/libpanel.3lib
 file path=usr/share/man/man3lib/libpkcs11.3lib
+link path=usr/share/man/man3lib/libposix4.3lib target=librt.3lib
 file path=usr/share/man/man3lib/libproc.3lib
 file path=usr/share/man/man3lib/libproject.3lib
 file path=usr/share/man/man3lib/libpthread.3lib
@@ -74,8 +76,9 @@ file path=usr/share/man/man3lib/libsecdb.3lib
 file path=usr/share/man/man3lib/libsendfile.3lib
 file path=usr/share/man/man3lib/libsip.3lib
 file path=usr/share/man/man3lib/libsocket.3lib
-file path=usr/share/man/man3lib/libsys.3lib
 file path=usr/share/man/man3lib/libsysevent.3lib
+link path=usr/share/man/man3lib/libtermcap.3lib target=libcurses.3lib
+link path=usr/share/man/man3lib/libtermlib.3lib target=libcurses.3lib
 file path=usr/share/man/man3lib/libthread.3lib
 file path=usr/share/man/man3lib/libtsnet.3lib
 file path=usr/share/man/man3lib/libtsol.3lib
@@ -85,6 +88,3 @@ file path=usr/share/man/man3lib/libvolmgt.3lib
 file path=usr/share/man/man3lib/libw.3lib
 file path=usr/share/man/man3lib/libxnet.3lib
 file path=usr/share/man/man3lib/liby.3lib
-link path=usr/share/man/man3lib/libposix4.3lib target=librt.3lib
-link path=usr/share/man/man3lib/libtermcap.3lib target=libcurses.3lib
-link path=usr/share/man/man3lib/libtermlib.3lib target=libcurses.3lib

@@ -14,9 +14,9 @@
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2013, OmniTI Computer Consulting, Inc. All rights reserved.
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
-# Copyright 2018 Joyent, Inc.
+# Copyright 2020 Joyent, Inc.
 # Copyright 2018 Jason King
-# Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 #
 
 include		$(SRC)/Makefile.master
@@ -62,6 +62,7 @@ MANFILES=	__fbufsize.3c					\
 		bstring.3c					\
 		btowc.3c					\
 		byteorder.3c					\
+		c16rtomb.3c					\
 		call_once.3c					\
 		catgets.3c					\
 		catopen.3c					\
@@ -171,6 +172,7 @@ MANFILES=	__fbufsize.3c					\
 		getenv.3c					\
 		getexecname.3c					\
 		getgrnam.3c					\
+		getgrouplist.3c					\
 		gethostid.3c					\
 		gethostname.3c					\
 		gethrtime.3c					\
@@ -241,7 +243,7 @@ MANFILES=	__fbufsize.3c					\
 		malloc.3c					\
 		mblen.3c					\
 		mbrlen.3c					\
-		mbrtowc.3c					\
+		mbrtoc16.3c					\
 		mbsinit.3c					\
 		mbsrtowcs.3c					\
 		mbstowcs.3c					\
@@ -466,6 +468,7 @@ MANFILES=	__fbufsize.3c					\
 		strxfrm.3c					\
 		swab.3c						\
 		sync_instruction_memory.3c			\
+		syncfs.3c					\
 		sysconf.3c					\
 		syslog.3c					\
 		system.3c					\
@@ -526,6 +529,7 @@ MANFILES=	__fbufsize.3c					\
 		u8_validate.3c					\
 		ualarm.3c					\
 		uconv_u16tou32.3c				\
+		ucontext_alloc.3c				\
 		ucred.3c					\
 		ungetc.3c					\
 		ungetwc.3c					\
@@ -543,7 +547,6 @@ MANFILES=	__fbufsize.3c					\
 		waitpid.3c					\
 		walkcontext.3c					\
 		wcpcpy.3c					\
-		wcrtomb.3c					\
 		wcscasecmp.3c					\
 		wcscoll.3c					\
 		wcsdup.3c					\
@@ -729,6 +732,7 @@ MANLINKS=	FD_CLR.3c				\
 		bindtextdomain.3c			\
 		btowc_l.3c				\
 		bzero.3c				\
+		c32rtomb.3c				\
 		calloc.3c				\
 		canonicalize_file_name.3c		\
 		catclose.3c				\
@@ -791,11 +795,14 @@ MANLINKS=	FD_CLR.3c				\
 		epoll_create1.3c			\
 		epoll_pwait.3c				\
 		erand48.3c				\
+		errc.3c					\
 		errno.3c				\
 		errx.3c					\
 		etext.3c				\
 		euccol.3c				\
 		eucscol.3c				\
+		eventfd_read.3c				\
+		eventfd_write.3c			\
 		explicit_bzero.3c			\
 		extended_to_decimal.3c			\
 		fconvert.3c				\
@@ -951,6 +958,7 @@ MANLINKS=	FD_CLR.3c				\
 		iswalnum_l.3c				\
 		iswalpha_l.3c				\
 		iswascii.3c				\
+		iswascii_l.3c				\
 		iswblank.3c				\
 		iswblank_l.3c				\
 		iswcntrl.3c				\
@@ -1006,6 +1014,8 @@ MANLINKS=	FD_CLR.3c				\
 		major.3c				\
 		mblen_l.3c				\
 		mbrlen_l.3c				\
+		mbrtoc32.3c				\
+		mbrtowc.3c				\
 		mbrtowc_l.3c				\
 		mbsinit_l.3c				\
 		mbsnrtowcs.3c				\
@@ -1024,6 +1034,7 @@ MANLINKS=	FD_CLR.3c				\
 		memcpy.3c				\
 		memmem.3c				\
 		memmove.3c				\
+		memrchr.3c				\
 		memset.3c				\
 		minor.3c				\
 		mkdtemp.3c				\
@@ -1113,14 +1124,18 @@ MANLINKS=	FD_CLR.3c				\
 		pthread_barrierattr_init.3c		\
 		pthread_barrierattr_setpshared.3c	\
 		pthread_cond_broadcast.3c		\
+		pthread_cond_clockwait.3c		\
 		pthread_cond_destroy.3c			\
+		pthread_cond_relclockwait_np.3c		\
 		pthread_cond_reltimedwait_np.3c		\
 		pthread_cond_timedwait.3c		\
 		pthread_condattr_destroy.3c		\
 		pthread_condattr_setclock.3c		\
 		pthread_condattr_setpshared.3c		\
 		pthread_key_create_once_np.3c		\
+		pthread_mutex_clocklock.3c		\
 		pthread_mutex_destroy.3c		\
+		pthread_mutex_relclocklock_np.3c	\
 		pthread_mutex_reltimedlock_np.3c	\
 		pthread_mutex_setprioceiling.3c		\
 		pthread_mutex_trylock.3c		\
@@ -1131,8 +1146,12 @@ MANLINKS=	FD_CLR.3c				\
 		pthread_mutexattr_setpshared.3c		\
 		pthread_mutexattr_setrobust.3c		\
 		pthread_mutexattr_settype.3c		\
+		pthread_rwlock_clockrdlock.3c		\
+		pthread_rwlock_clockwrlock.3c		\
 		pthread_rwlock_destroy.3c		\
+		pthread_rwlock_relclockrdlock_np.3c	\
 		pthread_rwlock_reltimedrdlock_np.3c	\
+		pthread_rwlock_relclockwrlock_np.3c	\
 		pthread_rwlock_reltimedwrlock_np.3c	\
 		pthread_rwlock_tryrdlock.3c		\
 		pthread_rwlock_trywrlock.3c		\
@@ -1144,6 +1163,7 @@ MANLINKS=	FD_CLR.3c				\
 		pthread_setspecific.3c			\
 		pthread_spin_init.3c			\
 		pthread_spin_trylock.3c			\
+		ptsname_r.3c				\
 		putc.3c					\
 		putc_unlocked.3c			\
 		putchar.3c				\
@@ -1157,6 +1177,7 @@ MANLINKS=	FD_CLR.3c				\
 		qeconvert.3c				\
 		qfconvert.3c				\
 		qgconvert.3c				\
+		qsort_r.3c				\
 		quadruple_to_decimal.3c			\
 		rand_r.3c				\
 		rctlblk_get_enforced_value.3c		\
@@ -1200,6 +1221,8 @@ MANLINKS=	FD_CLR.3c				\
 		schedctl_stop.3c			\
 		seconvert.3c				\
 		seed48.3c				\
+		sem_clockwait.3c			\
+		sem_relclockwait_np.3c			\
 		sem_reltimedwait_np.3c			\
 		sem_trywait.3c				\
 		sema_destroy.3c				\
@@ -1266,6 +1289,8 @@ MANLINKS=	FD_CLR.3c				\
 		strdupa.3c				\
 		strerror_l.3c				\
 		strerror_r.3c				\
+		strerrordesc_np.3c			\
+		strerrorname_np.3c			\
 		strfmon_l.3c				\
 		strftime_l.3c				\
 		strlcat.3c				\
@@ -1291,10 +1316,12 @@ MANLINKS=	FD_CLR.3c				\
 		strtok_r.3c				\
 		strtold.3c				\
 		strtoll.3c				\
+		strtonumx.3c				\
 		strtoull.3c				\
 		strtoumax.3c				\
 		strxfrm_l.3c				\
 		swapcontext.3c				\
+		swapcontext_extd.3c			\
 		swprintf.3c				\
 		swscanf.3c				\
 		tdelete.3c				\
@@ -1337,6 +1364,7 @@ MANLINKS=	FD_CLR.3c				\
 		uconv_u32tou8.3c			\
 		uconv_u8tou16.3c			\
 		uconv_u8tou32.3c			\
+		ucontext_free.3c			\
 		ucred_free.3c				\
 		ucred_get.3c				\
 		ucred_getegid.3c			\
@@ -1363,6 +1391,7 @@ MANLINKS=	FD_CLR.3c				\
 		valloc.3c				\
 		vasprintf.3c				\
 		verr.3c					\
+		verrc.3c				\
 		verrx.3c				\
 		vfprintf.3c				\
 		vfscanf.3c				\
@@ -1374,17 +1403,20 @@ MANLINKS=	FD_CLR.3c				\
 		vswprintf.3c				\
 		vswscanf.3c				\
 		vwarn.3c				\
+		vwarnc.3c				\
 		vwarnx.3c				\
 		vwprintf.3c				\
 		vwscanf.3c				\
 		wait4.3c				\
 		warn.3c					\
+		warnc.3c				\
 		warnx.3c				\
 		watof.3c				\
 		watoi.3c				\
 		watol.3c				\
 		watoll.3c				\
 		wcpncpy.3c				\
+		wcrtomb.3c				\
 		wcrtomb_l.3c				\
 		wcscasecmp_l.3c				\
 		wcscat.3c				\
@@ -1599,6 +1631,10 @@ ntohl.3c				:= LINKSRC = byteorder.3c
 ntohll.3c				:= LINKSRC = byteorder.3c
 ntohs.3c				:= LINKSRC = byteorder.3c
 
+c32rtomb.3c				:= LINKSRC = c16rtomb.3c
+wcrtomb.3c				:= LINKSRC = c16rtomb.3c
+wcrtomb_l.3c				:= LINKSRC = c16rtomb.3c
+
 canonicalize_file_name.3c		:= LINKSRC = realpath.3c
 
 catclose.3c				:= LINKSRC = catopen.3c
@@ -1735,16 +1771,23 @@ letoh64.3c				:= LINKSRC = endian.3c
 epoll_create1.3c			:= LINKSRC = epoll_create.3c
 epoll_pwait.3c				:= LINKSRC = epoll_wait.3c
 
+errc.3c					:= LINKSRC = err.3c
 errx.3c					:= LINKSRC = err.3c
 verr.3c					:= LINKSRC = err.3c
+verrc.3c				:= LINKSRC = err.3c
 verrx.3c				:= LINKSRC = err.3c
 vwarn.3c				:= LINKSRC = err.3c
+vwarnc.3c				:= LINKSRC = err.3c
 vwarnx.3c				:= LINKSRC = err.3c
 warn.3c					:= LINKSRC = err.3c
+warnc.3c				:= LINKSRC = err.3c
 warnx.3c				:= LINKSRC = err.3c
 
 euccol.3c				:= LINKSRC = euclen.3c
 eucscol.3c				:= LINKSRC = euclen.3c
+
+eventfd_read.3c				:= LINKSRC = eventfd.3c
+eventfd_write.3c			:= LINKSRC = eventfd.3c
 
 _exithandle.3c				:= LINKSRC = exit.3c
 
@@ -1955,6 +1998,7 @@ iswalnum.3c				:= LINKSRC = iswalpha.3c
 iswalnum_l.3c				:= LINKSRC = iswalpha.3c
 iswalpha_l.3c				:= LINKSRC = iswalpha.3c
 iswascii.3c				:= LINKSRC = iswalpha.3c
+iswascii_l.3c				:= LINKSRC = iswalpha.3c
 iswblank.3c				:= LINKSRC = iswalpha.3c
 iswblank_l.3c				:= LINKSRC = iswalpha.3c
 iswcntrl.3c				:= LINKSRC = iswalpha.3c
@@ -1993,6 +2037,7 @@ ulckpwdf.3c				:= LINKSRC = lckpwdf.3c
 lfind.3c				:= LINKSRC = lsearch.3c
 
 swapcontext.3c				:= LINKSRC = makecontext.3c
+swapcontext_extd.3c			:= LINKSRC = makecontext.3c
 
 major.3c				:= LINKSRC = makedev.3c
 minor.3c				:= LINKSRC = makedev.3c
@@ -2012,9 +2057,11 @@ mblen_l.3c				:= LINKSRC = mblen.3c
 
 mbrlen_l.3c				:= LINKSRC = mbrlen.3c
 
-mbrtowc_l.3c				:= LINKSRC = mbrtowc.3c
-
 mbsinit_l.3c				:= LINKSRC = mbsinit.3c
+
+mbrtoc32.3c				:= LINKSRC = mbrtoc16.3c
+mbrtowc.3c				:= LINKSRC = mbrtoc16.3c
+mbrtowc_l.3c				:= LINKSRC = mbrtoc16.3c
 
 mbsnrtowcs.3c				:= LINKSRC = mbsrtowcs.3c
 mbsnrtowcs_l.3c				:= LINKSRC = mbsrtowcs.3c
@@ -2035,6 +2082,7 @@ memcmp.3c				:= LINKSRC = memory.3c
 memcpy.3c				:= LINKSRC = memory.3c
 memmem.3c				:= LINKSRC = memory.3c
 memmove.3c				:= LINKSRC = memory.3c
+memrchr.3c				:= LINKSRC = memory.3c
 memset.3c				:= LINKSRC = memory.3c
 
 mkfifoat.3c				:= LINKSRC = mkfifo.3c
@@ -2182,6 +2230,8 @@ pthread_cond_destroy.3c			:= LINKSRC = pthread_cond_init.3c
 
 pthread_cond_broadcast.3c		:= LINKSRC = pthread_cond_signal.3c
 
+pthread_cond_clockwait.3c		:= LINKSRC = pthread_cond_wait.3c
+pthread_cond_relclockwait_np.3c		:= LINKSRC = pthread_cond_wait.3c
 pthread_cond_reltimedwait_np.3c		:= LINKSRC = pthread_cond_wait.3c
 pthread_cond_timedwait.3c		:= LINKSRC = pthread_cond_wait.3c
 
@@ -2208,6 +2258,8 @@ pthread_mutex_destroy.3c		:= LINKSRC = pthread_mutex_init.3c
 pthread_mutex_trylock.3c		:= LINKSRC = pthread_mutex_lock.3c
 pthread_mutex_unlock.3c			:= LINKSRC = pthread_mutex_lock.3c
 
+pthread_mutex_clocklock.3c		:= LINKSRC = pthread_mutex_timedlock.3c
+pthread_mutex_relclocklock_np.3c	:= LINKSRC = pthread_mutex_timedlock.3c
 pthread_mutex_reltimedlock_np.3c	:= LINKSRC = pthread_mutex_timedlock.3c
 
 pthread_mutexattr_setprioceiling.3c	:= LINKSRC = pthread_mutexattr_getprioceiling.3c
@@ -2226,8 +2278,12 @@ pthread_rwlock_destroy.3c		:= LINKSRC = pthread_rwlock_init.3c
 
 pthread_rwlock_tryrdlock.3c		:= LINKSRC = pthread_rwlock_rdlock.3c
 
+pthread_rwlock_clockrdlock.3c		:= LINKSRC = pthread_rwlock_timedrdlock.3c
+pthread_rwlock_relclockrdlock_np.3c	:= LINKSRC = pthread_rwlock_timedrdlock.3c
 pthread_rwlock_reltimedrdlock_np.3c	:= LINKSRC = pthread_rwlock_timedrdlock.3c
 
+pthread_rwlock_clockwrlock.3c		:= LINKSRC = pthread_rwlock_timedwrlock.3c
+pthread_rwlock_relclockwrlock_np.3c	:= LINKSRC = pthread_rwlock_timedwrlock.3c
 pthread_rwlock_reltimedwrlock_np.3c	:= LINKSRC = pthread_rwlock_timedwrlock.3c
 
 pthread_rwlock_trywrlock.3c		:= LINKSRC = pthread_rwlock_wrlock.3c
@@ -2240,7 +2296,11 @@ pthread_spin_init.3c			:= LINKSRC = pthread_spin_destroy.3c
 
 pthread_spin_trylock.3c			:= LINKSRC = pthread_spin_lock.3c
 
+ptsname_r.3c				:= LINKSRC = ptsname.3c
+
 fputs.3c				:= LINKSRC = puts.3c
+
+qsort_r.3c				:= LINKSRC = qsort.3c
 
 rand_r.3c				:= LINKSRC = rand.3c
 srand.3c				:= LINKSRC = rand.3c
@@ -2303,6 +2363,8 @@ FD_SET.3c				:= LINKSRC = select.3c
 FD_ZERO.3c				:= LINKSRC = select.3c
 pselect.3c				:= LINKSRC = select.3c
 
+sem_clockwait.3c			:= LINKSRC = sem_timedwait.3c
+sem_relclockwait_np.3c			:= LINKSRC = sem_timedwait.3c
 sem_reltimedwait_np.3c			:= LINKSRC = sem_timedwait.3c
 
 sem_trywait.3c				:= LINKSRC = sem_wait.3c
@@ -2350,6 +2412,8 @@ strcoll_l.3c				:= LINKSRC = strcoll.3c
 
 strerror_l.3c				:= LINKSRC = strerror.3c
 strerror_r.3c				:= LINKSRC = strerror.3c
+strerrordesc_np.3c			:= LINKSRC = strerror.3c
+strerrorname_np.3c			:= LINKSRC = strerror.3c
 
 strfmon_l.3c				:= LINKSRC = strfmon.3c
 
@@ -2408,6 +2472,8 @@ atoll.3c				:= LINKSRC = strtol.3c
 lltostr.3c				:= LINKSRC = strtol.3c
 strtoll.3c				:= LINKSRC = strtol.3c
 ulltostr.3c				:= LINKSRC = strtol.3c
+
+strtonumx.3c				:= LINKSRC = strtonum.3c
 
 strtoull.3c				:= LINKSRC = strtoul.3c
 
@@ -2468,6 +2534,8 @@ tss_set.3c				:= LINKSRC = tss.3c
 
 ttyname_r.3c				:= LINKSRC = ttyname.3c
 
+ucontext_free.3c			:= LINKSRC = ucontext_alloc.3c
+
 uconv_u16tou8.3c			:= LINKSRC = uconv_u16tou32.3c
 uconv_u32tou16.3c			:= LINKSRC = uconv_u16tou32.3c
 uconv_u32tou8.3c			:= LINKSRC = uconv_u16tou32.3c
@@ -2508,8 +2576,6 @@ backtrace_symbols_fd.3c			:= LINKSRC = walkcontext.3c
 printstack.3c				:= LINKSRC = walkcontext.3c
 
 wcpncpy.3c				:= LINKSRC = wcpcpy.3c
-
-wcrtomb_l.3c				:= LINKSRC = wcrtomb.3c
 
 wcscasecmp_l.3c				:= LINKSRC = wcscasecmp.3c
 wcsncasecmp.3c				:= LINKSRC = wcscasecmp.3c

@@ -26,6 +26,8 @@
 
 /*
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 /*
@@ -1395,7 +1397,7 @@ lx_brandsys(int cmd, int64_t *rval, uintptr_t arg1, uintptr_t arg2,
 		VERIFY(p->p_zone->zone_brand == &lx_brand);
 		return (exec_common(
 		    (char *)arg1, (const char **)arg2, (const char **)arg3,
-		    EBA_BRAND));
+		    NULL, EBA_BRAND));
 	}
 
 	/* For all other operations this must be a branded process. */
@@ -1530,7 +1532,7 @@ lx_brandsys(int cmd, int64_t *rval, uintptr_t arg1, uintptr_t arg2,
 
 	case B_EXEC_NATIVE:
 		return (exec_common((char *)arg1, (const char **)arg2,
-		    (const char **)arg3, EBA_NATIVE));
+		    (const char **)arg3, NULL, EBA_NATIVE));
 
 	/*
 	 * The B_TRUSS_POINT subcommand is used so that we can make a no-op
@@ -1876,23 +1878,35 @@ lx_brandsys(int cmd, int64_t *rval, uintptr_t arg1, uintptr_t arg2,
 		(void) lx_start_nfs_lockd();
 		return (0);
 
-	case B_BLOCK_ALL_SIGS:
+	case B_BLOCK_ALL_SIGS: {
+		uint_t result = 0;
+
 		mutex_enter(&p->p_lock);
 		pd = ptolxproc(p);
-		pd->l_block_all_signals++;
+		/*
+		 * This is used to block handling of all signals during vfork()
+		 * or clone(LX_CLONE_VFORK) emulation to match Linux semantics
+		 * and prevent the parent's signal handlers being called before
+		 * they are properly reset.
+		 */
+		if (pd->l_block_all_signals != 0) {
+			result = set_errno(EAGAIN);
+		} else {
+			pd->l_block_all_signals = 1;
+		}
 		mutex_exit(&p->p_lock);
-		return (0);
+		return (result);
+	}
 
 	case B_UNBLOCK_ALL_SIGS: {
-		uint_t result;
+		uint_t result = 0;
 
 		mutex_enter(&p->p_lock);
 		pd = ptolxproc(p);
 		if (pd->l_block_all_signals == 0) {
 			result = set_errno(EINVAL);
 		} else {
-			pd->l_block_all_signals--;
-			result = 0;
+			pd->l_block_all_signals = 0;
 		}
 		mutex_exit(&p->p_lock);
 		return (result);
@@ -2360,10 +2374,10 @@ lx_elfexec(struct vnode *vp, struct execa *uap, struct uarg *args,
 			/*
 			 * This is a shared object executable, so we need to
 			 * pick a reasonable place to put the heap. Just don't
-			 * use the first page.
+			 * use the first few pages.
 			 */
-			env.ex_brkbase = (caddr_t)PAGESIZE;
-			env.ex_bssbase = (caddr_t)PAGESIZE;
+			env.ex_brkbase = (caddr_t)(8 * PAGESIZE);
+			env.ex_bssbase = (caddr_t)(8 * PAGESIZE);
 		}
 
 		/*
@@ -2469,13 +2483,16 @@ lx_elfexec(struct vnode *vp, struct execa *uap, struct uarg *args,
 			 * misinterpret what we return from brk().
 			 *
 			 * It's probably not great, but we'll just set brkbase
-			 * to PAGESIZE. If there's something down there in the
-			 * way then libc/malloc should fall back to mmap() when
-			 * we fail to extend the brk for them.
+			 * to a small multiple of PAGESIZE, since some libraries
+			 * (e.g. procps 4.x) expect the first anonymous memory
+			 * region to begin at the 8th page or later. If there's
+			 * something down there in the way then libc/malloc
+			 * should fall back to mmap() when we fail to extend the
+			 * brk for them.
 			 */
 			if (ehdr.e_type == ET_DYN) {
-				env.ex_bssbase = (caddr_t)PAGESIZE;
-				env.ex_brkbase = (caddr_t)PAGESIZE;
+				env.ex_bssbase = (caddr_t)(8 * PAGESIZE);
+				env.ex_brkbase = (caddr_t)(8 * PAGESIZE);
 				env.ex_brksize = 0;
 			}
 		}

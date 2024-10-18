@@ -24,6 +24,7 @@
 /*
  * Copyright 2012 Garrett D'Amore <garrett@damore.org>.  All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -94,6 +95,10 @@
  * nominated by the device to cover the corresponding capability. The interrupt
  * is allocated on a per-capability basis. Therefore, one interrupt would cover
  * AERs, while another interrupt would cover the rest of the desired functions.
+ * Importantly, there is no guarantee that a bridge supports more than one
+ * vector; in particular, at least some AMD bridges do not.  In this case,
+ * interrupts associated with all the available capabilities will be routed to
+ * the same shared vector.
  *
  * To track which interrupts cover which behaviors, each driver state
  * (pcieb_devstate_t) has a member called 'pcieb_isr_tab'. Each index represents
@@ -593,12 +598,16 @@ pcieb_attach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 	pcieb_plat_attach_workaround(devi);
 
 	/*
-	 * If this is a root port, determine and set the max payload size.
-	 * Since this will involve scanning the fabric, all error enabling
-	 * and sw workarounds should be in place before doing this.
+	 * If this is a root port, we need to go through and at this point in
+	 * time set up and initialize all fabric-wide settings such as the max
+	 * packet size, tagging, etc. Since this will involve scanning the
+	 * fabric, all error enabling and sw workarounds should be in place
+	 * before doing this. For hotplug-capable bridges, this will happen
+	 * again when a hotplug event occurs. See the pcie theory statement in
+	 * uts/common/io/pciex/pcie.c for more information.
 	 */
 	if (PCIE_IS_RP(bus_p))
-		pcie_init_root_port_mps(devi);
+		pcie_fabric_setup(devi);
 
 	ddi_report_dev(devi);
 	return (DDI_SUCCESS);
@@ -1541,6 +1550,12 @@ pcieb_ioctl_get_speed(pcieb_devstate_t *pcieb, intptr_t arg, int mode,
 	case PCIE_LINK_SPEED_16:
 		pits.pits_speed = PCIEB_LINK_SPEED_GEN4;
 		break;
+	case PCIE_LINK_SPEED_32:
+		pits.pits_speed = PCIEB_LINK_SPEED_GEN5;
+		break;
+	case PCIE_LINK_SPEED_64:
+		pits.pits_speed = PCIEB_LINK_SPEED_GEN6;
+		break;
 	default:
 		pits.pits_speed = PCIEB_LINK_SPEED_UNKNOWN;
 		break;
@@ -1596,6 +1611,12 @@ pcieb_ioctl_set_speed(pcieb_devstate_t *pcieb, intptr_t arg, int mode,
 		break;
 	case PCIEB_LINK_SPEED_GEN4:
 		speed = PCIE_LINK_SPEED_16;
+		break;
+	case PCIEB_LINK_SPEED_GEN5:
+		speed = PCIE_LINK_SPEED_32;
+		break;
+	case PCIEB_LINK_SPEED_GEN6:
+		speed = PCIE_LINK_SPEED_64;
 		break;
 	default:
 		return (EINVAL);
@@ -1676,11 +1697,19 @@ pcieb_intr_handler(caddr_t arg1, caddr_t arg2)
 	/* AER Error */
 	if (isrc & PCIEB_INTR_SRC_AER) {
 		/*
-		 *  If MSI is shared with PME/hotplug then check Root Error
-		 *  Status Reg before claiming it. For now it's ok since
-		 *  we know we get 2 MSIs.
+		 * AERs can interrupt on this vector, so if error reporting is
+		 * possible we need to scan the fabric to determine whether to
+		 * claim it.  This process will also generate ereports if the
+		 * bridge has error data for us.  Checking for EREPORT_CAPABLE
+		 * is perhaps a bit of a formality here but if it's not set we
+		 * aren't going to be able to do much that's useful with the AER
+		 * data; we initialise sts to 0 rather than PF_ERR_NO_ERROR so
+		 * that we'll claim this interrupt in that case, since we aren't
+		 * going to do the scan.  It may be more correct to check the
+		 * root port status ourselves in that case, but we aren't
+		 * terribly worried about the case where we don't have FMA
+		 * capabilities.
 		 */
-		ret = DDI_INTR_CLAIMED;
 		bzero(&derr, sizeof (ddi_fm_error_t));
 		derr.fme_version = DDI_FME_VERSION;
 		mutex_enter(&pcieb_p->pcieb_peek_poke_mutex);
@@ -1696,9 +1725,13 @@ pcieb_intr_handler(caddr_t arg1, caddr_t arg2)
 
 		mutex_exit(&pcieb_p->pcieb_err_mutex);
 		mutex_exit(&pcieb_p->pcieb_peek_poke_mutex);
-		if (pcieb_die & sts)
+		if ((pcieb_die & sts) != 0) {
 			fm_panic("%s-%d: PCI(-X) Express Fatal Error. (0x%x)",
 			    ddi_driver_name(dip), ddi_get_instance(dip), sts);
+		}
+
+		if ((sts & ~PF_ERR_NO_ERROR) != 0)
+			ret = DDI_INTR_CLAIMED;
 	}
 FAIL:
 	return (ret);

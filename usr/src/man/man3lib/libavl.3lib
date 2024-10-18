@@ -10,8 +10,9 @@
 .\"
 .\"
 .\" Copyright 2015 Joyent, Inc.
+.\" Copyright 2024 Oxide Computer Company
 .\"
-.Dd Dec 04, 2015
+.Dd January 27, 2024
 .Dt LIBAVL 3LIB
 .Os
 .Sh NAME
@@ -128,6 +129,8 @@ Individual functions are documented in their own manual pages.
 .It Sy avl_is_empty Ta Sy avl_last
 .It Sy avl_nearest Ta Sy avl_numnodes
 .It Sy avl_remove Ta Sy avl_swap
+.It Sy avl_update Ta Sy avl_update_gt
+.It Sy avl_update_lt Ta
 .El
 .Pp
 In addition, the library defines C pre-processor macros which are
@@ -205,6 +208,7 @@ $ gcc -Wall -o avl avl.c -lavl
  */
 
 #include <sys/avl.h>
+#include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -273,9 +277,9 @@ find_avl(void)
 		lookup.in_val = i;
 		inp = avl_find(&inttree, &lookup, NULL);
 		if (inp == NULL) {
-			printf("Entry %d is not in the tree\\n", i);
+			printf("Entry %d is not in the tree\en", i);
 		} else {
-			printf("Entry %d is in the tree\\n",
+			printf("Entry %d is in the tree\en",
 			    inp->in_val);
 		}
 	}
@@ -290,7 +294,7 @@ walk_forwards(void)
 	intnode_t *inp;
 	for (inp = avl_first(&inttree); inp != NULL;
 	    inp = AVL_NEXT(&inttree, inp)) {
-		printf("Found entry %d\\n", inp->in_val);
+		printf("Found entry %d\en", inp->in_val);
 	}
 }
 
@@ -303,7 +307,7 @@ walk_backwards(void)
 	intnode_t *inp;
 	for (inp = avl_last(&inttree); inp != NULL;
 	    inp = AVL_PREV(&inttree, inp)) {
-		printf("Found entry %d\\n", inp->in_val);
+		printf("Found entry %d\en", inp->in_val);
 	}
 }
 
@@ -314,7 +318,7 @@ walk_backwards(void)
 static void
 inttree_inspect(void)
 {
-	printf("The tree is %s, there are %ld nodes in it\\n",
+	printf("The tree is %s, there are %ld nodes in it\en",
 	    avl_is_empty(&inttree) == B_TRUE ? "empty" : "not empty",
 	    avl_numnodes(&inttree));
 }
@@ -350,10 +354,10 @@ nearest_nodes(void)
 		abort();
 	inp = avl_nearest(&inttree, where, AVL_BEFORE);
 	assert(inp != NULL);
-	printf("closest node before 12 is: %d\\n", inp->in_val);
+	printf("closest node before 12 is: %d\en", inp->in_val);
 	inp = avl_nearest(&inttree, where, AVL_AFTER);
 	assert(inp != NULL);
-	printf("closest node after 12 is: %d\\n", inp->in_val);
+	printf("closest node after 12 is: %d\en", inp->in_val);
 }
 
 static void
@@ -381,6 +385,19 @@ swap_avl(void)
 	inttree_inspect();
 	avl_swap(&inttree, &swap);
 	inttree_inspect();
+}
+
+static void
+update_avl(void)
+{
+	intnode_t lookup, *inp;
+	avl_index_t where;
+
+	lookup.in_val = 9;
+	inp = avl_find(&inttree, &lookup, &where);
+	assert(inp != NULL);
+	inp->in_val = 25;
+	avl_update(&inttree, inp);
 }
 
 /*
@@ -415,6 +432,7 @@ main(void)
 	insert_avl();
 	inttree_inspect();
 	swap_avl();
+	update_avl();
 	cleanup();
 	return (0);
 }
@@ -442,6 +460,9 @@ See
 .Xr avl_numnodes 3AVL ,
 .Xr avl_remove 3AVL ,
 .Xr avl_swap 3AVL ,
+.Xr avl_update 3AVL ,
+.Xr avl_update_gt 3AVL ,
+.Xr avl_update_lt 3AVL
 .Rs
 .%A Adel'son-Vel'skiy, G. M.
 .%A Landis, Ye. M.

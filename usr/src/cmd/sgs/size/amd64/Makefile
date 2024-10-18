@@ -31,16 +31,11 @@ DEFLIST=	-DAMD64 -DELF
 
 .KEEP_STATE:
 
-LLDFLAGS =	$(LLDFLAGS64)
-ELFLIBDIR =	$(ELFLIBDIR64)
-CONVLIBDIR =	$(CONVLIBDIR64)
+install:	all $(ROOTPROG) $(ROOTPROG64) \
+	$(ROOTCCSBINLINK) $(ROOTCCSBINLINK64)
 
-VAR_SGSBINPROG=	$(VAR_SGSBINPROG64)
-VAR_SGSCCSLINK=	$(VAR_SGSCCSLINK64)
-
-
-package \
-install:	all $(ROOTPROG64) $(ROOTCCSBINLINK64)
+$(ROOTPROG64):
+	$(RM) $@; $(SYMLINK) ../../bin/size $@
 
 include		../Makefile.targ
-include		../../Makefile.sub.64
+include		$(SRC)/Makefile.master.64

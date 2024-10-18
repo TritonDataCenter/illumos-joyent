@@ -19,7 +19,6 @@ SUBDIRS=	man1		\
 		man1b		\
 		man1c		\
 		man1has		\
-		man1m		\
 		man1s		\
 		man2		\
 		man3		\
@@ -48,6 +47,7 @@ SUBDIRS=	man1		\
 		man3iscsit	\
 		man3kstat	\
 		man3kvm		\
+		man3jedec	\
 		man3ldap	\
 		man3lgrp	\
 		man3lib		\
@@ -76,12 +76,10 @@ SUBDIRS=	man1		\
 		man3sec		\
 		man3secdb	\
 		man3sip		\
-		man3slp		\
 		man3socket	\
 		man3stmf	\
 		man3sysevent	\
 		man3tecla	\
-		man3tnf		\
 		man3tsol	\
 		man3utempter	\
 		man3uuid	\
@@ -90,14 +88,15 @@ SUBDIRS=	man1		\
 		man3xcurses	\
 		man3xnet	\
 		man4		\
+		man4d		\
+		man4fs		\
+		man4i		\
+		man4ipp		\
+		man4m		\
+		man4p		\
 		man5		\
 		man7		\
-		man7d		\
-		man7fs		\
-		man7i		\
-		man7ipp		\
-		man7m		\
-		man7p		\
+		man8		\
 		man9		\
 		man9e		\
 		man9f		\

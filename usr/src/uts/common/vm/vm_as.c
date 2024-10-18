@@ -56,7 +56,6 @@
 #include <sys/vmsystm.h>
 #include <sys/cmn_err.h>
 #include <sys/debug.h>
-#include <sys/tnf_probe.h>
 #include <sys/vtrace.h>
 #include <sys/ddi.h>
 
@@ -455,7 +454,6 @@ as_addseg(struct as  *as, struct seg *newseg)
 
 	addr = newseg->s_base;
 	eaddr = addr + newseg->s_size;
-again:
 
 	seg = avl_find(&as->a_segtree, &addr, &where);
 
@@ -476,19 +474,6 @@ again:
 		 */
 		if (base + seg->s_size > addr) {
 			if (addr >= base || eaddr > base) {
-#ifdef __sparc
-				extern struct seg_ops segnf_ops;
-
-				/*
-				 * no-fault segs must disappear if overlaid.
-				 * XXX need new segment type so
-				 * we don't have to check s_ops
-				 */
-				if (seg->s_ops == &segnf_ops) {
-					seg_unmap(seg);
-					goto again;
-				}
-#endif
 				return (-1);	/* overlapping segment */
 			}
 		}
@@ -892,12 +877,6 @@ retry:
 		CPU_STATS_EXIT_K();
 		break;
 	}
-
-	/* Kernel probe */
-	TNF_PROBE_3(address_fault, "vm pagefault", /* CSTYLED */,
-	    tnf_opaque,	address,	addr,
-	    tnf_fault_type,	fault_type,	type,
-	    tnf_seg_access,	access,		rw);
 
 	raddr = (caddr_t)((uintptr_t)addr & (uintptr_t)PAGEMASK);
 	rsize = (((size_t)(addr + size) + PAGEOFFSET) & PAGEMASK) -

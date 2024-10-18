@@ -148,6 +148,8 @@ i_dladm_vnic_create_sys(dladm_handle_t handle, dladm_vnic_attr_t *attr)
 		bcopy(ioc.vc_mac_addr, attr->va_mac_addr, MAXMACADDRLEN);
 		attr->va_mac_len = ioc.vc_mac_len;
 		break;
+	default:
+		break;
 	}
 	return (status);
 }
@@ -342,7 +344,7 @@ static dladm_vnic_addr_type_t addr_types[] = {
 static const char *
 dladm_vnic_macaddrtype2str(vnic_mac_addr_type_t type)
 {
-	int i;
+	uint_t i;
 
 	for (i = 0; i < NADDR_TYPES; i++) {
 		if (type == addr_types[i].va_type)
@@ -354,7 +356,7 @@ dladm_vnic_macaddrtype2str(vnic_mac_addr_type_t type)
 dladm_status_t
 dladm_vnic_str2macaddrtype(const char *str, vnic_mac_addr_type_t *val)
 {
-	int i;
+	uint_t i;
 	dladm_vnic_addr_type_t *type;
 
 	for (i = 0; i < NADDR_TYPES; i++) {
@@ -405,7 +407,7 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 {
 	dladm_vnic_attr_t attr;
 	datalink_id_t vnic_id;
-	datalink_class_t class;
+	datalink_class_t class, pclass;
 	uint32_t media = DL_ETHER;
 	uint32_t link_flags;
 	char name[MAXLINKNAMELEN];
@@ -413,7 +415,7 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 	dladm_status_t status;
 	boolean_t is_vlan;
 	boolean_t is_etherstub;
-	int i;
+	uint_t i;
 	boolean_t vnic_created = B_FALSE;
 	boolean_t conf_set = B_FALSE;
 
@@ -443,7 +445,7 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 
 	if (!is_etherstub) {
 		if ((status = dladm_datalink_id2info(handle, linkid,
-		    &link_flags, &class, &media, NULL, 0)) != DLADM_STATUS_OK)
+		    &link_flags, &pclass, &media, NULL, 0)) != DLADM_STATUS_OK)
 			return (status);
 
 		/* Disallow persistent objects on top of temporary ones */
@@ -452,8 +454,8 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 			return (DLADM_STATUS_PERSIST_ON_TEMP);
 
 		/* Links cannot be created on top of these object types */
-		if (class == DATALINK_CLASS_VNIC ||
-		    class == DATALINK_CLASS_VLAN)
+		if (pclass == DATALINK_CLASS_VNIC ||
+		    pclass == DATALINK_CLASS_VLAN)
 			return (DLADM_STATUS_BADARG);
 	}
 
@@ -548,8 +550,17 @@ dladm_vnic_create(dladm_handle_t handle, const char *vnic, datalink_id_t linkid,
 	attr.va_force = (flags & DLADM_OPT_FORCE) != 0;
 
 	status = i_dladm_vnic_create_sys(handle, &attr);
-	if (status != DLADM_STATUS_OK)
+	if (status != DLADM_STATUS_OK) {
+		if (!is_etherstub && pclass == DATALINK_CLASS_OVERLAY &&
+		    status == DLADM_STATUS_ADDRNOTAVAIL) {
+			char errmsg[DLADM_STRSIZE];
+			(void) dladm_errlist_append(errs,
+			    "failed to start overlay device; "
+			    "could not open underlay socket: %s",
+			    dladm_status2str(status, errmsg));
+		}
 		goto done;
+	}
 	vnic_created = B_TRUE;
 
 	/* Save vnic configuration and its properties */

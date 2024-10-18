@@ -24,6 +24,7 @@
  */
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #ifndef	_SYS_PCIE_H
@@ -204,11 +205,13 @@ extern "C" {
 /*
  * In version 2 of PCI express, this indicated that both 5.0 GT/s and 2.5 GT/s
  * speeds were supported. The use of this as the maximum link speed was added
- * with PCIex v3.
+ * with PCIe v3.
  */
 #define	PCIE_LINKCAP_MAX_SPEED_5	0x2	/* 5.0 GT/s Speed */
 #define	PCIE_LINKCAP_MAX_SPEED_8	0x3	/* 8.0 GT/s Speed */
 #define	PCIE_LINKCAP_MAX_SPEED_16	0x4	/* 16.0 GT/s Speed */
+#define	PCIE_LINKCAP_MAX_SPEED_32	0x5	/* 32.0 GT/s Speed */
+#define	PCIE_LINKCAP_MAX_SPEED_64	0x6	/* 64.0 GT/s Speed */
 #define	PCIE_LINKCAP_MAX_SPEED_MASK	0xF	/* Maximum Link Speed */
 #define	PCIE_LINKCAP_MAX_WIDTH_X1	0x010
 #define	PCIE_LINKCAP_MAX_WIDTH_X2	0x020
@@ -289,6 +292,8 @@ extern "C" {
 #define	PCIE_LINKSTS_SPEED_5		0x2	/* 5.0 GT/s Link Speed */
 #define	PCIE_LINKSTS_SPEED_8		0x3	/* 8.0 GT/s Link Speed */
 #define	PCIE_LINKSTS_SPEED_16		0x4	/* 16.0 GT/s Link Speed */
+#define	PCIE_LINKSTS_SPEED_32		0x5	/* 32.0 GT/s Link Speed */
+#define	PCIE_LINKSTS_SPEED_64		0x6	/* 64.0 GT/s Link Speed */
 #define	PCIE_LINKSTS_SPEED_MASK		0xF	/* Link Speed */
 
 #define	PCIE_LINKSTS_NEG_WIDTH_X1	0x010
@@ -459,7 +464,7 @@ extern "C" {
 #define	PCIE_DEVCTL2_IDO_COMPL_EN	0x200
 #define	PCIE_DEVCTL2_LTR_MECH_EN	0x400
 #define	PCIE_DEVCTL2_EPR_REQ		0x800
-#define	PCIE_DEVCTL2_10BTAG_REQ_EN	0x1000
+#define	PCIE_DEVCTL2_10B_TAG_REQ_EN	0x1000
 #define	PCIE_DEVCTL2_OBFF_MASK		0x6000
 #define	PCIE_DEVCTL2_OBFF_DISABLE	0x0000
 #define	PCIE_DEVCTL2_OBFF_EN_VARA	0x2000
@@ -469,12 +474,14 @@ extern "C" {
 
 
 /*
- * Link Capability 2 Register (4 bytes)
+ * Link Capabilities 2 Register (4 bytes)
  */
 #define	PCIE_LINKCAP2_SPEED_2_5		0x02
 #define	PCIE_LINKCAP2_SPEED_5		0x04
 #define	PCIE_LINKCAP2_SPEED_8		0x08
 #define	PCIE_LINKCAP2_SPEED_16		0x10
+#define	PCIE_LINKCAP2_SPEED_32		0x20
+#define	PCIE_LINKCAP2_SPEED_64		0x40
 #define	PCIE_LINKCAP2_SPEED_MASK	0xfe
 #define	PCIE_LINKCAP2_CROSSLINK		0x100
 #define	PCIE_LINKCAP2_LSKP_OSGSS_MASK	0xfe00
@@ -482,11 +489,15 @@ extern "C" {
 #define	PCIE_LINKCAP2_LKSP_OSGSS_5	0x0400
 #define	PCIE_LINKCAP2_LKSP_OSGSS_8	0x0800
 #define	PCIE_LINKCAP2_LKSP_OSGSS_16	0x1000
+#define	PCIE_LINKCAP2_LKSP_OSGSS_32	0x2000
+#define	PCIE_LINKCAP2_LKSP_OSGSS_64	0x4000
 #define	PCIE_LINKCAP2_LKSP_OSRSS_MASK	0x7f0000
 #define	PCIE_LINKCAP2_LKSP_OSRSS_2_5	0x010000
 #define	PCIE_LINKCAP2_LKSP_OSRSS_5	0x020000
 #define	PCIE_LINKCAP2_LKSP_OSRSS_8	0x040000
 #define	PCIE_LINKCAP2_LKSP_OSRSS_16	0x080000
+#define	PCIE_LINKCAP2_LKSP_OSRSS_32	0x100000
+#define	PCIE_LINKCAP2_LKSP_OSRSS_64	0x200000
 #define	PCIE_LINKCAP2_RTPD_SUP		0x800000
 #define	PCIE_LINKCAP2_TRTPD_SUP		0x01000000
 #define	PCIE_LINKCAP2_DRS		0x80000000
@@ -499,6 +510,8 @@ extern "C" {
 #define	PCIE_LINKCTL2_TARGET_SPEED_5	0x2	/* 5.0 GT/s Speed */
 #define	PCIE_LINKCTL2_TARGET_SPEED_8	0x3	/* 8.0 GT/s Speed */
 #define	PCIE_LINKCTL2_TARGET_SPEED_16	0x4	/* 16.0 GT/s Speed */
+#define	PCIE_LINKCTL2_TARGET_SPEED_32	0x5	/* 32.0 GT/s Speed */
+#define	PCIE_LINKCTL2_TARGET_SPEED_64	0x6	/* 64.0 GT/s Speed */
 #define	PCIE_LINKCTL2_TARGET_SPEED_MASK	0x000f
 #define	PICE_LINKCTL2_ENTER_COMPLIANCE	0x0010
 #define	PCIE_LINKCTL2_HW_AUTO_SPEED_DIS	0x0020
@@ -536,6 +549,7 @@ extern "C" {
 #define	PCIE_EXT_CAP_NEXT_PTR_MASK	0xFFF
 
 #define	PCIE_EXT_CAP_NEXT_PTR_NULL	0x0
+#define	PCIE_EXT_CAP_MAX_PTR		0x3c0	/* max. number of caps */
 
 /*
  * PCI-Express Enhanced Capability Identifier Values
@@ -559,6 +573,7 @@ extern "C" {
 #define	PCIE_EXT_CAP_ID_SRIOV		0x10	/* Single Root I/O Virt. */
 #define	PCIE_EXT_CAP_ID_MRIOV		0x11	/* Multi Root I/O Virt. */
 #define	PCIE_EXT_CAP_ID_MULTICAST	0x12	/* Multicast Services */
+#define	PCIE_EXT_CAP_ID_PGREQ		0x13	/* Page Request */
 #define	PCIE_EXT_CAP_ID_EA		0x14	/* Enhanced Allocation */
 #define	PCIE_EXT_CAP_ID_RESIZE_BAR	0x15	/* Resizable BAR */
 #define	PCIE_EXT_CAP_ID_DPA		0x16	/* Dynamic Power Allocation */
@@ -573,11 +588,25 @@ extern "C" {
 #define	PCIE_EXT_CAP_ID_FRS		0x21	/* Function Ready Stat. Queue */
 #define	PCIE_EXT_CAP_ID_RTR		0x22	/* Readiness Time Reporting */
 #define	PCIE_EXT_CAP_ID_DVS		0x23	/* Designated Vendor-Specific */
+#define	PCIE_EXT_CAP_ID_VFRBAR		0x24	/* VF Resizable BAR */
 #define	PCIE_EXT_CAP_ID_DLF		0x25	/* Data Link Feature */
-#define	PCIE_EXT_CAP_ID_PL16GTE		0x26	/* Physical Layer 16.0 GT/s */
+#define	PCIE_EXT_CAP_ID_PL16GT		0x26	/* Physical Layer 16.0 GT/s */
 #define	PCIE_EXT_CAP_ID_LANE_MARGIN	0x27	/* Lane Margining */
 #define	PCIE_EXT_CAP_ID_HIEARCHY_ID	0x28	/* Hierarchy ID */
 #define	PCIE_EXT_CAP_ID_NPEM		0x29	/* Native PCIe Enclosure Mgmt */
+#define	PCIE_EXT_CAP_ID_PL32GT		0x2A	/* Physical Layer 32.0 GT/s */
+#define	PCIE_EXT_CAP_ID_AP		0x2B	/* Alternate Protocol */
+#define	PCIE_EXT_CAP_ID_SFI		0x2C	/* Sys. Firmware Intermediary */
+#define	PCIE_EXT_CAP_ID_SHDW_FUNC	0x2D	/* Shadow Functions */
+#define	PCIE_EXT_CAP_ID_DOE		0x2E	/* Data Object Exchange */
+#define	PCIE_EXT_CAP_ID_DEV3		0x2F	/* Device 3 */
+#define	PCIE_EXT_CAP_ID_IDE		0x30	/* Integrity and Data Encr. */
+#define	PCIE_EXT_CAP_ID_PL64GT		0x31	/* Physical Layer 64.0 GT/s */
+#define	PCIE_EXT_CAP_ID_FLIT_LOG	0x32	/* Flit Logging */
+#define	PCIE_EXT_CAP_ID_FLIT_PERF	0x33	/* Flit Perf. Measurement */
+#define	PCIE_EXT_CAP_ID_FLIT_ERR	0x34	/* Flit Error Injection */
+#define	PCIE_EXT_CAP_ID_SVC		0x35	/* Streamlined Virtual Chan. */
+#define	PCIE_EXT_CAP_ID_MMIO_RBL	0x36	/* MMIO Register Block Loc. */
 
 /*
  * PCI-Express Advanced Error Reporting Extended Capability Offsets
@@ -596,6 +625,7 @@ extern "C" {
 #define	PCIE_AER_RE_STS			0x30	/* Root Error Status */
 #define	PCIE_AER_CE_SRC_ID		0x34	/* Error Source ID */
 #define	PCIE_AER_ERR_SRC_ID		0x36	/* Error Source ID */
+#define	PCIE_AER_TLP_PRE_LOG		0x38	/* TLP Prefix Log */
 
 /* Bridges Only */
 #define	PCIE_AER_SUCE_STS		0x2c	/* Secondary UCE Status */
@@ -758,6 +788,56 @@ extern "C" {
 
 #define	PCIE_ARI_CTRL_FUNC_GRP_SHIFT	4
 #define	PCIE_ARI_CTRL_FUNC_GRP_MASK	0x7
+
+/*
+ * PCIe Device 3 Extended Capability Header (PCIE_EXT_CAP_ID_DEV3)
+ */
+#define	PCIE_DEVCAP3		0x04
+#define	PCIE_DEVCAP3_DMWR_REQ_ROUTE	0x01
+#define	PCIE_DEVCAP3_14B_TAG_COMP_SUP	0x02
+#define	PCIE_DEVCAP3_14B_TAG_REQ_SUP	0x04
+#define	PCIE_DEVCAP3_PORT_L0P_SUP	0x08
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_MASK	0x070
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_MIN	0x0	/* < 1us */
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_1us	0x1	/* [ 1us, 2us ) */
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_2us	0x2	/* [ 2us, 4us ) */
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_4us	0x3	/* [ 4us, 8us ) */
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_8us	0x4	/* [ 8us, 16us ) */
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_16us	0x5	/* [ 16us, 32us ) */
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_32us	0x6	/* [ 32us, 64us ] */
+#define	PCIE_DEVCAP3_PORT_L0P_EXIT_LAT_MAX	0x7	/* > 64us */
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_MASK	0x380
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_MIN	0x0	/* < 1us */
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_1us	0x1	/* [ 1us, 2us ) */
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_2us	0x2	/* [ 2us, 4us ) */
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_4us	0x3	/* [ 4us, 8us ) */
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_8us	0x4	/* [ 8us, 16us ) */
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_16us	0x5	/* [ 16us, 32us ) */
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_32us	0x6	/* [ 32us, 64us ] */
+#define	PCIE_DEVCAP3_RTMR_L0P_EXIT_LAT_MAX	0x7	/* > 64us */
+
+#define	PCIE_DEVCTL3		0x08
+#define	PCIE_DEVCTL3_DMWR_REQ_EN	0x01
+#define	PCIE_DEVCTL3_DMWR_EG_BLOCK	0x02
+#define	PCIE_DEVCTL3_14B_TAG_REQ_EN	0x04
+#define	PCIE_DEVCTL3_L0P_EN		0x08
+#define	PCIE_DEVCTL3_TARGET_WIDTH_MASK	0x70
+#define	PCIE_DEVCTL3_TARGET_WIDTH_X1	0x00
+#define	PCIE_DEVCTL3_TARGET_WIDTH_X2	0x10
+#define	PCIE_DEVCTL3_TARGET_WIDTH_X4	0x20
+#define	PCIE_DEVCTL3_TARGET_WIDTH_X8	0x30
+#define	PCIE_DEVCTL3_TARGET_WIDTH_X16	0x40
+#define	PCIE_DEVCTL3_TARGET_WIDTH_DYN	0x70
+
+#define	PCIE_DEVSTS3		0x0c
+#define	PCIE_DEVSTS3_INIT_WIDTH_MASK	0x07
+#define	PCIE_DEVSTS3_INIT_WIDTH_X1	0x00
+#define	PCIE_DEVSTS3_INIT_WIDTH_X2	0x01
+#define	PCIE_DEVSTS3_INIT_WIDTH_X4	0x02
+#define	PCIE_DEVSTS3_INIT_WIDTH_X8	0x03
+#define	PCIE_DEVSTS3_INIT_WIDTH_X16	0x04
+#define	PCIE_DEVSTS3_SEG_CAP		0x08
+#define	PCIE_DEVSTS3_REM_L0P_SUP	0x10
 
 /*
  * PCI-E Common TLP Header Fields

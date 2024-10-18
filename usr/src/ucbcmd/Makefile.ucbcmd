@@ -34,12 +34,6 @@
 
 include $(SRC)/Makefile.master
 
-LN=		ln
-SH=		sh
-CHMOD=		chmod
-MKDIR=		mkdir
-TOUCH=		touch
-
 FILEMODE=	0555
 LIBFILEMODE=	0444
 ROOTBIN=	$(ROOT)/usr/ucb
@@ -66,7 +60,7 @@ LDLIBS =        $(LDLIBS.cmd)
 
 LDFLAGS.cmd = \
 	$(ENVLDFLAGS1) $(ENVLDFLAGS2) $(ENVLDFLAGS3) \
-	$(MAPFILE.NES:%=-M%) $(MAPFILE.PGA:%=-M%) $(MAPFILE.NED:%=-M%) \
+	$(MAPFILE.NES:%=-Wl,-M%) $(MAPFILE.PGA:%=-Wl,-M%) $(MAPFILE.NED:%=-Wl,-M%) \
 	$(BDIRECT)
 
 LDFLAGS =       $(LDFLAGS.cmd)

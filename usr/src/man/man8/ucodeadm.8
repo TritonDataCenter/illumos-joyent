@@ -1,0 +1,188 @@
+.\" The contents of this file are subject to the terms of the Common
+.\" Development and Distribution License (the "License").  You may not use
+.\" this file except in compliance with the License.
+.\"
+.\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or
+.\" http://www.opensolaris.org/os/licensing.  See the License for the
+.\" specific language governing permissions and limitations under the
+.\" License.
+.\"
+.\" When distributing Covered Code, include this CDDL HEADER in each file
+.\" and include the License file at usr/src/OPENSOLARIS.LICENSE.  If
+.\" applicable, add the following below this CDDL HEADER, with the fields
+.\" enclosed by brackets "[]" replaced with your own identifying
+.\" information: Portions Copyright [yyyy] [name of copyright owner]
+.\"
+.\" Copyright (c) 2007, Sun Microsystems, Inc. All Rights Reserved
+.\" Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+.\" Copyright 2023 Oxide Computer Company
+.\"
+.Dd August 14, 2023
+.Dt UCODEADM 8
+.Os
+.Sh NAME
+.Nm ucodeadm
+.Nd processor microcode utility
+.Sh SYNOPSIS
+.Nm
+.Fl i
+.Op Fl t Ar type
+.Op Fl R Ar path
+.Ar microcode-file
+.Nm
+.Fl l
+.Op Fl t Ar type
+.Ar microcode-file
+.Nm
+.Fl u
+.Op Fl t Ar type
+.Ar microcode-file
+.Nm
+.Fl v
+.Sh DESCRIPTION
+The
+.Nm
+utility can be used to report the running microcode revision on the processors,
+update microcode, extract microcode to the target system to be used during the
+boot process, or to view details of the microcode patches contained within
+.Ar microcode-file ,
+where
+.Ar microcode-file
+is an update obtained from a processor vendor.
+.Pp
+In general, processor microcode updates are provided as part of the operating
+system and automatically applied during system boot, and there is no need for a
+system administrator to use
+.Nm
+directly.
+The operating system bundled files are not suitable for use with
+.Nm .
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl i Ar microcode-file
+Install microcode files on target system to be used during the next boot cycle.
+The type of the file must either be specified with the
+.Fl t
+option, or
+.Ar microcode-file
+name must start with the vendor name prefix, either
+.Dq intel
+or
+.Dq amd ,
+so that the type can be inferred from it.
+.Pp
+By default the microcode files will be installed at:
+.Pp
+.D1 Pa /platform/$ARCH/ucode/$VENDORSTR/
+.Pp
+where
+.Dv VENDORSTR
+is either
+.Dq GenuineIntel
+or
+.Dq AuthenticAMD
+and
+.Dv ARCH
+is the architecture of the running machine \(em the same value that is shown by
+the
+.Fl m
+option of
+.Xr uname 1 .
+.It Fl l Ar microcode-file
+Display details of the microcode patches contained within
+.Ar microcode-file .
+.It Fl t Ar type
+Specify the type of
+.Ar microcode-file .
+Either
+.Dq intel
+or
+.Dq amd .
+.It Fl u Ar microcode-file
+Update microcode on all cross-call interrupt ready processors.
+.It Fl v
+Report the microcode revision for each CPU on the current system.
+.It Fl R Ar alternate-path
+Install
+.Ar microcode
+files into the provided
+.Ar alternate-path .
+.El
+.Sh EXIT STATUS
+The following exit values are returned:
+.Bl -tag -width Ds
+.It 0
+Successful completion.
+.It >0
+An error occurred.
+.El
+.Sh EXAMPLES
+.Sy Example 1 No Reporting the Microcode Revision
+.Pp
+The following example displays the microcode revision that is currently running:
+.Bd -literal -offset 4n
+# ucodeadm -v
+CPU     Microcode Version
+0       0x2f
+1       0x2f
+.Ed
+.Pp
+.Sy Example 2 No Updating the Processor Microcode
+.Pp
+The following example updates the processor microcode using
+.Pa intel-ucode.txt :
+.Bd -literal -offset 4n
+# ucodeadm -u intel-ucode.txt
+.Ed
+.Pp
+.Sy Example 3 No Installing the Microcode on the Target System
+.Pp
+The following example installs the microcode into
+.Pa /export/ucode-path
+on the target system:
+.Bd -literal -offset 4n
+# ucodeadm -i -R /export/ucode-path intel-ucode.txt
+# ls /export/ucode-path
+00001632-00
+.Ed
+.Pp
+If an alternate path is used when installing the microcode on the target
+system, the installed microcode file is not used on the next boot cycle.
+.Pp
+.Sy Example 4 No Listing the contents of a microcode file
+.Bd -literal -offset 4n
+# ucodeadm -l amd_fam17h.bin
+Equivalence table:
+    00800F82 Family=17 Model=08 Stepping=02 -> 8082
+    00800F12 Family=17 Model=01 Stepping=02 -> 8012
+    00830F10 Family=17 Model=31 Stepping=00 -> 8310
+Microcode patches:
+    8082 -> Patch=0800820D Date=04162019 Bytes=3200
+    8012 -> Patch=0800126E Date=11112021 Bytes=3200
+    8310 -> Patch=08301055 Date=02152022 Bytes=3200
+
+# ucodeadm -l intel-ucode.txt
+Microcode patches:
+    00090672-03 -> Family=06 Model=97 Stepping=02
+                   Date=03032022 Bytes=212876
+Extended Signature Table:
+    00090672-03 -> Family=06 Model=97 Stepping=02
+    00090675-03 -> Family=06 Model=97 Stepping=05
+    000B06F2-03 -> Family=06 Model=bf Stepping=02
+    000B06F5-03 -> Family=06 Model=bf Stepping=05
+.Ed
+.Sh INTERFACE STABILITY
+The command line interface of
+.Nm
+is
+.Sy Committed .
+The output of
+.Nm
+is
+.Sy Not-An-Interface
+and may change at any time.
+.Sh SEE ALSO
+.Xr uname 1 ,
+.Xr attributes 7 ,
+.Xr psradm 8 ,
+.Xr psrinfo 8

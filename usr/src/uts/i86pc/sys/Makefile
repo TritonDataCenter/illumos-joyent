@@ -31,13 +31,14 @@ UTSBASE = ../..
 # include global definitions
 #
 include ../Makefile.i86pc
+include $(UTSBASE)/intel/sys/Makefile.psm
 
 #
 # Override defaults.
 #
 FILEMODE = 644
 
-CHKHDRS=  \
+HDRS=  \
 	acpidev.h	\
 	amd_iommu.h	\
 	asm_misc.h	\
@@ -46,7 +47,6 @@ CHKHDRS=  \
 	ddi_subrdefs.h	\
 	debug_info.h	\
 	fastboot.h	\
-	hma.h		\
 	mach_mmu.h	\
 	machclock.h	\
 	machcpuvar.h	\
@@ -63,23 +63,14 @@ CHKHDRS=  \
 	rm_platter.h	\
 	sbd_ioctl.h	\
 	smp_impldefs.h	\
-	smt.h		\
 	vm_machparam.h	\
 	x_call.h	\
 	xc_levels.h	\
 	xsvc.h
 
-NOCHKHDRS= \
-	vmm.h		\
-	vmm_dev.h	\
-	vmm_impl.h	\
-	vmm_instruction_emul.h
-
-HDRS= \
-	$(CHKHDRS)	\
-	$(NOCHKHDRS)
-
-ROOTHDRS=	$(HDRS:%=$(USR_PSM_ISYS_DIR)/%)
+ROOTHDRS = \
+	$(HDRS:%=$(USR_PSM_ISYS_DIR)/%)	\
+	$(PSM_SHARED_HDRS:%=$(USR_PSM_ISYS_DIR)/%)
 
 ROOTDIR=	$(ROOT)/usr/share/src
 ROOTDIRS=	$(ROOTDIR)/uts $(ROOTDIR)/uts/$(PLATFORM)
@@ -87,7 +78,7 @@ ROOTDIRS=	$(ROOTDIR)/uts $(ROOTDIR)/uts/$(PLATFORM)
 ROOTLINK=	$(ROOTDIR)/uts/$(PLATFORM)/sys
 LINKDEST=	../../../../platform/$(PLATFORM)/include/sys
 
-CHECKHDRS=	$(CHKHDRS:%.h=%.check)
+CHECKHDRS=	$(HDRS:%.h=%.check)
 
 .KEEP_STATE:
 

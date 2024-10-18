@@ -23,27 +23,35 @@
 # Copyright (c) 1992, 2010, Oracle and/or its affiliates. All rights reserved.
 #
 
-include		../Makefile.com
 include		../../Makefile.tools
-include		$(SGSHOME)/libelf/Makefile.com
+include		$(SRC)/cmd/sgs/libelf/Makefile.com
+include		../Makefile.com
 
 CONVLIBDIR =	-L../libconv
-CPPFLAGS =	$(NATIVE_CPPFLAGS)
-CFLAGS =	$(NATIVE_CFLAGS)
 SGSMSGTARG +=	$(SGSMSG32)
 NATIVE_LIBS +=	libc.so
-CW_LINKER =
+
+CPPFLAGS +=	-I$(SRC)/cmd/sgs/libelf/common
+LDLIBS +=	$(CONVLIBDIR) -lconv
+
+include		$(SRC)/Makefile.native
+include		$(SRC)/Makefile.master.64
+
+# As a bootstrapping issue, we can't use the real mapfile because we build
+# early in tools and thus don't have support for assertions.
+MAPFILES=
 
 .KEEP_STATE:
 
-install:	all $(ROOTONBLDLIBMACH)/$(DYNLIB) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
+install:	all $(ROOTONBLDLIBMACH64)/$(DYNLIB) \
+	$(ROOTONBLDLIBMACH64)/$(LIBLINKS)
 
-$(ROOTONBLDLIBMACH)/$(DYNLIB): $(PICS) $(ROOTONBLDLIBMACH)
+$(ROOTONBLDLIBMACH64)/$(DYNLIB): $(PICS) $(ROOTONBLDLIBMACH64)
 		$(BUILD.SO)
 		$(POST_PROCESS_SO)
 
-$(ROOTONBLDLIBMACH)/$(LIBLINKS): $(ROOTONBLDLIBMACH)/$(DYNLIB)
-		@$(RM) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
-		$(SYMLINK) $(DYNLIB) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
+$(ROOTONBLDLIBMACH64)/$(LIBLINKS): $(ROOTONBLDLIBMACH64)/$(DYNLIB)
+		@$(RM) $(ROOTONBLDLIBMACH64)/$(LIBLINKS)
+		$(SYMLINK) $(DYNLIB) $(ROOTONBLDLIBMACH64)/$(LIBLINKS)
 
 include		$(SGSHOME)/libelf/Makefile.targ

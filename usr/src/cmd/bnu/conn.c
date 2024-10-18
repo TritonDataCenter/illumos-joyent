@@ -27,10 +27,6 @@
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
 /*	  All Rights Reserved  	*/
 
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
-
 #include "uucp.h"
 
 GLOBAL char _Protocol[40] = "";	/* working protocol string */
@@ -70,7 +66,7 @@ static int notin(), ifdate(), checkdate(), checktime(), classmatch();
 
 GLOBAL char *Myline = CNULL;	/* to force which line will be used */
 GLOBAL char *Mytype = CNULL;	/* to force selection of specific device type */
-GLOBAL int Dologin;		/* to force login chat sequence */
+EXTERN int Dologin;		/* to force login chat sequence */
 
 /*
  * conn - place a telephone call to system and login, etc.
@@ -216,7 +212,7 @@ char *flds[], *dev[];
 
 
 /*
- *	rddev - find and unpack a line from device file for this caller type 
+ *	rddev - find and unpack a line from device file for this caller type
  *	lines starting with whitespace of '#' are comments
  *
  *	return codes:
@@ -225,10 +221,7 @@ char *flds[], *dev[];
  */
 
 GLOBAL int
-rddev(type, dev, buf, devcount)
-char *type;
-char *dev[];
-char *buf;
+rddev(char *type, char *dev[], char *buf, int devcount)
 {
 	char *commap, d_type[BUFSIZ];
 	int na;
@@ -299,8 +292,7 @@ char *buf;
  */
 
 static int
-finds(sysnam, flds, fldcount)
-char *sysnam, *flds[];
+finds(char *sysnam, char *flds[], int fldcount)
 {
 	static char info[BUFSIZ];
 	int na;
@@ -398,7 +390,7 @@ protoString(valid)
 char *valid;
 {
 	char *save;
-	
+
 	save =strdup(valid);
 	_Protocol[0] = '\0';
 
@@ -441,8 +433,8 @@ char *valid;
 	if ( *(protoPtr = _Protocol) != NULLCHAR ) {
 	    while ( *(protoPtr = nextProto(protoPtr)) != NULLCHAR ) {
 		if ( *(wantPtr = findProto(desired, *protoPtr)) == NULLCHAR ) {
-		    removeProto(valid, *protoPtr);	
-		    removeProto(protoPtr, *protoPtr);	
+		    removeProto(valid, *protoPtr);
+		    removeProto(protoPtr, *protoPtr);
 		} else {
 		    mergeProto(protoPtr, wantPtr);
 		    protoPtr++;
@@ -484,7 +476,7 @@ char *tostring, *fromstring;
 	    else
 		tostring++;
 	}
-	
+
 	if ( *tostring == NULLCHAR ) {
 	    length = nextProto(fromstring + 1) - fromstring;
 	    (void) strncpy(tostring, fromstring, length);
@@ -523,7 +515,7 @@ char *string, letter;
 	}
 }
 
-/* 
+/*
  * nextProto
  *	char *string;
  * return
@@ -540,7 +532,7 @@ char *string;
 	return(string);
 }
 
-/* 
+/*
  * findProto
  *	char *desired,
  *	char protoPtr;
@@ -761,7 +753,7 @@ wait_for_hangup(dcf)
 	}
 	return (SUCCESS);
 }
-	
+
 /*
  *	sendthem(str, fn, phstr1, phstr2)	send line of chat sequence
  *	char *str, *phstr;
@@ -874,7 +866,7 @@ int fn;
 				continue;
 			default:	/* send the backslash */
 				*bptr++ = '\\';
-				*bptr++ = *sptr;	
+				*bptr++ = *sptr;
 				continue;
 
 			/* flush buf, perform action, and continue */
@@ -960,8 +952,7 @@ int type;
 #undef FLUSH
 
 GLOBAL int
-wrstr(fn, buf, len, echocheck)
-char *buf;
+wrstr(int fn, char *buf, int len, int echocheck)
 {
 	int 	i;
 	char dbuf[BUFSIZ], *dbptr = dbuf;
@@ -993,9 +984,7 @@ char *buf;
 }
 
 GLOBAL int
-wrchr(fn, buf, len)
-int fn;
-char *buf;
+wrchr(int fn, char *buf, int len)
 {
 	int 	i, saccess;
 	char	cin, cout;
@@ -1303,7 +1292,7 @@ unsigned n;
 
 /*
 
- * altconn - place a telephone call to system 
+ * altconn - place a telephone call to system
  * from cu when telephone number or direct line used
  *
  * return codes:

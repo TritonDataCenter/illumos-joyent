@@ -2,14 +2,15 @@
 .\" Copyright (C) 2009, Sun Microsystems, Inc. All Rights Reserved.
 .\" Copyright 1989 AT&T
 .\" Copyright (c) 2013, OmniTI Computer Consulting, Inc. All Rights Reserved.
+.\" Copyright 2024 Oxide Computer Company
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH SOCKET 3SOCKET "Jan 28, 2009"
+.\" Copyright 2022 Garrett D'Amore
+.TH SOCKET 3SOCKET "June 21, 2024"
 .SH NAME
 socket \- create an endpoint for communication
 .SH SYNOPSIS
-.LP
 .nf
 \fBcc\fR [ \fIflag\fR ... ] \fIfile\fR ... \fB-lsocket\fR \fB -lnsl \fR [ \fIlibrary\fR ... ]
 #include <sys/types.h>
@@ -19,11 +20,8 @@ socket \- create an endpoint for communication
 .fi
 
 .SH DESCRIPTION
-.sp
-.LP
 The \fBsocket()\fR function creates an endpoint for communication and returns a
 descriptor.
-.sp
 .LP
 The \fIdomain\fR argument specifies the protocol family within which
 communication takes place. The protocol family is generally the same as the
@@ -60,15 +58,6 @@ Internet Protocol Version 6 (IPv6)
 .RE
 
 .sp
-.ne 2
-.na
-\fB\fBPF_NCA\fR\fR
-.ad
-.RS 12n
-Network Cache and Accelerator (NCA) protocols
-.RE
-
-.sp
 .LP
 The socket has the indicated \fItype\fR, which specifies the communication
 semantics. Currently defined types are:
@@ -94,9 +83,22 @@ following list, defined in <sys/socket.h>.
 \fB\fBSOCK_CLOEXEC\fR\fR
 .ad
 .RS 12n
-Creates the socket with the \fBFD_CLOEXEC\fR flag set, causing the underlying
-file descriptor to be closed prior to any future calls to \fBexec\fR(2). This
-is similar in purpose to the \fBO_CLOEXEC\fR flag to \fBopen\fR(2).
+Creates the socket with the close-on-exec flag, \fBFD_CLOEXEC\fR set.  This
+is similar in purpose to the \fBO_CLOEXEC\fR flag to \fBopen\fR(2).  The file
+descriptor will be closed on any successful calls to the \fBexec\fR(2) family of
+functions.
+.RE
+
+.sp
+.ne 2
+.na
+\fB\fBSOCK_CLOFORK\fR\fR
+.ad
+.RS 12n
+Creates the socket with the close-on-fork flag, \fBFD_CLOFORK\fR, set. This
+is similar in purpose to the \fBO_CLOFORK\fR flag to \fBopen\fR(2).  The file
+descriptor will be closed in any children created with the \fBfork\fR(2) family
+of functions.
 .RE
 
 .sp
@@ -123,7 +125,7 @@ provide nonblocking semantics as described for \fBO_NONBLOCK\fR in \fBopen\fR(2)
 
 .sp
 .LP
-There must be an entry in the \fBnetconfig\fR(4) file for at least each
+There must be an entry in the \fBnetconfig\fR(5) file for at least each
 protocol family and type required. If  a non-zero protocol has been specified
 but no exact match for the protocol family, type, and protocol is found, then
 the first entry containing the specified family and type with a \fIprotocol\fR
@@ -197,13 +199,9 @@ The operation of sockets is controlled by socket level \fIoptions\fR. These
 options are defined in the file <\fBsys/socket.h\fR>. \fBsetsockopt\fR(3SOCKET)
 and \fBgetsockopt\fR(3SOCKET) are used to set and get options, respectively.
 .SH RETURN VALUES
-.sp
-.LP
 Upon successful completion, a descriptor referencing the socket is returned.
 Otherwise, -1 is returned and \fBerrno\fR is set to indicate the error.
 .SH ERRORS
-.sp
-.LP
 The \fBsocket()\fR function will fail if:
 .sp
 .ne 2
@@ -296,9 +294,7 @@ One or more of the specified flags is not supported.
 .RE
 
 .SH ATTRIBUTES
-.sp
-.LP
-See \fBattributes\fR(5) for descriptions of the following attributes:
+See \fBattributes\fR(7) for descriptions of the following attributes:
 .sp
 
 .sp
@@ -312,16 +308,27 @@ MT-Level	Safe
 .TE
 
 .SH SEE ALSO
-.sp
-.LP
-\fBnca\fR(1), \fBclose\fR(2), \fBfcntl\fR(2), \fBioctl\fR(2), \fBread\fR(2),
-\fBwrite\fR(2), \fBaccept\fR(3SOCKET), \fBbind\fR(3SOCKET), \fBexec\fR(2),
-\fBconnect\fR(3SOCKET), \fBgetsockname\fR(3SOCKET), \fBgetsockopt\fR(3SOCKET),
-\fBin.h\fR(3HEAD), \fBlisten\fR(3SOCKET), \fBrecv\fR(3SOCKET), \fBopen\fR(2),
-\fBsetsockopt\fR(3SOCKET), \fBsend\fR(3SOCKET), \fBshutdown\fR(3SOCKET),
-\fBsocket.h\fR(3HEAD), \fBsocketpair\fR(3SOCKET), \fBattributes\fR(5)
+.BR close (2),
+.BR exec (2),
+.BR fcntl (2),
+.BR ioctl (2),
+.BR open (2),
+.BR read (2),
+.BR write (2),
+.BR in.h (3HEAD),
+.BR socket.h (3HEAD),
+.BR accept (3SOCKET),
+.BR bind (3SOCKET),
+.BR connect (3SOCKET),
+.BR getsockname (3SOCKET),
+.BR getsockopt (3SOCKET),
+.BR listen (3SOCKET),
+.BR recv (3SOCKET),
+.BR send (3SOCKET),
+.BR setsockopt (3SOCKET),
+.BR shutdown (3SOCKET),
+.BR socketpair (3SOCKET),
+.BR attributes (7)
 .SH NOTES
-.sp
-.LP
 Historically, \fBAF_\fR* was commonly used in places where \fBPF_\fR* was
 meant. New code should be careful to use \fBPF_\fR* as necessary.

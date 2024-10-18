@@ -38,7 +38,6 @@ UTSBASE		= ../..
 #
 MODULE		= rtw
 OBJECTS		= $(RTW_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(RTW_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_DRV_DIR)/$(MODULE)
 
 #
@@ -50,13 +49,12 @@ include $(UTSBASE)/intel/Makefile.intel
 #	Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
 # Driver depends on MAC-WIFI & net80211 misc modules
 #
-LDFLAGS		+= -dy -Nmisc/mac -Nmisc/net80211
+LDFLAGS		+= -Nmisc/mac -Nmisc/net80211
 
 CERRWARN	+= -_gcc=-Wno-type-limits
 CERRWARN	+= -_gcc=-Wno-unused-label
@@ -74,12 +72,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

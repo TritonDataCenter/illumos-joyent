@@ -21,7 +21,10 @@
 
 /*
  * Copyright (c) 1990, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2014 Garrett D'Amore <garrett@damore.org>
+ * Copyright 2022 Garrett D'Amore
+ * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2023 MNX Cloud, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <sys/note.h>
@@ -250,7 +253,7 @@ ddi_unmap_regs(dev_info_t *dip, uint_t rnumber, caddr_t *kaddrp, off_t offset,
 
 int
 ddi_bus_map(dev_info_t *dip, dev_info_t *rdip, ddi_map_req_t *mp,
-	off_t offset, off_t len, caddr_t *vaddrp)
+    off_t offset, off_t len, caddr_t *vaddrp)
 {
 	return (i_ddi_bus_map(dip, rdip, mp, offset, len, vaddrp));
 }
@@ -265,7 +268,7 @@ ddi_bus_map(dev_info_t *dip, dev_info_t *rdip, ddi_map_req_t *mp,
  */
 int
 nullbusmap(dev_info_t *dip, dev_info_t *rdip, ddi_map_req_t *mp,
-	off_t offset, off_t len, caddr_t *vaddrp)
+    off_t offset, off_t len, caddr_t *vaddrp)
 {
 	_NOTE(ARGUNUSED(rdip))
 	if (mp->map_type == DDI_MT_RNUMBER)
@@ -433,45 +436,6 @@ ddi_peek64(dev_info_t *dip, int64_t *addr, int64_t *val_p)
 	    val_p));
 }
 
-
-/*
- * We need to separate the old interfaces from the new ones and leave them
- * in here for a while. Previous versions of the OS defined the new interfaces
- * to the old interfaces. This way we can fix things up so that we can
- * eventually remove these interfaces.
- * e.g. A 3rd party module/driver using ddi_peek8 and built against S10
- * or earlier will actually have a reference to ddi_peekc in the binary.
- */
-#ifdef _ILP32
-int
-ddi_peekc(dev_info_t *dip, int8_t *addr, int8_t *val_p)
-{
-	return (i_ddi_peekpoke(dip, DDI_CTLOPS_PEEK, sizeof (*val_p), addr,
-	    val_p));
-}
-
-int
-ddi_peeks(dev_info_t *dip, int16_t *addr, int16_t *val_p)
-{
-	return (i_ddi_peekpoke(dip, DDI_CTLOPS_PEEK, sizeof (*val_p), addr,
-	    val_p));
-}
-
-int
-ddi_peekl(dev_info_t *dip, int32_t *addr, int32_t *val_p)
-{
-	return (i_ddi_peekpoke(dip, DDI_CTLOPS_PEEK, sizeof (*val_p), addr,
-	    val_p));
-}
-
-int
-ddi_peekd(dev_info_t *dip, int64_t *addr, int64_t *val_p)
-{
-	return (i_ddi_peekpoke(dip, DDI_CTLOPS_PEEK, sizeof (*val_p), addr,
-	    val_p));
-}
-#endif /* _ILP32 */
-
 int
 ddi_poke8(dev_info_t *dip, int8_t *addr, int8_t val)
 {
@@ -495,40 +459,6 @@ ddi_poke64(dev_info_t *dip, int64_t *addr, int64_t val)
 {
 	return (i_ddi_peekpoke(dip, DDI_CTLOPS_POKE, sizeof (val), addr, &val));
 }
-
-/*
- * We need to separate the old interfaces from the new ones and leave them
- * in here for a while. Previous versions of the OS defined the new interfaces
- * to the old interfaces. This way we can fix things up so that we can
- * eventually remove these interfaces.
- * e.g. A 3rd party module/driver using ddi_poke8 and built against S10
- * or earlier will actually have a reference to ddi_pokec in the binary.
- */
-#ifdef _ILP32
-int
-ddi_pokec(dev_info_t *dip, int8_t *addr, int8_t val)
-{
-	return (i_ddi_peekpoke(dip, DDI_CTLOPS_POKE, sizeof (val), addr, &val));
-}
-
-int
-ddi_pokes(dev_info_t *dip, int16_t *addr, int16_t val)
-{
-	return (i_ddi_peekpoke(dip, DDI_CTLOPS_POKE, sizeof (val), addr, &val));
-}
-
-int
-ddi_pokel(dev_info_t *dip, int32_t *addr, int32_t val)
-{
-	return (i_ddi_peekpoke(dip, DDI_CTLOPS_POKE, sizeof (val), addr, &val));
-}
-
-int
-ddi_poked(dev_info_t *dip, int64_t *addr, int64_t val)
-{
-	return (i_ddi_peekpoke(dip, DDI_CTLOPS_POKE, sizeof (val), addr, &val));
-}
-#endif /* _ILP32 */
 
 /*
  * ddi_peekpokeio() is used primarily by the mem drivers for moving
@@ -915,7 +845,7 @@ ddi_dma_burstsizes(ddi_dma_handle_t handle)
  *
  */
 void
-ddi_dma_attr_merge(ddi_dma_attr_t *attr, ddi_dma_attr_t *mod)
+ddi_dma_attr_merge(ddi_dma_attr_t *attr, const ddi_dma_attr_t *mod)
 {
 	attr->dma_attr_addr_lo =
 	    MAX(attr->dma_attr_addr_lo, mod->dma_attr_addr_lo);
@@ -984,7 +914,7 @@ ddi_map_fault(dev_info_t *dip, struct hat *hat, struct seg *seg,
  *	available for direct access to user process via the mmap(2) system call.
  */
 int
-ddi_device_mapping_check(dev_t dev, ddi_device_acc_attr_t *accattrp,
+ddi_device_mapping_check(dev_t dev, const ddi_device_acc_attr_t *accattrp,
     uint_t rnumber, uint_t *hat_flags)
 {
 	ddi_acc_handle_t handle;
@@ -2886,7 +2816,7 @@ ddi_prop_int64_op(prop_handle_t *ph, uint_t cmd, int64_t *data)
 		 */
 		ph->ph_cur_pos = (uchar_t *)ph->ph_cur_pos +
 		    sizeof (int64_t);
-			return (DDI_PROP_RESULT_OK);
+		return (DDI_PROP_RESULT_OK);
 
 	case DDI_PROP_CMD_ENCODE:
 		/*
@@ -2934,7 +2864,7 @@ ddi_prop_int64_op(prop_handle_t *ph, uint_t cmd, int64_t *data)
 		 */
 		ph->ph_cur_pos = (uchar_t *)ph->ph_cur_pos +
 		    sizeof (int64_t);
-			return (DDI_PROP_RESULT_OK);
+		return (DDI_PROP_RESULT_OK);
 
 	case DDI_PROP_CMD_GET_ESIZE:
 		/*
@@ -3115,7 +3045,7 @@ ddi_prop_1275_string(prop_handle_t *ph, uint_t cmd, char *data)
  */
 int
 ddi_prop_1275_bytes(prop_handle_t *ph, uint_t cmd, uchar_t *data,
-	uint_t nelements)
+    uint_t nelements)
 {
 	switch (cmd) {
 	case DDI_PROP_CMD_DECODE:
@@ -4922,7 +4852,7 @@ impl_ddi_callback_init(void)
 
 static void
 callback_insert(int (*funcp)(caddr_t), caddr_t arg, uintptr_t *listid,
-	int count)
+    int count)
 {
 	struct ddi_callback *list, *marker, *new;
 	size_t size = sizeof (struct ddi_callback);
@@ -5384,10 +5314,9 @@ swab(void *src, void *dst, size_t nbytes)
 static void
 ddi_append_minor_node(dev_info_t *ddip, struct ddi_minor_data *dmdp)
 {
-	int			circ;
 	struct ddi_minor_data	*dp;
 
-	ndi_devi_enter(ddip, &circ);
+	ndi_devi_enter(ddip);
 	if ((dp = DEVI(ddip)->devi_minor) == (struct ddi_minor_data *)NULL) {
 		DEVI(ddip)->devi_minor = dmdp;
 	} else {
@@ -5395,17 +5324,7 @@ ddi_append_minor_node(dev_info_t *ddip, struct ddi_minor_data *dmdp)
 			dp = dp->next;
 		dp->next = dmdp;
 	}
-	ndi_devi_exit(ddip, circ);
-}
-
-/*
- * Part of the obsolete SunCluster DDI Hooks.
- * Keep for binary compatibility
- */
-minor_t
-ddi_getiminor(dev_t dev)
-{
-	return (getminor(dev));
+	ndi_devi_exit(ddip);
 }
 
 static int
@@ -5844,11 +5763,10 @@ ddi_create_internal_pathname(dev_info_t *dip, char *name, int spec_type,
 void
 ddi_remove_minor_node(dev_info_t *dip, const char *name)
 {
-	int			circ;
 	struct ddi_minor_data	*dmdp, *dmdp1;
 	struct ddi_minor_data	**dmdp_prev;
 
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	dmdp_prev = &DEVI(dip)->devi_minor;
 	dmdp = DEVI(dip)->devi_minor;
 	while (dmdp != NULL) {
@@ -5883,7 +5801,7 @@ ddi_remove_minor_node(dev_info_t *dip, const char *name)
 		}
 		dmdp = dmdp1;
 	}
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 }
 
 
@@ -6567,7 +6485,7 @@ ddi_get_parent_data(dev_info_t *dip)
  *	major = ddi_driver_major(dev_info_t *)
  */
 major_t
-ddi_name_to_major(char *name)
+ddi_name_to_major(const char *name)
 {
 	return (mod_name_to_major(name));
 }
@@ -6795,7 +6713,6 @@ ddi_pathname_obp_set(dev_info_t *dip, char *component)
 int
 ddi_dev_pathname(dev_t devt, int spec_type, char *path)
 {
-	int		circ;
 	major_t		major = getmajor(devt);
 	int		instance;
 	dev_info_t	*dip;
@@ -6828,14 +6745,14 @@ ddi_dev_pathname(dev_t devt, int spec_type, char *path)
 			goto fail;
 
 		/* Add minorname to path. */
-		ndi_devi_enter(dip, &circ);
+		ndi_devi_enter(dip);
 		minorname = i_ddi_devtspectype_to_minorname(dip,
 		    devt, spec_type);
 		if (minorname) {
 			(void) strcat(path, ":");
 			(void) strcat(path, minorname);
 		}
-		ndi_devi_exit(dip, circ);
+		ndi_devi_exit(dip);
 		ddi_release_devi(dip);
 		if (minorname == NULL)
 			goto fail;
@@ -6955,14 +6872,14 @@ ddi_set_console_bell(void (*bellfunc)(clock_t duration))
 }
 
 int
-ddi_dma_alloc_handle(dev_info_t *dip, ddi_dma_attr_t *attr,
-	int (*waitfp)(caddr_t), caddr_t arg, ddi_dma_handle_t *handlep)
+ddi_dma_alloc_handle(dev_info_t *dip, const ddi_dma_attr_t *attr,
+    int (*waitfp)(caddr_t), caddr_t arg, ddi_dma_handle_t *handlep)
 {
 	int (*funcp)() = ddi_dma_allochdl;
 	ddi_dma_attr_t dma_attr;
 	struct bus_ops *bop;
 
-	if (attr == (ddi_dma_attr_t *)0)
+	if (attr == NULL)
 		return (DDI_DMA_BADATTR);
 
 	dma_attr = *attr;
@@ -6986,9 +6903,9 @@ static uintptr_t dma_mem_list_id = 0;
 
 int
 ddi_dma_mem_alloc(ddi_dma_handle_t handle, size_t length,
-	ddi_device_acc_attr_t *accattrp, uint_t flags,
-	int (*waitfp)(caddr_t), caddr_t arg, caddr_t *kaddrp,
-	size_t *real_length, ddi_acc_handle_t *handlep)
+    const ddi_device_acc_attr_t *accattrp, uint_t flags,
+    int (*waitfp)(caddr_t), caddr_t arg, caddr_t *kaddrp,
+    size_t *real_length, ddi_acc_handle_t *handlep)
 {
 	ddi_dma_impl_t *hp = (ddi_dma_impl_t *)handle;
 	dev_info_t *dip = hp->dmai_rdip;
@@ -7079,8 +6996,8 @@ ddi_dma_mem_free(ddi_acc_handle_t *handlep)
 
 int
 ddi_dma_buf_bind_handle(ddi_dma_handle_t handle, struct buf *bp,
-	uint_t flags, int (*waitfp)(caddr_t), caddr_t arg,
-	ddi_dma_cookie_t *cookiep, uint_t *ccountp)
+    uint_t flags, int (*waitfp)(caddr_t), caddr_t arg,
+    ddi_dma_cookie_t *cookiep, uint_t *ccountp)
 {
 	ddi_dma_impl_t *hp = (ddi_dma_impl_t *)handle;
 	dev_info_t *dip, *rdip;
@@ -7143,8 +7060,8 @@ ddi_dma_buf_bind_handle(ddi_dma_handle_t handle, struct buf *bp,
 
 int
 ddi_dma_addr_bind_handle(ddi_dma_handle_t handle, struct as *as,
-	caddr_t addr, size_t len, uint_t flags, int (*waitfp)(caddr_t),
-	caddr_t arg, ddi_dma_cookie_t *cookiep, uint_t *ccountp)
+    caddr_t addr, size_t len, uint_t flags, int (*waitfp)(caddr_t),
+    caddr_t arg, ddi_dma_cookie_t *cookiep, uint_t *ccountp)
 {
 	ddi_dma_impl_t *hp = (ddi_dma_impl_t *)handle;
 	dev_info_t *dip, *rdip;
@@ -7282,7 +7199,7 @@ ddi_dma_numwin(ddi_dma_handle_t handle, uint_t *nwinp)
 
 int
 ddi_dma_getwin(ddi_dma_handle_t h, uint_t win, off_t *offp,
-	size_t *lenp, ddi_dma_cookie_t *cookiep, uint_t *ccountp)
+    size_t *lenp, ddi_dma_cookie_t *cookiep, uint_t *ccountp)
 {
 	int (*funcp)() = ddi_dma_win;
 	struct bus_ops *bop;
@@ -7358,8 +7275,8 @@ i_ddi_dma_clr_fault(ddi_dma_handle_t handle)
  */
 int
 ddi_regs_map_setup(dev_info_t *dip, uint_t rnumber, caddr_t *addrp,
-	offset_t offset, offset_t len, ddi_device_acc_attr_t *accattrp,
-	ddi_acc_handle_t *handle)
+    offset_t offset, offset_t len, const ddi_device_acc_attr_t *accattrp,
+    ddi_acc_handle_t *handle)
 {
 	ddi_map_req_t mr;
 	ddi_acc_hdl_t *hp;
@@ -7433,7 +7350,7 @@ ddi_regs_map_free(ddi_acc_handle_t *handlep)
 
 int
 ddi_device_zero(ddi_acc_handle_t handle, caddr_t dev_addr, size_t bytecount,
-	ssize_t dev_advcnt, uint_t dev_datasz)
+    ssize_t dev_advcnt, uint_t dev_datasz)
 {
 	uint8_t *b;
 	uint16_t *w;
@@ -7626,10 +7543,9 @@ i_ddi_devtspectype_to_minorname(dev_info_t *dip, dev_t dev, int spec_type)
  * returning everything via arguments we can do the locking.
  */
 int
-i_ddi_minorname_to_devtspectype(dev_info_t *dip, char *minor_name,
-	dev_t *devtp, int *spectypep)
+i_ddi_minorname_to_devtspectype(dev_info_t *dip, const char *minor_name,
+    dev_t *devtp, int *spectypep)
 {
-	int			circ;
 	struct ddi_minor_data	*dmdp;
 
 	/* deal with clone minor nodes */
@@ -7662,7 +7578,7 @@ i_ddi_minorname_to_devtspectype(dev_info_t *dip, char *minor_name,
 		return (DDI_SUCCESS);
 	}
 
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	for (dmdp = DEVI(dip)->devi_minor; dmdp; dmdp = dmdp->next) {
 		if (((dmdp->type != DDM_MINOR) &&
 		    (dmdp->type != DDM_INTERNAL_PATH) &&
@@ -7676,10 +7592,10 @@ i_ddi_minorname_to_devtspectype(dev_info_t *dip, char *minor_name,
 		if (spectypep)
 			*spectypep = dmdp->ddm_spec_type;
 
-		ndi_devi_exit(dip, circ);
+		ndi_devi_exit(dip);
 		return (DDI_SUCCESS);
 	}
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 
 	return (DDI_FAILURE);
 }
@@ -7888,6 +7804,12 @@ ddi_devid_init(
 		/*FALLTHRU*/
 	case DEVID_ATA_SERIAL:
 		/*FALLTHRU*/
+	case DEVID_NVME_NSID:
+		/*FALLTHRU*/
+	case DEVID_NVME_EUI64:
+		/*FALLTHRU*/
+	case DEVID_NVME_NGUID:
+		/*FALLTHRU*/
 	case DEVID_ENCAP:
 		if (nbytes == 0)
 			return (DDI_FAILURE);
@@ -8040,7 +7962,6 @@ int
 ddi_lyr_get_minor_name(dev_t dev, int spec_type, char **minor_name)
 {
 	char		*buf;
-	int		circ;
 	dev_info_t	*dip;
 	char		*nm;
 	int		rval;
@@ -8052,11 +7973,11 @@ ddi_lyr_get_minor_name(dev_t dev, int spec_type, char **minor_name)
 
 	/* Find the minor name and copy into max size buf */
 	buf = kmem_alloc(MAXNAMELEN, KM_SLEEP);
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	nm = i_ddi_devtspectype_to_minorname(dip, dev, spec_type);
 	if (nm)
 		(void) strcpy(buf, nm);
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 	ddi_release_devi(dip);	/* e_ddi_hold_devi_by_dev() */
 
 	if (nm) {
@@ -8076,7 +7997,7 @@ ddi_lyr_get_minor_name(dev_t dev, int spec_type, char **minor_name)
 int
 ddi_lyr_devid_to_devlist(
 	ddi_devid_t	devid,
-	char		*minor_name,
+	const char	*minor_name,
 	int		*retndevs,
 	dev_t		**retdevs)
 {
@@ -8366,8 +8287,8 @@ umem_decr_devlockmem(struct ddi_umem_cookie *cookie)
  */
 int
 umem_lockmemory(caddr_t addr, size_t len, int flags, ddi_umem_cookie_t *cookie,
-		struct umem_callback_ops *ops_vector,
-		proc_t *procp)
+    struct umem_callback_ops *ops_vector,
+    proc_t *procp)
 {
 	int	error;
 	struct ddi_umem_cookie *p;
@@ -8838,8 +8759,8 @@ ddi_umem_unlock(ddi_umem_cookie_t cookie)
  */
 struct buf *
 ddi_umem_iosetup(ddi_umem_cookie_t cookie, off_t off, size_t len,
-	int direction, dev_t dev, daddr_t blkno,
-	int (*iodone)(struct buf *), int sleepflag)
+    int direction, dev_t dev, daddr_t blkno,
+    int (*iodone)(struct buf *), int sleepflag)
 {
 	struct ddi_umem_cookie *p = (struct ddi_umem_cookie *)cookie;
 	struct buf *bp;
@@ -8919,7 +8840,7 @@ ddi_get_devstate(dev_info_t *dip)
 
 void
 ddi_dev_report_fault(dev_info_t *dip, ddi_fault_impact_t impact,
-	ddi_fault_location_t location, const char *message)
+    ddi_fault_location_t location, const char *message)
 {
 	struct ddi_fault_event_data fd;
 	ddi_eventcookie_t ec;
@@ -9045,29 +8966,54 @@ ddi_taskq_resume(ddi_taskq_t *tq)
 }
 
 int
-ddi_parse(
-	const char	*ifname,
-	char		*alnum,
-	uint_t		*nump)
+ddi_parse(const char *ifname, char *alnum, uint_t *nump)
+{
+	/*
+	 * Cap "alnum" size at LIFNAMSIZ, as callers use that in most/all
+	 * cases.
+	 */
+	return (ddi_parse_dlen(ifname, alnum, LIFNAMSIZ, nump));
+}
+
+int
+ddi_parse_dlen(const char *ifname, char *alnum, size_t alnumsize, uint_t *nump)
 {
 	const char	*p;
-	int		l;
+	int		copy_len;
 	ulong_t		num;
 	boolean_t	nonum = B_TRUE;
 	char		c;
 
-	l = strlen(ifname);
-	for (p = ifname + l; p != ifname; l--) {
+	copy_len = strlen(ifname);
+	for (p = ifname + copy_len; p != ifname; copy_len--) {
 		c = *--p;
 		if (!isdigit(c)) {
-			(void) strlcpy(alnum, ifname, l + 1);
+			/*
+			 * At this point, copy_len is the length of ifname
+			 * WITHOUT the PPA number. For "e1000g10" copy_len is 6.
+			 *
+			 * We must first make sure we HAVE a PPA, and we
+			 * aren't exceeding alnumsize with copy_len and a '\0'
+			 * terminator...
+			 */
+			int copy_len_nul = copy_len + 1;
+
+			if (nonum || alnumsize < copy_len_nul)
+				return (DDI_FAILURE);
+
+			/*
+			 * ... then we abuse strlcpy() to copy over the
+			 * driver name portion AND '\0'-terminate it.
+			 */
+			(void) strlcpy(alnum, ifname, copy_len_nul);
 			if (ddi_strtoul(p + 1, NULL, 10, &num) != 0)
 				return (DDI_FAILURE);
 			break;
 		}
 		nonum = B_FALSE;
 	}
-	if (l == 0 || nonum)
+
+	if (copy_len == 0)
 		return (DDI_FAILURE);
 
 	*nump = num;
@@ -9362,7 +9308,6 @@ dip_set_offline(dev_info_t *dip, void *arg)
 static int
 branch_set_offline(dev_info_t *dip, char *path)
 {
-	int		circ;
 	int		end;
 	result_t	res;
 
@@ -9384,9 +9329,9 @@ branch_set_offline(dev_info_t *dip, char *path)
 	res.result = DDI_SUCCESS;
 	res.path = path;
 
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	ddi_walk_devs(ddi_get_child(dip), dip_set_offline, &res);
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 
 	return (res.result);
 }
@@ -9395,7 +9340,6 @@ branch_set_offline(dev_info_t *dip, char *path)
 static int
 create_prom_branch(void *arg, int has_changed)
 {
-	int		circ;
 	int		exists, rv;
 	pnode_t		nodeid;
 	struct ptnode	*tnp;
@@ -9433,7 +9377,7 @@ create_prom_branch(void *arg, int has_changed)
 	while ((tnp = ap->head) != NULL) {
 		ap->head = tnp->next;
 
-		ndi_devi_enter(ap->pdip, &circ);
+		ndi_devi_enter(ap->pdip);
 
 		/*
 		 * Check if the branch already exists.
@@ -9471,14 +9415,14 @@ create_prom_branch(void *arg, int has_changed)
 		 */
 		if (dip == NULL || branch_set_offline(dip, path)
 		    == DDI_FAILURE) {
-			ndi_devi_exit(ap->pdip, circ);
+			ndi_devi_exit(ap->pdip);
 			rv = EIO;
 			continue;
 		}
 
 		ASSERT(ddi_get_parent(dip) == ap->pdip);
 
-		ndi_devi_exit(ap->pdip, circ);
+		ndi_devi_exit(ap->pdip);
 
 		if (ap->flags & DEVI_BRANCH_CONFIGURE) {
 			int error = e_ddi_branch_configure(dip, &ap->fdip, 0);
@@ -9502,7 +9446,7 @@ create_prom_branch(void *arg, int has_changed)
 static int
 sid_node_create(dev_info_t *pdip, devi_branch_t *bp, dev_info_t **rdipp)
 {
-	int			rv, circ, len;
+	int			rv, len;
 	int			i, flags, ret;
 	dev_info_t		*dip;
 	char			*nbuf;
@@ -9559,7 +9503,7 @@ sid_node_create(dev_info_t *pdip, devi_branch_t *bp, dev_info_t **rdipp)
 	switch (rv) {
 	case DDI_WALK_CONTINUE:
 	case DDI_WALK_PRUNESIB:
-		ndi_devi_enter(dip, &circ);
+		ndi_devi_enter(dip);
 
 		i = DDI_WALK_CONTINUE;
 		for (; i == DDI_WALK_CONTINUE; ) {
@@ -9575,7 +9519,7 @@ sid_node_create(dev_info_t *pdip, devi_branch_t *bp, dev_info_t **rdipp)
 		 * is determined by rv returned by dip.
 		 */
 
-		ndi_devi_exit(dip, circ);
+		ndi_devi_exit(dip);
 		break;
 	case DDI_WALK_TERMINATE:
 		/*
@@ -9636,20 +9580,18 @@ create_sid_branch(
 	dev_info_t	*rdip;
 
 	while (state == DDI_WALK_CONTINUE) {
-		int	circ;
-
-		ndi_devi_enter(pdip, &circ);
+		ndi_devi_enter(pdip);
 
 		state = sid_node_create(pdip, bp, &rdip);
 		if (rdip == NULL) {
-			ndi_devi_exit(pdip, circ);
+			ndi_devi_exit(pdip);
 			ASSERT(state == DDI_WALK_ERROR);
 			break;
 		}
 
 		e_ddi_branch_hold(rdip);
 
-		ndi_devi_exit(pdip, circ);
+		ndi_devi_exit(pdip);
 
 		if (flags & DEVI_BRANCH_CONFIGURE) {
 			int error = e_ddi_branch_configure(rdip, dipp, 0);
@@ -9824,7 +9766,7 @@ e_ddi_branch_unconfigure(
 	dev_info_t **dipp,
 	uint_t flags)
 {
-	int	circ, rv;
+	int	rv;
 	int	destroy;
 	char	*devnm;
 	uint_t	nflags;
@@ -9854,16 +9796,16 @@ e_ddi_branch_unconfigure(
 
 	devnm = kmem_alloc(MAXNAMELEN + 1, KM_SLEEP);
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	(void) ddi_deviname(rdip, devnm);
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	/*
 	 * ddi_deviname() returns a component name with / prepended.
 	 */
 	(void) devfs_clean(pdip, devnm + 1, DV_CLEAN_FORCE);
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 
 	/*
 	 * Recreate device name as it may have changed state (init/uninit)
@@ -9873,7 +9815,7 @@ e_ddi_branch_unconfigure(
 
 	if (!e_ddi_branch_held(rdip)) {
 		kmem_free(devnm, MAXNAMELEN + 1);
-		ndi_devi_exit(pdip, circ);
+		ndi_devi_exit(pdip);
 		cmn_err(CE_WARN, "e_ddi_%s_branch: dip(%p) not held",
 		    destroy ? "destroy" : "unconfigure", (void *)rdip);
 		return (EINVAL);
@@ -9912,9 +9854,9 @@ e_ddi_branch_unconfigure(
 		/* The dip still exists, so do a hold */
 		e_ddi_branch_hold(rdip);
 	}
-out:
+
 	kmem_free(devnm, MAXNAMELEN + 1);
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 	return (ndi2errno(rv));
 }
 
@@ -10061,7 +10003,6 @@ e_ddi_branch_referenced(
 	int (*callback)(dev_info_t *dip, void *arg, uint_t ref),
 	void *arg)
 {
-	int circ;
 	char *path;
 	dev_info_t *pdip;
 	struct devi_busy bsa = {0};
@@ -10089,9 +10030,9 @@ e_ddi_branch_referenced(
 		return (-1);
 	}
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	(void) ddi_pathname(rdip, path);
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	bsa.dv_hash = mod_hash_create_ptrhash("dv_node busy hash", NUMCHAINS,
 	    mod_hash_null_valdtor, sizeof (struct dev_info));
@@ -10122,9 +10063,9 @@ e_ddi_branch_referenced(
 	bsa.arg = arg;
 
 	if (visit_dip(rdip, &bsa) == DDI_WALK_CONTINUE) {
-		ndi_devi_enter(rdip, &circ);
+		ndi_devi_enter(rdip);
 		ddi_walk_devs(ddi_get_child(rdip), visit_dip, &bsa);
-		ndi_devi_exit(rdip, circ);
+		ndi_devi_exit(rdip);
 	}
 
 out:

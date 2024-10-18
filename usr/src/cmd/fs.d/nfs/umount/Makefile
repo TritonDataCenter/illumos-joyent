@@ -61,10 +61,8 @@ $(LIBPROG):	$(OBJS)
 		$(LINK.c) -o $@ $(OBJS) $(LDLIBS)
 		$(POST_PROCESS)
 
-lint:	lint_SRCS
+clean:
+	$(RM) $(OBJS)
 
-clean:     
-	$(RM) $(LIBPROG).o replica.o
-
-replica.o: ../lib/replica.c 
+replica.o: ../lib/replica.c
 	$(COMPILE.c) ../lib/replica.c

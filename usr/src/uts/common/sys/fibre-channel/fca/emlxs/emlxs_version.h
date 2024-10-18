@@ -34,12 +34,12 @@ extern "C" {
 				    "All rights reserved."
 
 
-#define	EMLXS_VERSION		"2.80.8.0"
-#define	EMLXS_DATE_MINUTE	"16"	/* 00-59 */
-#define	EMLXS_DATE_HOUR		"28"	/* 00-23 */
-#define	EMLXS_DATE_DAY		"28"	/* 00-31 */
-#define	EMLXS_DATE_MONTH	"02"	/* 01-12 */
-#define	EMLXS_DATE_YEAR		"2020"	/* YYYY  */
+#define	EMLXS_VERSION		"2.80.9.0"
+#define	EMLXS_DATE_MINUTE	"50"	/* 00-59 */
+#define	EMLXS_DATE_HOUR		"16"	/* 00-23 */
+#define	EMLXS_DATE_DAY		"16"	/* 00-31 */
+#define	EMLXS_DATE_MONTH	"01"	/* 01-12 */
+#define	EMLXS_DATE_YEAR		"2024"	/* YYYY  */
 
 #define	EMLXS_REVISION		EMLXS_DATE_YEAR "." EMLXS_DATE_MONTH "." \
 				    EMLXS_DATE_DAY "." EMLXS_DATE_HOUR "." \
@@ -47,7 +47,7 @@ extern "C" {
 #define	EMLXS_NAME		""DRIVER_NAME" FCA v" EMLXS_DATE_YEAR \
 				    EMLXS_DATE_MONTH EMLXS_DATE_DAY "-" \
 				    EMLXS_VERSION
-#define	EMLXS_LABEL		"Emulex-S s" VERSION "-" EMLXS_ARCH " " \
+#define	EMLXS_LABEL		"EMLXS s" VERSION "-" EMLXS_ARCH " " \
 				    MACH " v" EMLXS_VERSION
 #define	EMLXS_FW_NAME		""DRIVER_NAME" FW v" EMLXS_DATE_YEAR \
 				    EMLXS_DATE_MONTH EMLXS_DATE_DAY "-" \

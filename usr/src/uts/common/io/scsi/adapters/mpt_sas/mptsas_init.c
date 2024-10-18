@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  * Copyright (c) 2014, Tegile Systems Inc. All rights reserved.
  * Copyright (c) 2017, Joyent, Inc.
+ * Copyright 2023 Racktop Systems, Inc.
  */
 
 /*
@@ -69,12 +70,12 @@
 #include <sys/scsi/scsi.h>
 
 #pragma pack(1)
-#include <sys/scsi/adapters/mpt_sas/mpi/mpi2_type.h>
-#include <sys/scsi/adapters/mpt_sas/mpi/mpi2.h>
-#include <sys/scsi/adapters/mpt_sas/mpi/mpi2_cnfg.h>
-#include <sys/scsi/adapters/mpt_sas/mpi/mpi2_init.h>
-#include <sys/scsi/adapters/mpt_sas/mpi/mpi2_ioc.h>
-#include <sys/scsi/adapters/mpt_sas/mpi/mpi2_tool.h>
+#include <sys/scsi/adapters/mpi/mpi2_type.h>
+#include <sys/scsi/adapters/mpi/mpi2.h>
+#include <sys/scsi/adapters/mpi/mpi2_cnfg.h>
+#include <sys/scsi/adapters/mpi/mpi2_init.h>
+#include <sys/scsi/adapters/mpi/mpi2_ioc.h>
+#include <sys/scsi/adapters/mpi/mpi2_tool.h>
 #pragma pack()
 /*
  * private header files.
@@ -165,6 +166,9 @@ mptsas_devid_type_string(mptsas_t *mpt)
 		return ("SAS3708");
 	case MPI26_MFGPAGE_DEVID_SAS3716:
 		return ("SAS3716");
+	case MPI26_MFGPAGE_DEVID_SAS3816:
+	case MPI26_MFGPAGE_DEVID_SAS3816_1:
+		return ("SAS3816");
 	case MPI26_MFGPAGE_DEVID_SAS4008:
 		return ("SAS4008");
 	default:
@@ -758,7 +762,7 @@ mptsas_do_ioc_init_reply(mptsas_t *mpt, caddr_t memp, int var,
 		return (DDI_FAILURE);
 	}
 
-	if ((ddi_get32(mpt->m_datap, &mpt->m_reg->Doorbell)) &
+	if ((mptsas_hirrd(mpt, &mpt->m_reg->Doorbell)) &
 	    MPI2_IOC_STATE_OPERATIONAL) {
 		mptsas_log(mpt, CE_NOTE,
 		    "?mpt%d: IOC Operational.\n", mpt->m_instance);

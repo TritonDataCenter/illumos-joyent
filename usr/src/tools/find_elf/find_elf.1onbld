@@ -1,0 +1,264 @@
+.\" Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
+.\"
+.\" CDDL HEADER START
+.\"
+.\" The contents of this file are subject to the terms of the
+.\" Common Development and Distribution License (the "License").
+.\" You may not use this file except in compliance with the License.
+.\"
+.\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+.\" or http://www.opensolaris.org/os/licensing.
+.\" See the License for the specific language governing permissions
+.\" and limitations under the License.
+.\"
+.\" When distributing Covered Code, include this CDDL HEADER in each
+.\" file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+.\" If applicable, add the following below this CDDL HEADER, with the
+.\" fields enclosed by brackets "[]" replaced with your own identifying
+.\" information: Portions Copyright [yyyy] [name of copyright owner]
+.\"
+.\" CDDL HEADER END
+.\"
+.\" Copyright 2022 Jason King
+.\"
+.Dd September  6, 2022
+.Dt FIND_ELF 1ONBLD
+.Os
+.Sh NAME
+.Nm find_elf
+.Nd Locate ELF objects
+.Sh SYNOPSIS
+.Nm
+.Op Fl afhnrs
+.Ar path
+.Sh DESCRIPTION
+The
+.Nm
+command descends a directory hierarchy and produces one line
+of output on stdout for each ELF object found.
+.Sh OPTIONS
+The following options are supported:
+.Bl -tag -width Fl
+.It Fl a
+Disable alias processing.
+Symbolic links are treated as independent
+files, each such link results in a separate
+.Sy OBJECT
+output line, and
+.Sy ALIAS
+lines are not issued.
+.It Fl f
+Fast Mode.
+When reading directories, the file name and modes are
+used to eliminate files from consideration and speed up the search:
+Directories with names that start with a
+.Ql \&.
+character are skipped.
+Executables must have the execute bit set, and
+shared objects must end with a
+.Ql .so
+extension.
+Files that do not meet these requirements are silently eliminated from
+consideration without further analysis.
+.It Fl h
+Show usage message.
+.It Fl n
+Do not treat well known hard-linked binaries as special.
+Certain well known binaries
+.Po
+currently
+.Pa alias
+and
+.Pa isaexec
+.Pc
+are hard linked to many other names in a proto directory tree.
+.Pp
+By default,
+.Nm
+will use these well known names as the initial name and all other hard links
+to those binaries are treated as aliases.
+Disabling this behavior with the
+.Fl n
+option will choose the first name encountered during directory traversal as
+the name, and all other hard links to the binary as aliases.
+.It Fl r
+Report file names as relative paths, relative to the given file or directory,
+instead of fully qualified.
+.It Fl s
+Only report shared objects.
+.El
+.Sh OUTPUT
+.Nm
+produces a series of
+.Sy PREFIX ,
+.Sy OBJECT ,
+and
+.Sy ALIAS
+lines, which collectively describe the ELF objects located.
+Whitespace is used within each
+line to delimit the various fields of information provided.
+.Pp
+If the
+.Fl r
+option is used to specify that file names be reported
+as relative paths, a
+.Sy PREFIX
+line is output to provide the base path from
+which the relative names should be interpreted.
+There can only be one
+.Sy PREFIX
+line, and it is output first, before any
+.Sy OBJECT
+or
+.Sy ALIAS
+lines.
+.Bd -literal -offset indent
+PREFIX path
+.Ed
+.Pp
+For each object found, an
+.Sy OBJECT
+line is produced to describe it:
+.Bd -literal -offset indent
+OBJECT [32 | 64] [DYN | EXEC | REL] [VERDEF | NOVERDEF] object-path
+.Ed
+.Pp
+The first field provides the ELF class of the object, and will be
+either 32 or 64.
+The second field provides the type of object, either
+a shared object
+.Ql DYN ,
+an executable
+.Ql EXEC ,
+or a relocatable object
+.Ql REL .
+The third field will be
+.Ql VERDEF
+if the object contains ELF version definitions, and
+.Ql NOVERDEF
+if the object is not versioned.
+The final field gives the path to the object.
+.Pp
+Under Unix, a file can have multiple names.
+In the context of ELF objects, this often happens for one of two reasons:
+.Bl -bullet -offset indent
+.It
+Compilation symlinks, used to provide a non-versioned name for a shared object.
+.It
+Symlinks such as
+.Ql 32
+and
+.Ql 64
+used to provide alternative non-machine specific paths to objects.
+.El
+.Pp
+When
+.Nm
+identifies an object via such an aliased name, it issues an
+.Sy ALIAS
+line mapping it to the main name for the object:
+.Bd -literal -offset indent
+ALIAS object-path alias-path
+.Ed
+.Pp
+The
+.Fl a
+option alters the handling of aliased names.
+When
+.Fl a
+is specified, each file results in a separate
+.Sy OBJECT
+line, as if they were
+independent files rather than the same file with different names.
+.Sh EXAMPLES
+Assume the following hierarchy of files exist under
+.Pa /usr/lib/foo :
+.Bd -literal -offset indent
+% /bin/ls -alRF /usr/lib/foo
+/usr/lib/foo:
+total 111
+drwxr-xr-x  3 root root    7 Jul 16 17:35 ./
+drwxr-xr-x 34 root root   42 Jul 16 17:34 ../
+lrwxrwxrwx  1 root bin     1 Jul 16 17:34 32 -> ./
+lrwxrwxrwx  1 root bin     5 Jul 16 17:34 64 -> amd64/
+drwxr-xr-x  2 root bin     4 Jul 16 17:35 amd64/
+lrwxrwxrwx  1 root bin    11 Jul 16 17:35 libfoo.so -> libfoo.so.1*
+-rwxr-xr-x  1 root bin 49132 Jul 16 17:35 libfoo.so.1*
+
+/usr/lib/foo/amd64:
+total 150
+drwxr-xr-x  2 root root   4 Jul 16 17:35 ./
+drwxr-xr-x  3 root root   7 Jul 16 17:35 ../
+lrwxrwxrwx  1 root bin    11 Jul 16 17:35 libfoo.so -> libfoo.so.1*
+-rwxr-xr-x  1 root bin 72536 Jul 16 17:35 libfoo.so.1*
+.Ed
+.Pp
+This hierarchy contains compilation symlinks
+.Po
+.Pa libfoo.so
+.Pc
+and path alias symlinks
+.Po
+32, 64
+.Pc ,
+as discussed in
+.Sx OUTPUT .
+.Pp
+.Nm
+produces the following output for the above hierarchy:
+.Bd -literal -offset indent
+% find_elf -r /usr/lib/foo
+PREFIX /usr/lib/foo
+OBJECT 64 DYN  VERDEF  amd64/libfoo.so.1
+ALIAS                  amd64/libfoo.so.1  64/libfoo.so
+ALIAS                  amd64/libfoo.so.1  64/libfoo.so.1
+ALIAS                  amd64/libfoo.so.1  amd64/libfoo.so
+OBJECT 32 DYN  VERDEF  libfoo.so.1
+ALIAS                  libfoo.so.1        32/libfoo.so
+ALIAS                  libfoo.so.1        32/libfoo.so.1
+ALIAS                  libfoo.so.1        libfoo.so
+.Ed
+.Pp
+Contrast this with the output when
+.Fl a
+is used to treat each name as an independent file:
+.Bd -literal -offset indent
+% find_elf -ar /usr/lib/foo
+PREFIX /usr/lib/foo
+OBJECT 32 DYN  VERDEF  32/libfoo.so
+OBJECT 32 DYN  VERDEF  32/libfoo.so.1
+OBJECT 64 DYN  VERDEF  64/libfoo.so
+OBJECT 64 DYN  VERDEF  64/libfoo.so.1
+OBJECT 64 DYN  VERDEF  amd64/libfoo.so.1
+OBJECT 64 DYN  VERDEF  amd64/libfoo.so
+OBJECT 32 DYN  VERDEF  libfoo.so.1
+OBJECT 32 DYN  VERDEF  libfoo.so
+.Ed
+.Pp
+When
+.Nm
+is used to process an alias for which no target object is given,
+there will be no output.
+For example, using
+.Pa /lib/libc.so ,
+which is a compilation symlink for
+.Pa /lib/libc.so.1 :
+.Bd -literal -offset indent
+% find_elf /lib/libc.so
+.Ed
+.Pp
+In such situations, the
+.Fl a
+option can be used to produce the desired output:
+.Bd -literal -offset indent
+% find_elf -a /lib/libc.so
+OBJECT 32 DYN  VERDEF   /lib/libc.so
+.Ed
+.Sh SEE ALSO
+.Xr elfdump 1 ,
+.Xr ld 1 ,
+.Xr ldd 1 ,
+.Xr pvs 1 ,
+.Xr check_rtime 1ONBLD ,
+.Xr interface_check 1ONBLD ,
+.Xr interface_cmp 1ONBLD

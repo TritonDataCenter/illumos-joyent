@@ -46,15 +46,12 @@ MAPFILE=	../common/mapfile-vers
 CPPFLAGS=	-I. -I../common -I../../include -I../../include/$(MACH) \
 		-I$(SRC)/lib/libc/inc -I$(SRC)/uts/$(ARCH)/sys \
 		$(CPPFLAGS.master) -I$(ELFCAP)
-LLDFLAGS =	$(VAR_ELFEDIT_LLDFLAGS)
-LLDFLAGS64 =	$(VAR_ELFEDIT_LLDFLAGS64)
-LDFLAGS +=	$(VERSREF) -M$(MAPFILE) $(LLDFLAGS)
+LLDFLAGS =	'-R$$ORIGIN/../../lib'
+LLDFLAGS64 =	'-R$$ORIGIN/../../../lib/$(MACH64)'
+LDFLAGS +=	$(VERSREF) -Wl,-M$(MAPFILE) $(LLDFLAGS)
 LDLIBS +=	$(ELFLIBDIR) -lelf $(LDDBGLIBDIR) -llddbg \
 		    $(CONVLIBDIR) -lconv -ltecla
 NATIVE_LIBS +=	libtecla.so
-
-CERRWARN +=	-_gcc=-Wno-switch
-CERRWARN +=	$(CNOWARN_UNINIT)
 
 BLTDEFS =	msg.h
 BLTDATA =	msg.c

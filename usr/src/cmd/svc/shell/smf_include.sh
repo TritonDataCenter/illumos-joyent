@@ -25,6 +25,7 @@
 # Copyright 2012 Joyent, Inc.  All rights reserved.
 # Copyright 2015 Nexenta Systems, Inc. All rights reserved.
 # Copyright 2012 Joyent, Inc.  All rights reserved.
+# Copyright 2021 Oxide Computer Company
 #
 
 smf_present () {
@@ -74,6 +75,15 @@ smf_is_globalzone() {
 smf_is_nonglobalzone() {
 	[ "${SMF_ZONENAME:=`/sbin/zonename`}" != "global" ] && return 0
 	return 1
+}
+
+# smf_root_is_ramdisk
+#
+# Returns zero (success) if the system root file system is mounted from a
+# ramdisk, non-zero otherwise.
+#
+smf_root_is_ramdisk() {
+	/lib/svc/bin/rootisramdisk
 }
 
 # smf_configure_ip
@@ -233,7 +243,7 @@ smf_kill_contract() {
 }
 
 #
-# smf(5) method and monitor exit status definitions
+# smf(7) method and monitor exit status definitions
 #   SMF_EXIT_ERR_OTHER, although not defined, encompasses all non-zero
 #   exit status values.
 #

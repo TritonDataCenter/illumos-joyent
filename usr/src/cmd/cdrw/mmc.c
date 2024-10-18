@@ -23,8 +23,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <sys/types.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -34,6 +32,8 @@
 #include "mmc.h"
 #include "util.h"
 #include "main.h"
+
+int uscsi_error;
 
 int
 test_unit_ready(int fd)
@@ -278,7 +278,7 @@ get_configuration(int fd, uint16_t feature, int bufsize, uchar_t *buf)
 
 int
 read10(int fd, uint32_t start_blk, uint16_t nblk, uchar_t *buf,
-	uint32_t bufsize)
+    uint32_t bufsize)
 {
 	struct uscsi_cmd *scmd;
 
@@ -299,7 +299,7 @@ read10(int fd, uint32_t start_blk, uint16_t nblk, uchar_t *buf,
 
 int
 write10(int fd, uint32_t start_blk, uint16_t nblk, uchar_t *buf,
-	uint32_t bufsize)
+    uint32_t bufsize)
 {
 	struct uscsi_cmd *scmd;
 
@@ -396,7 +396,7 @@ blank_disc(int fd, int type, int immediate)
 
 int
 read_cd(int fd, uint32_t start_blk, uint16_t nblk, uchar_t sector_type,
-	uchar_t *buf, uint32_t bufsize)
+    uchar_t *buf, uint32_t bufsize)
 {
 	struct uscsi_cmd *scmd;
 
@@ -672,7 +672,7 @@ read_format_capacity(int fd, uint_t *bsize)
 }
 
 /*
- * Used to reset the device. Since, sd(7D) requires a
+ * Used to reset the device. Since, sd(4D) requires a
  * command to be issued when resetting a device we will
  * issue an innocuous command. The command chosen for this
  * purpose is the TEST UNIT READY (TUR) command. We also do
@@ -692,7 +692,7 @@ reset_dev(int fd)
 	 */
 	scmd = get_uscsi_cmd();
 
-	/* Tell sd(7D) to do a silent reset of the device. */
+	/* Tell sd(4D) to do a silent reset of the device. */
 	scmd->uscsi_flags = USCSI_SILENT | USCSI_RESET;
 
 	scmd->uscsi_timeout = DEFAULT_SCSI_TIMEOUT;
@@ -891,7 +891,7 @@ print_profile_name(uint16_t num, uchar_t current, uchar_t abbr)
  *
  * Description: Print a list of Profiles supported by the Logical Unit.
  *
- * Parameters:	fd 	- file descriptor for device whose list of
+ * Parameters:	fd	- file descriptor for device whose list of
  *			  profiles we wish to print
  */
 void

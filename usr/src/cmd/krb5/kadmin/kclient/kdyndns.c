@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdio.h>
 #include <locale.h>
 #include <netdb.h>
@@ -48,8 +46,8 @@ usage()
 int
 main(int argc, char **argv)
 {
-	char c, fqdn[MAXHOSTNAMELEN];
-	int ret = 0;
+	char fqdn[MAXHOSTNAMELEN];
+	int c, ret = 0;
 
 	(void) setlocale(LC_ALL, "");
 

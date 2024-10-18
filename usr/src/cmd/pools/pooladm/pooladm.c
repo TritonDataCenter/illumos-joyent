@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * pooladm - set, remove, or display active pool configurations.
  */
@@ -133,7 +131,7 @@ config_commit(pool_conf_t *conf, const char *static_conf_name)
 int
 main(int argc, char *argv[])
 {
-	char c;
+	int c;
 	pool_conf_t *conf = NULL;
 	const char *static_conf_loc;
 

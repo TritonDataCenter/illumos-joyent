@@ -22,6 +22,8 @@
 /*
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #ifndef	_SYS_DDITYPES_H
@@ -83,7 +85,7 @@ typedef	struct __ddi_dma_seg *ddi_dma_seg_t;
 typedef struct {
 	union {
 		uint64_t	_dmac_ll;	/* 64 bit DMA address */
-		uint32_t 	_dmac_la[2];    /* 2 x 32 bit address */
+		uint32_t	_dmac_la[2];	/* 2 x 32 bit address */
 	} _dmu;
 	size_t		dmac_size;	/* DMA cookie size */
 	uint_t		dmac_type;	/* bus specific type bits */
@@ -163,7 +165,10 @@ typedef struct __ddi_devid *ddi_devid_t;
 #define	DEVID_SCSI3_VPD_T10	6
 #define	DEVID_SCSI3_VPD_EUI	7
 #define	DEVID_SCSI3_VPD_NAA	8
-#define	DEVID_MAXTYPE		8
+#define	DEVID_NVME_NSID		9
+#define	DEVID_NVME_EUI64	10
+#define	DEVID_NVME_NGUID	11
+#define	DEVID_MAXTYPE		11
 
 /*
  * Device id scsi encode versions (version of encode interface, not devid)
@@ -215,6 +220,8 @@ typedef enum {
 typedef enum {EPL_KERNEL, EPL_INTERRUPT, EPL_HIGHLEVEL} ddi_plevel_t;
 typedef struct ddi_event_cookie *ddi_eventcookie_t;
 typedef struct ddi_event_callbacks *ddi_callback_id_t;
+typedef void (*ddi_event_cb_f)(dev_info_t *, ddi_eventcookie_t,
+    void *arg, void *impldata);
 
 #endif	/* !_ASM */
 
@@ -232,8 +239,8 @@ typedef struct ddi_device_acc_attr {
 	uchar_t devacc_attr_access;		/* access error protection */
 } ddi_device_acc_attr_t;
 
-#define	DDI_DEVICE_ATTR_V0 	0x0001
-#define	DDI_DEVICE_ATTR_V1 	0x0002
+#define	DDI_DEVICE_ATTR_V0	0x0001
+#define	DDI_DEVICE_ATTR_V1	0x0002
 
 /*
  * endian-ness flags
@@ -262,14 +269,14 @@ typedef struct ddi_device_acc_attr {
 /*
  * Data Access Handle
  */
-#define	VERS_ACCHDL 			0x0001
+#define	VERS_ACCHDL			0x0001
 
 typedef struct __ddi_acc_handle *ddi_acc_handle_t;
 
 typedef struct ddi_acc_hdl {
 	int	ah_vers;		/* version number */
 	void	*ah_bus_private;	/* bus private pointer */
-	void 	*ah_platform_private; 	/* platform private pointer */
+	void	*ah_platform_private;	/* platform private pointer */
 	dev_info_t *ah_dip;		/* requesting device */
 
 	uint_t	ah_rnumber;		/* register number */

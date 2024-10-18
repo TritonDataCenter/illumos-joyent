@@ -27,39 +27,24 @@
 
 include		$(SRC)/Makefile.master
 
-# This is how the SUBDIRS stuff should look by the time the SGS
-# directory is fully converted:
-#
-# SUBDIRS=	$(MACH) $(BUILD64) $(MACH64)
-#
-# $(SUBDIRS):	FRC
-#	@cd $@; pwd; $(MAKE) $(TARGET)
-#
-# In the meantime, we use an sneaky trick on the $(SUBDIRS) target
-# to build whatever 64-bit directories we actually find as a side-effect
-# of descending into the 32-bit directories.  Ick.
-
-SUBDIRS =	$(MACH) $(EXTRASUBDIRS)
+SUBDIRS =	$(EXTRASUBDIRS)
+$(BUILD32)SUBDIRS += $(MACH)
+$(BUILD64)SUBDIRS += $(MACH64)
 
 all :=		TARGET= all
 clean :=	TARGET= clean
 clobber :=	TARGET= clobber
-delete :=	TARGET= delete
 install :=	TARGET= install
 catalog :=	TARGET= catalog
-package :=	TARGET= package
 chkmsg :=	TARGET= chkmsg
 
 .KEEP_STATE:
 .KEEP_STATE_FILE: .make.state.$(MACH)
 
-all clean clobber delete install catalog package chkmsg: \
+all clean clobber install catalog chkmsg: \
 		$(SUBDIRS)
 
 $(SUBDIRS):	FRC
 		@ cd $@; pwd; $(MAKE) $(TARGET)
-		@ $(BUILD64)if [ -f $(MACH64)/Makefile ]; then		\
-		  $(BUILD64)     cd $(MACH64); pwd; $(MAKE) $(TARGET);	\
-		  $(BUILD64)else /bin/true; fi
 
 FRC:

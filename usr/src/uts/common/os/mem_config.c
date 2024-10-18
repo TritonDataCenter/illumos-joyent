@@ -509,7 +509,7 @@ mapalloc:
 	 * Recalculate the paging parameters now total_pages has changed.
 	 * This will also cause the clock hands to be reset before next use.
 	 */
-	setupclock(1);
+	setupclock();
 
 	memsegs_unlock(1);
 
@@ -1639,7 +1639,7 @@ delthr_get_freemem(struct mem_handle *mhp)
 		 * Put pressure on pageout.
 		 */
 		page_needfree(free_get);
-		WAKE_PAGEOUT_SCANNER();
+		WAKE_PAGEOUT_SCANNER(delthr);
 
 		mutex_enter(&mhp->mh_mutex);
 		(void) cv_reltimedwait(&mhp->mh_cv, &mhp->mh_mutex,
@@ -2700,7 +2700,7 @@ kphysm_del_cleanup(struct mem_handle *mhp)
 	 * Recalculate the paging parameters now total_pages has changed.
 	 * This will also cause the clock hands to be reset before next use.
 	 */
-	setupclock(1);
+	setupclock();
 
 	memsegs_unlock(1);
 

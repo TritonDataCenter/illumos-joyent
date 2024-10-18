@@ -19,7 +19,6 @@
 # CDDL HEADER END
 #
 #
-#ident	"%Z%%M%	%I%	%E% SMI"
 #
 # Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
@@ -37,7 +36,7 @@
 SUBDIR1=	clri edquota ff fsck fsckall fsdb fsirand fstyp \
 		labelit lockfs ncheck quot quota quotacheck quotaon \
 		repquota tunefs
-SUBDIR2= 	df fssnap mkfs mount newfs volcopy
+SUBDIR2=	df fssnap mkfs mount newfs volcopy
 ROLLDIR=	roll_log
 SUBDIRS=	$(ROLLDIR) $(SUBDIR1) $(SUBDIR2)
 
@@ -45,7 +44,6 @@ all:=		TARGET= all
 install:=	TARGET= install
 clean:=		TARGET= clean
 clobber:=	TARGET= clobber
-lint:=		TARGET= lint
 catalog:=       TARGET= catalog
 
 # for messaging catalog
@@ -62,12 +60,12 @@ all install:	$(ROLLDIR) .WAIT $(SUBDIR1) $(SUBDIR2)
 catalog:        $(POFILE)
 
 $(POFILE):      $(SUBDIR2)
-	$(RM) 	$@
+	$(RM)	$@
 	cat     $(POFILES)      > $@
 
-clean clobber lint: $(SUBDIRS)
+clean clobber: $(SUBDIRS)
 
 $(SUBDIRS): FRC
-	@cd $@; pwd; $(MAKE) $(MFLAGS) $(TARGET)
+	@cd $@; pwd; $(MAKE) $(TARGET)
 
 FRC:

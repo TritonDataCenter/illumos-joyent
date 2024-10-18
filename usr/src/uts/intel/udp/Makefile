@@ -36,17 +36,9 @@ UTSBASE	= ../..
 #
 MODULE		= udp
 OBJECTS		= $(UDP_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(UDP_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_DRV_DIR)/$(MODULE)
 ROOTLINK	= $(ROOT_STRMOD_DIR)/$(MODULE) $(ROOT_SOCK_DIR)/$(MODULE)
 CONF_SRCDIR	= $(UTSBASE)/common/inet/udp
-
-#
-# Extra for $(MODULE).check target
-#
-# Need to remove ipddi.o since it has non-static defines for _init etc.
-IP_CHECK_OBJS	= $(IP_OBJS:ipddi.o=ip.o)
-EXTRA_CHECK_OBJS = $(IP_CHECK_OBJS:%=../ip/$(OBJS_DIR)/%)
 
 #
 #	Include common rules.
@@ -57,13 +49,12 @@ include $(UTSBASE)/intel/Makefile.intel
 #	Define targets
 #
 ALL_TARGET	= $(BINARY) $(SRC_CONFILE)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE) $(ROOTLINK) $(ROOT_CONFFILE)
 
 #
 #	depends on ip and sockfs
 #
-LDFLAGS		+= -dy -Ndrv/ip -Nfs/sockfs
+LDFLAGS		+= -Ndrv/ip -Nfs/sockfs
 
 # needs work
 $(OBJS_DIR)/udpddi.o := SMOFF += index_overflow
@@ -80,12 +71,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

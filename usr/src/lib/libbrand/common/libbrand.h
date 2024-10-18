@@ -62,6 +62,8 @@ extern int brand_get_halt(brand_handle_t, const char *, const char *,
     char *, size_t);
 extern int brand_get_initname(brand_handle_t, char *, size_t);
 extern boolean_t brand_restartinit(brand_handle_t);
+extern boolean_t brand_restartinit0(brand_handle_t);
+extern boolean_t brand_restartinitreboot(brand_handle_t);
 extern int brand_get_install(brand_handle_t, const char *, const char *,
     char *, size_t);
 extern int brand_get_installopts(brand_handle_t, char *, size_t);
@@ -89,6 +91,7 @@ extern int brand_get_preuninstall(brand_handle_t, const char *, const char *,
     char *, size_t);
 extern int brand_get_query(brand_handle_t, const char *, const char *,
     char *, size_t);
+extern int brand_get_secflags(brand_handle_t, char *, size_t);
 extern int brand_get_uninstall(brand_handle_t, const char *, const char *,
     char *, size_t);
 extern int brand_get_validatesnap(brand_handle_t, const char *, const char *,

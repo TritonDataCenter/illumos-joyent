@@ -18,6 +18,7 @@
 #
 # CDDL HEADER END
 #
+
 #
 # Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
@@ -29,12 +30,5 @@ include		../Makefile.com
 
 .KEEP_STATE:
 
-LLDFLAGS =	$(LLDFLAGS64)
-CONVLIBDIR =	$(CONVLIBDIR64)
-ELFLIBDIR =	$(ELFLIBDIR64)
-LDDBGLIBDIR =	$(LDDBGLIBDIR64)
-
-ROOTPROG =	$(ROOTPROG64)
-
 include		../Makefile.targ
-include		../../Makefile.sub.64
+include		$(SRC)/Makefile.master.64

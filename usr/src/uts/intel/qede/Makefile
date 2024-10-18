@@ -47,6 +47,7 @@ CPPFLAGS	+= -I$(UTSBASE)/common/io/qede/579xx/hsi/mcp
 #
 CERRWARN	+= -_gcc=-Wno-unused-variable
 CERRWARN	+= -_gcc=-Wno-unused-function
+CCWARNINLINE	=
 
 # 3rd party module
 SMOFF += all_func_returns,indenting,no_if_block,deref_check,testing_index_after_use
@@ -64,7 +65,7 @@ STACKPROTECT=basic
 ALL_TARGET	= $(BINARY) $(CONFMOD)
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE) $(ROOT_CONFFILE)
 
-LDFLAGS		+= -dy -N misc/mac
+LDFLAGS		+= -N misc/mac
 
 .KEEP_STATE:
 
@@ -75,10 +76,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:
-modlintlib:
-clean.lint:
 
 install:	$(INSTALL_DEPS)
 

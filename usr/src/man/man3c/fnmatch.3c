@@ -44,7 +44,7 @@
 .\" Portions Copyright (c) 2002, Sun Microsystems, Inc.  All Rights Reserved
 .\" Copyright 2017 Nexenta Systems, Inc.
 .\"
-.Dd August 14, 2017
+.Dd July 12, 2024
 .Dt FNMATCH 3C
 .Os
 .Sh NAME
@@ -64,7 +64,7 @@
 The
 .Fn fnmatch
 function matches patterns as described on the
-.Xr fnmatch 5
+.Xr fnmatch 7
 manual page
 .Po with the exceptions noted in the
 .Sx STANDARDS
@@ -121,7 +121,7 @@ implementation of
 header
 .In fnmatch.h
 provides the
-.Dv FNM_FOLDCASE
+.Dv FNM_CASEFOLD
 flag having the same meaning.
 .It Dv FNM_NOESCAPE
 If not set, a backslash character
@@ -236,9 +236,9 @@ is not being called to change the locale.
 .Xr glob 3C ,
 .Xr setlocale 3C ,
 .Xr wordexp 3C ,
-.Xr attributes 5 ,
-.Xr fnmatch 5 ,
-.Xr standards 5
+.Xr attributes 7 ,
+.Xr fnmatch 7 ,
+.Xr standards 7
 .Sh STANDARDS
 The current implementation of the
 .Fn fnmatch

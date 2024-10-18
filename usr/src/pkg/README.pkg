@@ -29,7 +29,7 @@ Introduction
 This README describes some basics about creating, modifying, and
 building packages in ON.  All package creation in ON is done using
 tools available to our customers.  If terminology in this document
-is confusing, you may wish to review the pkg(5) manpage.
+is confusing, you may wish to review the pkg(7) manpage.
 
 Packaging Overview
 ------------------
@@ -85,12 +85,6 @@ The build behavior may modified by the following variables:
 	    detailed information about the commands it executes to
 	    process and publish packages.
 
-	ONNV_BUILDNUM
-	    If ONNV_BUILDNUM is set to an older ON build number,
-	    your packages will be published at that version instead
-	    of the one defined in usr/src/Makefile.buildnum, which
-	    is managed by the gatekeepers.
-
 A set of intermediate build products are placed in
 usr/src/pkg/packages.$MACH/.  These can be useful during development.
 
@@ -114,7 +108,7 @@ Incremental Builds
    make command line and specify the "all" target.  If you want to process
    them all, simply specify the "all" target.
 
-   	% dmake -e PKGS="BRCMbnx BRCMbnxe" all
+	% dmake -e PKGS="BRCMbnx BRCMbnxe" all
 	% dmake -e all
 
    If you want to publish a subset of packages, simply set PKGS on the
@@ -124,7 +118,7 @@ Incremental Builds
    system.  If you want to publish them all, simply specify the
    "install" target.
 
-   	% dmake -e PKGS="BRCMbnx BRCMbnxe" install
+	% dmake -e PKGS="BRCMbnx BRCMbnxe" install
 	% dmake -e install
 
    You can also use package names, or package names with ".pub"
@@ -136,7 +130,7 @@ Incremental Builds
    packages will simply be added to the existing repository.
 
    To do cross-platform packaging, prefix your target with (for
-   example) "sparc/", as in "dmake sparc/install".  Note that we
+   example) "i386/", as in "dmake i386/install".  Note that we
    currently pull some license files directly from a built source
    tree, so if you do this in a workspace that had proto area copied
    in via nightly -U, then you'll need to set $SRC to point to the
@@ -150,7 +144,7 @@ available from /opt/onbld/bin or usr/src/tools/scripts/ to setup and
 upgrade your system.  A manpage is available in /opt/onbld/man
 or usr/src/tools/scripts/onu.1.
 
-Alternatively, you can manually start a pkg.depot(1M) server to
+Alternatively, you can manually start a pkg.depot(8) server to
 serve the generated repository to multiple test machines.
 
 	Start up a depot on your build machine.
@@ -213,7 +207,6 @@ We supply a set of commonly-used macros for use in package manifests.
 These are the PKGMOG_DEFINES in usr/src/pkg/Makefile.
 
 	$(i386_ONLY)
-	$(sparc_ONLY)
 	$(ARCH)
 	$(ARCH32)
 	$(ARCH64)
@@ -263,7 +256,7 @@ in our manifests.
 Zones and Packages
 ------------------
 
-pkg(5) uses variants to implement zones.  If a package is marked
+pkg(7) uses variants to implement zones.  If a package is marked
 with both global and non-global zone variants, the package contents will
 be installed in both global and non-global by default.
 	set name=variant.opensolaris.zone value=global value=nonglobal
@@ -289,7 +282,7 @@ add a comment describing why the dependency is required.
 Moving Content Between Packages and Removing Content
 ----------------------------------------------------
 
-pkg(5) tracks when content is removed from packages, and automatically
+pkg(7) tracks when content is removed from packages, and automatically
 removes it.
 
 If you need to move content between packages, there are two primary
@@ -365,13 +358,13 @@ For example, to find rename ancestors of 'system/zones', do the following:
 
     $ cd usr/src/pkg/manifests
     $ mypkgname=system/zones
-    $ grep -l "fmri=pkg:/$mypkgname@" `grep -l pkg.renamed *.mf` /dev/null
-    SUNWzone.mf
+    $ grep -l "fmri=pkg:/$mypkgname@" `grep -l pkg.renamed *.p5m` /dev/null
+    SUNWzone.p5m
 
 Make sure to check that the package has not undergone multiple renames!
 
     $ mypkgname=SUNWzone
-    $ grep -l "fmri=pkg:/$mypkgname@" `grep -l pkg.renamed *.mf` /dev/null
+    $ grep -l "fmri=pkg:/$mypkgname@" `grep -l pkg.renamed *.p5m` /dev/null
     $
 
 Once you have the renamed ancestor list, for *each* of the packages (the
@@ -402,13 +395,13 @@ to system/foobar in build 140, and then later obsoleted in build 150.
 Note that in all cases the package FMRI is updated to the obsoletion
 build, 150.
 
-    SUNWfoobar.mf:
+    SUNWfoobar.p5m:
         # Was renamed to system/foobar, both now obsolete.
         set name=pkg.fmri value=pkg:/SUNWfoobar@0.5.11,5.11-0.150
         set name=pkg.obsolete value=true
         set name=variant.arch value=$(ARCH)
 
-    system-foobar.mf:
+    system-foobar.p5m:
 	set name=pkg.fmri value=pkg:/system/foobar@0.5.11,5.11-0.150
 	set name=pkg.obsolete value=true
 	set name=variant.arch value=$(ARCH)
@@ -442,10 +435,7 @@ The following actions are required for all packages in ON.
 	    in /usr/share/package-manager/data/opensolaris.org.sections.
 
 	license
-	    All packages must specify a set of license actions.  If
-	    you're adding items here that are not already included in
-	    usr/src/pkg/license_files, then you will also need to modify 
-	    usr/src/tools/opensolaris/license-list.
+	    All packages must specify a set of license actions.
 
 You don't need to set the following.  They're taken care of for all OS/Net
 packages in the transforms/common_actions file.

@@ -23,10 +23,13 @@
 # Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2015, OmniTI Computer Consulting, Inc. All rights reserved.
 # Copyright 2018 Joyent, Inc.
-# Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2019 Peter Tribble.
 # Copyright 2018 Joyent, Inc.
 # Copyright 2020 Oxide Computer Company
+# Copyright 2022 Garrett D'Amore <garrett@damore.org>
+# Copyright 2022 Tintri by DDN, Inc. All rights reserved.
+# Copyright 2024 RackTop Systems, Inc.
 #
 
 # This file provides exceptions to the usual rules applied to ELF objects by
@@ -43,7 +46,6 @@
 #	lib
 #	lib/amd64
 #	lib/sparcv9
-
 
 # Directory hierarchies to skip completely
 SKIP		^usr/lib/libc/			# optimized libc
@@ -71,10 +73,13 @@ SKIP		^usr/lib/sysevent/modules/picl_slm.so$
 #
 SKIP		^opt/libc-tests/tests/stdio/
 
+# The libsec tests interpose on all referenced libidmap functions,
+# causing false positives for the unref. checks for libsec.
+SKIP		^opt/libsec-tests/bin/
+
 # Objects that are allowed to have executable data segments
 EXEC_DATA	^MACH(lib)/ld\.so\.1$
 EXEC_DATA	^lib/libc\.so\.1$	# 6524709, 32-bit, needed for x86 only
-EXEC_DATA	^MACH(lib)/libumem\.so\.1$ # ptcumem
 EXEC_DATA	^opt/SUNWdtrt/tst/.*/ustack/tst\.helper\.exe$
 EXEC_DATA	^platform/.*/MACH(kernel)/unix$
 
@@ -109,6 +114,12 @@ UNUSED_DEPS	^usr/lib/picl/plugins/		# require devtree dependencies
 UNUSED_OBJ	unused object=.*/libnetsnmphelpers\.so\..*
 UNREF_OBJ	unreferenced object=.*/libnetsnmphelpers\.so\..*
 
+# ksh93 is just a wrapper into libshell but it is linked with libumem.so
+# so that the underlying libraries use that implementation for memory
+# management. Since ksh itself doesn't perform any memory allocations in
+# the stub, ldd -U determines that libumem is an unreferenced object.
+UNREF_OBJ	/libumem\.so\.1.*/usr/bin/(i86/)?r?ksh(93)?\b
+
 # Unused runpaths due to dlopen() use
 UNUSED_RPATH	/usr/lib/fs/autofs.*\ from\ .automountd
 UNUSED_RPATH	/etc/ppp/plugins.*\ from\ .*pppd
@@ -133,6 +144,7 @@ UNUSED_RPATH	/usr/gnu/lib.*\ from\ .*/usr/lib/64/libpython2\..
 UNUSED_RPATH	/usr/gnu/lib.*\ from\ .*/usr/lib/64/libpython3\..
 UNUSED_RPATH	/usr/snadm/lib.*\ from\ .*/usr/snadm/lib/libspmicommon\.so\.1
 UNUSED_RPATH	/usr/gcc/.*/lib.*\ from\ .*
+UNUSED_RPATH	/usr/gnu/lib.*\ from\ .*libncurses\.so\.5
 
 # Unused runpaths for reasons not captured above
 UNUSED_RPATH	/usr/lib/smbsrv.*\ from\ .*libsmb\.so\.1	# future needs
@@ -160,10 +172,8 @@ UNREF_OBJ	/lib.*\ of\ .*libtspi\.so\.1
 UNREF_OBJ	/lib.*\ of\ .*libxml2\.so\.2
 UNREF_OBJ	/lib.*\ of\ .*libxslt\.so\.1
 UNREF_OBJ	/lib.*\ of\ .*libpq\.so\.4
-UNREF_OBJ	/lib.*\ of\ .*libpython2\.4\.so\.1\.0
-UNREF_OBJ	/lib.*\ of\ .*libpython2\.6\.so\.1\.0
-UNREF_OBJ	/lib.*\ of\ .*libpython2\.7\.so\.1\.0
-UNREF_OBJ	/lib.*\ of\ .*libpython3\.[5678]m?\.so\.1\.0
+UNREF_OBJ	/lib.*\ of\ .*libpython2\.[467]\.so\.1\.0
+UNREF_OBJ	/lib.*\ of\ .*libpython3\.\d+m?\.so\.1\.0
 UNREF_OBJ	/libgcc_s.*\ of\ .*libstdc\+\+\.so\.6
 UNREF_OBJ	/libgcc_s.*\ of\ .*libgmodule-2\.0\.so\.0
 
@@ -229,22 +239,21 @@ FORBIDDEN_DEP   usr/lib/netsvc/yp/ypxfrd        # C++
 
 # libfakekernel is a test environment, not intended for general use
 FORBIDDEN libfakekernel\.so
+FORBIDDEN_DEP opt/smbsrv-tests/tests/smb_sid/large_sids_kern
+FORBIDDEN_DEP opt/os-tests/tests/ksid/ksid.32
+FORBIDDEN_DEP opt/os-tests/tests/ksid/ksid.64
 FORBIDDEN_DEP usr/MACH(lib)/libzpool.so.1
-FORBIDDEN_DEP usr/bin/amd64/ztest
-FORBIDDEN_DEP usr/bin/i86/ztest
+FORBIDDEN_DEP usr/bin/ztest
 FORBIDDEN_DEP usr/bin/raidz_test
-FORBIDDEN_DEP usr/bin/sparcv7/ztest
-FORBIDDEN_DEP usr/bin/sparcv9/ztest
 FORBIDDEN_DEP usr/lib/MACH(smbfs)/libfknsmb.so.1
 FORBIDDEN_DEP usr/lib/MACH(smbfs)/libfksmbfs.so.1
 FORBIDDEN_DEP usr/lib/MACH(smbsrv)/libfksmbsrv.so.1
 FORBIDDEN_DEP usr/lib/smbsrv/fksmbd
+FORBIDDEN_DEP usr/lib/smbsrv/test-decrypt
+FORBIDDEN_DEP usr/lib/smbsrv/test-encrypt
 FORBIDDEN_DEP usr/lib/smbsrv/test-msgbuf
 FORBIDDEN_DEP usr/lib/smbsrv/testoplock
-FORBIDDEN_DEP usr/sbin/amd64/zdb
-FORBIDDEN_DEP usr/sbin/i86/zdb
-FORBIDDEN_DEP usr/sbin/sparcv7/zdb
-FORBIDDEN_DEP usr/sbin/sparcv9/zdb
+FORBIDDEN_DEP usr/sbin/zdb
 
 # libucb is intended for legacy compatibility, not general use
 FORBIDDEN libucb\.so
@@ -284,3 +293,56 @@ NO_COMMENT	^usr/lib/raidcfg/amd64/mpt\.so\.1
 NO_COMMENT	^usr/lib/raidcfg/mpt\.so\.1
 NO_COMMENT	^usr/sbin/chk_encodings
 NO_COMMENT	^usr/xpg4/bin/more
+NO_COMMENT	^kernel/drv/amd64/acpi_toshiba
+NO_COMMENT	^kernel/drv/amd64/adpu320
+NO_COMMENT	^kernel/drv/amd64/atiatom
+NO_COMMENT	^kernel/drv/amd64/bcm_sata
+NO_COMMENT	^kernel/drv/amd64/glm
+NO_COMMENT	^kernel/drv/amd64/intel_nhmex
+NO_COMMENT	^kernel/drv/amd64/ixgb
+NO_COMMENT	^kernel/drv/amd64/lsimega
+NO_COMMENT	^kernel/drv/amd64/marvell88sx
+NO_COMMENT	^kernel/drv/amd64/mpt
+NO_COMMENT	^kernel/drv/amd64/sdpib
+NO_COMMENT	^kernel/drv/amd64/usbser_edge
+NO_COMMENT	^kernel/kmdb/amd64/mpt
+NO_COMMENT	^kernel/kmdb/amd64/nfs
+NO_COMMENT	^kernel/misc/scsi_vhci/amd64/scsi_vhci_f_asym_emc
+NO_COMMENT	^kernel/misc/scsi_vhci/amd64/scsi_vhci_f_asym_lsi
+NO_COMMENT	^kernel/misc/scsi_vhci/amd64/scsi_vhci_f_sym_emc
+NO_COMMENT	^kernel/strmod/amd64/sdpib
+NO_COMMENT	^platform/i86pc/kernel/cpu/amd64/cpu_ms\.GenuineIntel\.6\.46
+NO_COMMENT	^platform/i86pc/kernel/cpu/amd64/cpu_ms\.GenuineIntel\.6\.47
+
+# ath contains a binary HAL component which contains an incorrect .comment
+# section and has a license which forbids modification.
+NO_COMMENT	^kernel/drv/amd64/ath
+
+# mdb standalone library versions which are neither delivered nor are real
+# shared objects
+NO_COMMENT	^usr/lib/amd64/libstanddisasm\.so
+NO_COMMENT	^usr/lib/amd64/libstandsaveargs\.so
+NO_COMMENT	^usr/lib/amd64/libstanddisasm\.so
+NO_COMMENT	^usr/lib/libstanddisasm\.so
+
+# closed binaries predate -ztype=kmod
+NOT_KMOD	^kernel/drv/amd64/acpi_toshiba
+NOT_KMOD	^kernel/drv/amd64/adpu320
+NOT_KMOD	^kernel/drv/amd64/atiatom
+NOT_KMOD	^kernel/drv/amd64/bcm_sata
+NOT_KMOD	^kernel/drv/amd64/glm
+NOT_KMOD	^kernel/drv/amd64/intel_nhmex
+NOT_KMOD	^kernel/drv/amd64/ixgb
+NOT_KMOD	^kernel/drv/amd64/lsimega
+NOT_KMOD	^kernel/drv/amd64/marvell88sx
+NOT_KMOD	^kernel/drv/amd64/mpt
+NOT_KMOD	^kernel/drv/amd64/sdpib
+NOT_KMOD	^kernel/drv/amd64/usbser_edge
+NOT_KMOD	^kernel/kmdb/amd64/mpt
+NOT_KMOD	^kernel/kmdb/amd64/nfs
+NOT_KMOD	^kernel/misc/scsi_vhci/amd64/scsi_vhci_f_asym_emc
+NOT_KMOD	^kernel/misc/scsi_vhci/amd64/scsi_vhci_f_asym_lsi
+NOT_KMOD	^kernel/misc/scsi_vhci/amd64/scsi_vhci_f_sym_emc
+NOT_KMOD	^kernel/strmod/amd64/sdpib
+NOT_KMOD	^platform/i86pc/kernel/cpu/amd64/cpu_ms\.GenuineIntel\.6\.46
+NOT_KMOD	^platform/i86pc/kernel/cpu/amd64/cpu_ms\.GenuineIntel\.6\.47

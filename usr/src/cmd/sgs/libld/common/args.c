@@ -192,7 +192,6 @@ usage_mesg(Boolean detail)
 	(void) fprintf(stderr, MSG_INTL(MSG_ARG_DETAIL_CY));
 	(void) fprintf(stderr, MSG_INTL(MSG_ARG_DETAIL_ZA));
 	(void) fprintf(stderr, MSG_INTL(MSG_ARG_DETAIL_ZAE));
-	(void) fprintf(stderr, MSG_INTL(MSG_ARG_DETAIL_ZAL));
 	(void) fprintf(stderr, MSG_INTL(MSG_ARG_DETAIL_ZADLIB));
 	(void) fprintf(stderr, MSG_INTL(MSG_ARG_DETAIL_ZC));
 	(void) fprintf(stderr, MSG_INTL(MSG_ARG_DETAIL_ZDEF));
@@ -276,7 +275,7 @@ ld_rescan_archives(Ofl_desc *ofl, int isgrp, int end_arg_ndx)
 			 * If this archive was processed with -z allextract,
 			 * then all members have already been extracted.
 			 */
-			if (adp->ad_elf == NULL)
+			if (adp->ad_allextract == TRUE)
 				continue;
 
 			/*
@@ -325,11 +324,6 @@ check_flags(Ofl_desc * ofl, int argc)
 		if (otype == OT_RELOC) {
 			if (dflag == SET_UNKNOWN)
 				dflag = SET_FALSE;
-			if ((dflag == SET_TRUE) &&
-			    OFL_GUIDANCE(ofl, FLG_OFG_NO_KMOD)) {
-				ld_eprintf(ofl, ERR_GUIDANCE,
-				    MSG_INTL(MSG_GUIDE_KMOD));
-			}
 		} else if (otype == OT_KMOD) {
 			if (dflag != SET_UNKNOWN) {
 				ld_eprintf(ofl, ERR_FATAL,
@@ -895,6 +889,7 @@ guidance_parse(Ofl_desc *ofl, char *optarg)
 		{ MSG_ORIG(MSG_ARG_GUIDE_NO_MAPFILE),	FLG_OFG_NO_MF },
 		{ MSG_ORIG(MSG_ARG_GUIDE_NO_TEXT),	FLG_OFG_NO_TEXT },
 		{ MSG_ORIG(MSG_ARG_GUIDE_NO_UNUSED),	FLG_OFG_NO_UNUSED },
+		{ MSG_ORIG(MSG_ARG_GUIDE_NO_ASSERTS),	FLG_OFG_NO_ASSERTS },
 		{ NULL,					0 }
 	};
 
@@ -921,8 +916,8 @@ guidance_parse(Ofl_desc *ofl, char *optarg)
 					if (strcasecmp(name, item->name) == 0)
 						break;
 				if (item->name == NULL) {
-					DBG_CALL(Dbg_args_guidance_unknown(
-					    ofl->ofl_lml, name));
+					ld_eprintf(ofl, ERR_GUIDANCE,
+					    MSG_INTL(MSG_GUIDE_UNKNOWN), name);
 					continue;
 				}
 				ofl_guideflags |= item->flag;
@@ -1584,8 +1579,9 @@ parseopt_pass1(Ofl_desc *ofl, int argc, char **argv, int *usage)
 				}
 			/*
 			 * The following options just need validation as they
-			 * are interpreted on the second pass through the
-			 * command line arguments.
+			 * are interpreted either on the second pass through
+			 * the command line arguments, by ld(1) directly, or
+			 * are merely accepted for compatibility.
 			 */
 			} else if (
 			    strncmp(optarg, MSG_ORIG(MSG_ARG_INITARRAY),

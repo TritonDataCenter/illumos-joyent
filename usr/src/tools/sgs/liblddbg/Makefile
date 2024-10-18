@@ -24,29 +24,34 @@
 # Use is subject to license terms.
 #
 
-include		../Makefile.com
 include		../../Makefile.tools
-include		$(SGSHOME)/liblddbg/Makefile.com
+include		$(SRC)/cmd/sgs/liblddbg/Makefile.com
+include		../Makefile.com
 
 .KEEP_STATE:
 
-CPPFLAGS =	$(NATIVE_CPPFLAGS) -I$(SRC)/lib/libc/inc
-CFLAGS =	$(NATIVE_CFLAGS)
-DYNFLAGS +=	-L../libconv
+CONVLIBDIR=	-L../libconv
+CPPFLAGS +=	-I$(SRC)/lib/libc/inc
 SGSMSGTARG +=	$(SGSMSG32)
 NATIVE_LIBS +=	libc.so
-CW_LINKER =
+LDLIBS +=	$(CONVLIBDIR) -lconv
+
+# A bootstrapping problem means we can't use the regular mapfile just yet
+MAPFILES =
+
+include		$(SRC)/Makefile.native
+include		$(SRC)/Makefile.master.64
 
 all:		$(DYNLIB) $(LIBLINKS)
 
-install:	all $(ROOTONBLDLIBMACH)/$(DYNLIB) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
+install:	all $(ROOTONBLDLIBMACH64)/$(DYNLIB) $(ROOTONBLDLIBMACH64)/$(LIBLINKS)
 
-$(ROOTONBLDLIBMACH)/$(DYNLIB): $(PICS) $(ROOTONBLDLIBMACH)
+$(ROOTONBLDLIBMACH64)/$(DYNLIB): $(PICS) $(ROOTONBLDLIBMACH64)
 		$(BUILD.SO)
 		$(POST_PROCESS_SO)
 
-$(ROOTONBLDLIBMACH)/$(LIBLINKS): $(ROOTONBLDLIBMACH)/$(DYNLIB)
-		@$(RM) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
-		$(SYMLINK) $(DYNLIB) $(ROOTONBLDLIBMACH)/$(LIBLINKS)
+$(ROOTONBLDLIBMACH64)/$(LIBLINKS): $(ROOTONBLDLIBMACH64)/$(DYNLIB)
+		@$(RM) $(ROOTONBLDLIBMACH64)/$(LIBLINKS)
+		$(SYMLINK) $(DYNLIB) $(ROOTONBLDLIBMACH64)/$(LIBLINKS)
 
 include		$(SGSHOME)/liblddbg/Makefile.targ

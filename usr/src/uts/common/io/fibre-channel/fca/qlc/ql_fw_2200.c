@@ -10,7 +10,7 @@
  *									*
  *				NOTICE					*
  *									*
- *		COPYRIGHT 2008 QLOGIC CORPORATION			*
+ *		COPYRIGHT 1994-2015 QLOGIC CORPORATION			*
  *			ALL RIGHTS RESERVED				*
  *									*
  * This file contains the QLogic hardware specific firmware binary.	*
@@ -24,8 +24,6 @@
  *									*
  * **********************************************************************
  */
-
-#pragma ident	"Copyright 2008 QLogic Corporation; ql_fw_2200.c"
 
 /*
  *	Firmware Version 2.01.145 (21:47 Apr 10, 2007)

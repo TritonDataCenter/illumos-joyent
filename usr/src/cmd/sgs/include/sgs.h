@@ -25,6 +25,7 @@
  *
  *
  * Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2022 Oxide Computer Company
  *
  * Global include file for all sgs.
  */
@@ -46,6 +47,7 @@ extern "C" {
 #ifndef	_ASM
 #include <sys/types.h>
 #include <sys/machelf.h>
+#include <sys/stddef.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <libelf.h>
@@ -80,20 +82,20 @@ extern const char link_ver_string[];
  * General align and round macros.
  */
 #define	S_ALIGN(x, a)	((x) & ~(((a) ? (a) : 1) - 1))
-#define	S_ROUND(x, a)   ((x) + (((a) ? (a) : 1) - 1) & ~(((a) ? (a) : 1) - 1))
+#define	S_ROUND(x, a)   (((x) + (((a) ? (a) : 1) - 1)) & ~(((a) ? (a) : 1) - 1))
 
 /*
  * Bit manipulation macros; generic bit mask and is `v' in the range
  * supportable in `n' bits?
  */
-#define	S_MASK(n)	((1 << (n)) -1)
+#define	S_MASK(n)	((1 << (n)) - 1)
 #define	S_INRANGE(v, n)	(((-(1 << (n)) - 1) < (v)) && ((v) < (1 << (n))))
 
 
 /*
  * Yet another definition of the OFFSETOF macro, used with the AVL routines.
  */
-#define	SGSOFFSETOF(s, m)	((size_t)(&(((s *)0)->m)))
+#define	SGSOFFSETOF(s, m)	offsetof(s, m)
 
 /*
  * When casting between integer and pointer types, gcc will complain
@@ -195,27 +197,11 @@ typedef struct {
 #define	SGS_REJ_HWCAP_2		17	/* hardware capabilities mismatch */
 #define	SGS_REJ_ARCHIVE		18	/* archive used in invalid context */
 #define	SGS_REJ_KMOD		19	/* object is a kernel module */
-#define	SGS_REJ_NUM		20
+#define	SGS_REJ_HWCAP_3		20	/* hardware capabilities mismatch */
+#define	SGS_REJ_NUM		21
+
 
 #define	FLG_REJ_ALTER		0x01	/* object name is an alternative */
-
-/*
- * For those source files used both inside and outside of the
- * libld source base (tools/common/string_table.c) we can
- * automatically switch between the allocation models
- * based off of the 'cc -DUSE_LIBLD_MALLOC' flag.
- */
-#ifdef	USE_LIBLD_MALLOC
-#define	calloc(x, a)		libld_malloc(((size_t)x) * ((size_t)a))
-#define	free			libld_free
-#define	malloc			libld_malloc
-#define	realloc			libld_realloc
-
-#define	libld_calloc(x, a)	libld_malloc(((size_t)x) * ((size_t)a))
-extern void			libld_free(void *);
-extern void			*libld_malloc(size_t);
-extern void			*libld_realloc(void *, size_t);
-#endif
 
 /*
  * Data structures (defined in libld.h).
@@ -260,7 +246,6 @@ typedef struct lm_list32	Lm_list32;
 /*
  * For the various utilities that include sgs.h
  */
-extern int	assfail(const char *, const char *, int);
 extern void	eprintf(Lm_list *, Error, const char *, ...);
 extern void	veprintf(Lm_list *, Error, const char *, va_list);
 extern uint_t	sgs_str_hash(const char *);

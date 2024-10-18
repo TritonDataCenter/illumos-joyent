@@ -133,7 +133,7 @@ typedef struct {
 		uint_t	n;		/* # items in shxndx.data */
 	} shxndx;
 	VERSYM_STATE	*versym;	/* NULL, or associated VERSYM section */
-	Sym 		*sym;		/* Array of symbols */
+	Sym		*sym;		/* Array of symbols */
 	Word		symn;		/* # of symbols */
 } SYMTBL_STATE;
 
@@ -505,10 +505,14 @@ sections(const char *file, Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi)
  * Obtain a specified Phdr entry.
  */
 static Phdr *
-getphdr(Word phnum, Word *type_arr, Word type_cnt, const char *file, Elf *elf)
+getphdr(Word phnum, Word *type_arr, Word type_cnt, const char *file, Elf *elf,
+    size_t *phndx)
 {
 	Word	cnt, tcnt;
 	Phdr	*phdr;
+
+	if (phndx != NULL)
+		*phndx = 0;
 
 	if ((phdr = elf_getphdr(elf)) == NULL) {
 		failure(file, MSG_ORIG(MSG_ELF_GETPHDR));
@@ -517,8 +521,12 @@ getphdr(Word phnum, Word *type_arr, Word type_cnt, const char *file, Elf *elf)
 
 	for (cnt = 0; cnt < phnum; phdr++, cnt++) {
 		for (tcnt = 0; tcnt < type_cnt; tcnt++) {
-			if (phdr->p_type == type_arr[tcnt])
+			if (phdr->p_type == type_arr[tcnt]) {
+				if (phndx != NULL) {
+					*phndx = cnt;
+				}
 				return (phdr);
+			}
 		}
 	}
 	return (NULL);
@@ -854,6 +862,43 @@ unwind_exception_ranges(Cache *_cache, const char *file, int do_swap)
 #undef MSG_EXR_ENTRY
 }
 
+
+/*
+ * For program headers which reflect a single section, check that their values
+ * and that of the section match.
+ */
+static void
+check_phdr_v_shdr(Phdr *phdr, size_t phndx,
+    uchar_t osabi, Half mach, Cache *cache, const char *file)
+{
+	Conv_inv_buf_t	inv_buf;
+
+#define	CHECK(str, pfield, sfield)					\
+	if (phdr->pfield != cache->c_shdr->sfield) {			\
+		fprintf(stderr, MSG_INTL(MSG_SHDR_PHDR_MISMATCH),	\
+		    file,						\
+		    cache->c_ndx,					\
+		    cache->c_name,					\
+		    str,						\
+		    conv_phdr_type(osabi, mach, phdr->p_type,		\
+		    CONV_FMT_ALT_CF, &inv_buf),				\
+		    #sfield,						\
+		    cache->c_shdr->sfield,				\
+		    phndx,						\
+		    #pfield,						\
+		    phdr->pfield);					\
+	}
+
+	CHECK(MSG_INTL(MSG_STR_VADDR), p_vaddr, sh_addr);
+	CHECK(MSG_INTL(MSG_STR_OFFSET), p_offset, sh_offset);
+	CHECK(MSG_INTL(MSG_STR_FILESIZE), p_filesz, sh_size);
+	CHECK(MSG_INTL(MSG_STR_MEMSIZE), p_memsz, sh_size);
+	CHECK(MSG_INTL(MSG_STR_ALIGNMENT), p_align, sh_addralign);
+
+#undef CHECK
+}
+
+
 /*
  * Display information from unwind/exception sections:
  *
@@ -869,6 +914,7 @@ unwind(Cache *cache, Word shnum, Word phnum, Ehdr *ehdr, uchar_t osabi,
 
 	Word			cnt;
 	Phdr			*uphdr = NULL;
+	size_t			phndx;
 	gnu_eh_state_t		eh_state;
 
 	/*
@@ -894,9 +940,11 @@ unwind(Cache *cache, Word shnum, Word phnum, Ehdr *ehdr, uchar_t osabi,
 	 * how they should be interpreted.
 	 */
 	/* Find the program header for .eh_frame_hdr if present */
-	if (phnum)
+	if (phnum) {
 		uphdr = getphdr(phnum, phdr_types,
-		    sizeof (phdr_types) / sizeof (*phdr_types), file, elf);
+		    sizeof (phdr_types) / sizeof (*phdr_types), file, elf,
+		    &phndx);
+	}
 
 	/*
 	 * eh_state is used to retain data used by unwind_eh_frame()
@@ -950,12 +998,19 @@ unwind(Cache *cache, Word shnum, Word phnum, Ehdr *ehdr, uchar_t osabi,
 		dbg_print(0, MSG_ORIG(MSG_STR_EMPTY));
 		dbg_print(0, MSG_INTL(MSG_ELF_SCN_UNWIND), _cache->c_name);
 
-		if (is_exrange)
+		if (is_exrange) {
 			unwind_exception_ranges(_cache, file,
 			    _elf_sys_encoding() != ehdr->e_ident[EI_DATA]);
-		else
+		} else {
+			if ((uphdr != NULL) && (strcmp(_cache->c_name,
+			    MSG_ORIG(MSG_SCN_FRMHDR)) == 0)) {
+				check_phdr_v_shdr(uphdr, phndx, osabi,
+				    ehdr->e_machine, _cache, file);
+			}
+
 			unwind_eh_frame(cache, cnt, shnum, uphdr, ehdr,
 			    &eh_state, osabi, file, flags);
+		}
 	}
 }
 
@@ -1051,9 +1106,12 @@ symbols_getxindex(SYMTBL_STATE *state)
 		    (shdr->sh_link != state->secndx))
 			continue;
 
-		if ((shdr->sh_entsize) &&
-		    /* LINTED */
-		    ((symn = (uint_t)(shdr->sh_size / shdr->sh_entsize)) == 0))
+		if (shdr->sh_entsize == 0)
+			symn = 0;
+		else
+			symn = (uint_t)(shdr->sh_size / shdr->sh_entsize);
+
+		if (symn == 0)
 			continue;
 
 		if ((_cache->c_data == NULL) || (_cache->c_data->d_buf == NULL))
@@ -1113,7 +1171,7 @@ output_symbol(SYMTBL_STATE *state, Word symndx, Word info, Word disp_symndx,
 	int		gnuver;
 	uchar_t		type;
 	Shdr		*tshdr;
-	Word		shndx;
+	Word		shndx = 0;
 	Conv_inv_buf_t	inv_buf;
 
 	/* Ensure symbol index is in range */
@@ -1266,8 +1324,8 @@ output_symbol(SYMTBL_STATE *state, Word symndx, Word info, Word disp_symndx,
 	    (sym->st_shndx != SHN_UNDEF) && ((sym->st_shndx < SHN_LORESERVE) ||
 	    (sym->st_shndx == SHN_XINDEX)) && (tshdr != NULL)) {
 		Word v = sym->st_value;
-			if (state->ehdr->e_type != ET_REL)
-				v -= tshdr->sh_addr;
+		if (state->ehdr->e_type != ET_REL)
+			v -= tshdr->sh_addr;
 		if (((v + sym->st_size) > tshdr->sh_size)) {
 			(void) fprintf(stderr,
 			    MSG_INTL(MSG_ERR_BADSYM6), state->file,
@@ -1324,12 +1382,12 @@ cap_section(const char *file, Cache *cache, Word shnum, Cache *ccache,
 	Word		cnum, capnum, nulls, symcaps;
 	int		descapndx, objcap, title;
 	Cap		*cap = (Cap *)ccache->c_data->d_buf;
-	Shdr		*cishdr, *cshdr = ccache->c_shdr;
-	Cache		*cicache, *strcache;
+	Shdr		*cishdr = NULL, *cshdr = ccache->c_shdr;
+	Cache		*cicache = NULL, *strcache = NULL;
 	Capinfo		*capinfo = NULL;
-	Word		capinfonum;
+	Word		capinfonum = 0;
 	const char	*strs = NULL;
-	size_t		strs_size;
+	size_t		strs_size = 0;
 
 	if ((cshdr->sh_entsize == 0) || (cshdr->sh_size == 0)) {
 		(void) fprintf(stderr, MSG_INTL(MSG_ERR_BADSZ),
@@ -1492,7 +1550,7 @@ cap_section(const char *file, Cache *cache, Word shnum, Cache *ccache,
 			    (cap->c_tag == CA_SUNW_MACH) ||
 			    (cap->c_tag == CA_SUNW_ID))) {
 				(void) fprintf(stderr,
-				    MSG_INTL(MSG_WARN_INVCAP4), file,
+				    MSG_INTL(MSG_WARN_INVCAP3), file,
 				    EC_WORD(elf_ndxscn(ccache->c_scn)),
 				    ccache->c_name, EC_WORD(cshdr->sh_info));
 			}
@@ -1572,7 +1630,7 @@ cap_section(const char *file, Cache *cache, Word shnum, Cache *ccache,
 	    ((ehdr->e_type == ET_EXEC) || (ehdr->e_type == ET_DYN))) {
 		Capinfo		*cip;
 		Capchain	*chain;
-		Cache   	*chcache;
+		Cache		*chcache;
 		Shdr		*chshdr;
 		Word		chainnum, inum;
 
@@ -1697,9 +1755,9 @@ cap(const char *file, Cache *cache, Word shnum, Word phnum, Ehdr *ehdr,
 {
 	Word		cnt;
 	Shdr		*cshdr = NULL;
-	Cache		*ccache;
-	Off		cphdr_off = 0;
-	Xword		cphdr_sz;
+	Cache		*ccache = NULL;
+	Phdr		*uphdr = NULL;
+	size_t		phndx;
 
 	/*
 	 * Determine if a global capabilities header exists.
@@ -1714,8 +1772,8 @@ cap(const char *file, Cache *cache, Word shnum, Word phnum, Ehdr *ehdr,
 
 		for (cnt = 0; cnt < phnum; phdr++, cnt++) {
 			if (phdr->p_type == PT_SUNWCAP) {
-				cphdr_off = phdr->p_offset;
-				cphdr_sz = phdr->p_filesz;
+				uphdr = phdr;
+				phndx = cnt;
 				break;
 			}
 		}
@@ -1746,10 +1804,10 @@ cap(const char *file, Cache *cache, Word shnum, Word phnum, Ehdr *ehdr,
 		}
 	}
 
-	if ((cshdr == NULL) && (cphdr_off == 0))
+	if ((cshdr == NULL) && (uphdr == NULL))
 		return;
 
-	if (cphdr_off && (cshdr == NULL))
+	if ((uphdr != NULL) && (cshdr == NULL))
 		(void) fprintf(stderr, MSG_INTL(MSG_WARN_INVCAP1), file);
 
 	/*
@@ -1758,24 +1816,23 @@ cap(const char *file, Cache *cache, Word shnum, Word phnum, Ehdr *ehdr,
 	 * accompanying PT_SUNWCAP program header.
 	 */
 	if (cshdr && ((ehdr->e_type == ET_EXEC) || (ehdr->e_type == ET_DYN))) {
-		if (cphdr_off == 0) {
+		if (uphdr == NULL) {
 			(void) fprintf(stderr, MSG_INTL(MSG_WARN_INVCAP2),
 			    file, EC_WORD(elf_ndxscn(ccache->c_scn)),
 			    ccache->c_name);
-		} else if ((cphdr_off != cshdr->sh_offset) ||
-		    (cphdr_sz != cshdr->sh_size)) {
-			(void) fprintf(stderr, MSG_INTL(MSG_WARN_INVCAP3),
-			    file, EC_WORD(elf_ndxscn(ccache->c_scn)),
-			    ccache->c_name);
+		} else {
+			check_phdr_v_shdr(uphdr, phndx, osabi, ehdr->e_machine,
+			    ccache, file);
 		}
 	}
 }
 
 /*
- * Print the interpretor.
+ * Print the interpreter.
  */
 static void
-interp(const char *file, Cache *cache, Word shnum, Word phnum, Elf *elf)
+interp(const char *file, Cache *cache, Word shnum, Word phnum, Elf *elf,
+    Ehdr *ehdr)
 {
 	static Word phdr_types[] = { PT_INTERP };
 
@@ -1783,24 +1840,19 @@ interp(const char *file, Cache *cache, Word shnum, Word phnum, Elf *elf)
 	Word	cnt;
 	Shdr	*ishdr = NULL;
 	Cache	*icache = NULL;
-	Off	iphdr_off = 0;
-	Xword	iphdr_fsz;
+	Phdr	*iphdr = NULL;
+	size_t	phndx;
 
 	/*
 	 * Determine if an interp header exists.
 	 */
 	if (phnum) {
-		Phdr	*phdr;
-
-		phdr = getphdr(phnum, phdr_types,
-		    sizeof (phdr_types) / sizeof (*phdr_types), file, elf);
-		if (phdr != NULL) {
-			iphdr_off = phdr->p_offset;
-			iphdr_fsz = phdr->p_filesz;
-		}
+		iphdr = getphdr(phnum, phdr_types,
+		    sizeof (phdr_types) / sizeof (*phdr_types), file, elf,
+		    &phndx);
 	}
 
-	if (iphdr_off == 0)
+	if (iphdr == NULL)
 		return;
 
 	/*
@@ -1815,8 +1867,9 @@ interp(const char *file, Cache *cache, Word shnum, Word phnum, Elf *elf)
 		 * string.  The target section can't be in a NOBITS section.
 		 */
 		if ((shdr->sh_type == SHT_NOBITS) ||
-		    (iphdr_off < shdr->sh_offset) ||
-		    (iphdr_off + iphdr_fsz) > (shdr->sh_offset + shdr->sh_size))
+		    (iphdr->p_offset < shdr->sh_offset) ||
+		    (iphdr->p_offset + iphdr->p_filesz) >
+		    (shdr->sh_offset + shdr->sh_size))
 			continue;
 
 		icache = _cache;
@@ -1837,18 +1890,18 @@ interp(const char *file, Cache *cache, Word shnum, Word phnum, Elf *elf)
 		dbg_print(0, MSG_INTL(MSG_ELF_SCN_INTERP), icache->c_name);
 		dbg_print(0, MSG_ORIG(MSG_FMT_INDENT),
 		    (char *)icache->c_data->d_buf +
-		    (iphdr_off - ishdr->sh_offset));
-	} else
+		    (iphdr->p_offset - ishdr->sh_offset));
+	} else {
 		(void) fprintf(stderr, MSG_INTL(MSG_WARN_INVINTERP1), file);
+	}
 
 	/*
 	 * If there are any inconsistences between the program header and
 	 * section information, flag them.
 	 */
-	if (ishdr && ((iphdr_off != ishdr->sh_offset) ||
-	    (iphdr_fsz != ishdr->sh_size))) {
-		(void) fprintf(stderr, MSG_INTL(MSG_WARN_INVINTERP2), file,
-		    icache->c_name);
+	if (icache != NULL) {
+		check_phdr_v_shdr(iphdr, phndx, ELFOSABI_SOLARIS,
+		    ehdr->e_machine, icache, file);
 	}
 }
 
@@ -1864,7 +1917,7 @@ syminfo(Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi, const char *file)
 	Dyn		*dyns;
 	Word		infonum, cnt, ndx, symnum, dynnum;
 	Cache		*infocache = NULL, *dyncache = NULL, *symsec, *strsec;
-	Boolean		*dynerr;
+	Boolean		*dynerr = NULL;
 
 	for (cnt = 1; cnt < shnum; cnt++) {
 		if (cache[cnt].c_shdr->sh_type == SHT_SUNW_syminfo) {
@@ -1962,7 +2015,7 @@ syminfo(Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi, const char *file)
 	Elf_syminfo_title(0);
 
 	for (ndx = 1, info++; ndx < infonum; ndx++, info++) {
-		Sym 		*sym;
+		Sym		*sym;
 		const char	*needed, *name;
 		Word		expect_dt;
 		Word		boundto = info->si_boundto;
@@ -2132,7 +2185,7 @@ version_def(Verdef *vdf, Word vdf_num, Cache *vcache, Cache *scache,
  *	contain the largest version index seen.
  *
  * note:
- * 	The versym section of an object that follows the original
+ *	The versym section of an object that follows the original
  *	Solaris versioning rules only contains indexes into the verdef
  *	section. Symbols defined in other objects (UNDEF) are given
  *	a version of 0, indicating that they are not defined by
@@ -2892,7 +2945,7 @@ dyn_symtest(Dyn *dyn, const char *symname, Cache *symtab_cache,
 	Conv_inv_buf_t	buf;
 	int		i;
 	Sym		*sym;
-	Cache		*_cache;
+	Cache		*_cache = NULL;
 
 	for (i = 0; i < 3; i++) {
 		switch (i) {
@@ -2921,7 +2974,8 @@ dyn_symtest(Dyn *dyn, const char *symname, Cache *symtab_cache,
  * Search for and process a .dynamic section.
  */
 static void
-dynamic(Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi, const char *file)
+dynamic(Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi, const char *file,
+    Word phnum, Elf *elf)
 {
 	struct {
 		Cache	*symtab;
@@ -2952,6 +3006,9 @@ dynamic(Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi, const char *file)
 	int	dynsec_cnt;
 	Word	cnt;
 	int	osabi_solaris = osabi == ELFOSABI_SOLARIS;
+	Phdr	*pt_dynamic = NULL;
+	size_t	phndx;
+	static Word phdr_type[] = { PT_DYNAMIC };
 
 	/*
 	 * Make a pass over all the sections, gathering section information
@@ -3025,7 +3082,7 @@ dynamic(Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi, const char *file)
 		case _sec_type: \
 			if (sec._sec_field == NULL) \
 				sec._sec_field = _cache; \
-				break
+			break
 		GRAB(SHT_SYMTAB,	symtab);
 		GRAB(SHT_DYNSYM,	dynsym);
 		GRAB(SHT_FINI_ARRAY,	fini_array);
@@ -3047,13 +3104,18 @@ dynamic(Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi, const char *file)
 		}
 	}
 
+	if (phnum) {
+		pt_dynamic = getphdr(phnum, phdr_type, 1, file, elf, &phndx);
+	}
+
 	/*
 	 * If no dynamic section, return immediately. If more than one
 	 * dynamic section, then something odd is going on and an error
 	 * is in order, but then continue on and display them all.
 	 */
-	if (dynsec_num == 0)
+	if (dynsec_num == 0) {
 		return;
+	}
 	if (dynsec_num > 1)
 		(void) fprintf(stderr, MSG_INTL(MSG_ERR_MULTDYN),
 		    file, EC_WORD(dynsec_num));
@@ -3086,6 +3148,23 @@ dynamic(Cache *cache, Word shnum, Ehdr *ehdr, uchar_t osabi, const char *file)
 		}
 		if ((_cache->c_data == NULL) || (_cache->c_data->d_buf == NULL))
 			continue;
+
+		/* The first time through, check v. PT_DYNAMIC */
+		if (dynsec_cnt == 1) {
+			Conv_inv_buf_t inv_buf;
+
+			if ((pt_dynamic == NULL) && (ehdr->e_type != ET_REL)) {
+				fprintf(stderr, MSG_INTL(MSG_SHDR_NO_PHDR),
+				    file, _cache->c_ndx, _cache->c_name,
+				    conv_phdr_type(osabi, ehdr->e_machine,
+				    PT_DYNAMIC, CONV_FMT_ALT_CF, &inv_buf));
+			}
+
+			if (pt_dynamic != NULL) {
+				check_phdr_v_shdr(pt_dynamic, phndx,
+				    osabi, ehdr->e_machine, _cache, file);
+			}
+		}
 
 		numdyn = shdr->sh_size / shdr->sh_entsize;
 		dyn = (Dyn *)_cache->c_data->d_buf;
@@ -4255,7 +4334,7 @@ group(Cache *cache, Word shnum, const char *file, uint_t flags)
 			(void) snprintf(index, MAXNDXSIZE,
 			    MSG_ORIG(MSG_FMT_INDEX), EC_XWORD(gcnt));
 
-			if (grpdata[gcnt] >= shnum)
+			if ((grpdata[gcnt] == 0) || (grpdata[gcnt] >= shnum))
 				name = MSG_INTL(MSG_GRP_INVALSCN);
 			else
 				name = cache[grpdata[gcnt]].c_name;
@@ -4547,7 +4626,7 @@ shdr_cache(const char *file, Elf *elf, Ehdr *ehdr, size_t shstrndx,
 	Elf_Scn		*scn;
 	Elf_Data	*data;
 	size_t		ndx;
-	Shdr		*nameshdr;
+	Shdr		*nameshdr = NULL;
 	char		*names = NULL;
 	Cache		*cache, *_cache;
 	size_t		*shdr_ndx_arr, shdr_ndx_arr_cnt;
@@ -4636,7 +4715,7 @@ shdr_cache(const char *file, Elf *elf, Ehdr *ehdr, size_t shstrndx,
 	 * of this data that has caused problems with elfdump()'s ability to
 	 * extract the data.
 	 */
-	for (ndx = 1, scn = NULL; scn = elf_nextscn(elf, scn);
+	for (ndx = 1, scn = NULL; (scn = elf_nextscn(elf, scn)) != NULL;
 	    ndx++, _cache++) {
 		char	scnndxnm[100];
 
@@ -4653,7 +4732,8 @@ shdr_cache(const char *file, Elf *elf, Ehdr *ehdr, size_t shstrndx,
 		 * If this section has data in the file, include it in
 		 * the array of sections to check for address overlap.
 		 */
-		if ((_cache->c_shdr->sh_size != 0) &&
+		if (_cache->c_shdr != NULL &&
+		    (_cache->c_shdr->sh_size != 0) &&
 		    (_cache->c_shdr->sh_type != SHT_NOBITS))
 			shdr_ndx_arr[shdr_ndx_arr_cnt++] = ndx;
 
@@ -4661,9 +4741,9 @@ shdr_cache(const char *file, Elf *elf, Ehdr *ehdr, size_t shstrndx,
 		 * If a shstrtab exists, assign the section name.
 		 */
 		if (names && _cache->c_shdr) {
-			if (_cache->c_shdr->sh_name &&
-			    /* LINTED */
-			    (nameshdr->sh_size > _cache->c_shdr->sh_name)) {
+			if (_cache->c_shdr->sh_name != 0 &&
+			    (nameshdr != NULL &&
+			    nameshdr->sh_size > _cache->c_shdr->sh_name)) {
 				const char	*symname;
 				char		*secname;
 
@@ -4696,6 +4776,7 @@ shdr_cache(const char *file, Elf *elf, Ehdr *ehdr, size_t shstrndx,
 						(void) fprintf(stderr,
 						    MSG_INTL(MSG_ERR_MALLOC),
 						    file, strerror(err));
+						free(shdr_ndx_arr);
 						return (0);
 					}
 					(void) snprintf(_cache->c_name, strsz,
@@ -4733,6 +4814,7 @@ shdr_cache(const char *file, Elf *elf, Ehdr *ehdr, size_t shstrndx,
 			int err = errno;
 			(void) fprintf(stderr, MSG_INTL(MSG_ERR_MALLOC),
 			    file, strerror(err));
+			free(shdr_ndx_arr);
 			return (0);
 		}
 		(void) strcpy(_cache->c_name, scnndxnm);
@@ -4844,6 +4926,7 @@ shdr_cache(const char *file, Elf *elf, Ehdr *ehdr, size_t shstrndx,
 		}
 	}
 
+	free(shdr_ndx_arr);
 	return (1);
 }
 
@@ -5047,6 +5130,7 @@ regular(const char *file, int fd, Elf *elf, uint_t flags,
 
 			dbg_print(0, MSG_ORIG(MSG_STR_EMPTY));
 			dbg_print(0, MSG_INTL(MSG_ELF_PHDR), EC_WORD(ndx));
+
 			Elf_phdr(0, osabi, ehdr->e_machine, phdr);
 		}
 	}
@@ -5228,7 +5312,7 @@ regular(const char *file, int fd, Elf *elf, uint_t flags,
 		sections(file, cache, shnum, ehdr, osabi);
 
 	if (flags & FLG_SHOW_INTERP)
-		interp(file, cache, shnum, phnum, elf);
+		interp(file, cache, shnum, phnum, elf, ehdr);
 
 	if ((osabi == ELFOSABI_SOLARIS) || (osabi == ELFOSABI_LINUX))
 		versions(cache, shnum, file, flags, &versym);
@@ -5255,7 +5339,7 @@ regular(const char *file, int fd, Elf *elf, uint_t flags,
 		reloc(cache, shnum, ehdr, file);
 
 	if (flags & FLG_SHOW_DYNAMIC)
-		dynamic(cache, shnum, ehdr, osabi, file);
+		dynamic(cache, shnum, ehdr, osabi, file, phnum, elf);
 
 	if (flags & FLG_SHOW_NOTE) {
 		Word	note_cnt;

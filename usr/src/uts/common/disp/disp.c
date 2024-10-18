@@ -49,7 +49,6 @@
 #include <sys/kmem.h>
 #include <sys/cpuvar.h>
 #include <sys/vtrace.h>
-#include <sys/tnf.h>
 #include <sys/cpupart.h>
 #include <sys/lgrp.h>
 #include <sys/pg.h>
@@ -142,7 +141,7 @@ int	rechoose_interval = RECHOOSE_INTERVAL;
 hrtime_t nosteal_nsec = NOSTEAL_UNINITIALIZED;
 extern void cmp_set_nosteal_interval(void);
 
-id_t	defaultcid;	/* system "default" class; see dispadmin(1M) */
+id_t	defaultcid;	/* system "default" class; see dispadmin(8) */
 
 disp_lock_t	transition_lock;	/* lock on transitioning threads */
 disp_lock_t	stop_lock;		/* lock on stopped threads */
@@ -290,7 +289,7 @@ dispinit(void)
 
 	/*
 	 * Get the default class ID; this may be later modified via
-	 * dispadmin(1M).  This will load the class (normally TS) and that will
+	 * dispadmin(8).  This will load the class (normally TS) and that will
 	 * call disp_add(), which is why we had to drop cpu_lock first.
 	 */
 	if (getcid(defaultclass, &defaultcid) != 0) {
@@ -1328,12 +1327,6 @@ setbackdq(kthread_t *tp)
 	TRACE_3(TR_FAC_DISP, TR_BACKQ, "setbackdq:pri %d cpu %p tid %p",
 	    tpri, cp, tp);
 
-#ifndef NPROBE
-	/* Kernel probe */
-	if (tnf_tracing_active)
-		tnf_thread_queue(tp, cp, tpri);
-#endif /* NPROBE */
-
 	ASSERT(tpri >= 0 && tpri < dp->disp_npri);
 
 	THREAD_RUN(tp, &dp->disp_lock);		/* set t_state to TS_RUN */
@@ -1484,12 +1477,6 @@ setfrontdq(kthread_t *tp)
 	TRACE_2(TR_FAC_DISP, TR_FRONTQ, "frontq:pri %d tid %p", tpri, tp);
 	DTRACE_SCHED3(enqueue, kthread_t *, tp, disp_t *, dp, int, 1);
 
-#ifndef NPROBE
-	/* Kernel probe */
-	if (tnf_tracing_active)
-		tnf_thread_queue(tp, cp, tpri);
-#endif /* NPROBE */
-
 	ASSERT(tpri >= 0 && tpri < dp->disp_npri);
 
 	THREAD_RUN(tp, &dp->disp_lock);		/* set TS_RUN state and lock */
@@ -1600,12 +1587,6 @@ setkpdq(kthread_t *tp, int borf)
 	cp = disp_lowpri_cpu(cp, tp, tp->t_pri);
 	disp_lock_enter_high(&cp->cpu_disp->disp_lock);
 	ASSERT((cp->cpu_flags & CPU_QUIESCED) == 0);
-
-#ifndef NPROBE
-	/* Kernel probe */
-	if (tnf_tracing_active)
-		tnf_thread_queue(tp, cp, tpri);
-#endif /* NPROBE */
 
 	if (cp->cpu_chosen_level < tpri)
 		cp->cpu_chosen_level = tpri;

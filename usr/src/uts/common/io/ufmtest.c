@@ -256,7 +256,7 @@ ufmtest_do_setfw(intptr_t data, int mode)
 		ufmt.ufmt_nvl = NULL;
 	}
 
-	nvlbuf = kmem_zalloc(setfw.utsw_bufsz, KM_NOSLEEP | KM_NORMALPRI);
+	nvlbuf = kmem_zalloc(setfw.utsw_bufsz, KM_NOSLEEP_LAZY);
 	if (nvlbuf == NULL)
 		return (ENOMEM);
 
@@ -266,7 +266,7 @@ ufmtest_do_setfw(intptr_t data, int mode)
 	}
 
 	ret = nvlist_unpack(nvlbuf, setfw.utsw_bufsz, &ufmt.ufmt_nvl,
-	    NV_ENCODE_NATIVE);
+	    KM_NOSLEEP);
 	kmem_free(nvlbuf, setfw.utsw_bufsz);
 
 	if (ret != 0)

@@ -253,13 +253,15 @@ params_type_print(nvlist_t *p, const char *name, const char *fmri)
 		if (nvpair_value_nvlist(tnvp, &nvl) != 0)
 			uu_die("nvpair_value_nvlist");
 
-		if (!has_output)
-			if (fmri == NULL)
+		if (!has_output) {
+			if (fmri == NULL) {
 				safe_printf(gettext("    Event: %s\n"), name);
-			else
+			} else {
 				safe_printf(gettext(
 				    "    Event: %s (source: %s)\n"),
 				    name, fmri);
+			}
+		}
 
 		has_output = 1;
 
@@ -287,7 +289,7 @@ listnotify_print(nvlist_t *nvl, const char *event)
 {
 	char *fmri;
 	nvlist_t **params;
-	size_t n;
+	uint_t n;
 	int32_t tset;
 	int i;
 

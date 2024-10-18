@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <door.h>
@@ -121,6 +122,18 @@ dladm_create_datalink_id(dladm_handle_t handle, const char *link,
 	    !(flags & (DLADM_OPT_ACTIVE | DLADM_OPT_PERSIST)) ||
 	    linkidp == NULL) {
 		return (DLADM_STATUS_BADARG);
+	}
+
+	if (getzoneid() != GLOBAL_ZONEID) {
+		/*
+		 * If we're creating this link in a non-global zone, then do
+		 * not allow it to be persistent, and flag it as transient so
+		 * that it will be automatically cleaned up on zone shutdown,
+		 * rather than being moved to the GZ.
+		 */
+		if (flags & DLADM_OPT_PERSIST)
+			return (DLADM_STATUS_TEMPONLY);
+		flags |= DLADM_OPT_TRANSIENT;
 	}
 
 	dlmgmt_flags = (flags & DLADM_OPT_ACTIVE) ? DLMGMT_ACTIVE : 0;
@@ -400,7 +413,7 @@ again:
 	confp->ds_readonly = B_TRUE;
 	nvlbuf = (char *)retvalp + sizeof (dlmgmt_getconfsnapshot_retval_t);
 	if ((err = nvlist_unpack(nvlbuf, retvalp->lr_nvlsz,
-	    &(confp->ds_nvl), NV_ENCODE_NATIVE)) != 0) {
+	    &(confp->ds_nvl), 0)) != 0) {
 		status = dladm_errno2status(err);
 	}
 	free(retvalp);
@@ -489,9 +502,8 @@ dladm_get_conf_field(dladm_handle_t handle, dladm_conf_t conf, const char *attr,
  * Get next property attribute from data link configuration repository.
  * If last_attr is "", return the first property.
  */
-/* ARGSUSED */
 dladm_status_t
-dladm_getnext_conf_linkprop(dladm_handle_t handle, dladm_conf_t conf,
+dladm_getnext_conf_linkprop(dladm_handle_t handle __unused, dladm_conf_t conf,
     const char *last_attr, char *attr, void *attrval, size_t attrsz,
     size_t *attrszp)
 {
@@ -582,9 +594,12 @@ dladm_zname2info(dladm_handle_t handle, const char *zonename, const char *link,
 	if (linkidp != NULL)
 		*linkidp = linkid;
 	if (flagp != NULL) {
-		*flagp = retval.lr_flags & DLMGMT_ACTIVE ? DLADM_OPT_ACTIVE : 0;
+		*flagp = (retval.lr_flags & DLMGMT_ACTIVE) ?
+		    DLADM_OPT_ACTIVE : 0;
 		*flagp |= (retval.lr_flags & DLMGMT_PERSIST) ?
 		    DLADM_OPT_PERSIST : 0;
+		*flagp |= (retval.lr_flags & DLMGMT_TRANSIENT) ?
+		    DLADM_OPT_TRANSIENT : 0;
 	}
 	if (classp != NULL)
 		*classp = retval.lr_class;
@@ -679,7 +694,7 @@ dladm_set_conf_field(dladm_handle_t handle, dladm_conf_t conf, const char *attr,
 	setattr.ld_cmd = DLMGMT_CMD_SETATTR;
 	setattr.ld_confid = conf.ds_confid;
 	(void) strlcpy(setattr.ld_attr, attr, MAXLINKATTRLEN);
-	setattr.ld_attrsz = attrsz;
+	setattr.ld_attrsz = (uint32_t)attrsz;
 	setattr.ld_type = type;
 	bcopy(attrval, &setattr.ld_attrval, attrsz);
 

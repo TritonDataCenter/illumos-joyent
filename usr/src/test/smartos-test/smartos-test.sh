@@ -13,6 +13,7 @@
 
 #
 # Copyright 2020 Joyent, Inc.
+# Copyright 2024 MNX Cloud, Inc.
 #
 
 #
@@ -23,15 +24,6 @@
 #
 
 export PATH=/usr/bin:/usr/sbin:/opt/tools/sbin:/opt/tools/bin:$PATH
-
-# The pkgsrc packages we will install.
-export SMARTOS_TEST_PKGS="
-    python27
-    sudo
-    coreutils
-    gcc7
-    gmake
-"
 
 #
 # Set $KEEP as a precaution in case we ever end up running the zfs-test suite
@@ -185,6 +177,20 @@ function add_loopback_mounts {
 }
 
 #
+# The ZFS test suite often will invoke user{add,del,mod}(8). Move /etc/shadow
+# into /etc's normal ramdisk volume.  The link(2) calls the above utilities
+# use will start working, unlocking a great deal of tests.
+#
+function shadow_fix {
+    FS=$(/bin/df -n /etc/shadow | awk '{print $NF'})
+    if [[ "$FS" == "lofs" ]]; then
+	log_must umount /etc/shadow
+	log_must cp -pf /usbkey/shadow /etc/shadow
+    fi
+    # Else leave it alone.
+}
+
+#
 # Extract the non-/usr parts of the test archive
 #
 function extract_remaining_test_bits {
@@ -201,10 +207,10 @@ function setup_pkgsrc {
 
     # We should always use the same pkgsrc version as we have installed
     # on the build machine in case any of our tests link against libraries
-    # in /opt/local
-    PKGSRC_STEM="https://pkgsrc.joyent.com/packages/SmartOS/bootstrap"
-    BOOTSTRAP_TAR="bootstrap-2018Q4-tools.tar.gz"
-    BOOTSTRAP_SHA="b599667c80e4a42157763ed25d868ec7dc34962d"
+    # in /opt/tools
+    PKGSRC_STEM="https://pkgsrc.smartos.org/packages/SmartOS/bootstrap"
+    BOOTSTRAP_TAR="bootstrap-2021Q4-tools.tar.gz"
+    BOOTSTRAP_SHA="c427cb1ed664fd161d8e12c5191adcae7aee68b4"
 
     # Ensure we are in a directory with enough space for the bootstrap
     # download, by default the SmartOS /root directory is limited to the size
@@ -222,18 +228,15 @@ function setup_pkgsrc {
 
     # Install bootstrap kit to /opt/tools
     log_must tar -zxpf ${BOOTSTRAP_TAR} -C /
-
-    # add a symlink from /opt/local, needed by many test suites
-    if [[ ! -d /opt/local && ! -L /opt/local ]]; then
-        log_must ln -s /opt/tools /opt/local
-    else
-        log "Not forging /opt/local link"
-    fi
 }
+
+# The pkgsrc packages we will install are now a single metapackage.
+# If updates in that metapackage (e.g. python change) cause tests to fail,
+# consult with pkgsrc and/or maintainers of usr/src/test tests to update.
 
 function install_required_pkgs {
 
-    log_must pkgin -y in ${SMARTOS_TEST_PKGS}
+    log_must pkgin -y in smartos-test-tools
 }
 
 function add_test_accounts {
@@ -269,10 +272,12 @@ export KEEP
 EOF
 
             if [[ -n "$DISKS" ]]; then
+		# NOTE: This will be enough to make this script's execute-tests
+		# invocation run the ZFS test suite.
                 echo "DISKS=\"$DISKS\"" >> $zprofile
 		echo "export DISKS" >> $zprofile
             else
-                msg="echo Please set \$DISKS appropriate before running zfstest"
+                msg='echo Please set \$DISKS appropriate before running zfstest'
                 echo $msg >> $zprofile
             fi
 
@@ -282,6 +287,52 @@ EOF
     if [[ ! -f /opt/tools/etc/sudoers.d/ztest ]]; then
         mkdir -p /opt/tools/etc/sudoers.d
         echo "ztest ALL=(ALL) NOPASSWD: ALL" >> /opt/tools/etc/sudoers.d/ztest
+    fi
+}
+
+function zfs_test_check {
+    # DISKS is set either in our environment, or in the .profile of ~ztest.
+    zprofile=/zones/global/ztest/.profile
+    zdisksvar=$(su - ztest -c 'echo $DISKS' | tail -1)
+
+    # Check for KEEP too.
+    grep -q ^KEEP= $zprofile || \
+	fatal "Cannot run ZFS test, you need KEEP set in your ztest's environment"
+
+    # If neither are set DO NOT RUN the ztests.
+    if [[ -z $DISKS && -z $zdisksvar ]]; then
+	fatal "Cannot run ZFS test, you need DISKS set in your or ztest's environment"
+    fi
+
+    # Check if they are both non-zero and different.
+    if [[ -n "$DISKS" && -n "$zdisksvar" && "$DISKS" != "$zdisksvar" ]]; then
+	log "DISKS in current root environment: $DISKS"
+	log "DISKS in user ztest's environment: $zdisksvar"
+	fatal "Pleast reconcile these two before running the ZFS tests."
+    fi
+
+    if [[ -z "$zdisksvar" ]]; then
+	# put DISKS into ztest's .profile.
+        echo "DISKS=\"$DISKS\"" >> $zprofile
+	echo "export DISKS" >> $zprofile
+    fi
+
+    # Allow access to ZFS unit tests driver.
+    add_drv zut
+    # OKAY, now we can run it!
+    log_test zfstest su - ztest -c /opt/zfs-tests/bin/zfstest
+    rem_drv zut
+}
+
+function nvme_test_check {
+    # Execute the unit tests regardless...
+    log_testrunner nvme-tests /opt/nvme-tests/runfiles/unit.run
+
+    # If we specify NVME_TEST_DEVICE, then run the non-destructive NVMe tests.
+    if [[ -n "$NVME_TEST_DEVICE" ]]; then
+	log_testrunner nvme-tests /opt/nvme-tests/runfiles/non-destruct.run
+    else
+	log "Skipping NVMe non-destructive tests"
     fi
 }
 
@@ -295,13 +346,17 @@ EOF
 function execute_tests {
 
     log "Starting test runs"
-    log_test bhyvetest /opt/bhyvetest/bin/bhyvetest -ak
+    log_test bhyvetest /opt/bhyve-tests/bin/bhyvetest
     log_testrunner crypto-tests /opt/crypto-tests/runfiles/default.run
     log_testrunner elf-tests /opt/elf-tests/runfiles/default.run
     log_testrunner libc-tests /opt/libc-tests/runfiles/default.run
+    log_testrunner libsec-tests /opt/libsec-tests/runfiles/default.run
+    log_testrunner libproc-tests /opt/libproc-tests/runfiles/default.run
     log_test vndtest /opt/vndtest/bin/vndtest -a
     log_testrunner util-tests /opt/util-tests/runfiles/default.run
     log_testrunner os-tests /opt/os-tests/runfiles/default.run
+    nvme_test_check
+    zfs_test_check
 
     if [[ -n "$FAILED_TESTS" ]]; then
         echo ""
@@ -395,11 +450,14 @@ if [[ $do_rollback = true ]]; then
 fi
 
 if [[ $do_configure = true ]]; then
+    shadow_fix
     add_loopback_mounts $test_archive
     extract_remaining_test_bits $test_archive
     add_test_accounts
     setup_pkgsrc
     install_required_pkgs
+    # Enable per-process coredumps, some tests assume they're pre-set.
+    log_must coreadm -e process
     log "This system is now configured to run the SmartOS tests."
 fi
 

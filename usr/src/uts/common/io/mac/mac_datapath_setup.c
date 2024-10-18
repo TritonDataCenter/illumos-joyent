@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2020 RackTop Systems.
  */
 
 #include <sys/types.h>
@@ -1083,10 +1084,9 @@ mac_flow_cpu_init(flow_entry_t *flent, cpupart_t *cpupart)
 {
 	mac_soft_ring_set_t *rx_srs;
 	processorid_t cpuid;
-	int i, j, k, srs_cnt, nscpus, maxcpus, soft_ring_cnt = 0;
+	int i, j, k, srs_cnt, maxcpus, soft_ring_cnt = 0;
 	mac_cpus_t *srs_cpu;
 	mac_resource_props_t *emrp = &flent->fe_effective_props;
-	uint32_t cpus[MRP_NCPUS];
 
 	/*
 	 * The maximum number of CPUs available can either be
@@ -1094,6 +1094,12 @@ mac_flow_cpu_init(flow_entry_t *flent, cpupart_t *cpupart)
 	 * in the system.
 	 */
 	maxcpus = (cpupart != NULL) ? cpupart->cp_ncpus : ncpus;
+	/*
+	 * We cannot exceed the hard limit imposed by data structures.
+	 * Leave space for polling CPU and the SRS worker thread when
+	 * "mac_latency_optimize" is not set.
+	 */
+	maxcpus = MIN(maxcpus, MRP_NCPUS - 2);
 
 	/*
 	 * Compute the number of soft rings needed on top for each Rx
@@ -1113,7 +1119,10 @@ mac_flow_cpu_init(flow_entry_t *flent, cpupart_t *cpupart)
 		 */
 		soft_ring_cnt = 1;
 	}
-	for (srs_cnt = 0; srs_cnt < flent->fe_rx_srs_cnt; srs_cnt++) {
+
+	emrp->mrp_ncpus = 0;
+	for (srs_cnt = 0; srs_cnt < flent->fe_rx_srs_cnt &&
+	    emrp->mrp_ncpus < MRP_NCPUS; srs_cnt++) {
 		rx_srs = flent->fe_rx_srs[srs_cnt];
 		srs_cpu = &rx_srs->srs_cpu;
 		if (rx_srs->srs_fanout_state == SRS_FANOUT_INIT)
@@ -1140,32 +1149,22 @@ mac_flow_cpu_init(flow_entry_t *flent, cpupart_t *cpupart)
 		}
 		srs_cpu->mc_rx_workerid = cpuid;
 		mutex_exit(&cpu_lock);
-	}
 
-	nscpus = 0;
-	for (srs_cnt = 0; srs_cnt < flent->fe_rx_srs_cnt; srs_cnt++) {
-		rx_srs = flent->fe_rx_srs[srs_cnt];
-		srs_cpu = &rx_srs->srs_cpu;
-		for (j = 0; j < srs_cpu->mc_ncpus; j++) {
-			cpus[nscpus++] = srs_cpu->mc_cpus[j];
+		/*
+		 * Copy fanout CPUs to fe_effective_props without duplicates.
+		 */
+		for (i = 0; i < srs_cpu->mc_ncpus &&
+		    emrp->mrp_ncpus < MRP_NCPUS; i++) {
+			for (j = 0; j < emrp->mrp_ncpus; j++) {
+				if (emrp->mrp_cpu[j] == srs_cpu->mc_cpus[i])
+					break;
+			}
+			if (j == emrp->mrp_ncpus) {
+				emrp->mrp_cpu[emrp->mrp_ncpus++] =
+				    srs_cpu->mc_cpus[i];
+			}
 		}
 	}
-
-
-	/*
-	 * Copy cpu list to fe_effective_props
-	 * without duplicates.
-	 */
-	k = 0;
-	for (i = 0; i < nscpus; i++) {
-		for (j = 0; j < k; j++) {
-			if (emrp->mrp_cpu[j] == cpus[i])
-				break;
-		}
-		if (j == k)
-			emrp->mrp_cpu[k++] = cpus[i];
-	}
-	emrp->mrp_ncpus = k;
 
 	mac_tx_cpu_init(flent, NULL, cpupart);
 }
@@ -2219,8 +2218,8 @@ mac_srs_create(mac_client_impl_t *mcip, flow_entry_t *flent, uint32_t srs_type,
 	 * Create the srs_worker with twice the stack of a normal kernel thread
 	 * to reduce the likelihood of stack overflows in receive-side
 	 * processing.  (The larger stacks are not the only precaution taken
-	 * against stack overflows; see the use of the MAC_RX_SRS_TOODEEP
-	 * macro for details.)
+	 * against stack overflows; see the use of mac_rx_srs_stack_needed
+	 * in mac_sched.c).
 	 */
 	mac_srs->srs_worker = thread_create(NULL, default_stksize << 1,
 	    mac_srs_worker, mac_srs, 0, &p0, TS_RUN, mac_srs->srs_pri);

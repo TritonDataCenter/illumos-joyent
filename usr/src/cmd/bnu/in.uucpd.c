@@ -21,9 +21,9 @@
 /*
  * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
  */
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 /*
  * 4.2BSD, 2.9BSD, or ATTSVR4 TCP/IP server for uucico
@@ -55,7 +55,7 @@
 #include <security/pam_appl.h>
 
 static int uucp_conv();
-struct pam_conv conv = {uucp_conv, NULL };
+struct pam_conv conv = {uucp_conv, NULL};
 pam_handle_t    *pamh;
 
 #if !defined(BSD4_2) && !defined(BSD2_9) && !defined(ATTSVR4)
@@ -511,15 +511,15 @@ struct sockaddr_in *sin;
 static int
 uucp_conv(num_msg, msg, response, appdata_ptr)
 	int num_msg;
-	struct pam_message **msg;
+	const struct pam_message **msg;
 	struct pam_response **response;
 	void *appdata_ptr;
 {
-	struct pam_message	*m;
-	struct pam_response	*r;
-	char			*temp;
-	static char		passwd[64];
-	int			k, i;
+	const struct pam_message *m;
+	struct pam_response *r;
+	char *temp;
+	static char passwd[64];
+	int k, i;
 
 	if (num_msg <= 0)
 		return (PAM_CONV_ERR);

@@ -23,28 +23,27 @@
 # Use is subject to license terms.
 #
 # Copyright 2017 RackTop Systems.
+# Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2023 Oxide Computer Company
 #
 
 PROG = ucodeadm
 
 PROG_OBJS = ucodeadm.o ucode_errno.o
-COMMON_OBJS = ucode_utils.o
+COMMON_OBJS = ucode_utils_intel.o ucode_utils_amd.o
 OBJS = $(PROG_OBJS) $(COMMON_OBJS)
 COMMON_SRCDIR = ../../common/ucode
 ERROR_HEADER = $(COMMON_SRCDIR)/ucode_errno.h
-SRCS = $(PROG_OBJS:%.o=%.c) $(COMMON_OBJS:%.o=$(COMMON_SRCDIR)/%.c)
 
 include	../Makefile.cmd
+include	../Makefile.ctf
 
 POFILE = ucodeadm_all.po
 POFILES = $(PROG_OBJS:%.o=%.po)
 
-CPPFLAGS = -I../../common -I../../uts/common
+CSTD = $(GNU_C99)
+CPPFLAGS += -I$(SRC)/common
 CFLAGS	+= $(CCVERBOSE)
-CERRWARN += $(CNOWARN_UNINIT)
-CERRWARN += -_gcc=-Wno-type-limits
-LINTFLAGS += -errtags -erroff=E_NAME_DEF_NOT_USED2
-LINTFLAGS += -erroff=E_INCONS_ARG_DECL2,E_INCONS_VAL_TYPE_DECL2
 LDLIBS += -lgen
 
 DIRMODE = 0755
@@ -73,9 +72,6 @@ $(PROG): $(OBJS) ucode_errno.c
 
 clean:
 	-$(RM) $(CLEANFILES)
-
-lint:	lint_SRCS
-
 
 include	../Makefile.targ
 

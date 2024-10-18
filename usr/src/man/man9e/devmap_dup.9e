@@ -3,14 +3,13 @@
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH DEVMAP_DUP 9E "Jan 21, 1997"
+.TH DEVMAP_DUP 9E "June 18, 2021"
 .SH NAME
 devmap_dup \- device mapping duplication entry point
 .SH SYNOPSIS
-.LP
 .nf
 #include <sys/ddi.h>
-#include <sys/sunddi.h
+#include <sys/sunddi.h>
 
 
 
@@ -19,11 +18,8 @@ devmap_dup \- device mapping duplication entry point
 .fi
 
 .SH INTERFACE LEVEL
-.sp
-.LP
-Solaris DDI specific (Solaris DDI).
+illumos DDI specific (illumos DDI).
 .SH ARGUMENTS
-.sp
 .ne 2
 .na
 \fB\fIdhp\fR \fR
@@ -63,8 +59,6 @@ data for the duplicated device mapping.
 .RE
 
 .SH DESCRIPTION
-.sp
-.LP
 The system calls \fBdevmap_dup()\fR when a device mapping is duplicated, such
 as during the execution of the \fBfork\fR(2) system call.  The system expects
 \fBdevmap_dup()\fR to generate new driver private data for the new mapping, and
@@ -72,11 +66,9 @@ to set \fInew_pvtp\fR to point to it. \fInew_dhp\fR is the handle of the new
 mapped object.
 .sp
 .LP
-A non-zero return value from  \fBdevmap_dup()\fR will cause a corresponding
+A non-zero return value from \fBdevmap_dup()\fR will cause a corresponding
 operation such as \fBfork()\fR to fail.
 .SH RETURN VALUES
-.sp
-.LP
 \fBdevmap_dup()\fR returns the following values:
 .sp
 .ne 2
@@ -97,7 +89,6 @@ An error occurred.
 .RE
 
 .SH EXAMPLES
-.sp
 .in +2
 .nf
 static int
@@ -125,9 +116,8 @@ xxdevmap_dup(devmap_cookie_t dhp, void *pvtp, \e
 .in -2
 
 .SH SEE ALSO
-.sp
-.LP
-\fBfork\fR(2), \fBdevmap_callback_ctl\fR(9S)
+.BR fork (2),
+.BR devmap_callback_ctl (9S)
 .sp
 .LP
 \fIWriting Device Drivers\fR

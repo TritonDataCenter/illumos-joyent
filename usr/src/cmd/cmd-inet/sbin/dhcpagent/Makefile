@@ -34,8 +34,8 @@ OBJS =	adopt.o agent.o async.o bound.o class_id.o defaults.o inform.o \
 	request.o script_handler.o select.o states.o util.o
 
 include ../../../Makefile.cmd
+include ../../../Makefile.ctf
 
-SRCS    = $(OBJS:%.o=%.c)
 POFILES = $(OBJS:%.o=%.po)
 XGETFLAGS += -a -x dhcpagent.xcl
 
@@ -47,9 +47,6 @@ SMATCH=off
 CPPFLAGS  += -D_XOPEN_SOURCE=500 -D__EXTENSIONS__
 LDLIBS    += -lxnet -lnvpair -ldhcpagent -ldhcputil -linetutil -ldevinfo \
 	-ldlpi -lresolv -lipadm
-
-# Disable warnings that affect all XPG applications.
-LINTFLAGS += -erroff=E_INCONS_ARG_DECL2 -erroff=E_INCONS_VAL_TYPE_DECL2
 
 .KEEP_STATE:
 
@@ -66,7 +63,5 @@ $(POFILE):	$(POFILES)
 
 clean:
 		$(RM) $(OBJS)
-
-lint:		lint_SRCS
 
 include ../../../Makefile.targ

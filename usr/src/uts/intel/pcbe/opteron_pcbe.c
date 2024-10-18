@@ -66,10 +66,12 @@
 /*
  * Portions Copyright 2009 Advanced Micro Devices, Inc.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
- * Performance Counter Back-End for AMD Opteron and AMD Athlon 64 processors.
+ * Performance Counter Back-End for AMD Opteron, AMD Athlon 64, and Zen
+ * era processors.
  */
 
 #include <sys/cpuvar.h>
@@ -447,9 +449,10 @@ static const amd_generic_event_t family_10h_generic_events[] = {
 };
 
 /*
- * For Family 17h, the cpcgen utility generates all of our events including ones
- * that need specific unit codes, therefore we leave all unit codes out of
- * these. Zen 1 and Zen 2 have different event sets that they support.
+ * For Family 17h and Family 19h, the cpcgen utility generates all of our events
+ * including ones that need specific unit codes, therefore we leave all unit
+ * codes out of these. Zen 1, Zen 2, and Zen 3 have different event sets that
+ * they support.
  */
 static const amd_generic_event_t family_17h_zen1_papi_events[] = {
 	{ "PAPI_br_cn",		"ExRetCond" },
@@ -459,7 +462,6 @@ static const amd_generic_event_t family_17h_zen1_papi_events[] = {
 	{ "PAPI_tot_ins",	"ExRetInstr" },
 	{ "PAPI_tlb_dm",	"LsL1DTlbMiss" },
 	{ "PAPI_tlb_im",	"BpL1TlbMissL2Miss" },
-	{ "PAPI_tot_cyc",	"LsNotHaltedCyc" },
 	GEN_EV_END
 };
 
@@ -470,10 +472,41 @@ static const amd_generic_event_t family_17h_zen2_papi_events[] = {
 	{ "PAPI_tot_ins",	"ExRetInstr" },
 	{ "PAPI_tlb_dm",	"LsL1DTlbMiss" },
 	{ "PAPI_tlb_im",	"BpL1TlbMissL2Miss" },
-	{ "PAPI_tot_cyc",	"LsNotHaltedCyc" },
 	GEN_EV_END
 };
 
+static const amd_generic_event_t family_19h_zen3_papi_events[] = {
+	{ "PAPI_br_cn",		"ExRetCond" },
+	{ "PAPI_br_ins",	"ExRetBrn" },
+	{ "PAPI_tot_cyc",	"LsNotHaltedCyc" },
+	{ "PAPI_tot_ins",	"ExRetInstr" },
+	{ "PAPI_tlb_dm",	"LsL1DTlbMiss" },
+	{ "PAPI_tlb_im",	"BpL1TlbMissL2TlbMiss" },
+	GEN_EV_END
+};
+
+static const amd_generic_event_t family_19h_zen4_papi_events[] = {
+	{ "PAPI_br_cn",		"ExRetCond" },
+	{ "PAPI_br_ins",	"ExRetBrn" },
+	{ "PAPI_tot_cyc",	"LsNotHaltedCyc" },
+	{ "PAPI_tot_ins",	"ExRetInstr" },
+	{ "PAPI_tlb_dm",	"LsL1DTlbMiss" },
+	{ "PAPI_tlb_im",	"BpL1TlbMissL2TlbMiss" },
+	GEN_EV_END
+};
+
+static const amd_generic_event_t family_1ah_zen5_papi_events[] = {
+	{ "PAPI_br_cn",		"Retired_Conditional_Branch_Instructions" },
+	{ "PAPI_br_ins",	"Retired_Branch_Instructions" },
+	{ "PAPI_br_msp",
+		"Retired_Conditional_Branch_Instructions_Mispredicted" },
+	{ "PAPI_br_ucn",	"Retired_Unconditional_Branch_Instructions" },
+	{ "PAPI_tot_cyc",	"Cycles_Not_in_Halt" },
+	{ "PAPI_tot_ins",	"Retired_Instructions" },
+	{ "PAPI_hw_int",	"Interrupts_Taken" },
+	{ "PAPI_tlb_sd",	"TLB_Flush_Events" },
+	GEN_EV_END
+};
 
 static char	*evlist;
 static size_t	evlist_sz;
@@ -497,6 +530,21 @@ static char amd_fam_17h_zen2_reg[] = "See \"Preliminary Processor Programming "
 "(AMD publication 55803), \"Processor Programming Reference (PPR) for AMD "
 "Family 17h Model 71h, Revision B0 Processors\" (AMD publication 56176), and "
 "amd_f17h_zen2_events(3CPC)";
+static char amd_fam_19h_zen3_reg[] = "See \"Preliminary Processor Programming "
+"Reference (PPR) for AMD Family 19h Model 01h, Revision B1 Processors Volume "
+"1 of 2\" (AMD publication 55898), \"Processor Programming Reference (PPR) "
+"for AMD Family 19h Model 21h, Revision B0 Processors\" (AMD publication "
+"56214), and amd_f19h_zen3_events(3CPC)";
+static char amd_fam_19h_zen4_reg[] = "See \"Processor Programming Reference "
+"(PPR) for AMD Family 19h Model 11h, Revision B1 Processors Volume 1 of 6\" "
+"(AMD publication 55901), \"Processor Programming Reference (PPR) for AMD "
+"Family 19h Model 61h, Revision B1 Processors\" (AMD publication 56713), "
+"\"Processor Programming Reference (PPR) for AMD Family 19h Model 70h, "
+"Revision A0 Processors\" (AMD publication 57019), and "
+"amd_f19h_zen4_events(3CPC)";
+static char amd_fam_1ah_zen5_reg[] = "See \"Performance Monitor Counters "
+"for AMD Family 1Ah Model 00h-Fh Processors\" (AMD publication 58550) and "
+"amd_f1ah_zen5_events(3CPC)";
 
 static char amd_pcbe_impl_name[64];
 static char *amd_pcbe_cpuref;
@@ -523,7 +571,7 @@ static uint64_t
 opt_pcbe_pic_addr(uint_t counter)
 {
 	ASSERT3U(counter, <, opd.opd_ncounters);
-	return (PIC_BASE_ADDR + 2 * counter);
+	return (PIC_BASE_ADDR + counter);
 }
 
 static uint64_t
@@ -538,16 +586,19 @@ opt_pcbe_init(void)
 {
 	const amd_event_t		*evp;
 	const amd_generic_event_t	*gevp;
+	x86_uarchrev_t			uarchrev;
 
 	amd_family = cpuid_getfamily(CPU);
 	amd_model = cpuid_getmodel(CPU);
+	uarchrev = cpuid_getuarchrev(CPU);
 
 	/*
 	 * Make sure this really _is_ an Opteron or Athlon 64 system. The kernel
 	 * loads this module based on its name in the module directory, but it
 	 * could have been renamed.
 	 */
-	if (cpuid_getvendor(CPU) != X86_VENDOR_AMD || amd_family < 0xf)
+	if ((cpuid_getvendor(CPU) != X86_VENDOR_AMD || amd_family < 0xf) &&
+	    cpuid_getvendor(CPU) != X86_VENDOR_HYGON)
 		return (-1);
 
 	if (amd_family == 0xf) {
@@ -556,7 +607,9 @@ opt_pcbe_init(void)
 		    "AMD Opteron & Athlon64");
 	} else {
 		(void) snprintf(amd_pcbe_impl_name, sizeof (amd_pcbe_impl_name),
-		    "AMD Family %02xh", amd_family);
+		    "%s Family %02xh",
+		    cpuid_getvendor(CPU) == X86_VENDOR_HYGON ? "Hygon" : "AMD",
+		    amd_family);
 	}
 
 	/*
@@ -578,36 +631,65 @@ opt_pcbe_init(void)
 	 * Figure out processor revision here and assign appropriate
 	 * event configuration.
 	 */
+	switch (uarchrev_uarch(uarchrev)) {
+	case X86_UARCH_AMD_LEGACY:
+		switch (amd_family) {
+		case 0xf: {
+			x86_chiprev_t rev;
 
-	if (amd_family == 0xf) {
-		uint32_t rev;
+			rev = cpuid_getchiprev(CPU);
 
-		rev = cpuid_getchiprev(CPU);
-
-		if (X86_CHIPREV_ATLEAST(rev, X86_CHIPREV_AMD_F_REV_F))
-			amd_pcbe_cpuref = amd_fam_f_NPT_bkdg;
-		else
-			amd_pcbe_cpuref = amd_fam_f_rev_ae_bkdg;
-		amd_events = family_f_events;
-		amd_generic_events = opt_generic_events;
-	} else if (amd_family == 0x10) {
-		amd_pcbe_cpuref = amd_fam_10h_bkdg;
-		amd_events = family_10h_events;
-		amd_generic_events = family_10h_generic_events;
-	} else if (amd_family == 0x11) {
-		amd_pcbe_cpuref = amd_fam_11h_bkdg;
-		amd_events = family_11h_events;
-		amd_generic_events = opt_generic_events;
-	} else if (amd_family == 0x17 && amd_model <= 0x2f) {
+			if (chiprev_at_least(rev,
+			    X86_CHIPREV_AMD_LEGACY_F_REV_F)) {
+				amd_pcbe_cpuref = amd_fam_f_NPT_bkdg;
+			} else {
+				amd_pcbe_cpuref = amd_fam_f_rev_ae_bkdg;
+			}
+			amd_events = family_f_events;
+			amd_generic_events = opt_generic_events;
+			break;
+		}
+		case 0x10:
+			amd_pcbe_cpuref = amd_fam_10h_bkdg;
+			amd_events = family_10h_events;
+			amd_generic_events = family_10h_generic_events;
+			break;
+		case 0x11:
+			amd_pcbe_cpuref = amd_fam_11h_bkdg;
+			amd_events = family_11h_events;
+			amd_generic_events = opt_generic_events;
+			break;
+		default:
+			return (-1);
+		}
+		break;
+	case X86_UARCH_AMD_ZEN1:
+	case X86_UARCH_AMD_ZENPLUS:
 		amd_pcbe_cpuref = amd_fam_17h_zen1_reg;
 		amd_events = opteron_pcbe_f17h_zen1_events;
 		amd_generic_events = family_17h_zen1_papi_events;
-	} else if (amd_family == 0x17 && amd_model >= 0x30 &&
-	    amd_model <= 0x7f) {
+		break;
+	case X86_UARCH_AMD_ZEN2:
 		amd_pcbe_cpuref = amd_fam_17h_zen2_reg;
 		amd_events = opteron_pcbe_f17h_zen2_events;
 		amd_generic_events = family_17h_zen2_papi_events;
-	} else {
+		break;
+	case X86_UARCH_AMD_ZEN3:
+		amd_pcbe_cpuref = amd_fam_19h_zen3_reg;
+		amd_events = opteron_pcbe_f19h_zen3_events;
+		amd_generic_events = family_19h_zen3_papi_events;
+		break;
+	case X86_UARCH_AMD_ZEN4:
+		amd_pcbe_cpuref = amd_fam_19h_zen4_reg;
+		amd_events = opteron_pcbe_f19h_zen4_events;
+		amd_generic_events = family_19h_zen4_papi_events;
+		break;
+	case X86_UARCH_AMD_ZEN5:
+		amd_pcbe_cpuref = amd_fam_1ah_zen5_reg;
+		amd_events = opteron_pcbe_f1ah_zen5_events;
+		amd_generic_events = family_1ah_zen5_papi_events;
+		break;
+	default:
 		/*
 		 * Different families have different meanings on events and even
 		 * worse (like family 15h), different constraints around

@@ -24,7 +24,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2015, Syneto S.R.L. All rights reserved.
  * Copyright 2016 Toomas Soome <tsoome@me.com>
- * Copyright 2016 RackTop Systems.
+ * Copyright 2017 RackTop Systems.
  */
 
 /*
@@ -127,8 +127,8 @@
  *   stn_global for the system-wide set. They are re-read when instances are
  *   refreshed.
  *
- *   The GPEC events published by svc.startd are consumed by fmd(1M). After
- *   processing these events, fmd(1M) publishes the processed events to
+ *   The GPEC events published by svc.startd are consumed by fmd(8). After
+ *   processing these events, fmd(8) publishes the processed events to
  *   notification agents. The notification agents read the notification
  *   parameters from the SMF repository through libscf(3LIB) interfaces and send
  *   the notification, or not, based on those parameters.
@@ -904,7 +904,9 @@ vertex_send_event(graph_vertex_t *v, restarter_event_type_t e)
 		break;
 
 	case RESTARTER_EVENT_TYPE_REMOVE_INSTANCE:
+	case RESTARTER_EVENT_TYPE_ADMIN_RESTORE:
 	case RESTARTER_EVENT_TYPE_ADMIN_DEGRADED:
+	case RESTARTER_EVENT_TYPE_ADMIN_DEGRADE_IMMEDIATE:
 	case RESTARTER_EVENT_TYPE_ADMIN_REFRESH:
 	case RESTARTER_EVENT_TYPE_ADMIN_RESTART:
 	case RESTARTER_EVENT_TYPE_ADMIN_MAINT_OFF:

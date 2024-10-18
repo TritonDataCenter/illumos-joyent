@@ -21,6 +21,7 @@
 
 /*
  * Copyright (c) 1990, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2022 Garrett D'Amore
  */
 
 #include <sys/scsi/scsi.h>
@@ -390,8 +391,6 @@ free_pktiopb(struct scsi_pkt *pkt, caddr_t datap, int datalen)
  * Common naming functions
  */
 
-static char scsi_tmpname[64];
-
 char *
 scsi_dname(int dtyp)
 {
@@ -479,7 +478,7 @@ scsi_cname(uchar_t cmd, register char **cmdvec)
 		}
 		cmdvec++;
 	}
-	return (sprintf(scsi_tmpname, "<undecoded cmd 0x%x>", cmd));
+	return ("<undecoded cmd>");
 }
 
 char *
@@ -2502,7 +2501,7 @@ scsi_uscsi_pktinit(struct uscsi_cmd *uscmd, struct scsi_pkt *pkt)
 	    (uscmd->uscsi_path_instance != 0)) {
 		/*
 		 * Check to make sure the scsi_pkt was allocated correctly
-		 * before transferring uscsi(7i) path_instance to scsi_pkt(9S).
+		 * before transferring uscsi(4I) path_instance to scsi_pkt(9S).
 		 */
 		if (scsi_pkt_allocated_correctly(pkt)) {
 			/* set pkt_path_instance and flag. */
@@ -2547,7 +2546,7 @@ scsi_uscsi_pktfini(struct scsi_pkt *pkt, struct uscsi_cmd *uscmd)
 {
 	/*
 	 * Check to make sure the scsi_pkt was allocated correctly before
-	 * transferring scsi_pkt(9S) path_instance to uscsi(7i).
+	 * transferring scsi_pkt(9S) path_instance to uscsi(4I).
 	 */
 	if (!scsi_pkt_allocated_correctly(pkt)) {
 		uscmd->uscsi_path_instance = 0;

@@ -34,7 +34,7 @@ include $(TOPDIR)/lib/Makefile.lib
 include $(TOPDIR)/psm/stand/lib/Makefile.lib
 include $(TOPDIR)/psm/Makefile.psm.64
 
-CFLAGS64	+= -xchip=ultra $(CCABS32)
+CFLAGS64	+= -xchip=ultra
 CERRWARN	+= -_gcc=-Wno-parentheses
 
 PROMDIR =	$(TOPDIR)/psm/promif/ieee1275/common
@@ -79,7 +79,7 @@ PROM_CFILES =			\
 
 PROM_SFILES =
 
-PROM_FILES = 	$(PROM_CFILES) $(PROM_SFILES)
+PROM_FILES =	$(PROM_CFILES) $(PROM_SFILES)
 
 KARCH =		sun4u
 MMU =		sfmmu
@@ -93,7 +93,7 @@ L_OBJS =	$(OBJS:%.o=%.ln)
 L_SRCS =	$(PROM_FILES:%=$(PROMDIR)/%)
 
 ARCHOPTS =	-DSTACK_64BIT -Dsun4u
-ASFLAGS =	-P -D__STDC__ -D_BOOT -D_ASM
+ASFLAGS =	-D__STDC__ -D_BOOT -D_ASM
 CPPDEFS	=	$(ARCHOPTS) -D$(KARCH) -D_BOOT -D_KERNEL -D_MACHDEP
 CPPINCS =	-I. -I$(SYSDIR)/sun4 -I$(SYSDIR)/$(KARCH) -I$(SYSDIR)/$(MMU) \
 		-I$(SYSDIR)/sparc/v9 -I$(SYSDIR)/sparc \

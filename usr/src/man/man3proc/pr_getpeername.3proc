@@ -11,14 +11,15 @@
 .\"
 .\" Copyright 2015 Joyent, Inc.
 .\"
-.Dd May 11, 2016
+.Dd November 27, 2023
 .Dt PR_GETPEERNAME 3PROC
 .Os
 .Sh NAME
 .Nm pr_getpeername
 .Nd inject getpeername library call into victim process
-.Sh SYNOPSIS
+.Sh LIBRARY
 .Lb libproc
+.Sh SYNOPSIS
 .In libproc.h
 .Ft int
 .Fo pr_getpeername
@@ -101,4 +102,4 @@ in
 .Sh SEE ALSO
 .Xr libproc 3LIB ,
 .Xr getpeername 3SOCKET ,
-.Xr proc 4
+.Xr proc 5

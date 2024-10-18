@@ -35,16 +35,8 @@ UTSBASE	= ../..
 #
 MODULE		= tcp6
 OBJECTS		= $(TCP6_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(TCP6_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_DRV_DIR)/$(MODULE)
 CONF_SRCDIR	= $(UTSBASE)/common/inet/tcp
-
-#
-# Extra for $(MODULE).check target
-#
-# Need to remove ipddi.o since it has non-static defines for _init etc.
-IP_CHECK_OBJS	= $(IP_OBJS:ipddi.o=ip.o)
-EXTRA_CHECK_OBJS = $(IP_CHECK_OBJS:%=../ip/$(OBJS_DIR)/%)
 
 # needs work
 SMOFF += index_overflow
@@ -58,13 +50,12 @@ include $(UTSBASE)/intel/Makefile.intel
 #	Define targets
 #
 ALL_TARGET	= $(BINARY) $(SRC_CONFFILE)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE) $(ROOT_CONFFILE)
 
 #
 #	depends on tcp ip and ip6
 #
-LDFLAGS		+= -dy -Ndrv/tcp -Ndrv/ip -Ndrv/ip6
+LDFLAGS		+= -Ndrv/tcp -Ndrv/ip -Ndrv/ip6
 
 #
 #	Default build targets.
@@ -78,12 +69,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

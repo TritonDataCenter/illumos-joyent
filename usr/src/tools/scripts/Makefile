@@ -24,6 +24,8 @@
 # Copyright 2010, Richard Lowe
 #
 # Copyright 2020 Joyent, Inc.
+# Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2022 Jason King
 
 SHELL=/usr/bin/ksh93
 
@@ -32,9 +34,7 @@ SCRIPTS= \
 	nightly
 
 SHFILES= \
-	Install \
 	build_cscope \
-	bringovercheck \
 	checkpaths \
 	cstyle \
 	elfcmp \
@@ -42,7 +42,6 @@ SHFILES= \
 	genoffsets \
 	onu \
 	protocmp.terse \
-	sccscheck \
 	webrev \
 	which_scm \
 	ws \
@@ -50,7 +49,6 @@ SHFILES= \
 
 PERLFILES= \
 	check_rtime \
-	find_elf \
 	interface_check \
 	interface_cmp \
 	jstyle \
@@ -77,14 +75,12 @@ SCRIPTLINKS= \
 	git-nits
 
 MAN1ONBLDFILES= \
-	Install.1onbld \
 	bldenv.1onbld \
-	bringovercheck.1onbld \
 	cddlchk.1onbld \
 	checkpaths.1onbld \
 	check_rtime.1onbld \
+	ctfconvert.1onbld \
 	cstyle.1onbld \
-	find_elf.1onbld \
 	flg.flp.1onbld \
 	git-pbchk.1onbld \
 	hdrchk.1onbld \
@@ -94,7 +90,6 @@ MAN1ONBLDFILES= \
 	mapfilechk.1onbld \
 	nightly.1onbld \
 	onu.1onbld \
-	sccscheck.1onbld \
 	webrev.1onbld \
 	which_scm.1onbld \
 	ws.1onbld \
@@ -135,7 +130,7 @@ all:	$(SHFILES) $(PERLFILES) $(PERLMODULES) $(PYFILES) \
 	$(MAN1ONBLDFILES) $(MAKEFILES) $(SCRIPTS)
 
 onu.sh:	onu.sh.in
-	$(SED) -e "s:@PYTHON_VERSION@:$(PYTHON_VERSION):g" < onu.sh.in > $@
+	$(SED) -e "s:@PYTHON_VERSION@:$(PYTHON3_VERSION):g" < onu.sh.in > $@
 
 $(ROOTONBLDBIN)/git-nits:
 	$(RM) $(ROOTONBLDBIN)/git-nits

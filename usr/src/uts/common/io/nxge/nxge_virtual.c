@@ -62,11 +62,11 @@ uint32_t nxge_groups_per_port = 2;
 extern uint32_t nxge_use_partition;
 extern uint32_t nxge_dma_obp_props_only;
 
-extern uint_t nxge_rx_intr(void *, void *);
-extern uint_t nxge_tx_intr(void *, void *);
-extern uint_t nxge_mif_intr(void *, void *);
-extern uint_t nxge_mac_intr(void *, void *);
-extern uint_t nxge_syserr_intr(void *, void *);
+extern uint_t nxge_rx_intr(char *, char *);
+extern uint_t nxge_tx_intr(char *, char *);
+extern uint_t nxge_mif_intr(char *, char *);
+extern uint_t nxge_mac_intr(char *, char *);
+extern uint_t nxge_syserr_intr(char *, char *);
 extern void *nxge_list;
 
 #define	NXGE_SHARED_REG_SW_SIM
@@ -1043,6 +1043,7 @@ nxge_cfg_verify_set_classify_prop(p_nxge_t nxgep, char *prop,
 	uint_t prop_len;
 	uint_t known_cfg_value;
 
+	new_value = 0;
 	known_cfg_value = (uint_t)known_cfg;
 
 	if (override == B_TRUE) {
@@ -2847,9 +2848,7 @@ nxge_set_hw_vlan_class_config(p_nxge_t nxgep)
 			vmap = (nxge_param_map_t *)&vlan_cfg_val[i];
 			if ((vmap->param_id) &&
 			    (vmap->param_id < NXGE_MAX_VLANS) &&
-			    (vmap->map_to <
-			    p_cfgp->max_rdc_grpids) &&
-			    (vmap->map_to >= (uint8_t)0)) {
+			    (vmap->map_to < p_cfgp->max_rdc_grpids)) {
 				NXGE_DEBUG_MSG((nxgep, CFG2_CTL,
 				    " nxge_vlan_config mapping"
 				    " id %d grp %d",
@@ -2909,9 +2908,7 @@ nxge_set_hw_mac_class_config(p_nxge_t nxgep)
 		for (i = 0; i < mac_cnt; i++) {
 			mac_map = (nxge_param_map_t *)&mac_cfg_val[i];
 			if ((mac_map->param_id < p_cfgp->max_macs) &&
-			    (mac_map->map_to <
-			    p_cfgp->max_rdc_grpids) &&
-			    (mac_map->map_to >= (uint8_t)0)) {
+			    (mac_map->map_to < p_cfgp->max_rdc_grpids)) {
 				NXGE_DEBUG_MSG((nxgep, CFG2_CTL,
 				    " nxge_mac_config mapping"
 				    " id %d grp %d",
@@ -4030,6 +4027,7 @@ nxge_init_mmac(p_nxge_t nxgep, boolean_t compute_addrs)
 	nxge_mmac_t *mmac_info;
 	npi_mac_addr_t mac_addr;
 
+	alt_mac_ls4b = 0;
 	func_num = nxgep->function_num;
 	base_mmac_addr = (uint16_t *)&nxgep->factaddr;
 	mmac_info = (nxge_mmac_t *)&nxgep->nxge_mmac_info;

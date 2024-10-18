@@ -40,7 +40,6 @@ UTSBASE	= ../..
 #
 MODULE		= eoib
 OBJECTS		= $(EOIB_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(EOIB_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_DRV_DIR)/$(MODULE)
 
 #
@@ -52,7 +51,6 @@ include $(UTSBASE)/intel/Makefile.intel
 # Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 # Module specific debug flag
@@ -60,10 +58,11 @@ INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 CPPFLAGS += -DEIB_DEBUG
 
 #
-# Lint pass one enforcement
+# For now, disable these warnings; maintainers should endeavor
+# to investigate and remove these for maximum coverage.
+# Please do not carry these forward to new Makefiles.
 #
-CFLAGS += $(CCVERBOSE)
-
+CFLAGS		+= $(CCVERBOSE)
 CERRWARN	+= -_gcc=-Wno-switch
 CERRWARN	+= $(CNOWARN_UNINIT)
 
@@ -73,7 +72,7 @@ $(OBJS_DIR)/eib_ibt.o := SMOFF += deref_check
 #
 # Depends on misc/ibtl
 #
-LDFLAGS	+= -dy -Nmisc/mac -Nmisc/ibtl -Nmisc/ibcm -Nmisc/ibmf
+LDFLAGS	+= -Nmisc/mac -Nmisc/ibtl -Nmisc/ibcm -Nmisc/ibmf
 
 #
 # Default build targets
@@ -87,12 +86,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

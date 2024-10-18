@@ -20,13 +20,12 @@
 #
 
 PROG = smatch
-SPARSE_VERSION = 0.6.1-rc1-il-4
+SPARSE_VERSION = 0.6.1-rc1-il-7
 
 include ../Makefile.tools
 
 # We have to build smatch before we can use cw
-i386_CC = $(GNUC_ROOT)/bin/gcc
-sparc_CC = $(GNUC_ROOT)/bin/gcc
+NATIVECC = $(GNUC_ROOT)/bin/gcc
 # sparc doesn't recognise -msave-args
 i386_SMATCHFLAGS = -msave-args
 sparc_SMATCHFLAGS =
@@ -35,7 +34,7 @@ sparc_SMATCHFLAGS =
 # unused on x86 because the compiler will replace ceil(3M) with its own copy.
 # However, on SPARC, it doesn't. So for now we disable builtins to make it
 # consistent.
-CFLAGS = -O -m64 -std=gnu99 -nodefaultlibs -D__sun $($(MACH)_SMATCHFLAGS)
+CFLAGS = -O -m64 -std=gnu99 -nodefaultlibs -D__sun $($(NATIVE_MACH)_SMATCHFLAGS)
 CFLAGS += -fno-builtin
 CFLAGS += -Wall -Wno-unknown-pragmas -Wno-psabi
 
@@ -45,8 +44,8 @@ CFLAGS += -DSMATCHDATADIR='"$(SMATCHDATADIR)"'
 CFLAGS += -DGCC_BASE='"/no/such/dir"'
 CFLAGS += -DMULTIARCH_TRIPLET=NULL
 
-LDCHECKS = -Wl,$(ZASSERTDEFLIB) -Wl,$(ZGUIDANCE) -Wl,$(ZFATALWARNINGS)
-LDLIBS += -Wl,$(ZLAZYLOAD) -Wl,$(ZDIRECT) -lsqlite3 -lcrypto -lgcc -lm -lc
+LDCHECKS = $(ZASSERTDEFLIB) $(ZGUIDANCE) $(ZFATALWARNINGS)
+LDLIBS += $(ZLAZYLOAD) $(ZDIRECT) -lsqlite3 -lmd -lgcc -lm -lc
 LDFLAGS = $(MAPFILE.NES:%=-Wl,-M%)
 
 #
@@ -57,6 +56,9 @@ LDFLAGS = $(MAPFILE.NES:%=-Wl,-M%)
 #
 LDFLAGS += -L$(NATIVE_ADJUNCT)/lib -R$(NATIVE_ADJUNCT)/lib
 LDFLAGS += -L$(NATIVE_ADJUNCT)/lib/$(MACH64) -R$(NATIVE_ADJUNCT)/lib/$(MACH64)
+
+NATIVE_LIBS += libsqlite3.so libmd.so libm.so libc.so
+LDFLAGS += $(NATIVE_LIBS:%=$(ZASSERTDEFLIB)=%)
 
 CPPFLAGS += -nostdinc
 CPPFLAGS += -Isrc/
@@ -230,6 +232,7 @@ SMATCH_DB_DATA += mtag_alias.schema
 SMATCH_DB_DATA += type_size.schema
 SMATCH_DB_DATA += fn_ptr_data_link.schema
 SMATCH_DB_DATA += mtag_data.schema
+SMATCH_DB_DATA += mtag_info.schema
 SMATCH_DB_DATA += type_value.schema
 
 ROOTONBLDDATAFILES = $(SMATCH_DATA:%=$(SMATCHDATADIR)/smatch_data/%)

@@ -545,8 +545,6 @@ statd_call_statd(char *name)
 	stat_chge ntf;
 	int i;
 	int rc;
-	int dummy1, dummy2, dummy3, dummy4;
-	char ascii_addr[MAXNAMELEN];
 	size_t unq_len;
 
 	ntf.mon_name = hostname;
@@ -944,7 +942,7 @@ move_file(char *fromdir, char *file, char *todir)
 int
 create_symlink(char *todir, char *rname, char *lname)
 {
-	int error;
+	int error = 0;
 	char lpath[MAXPATHLEN];
 
 	/*
@@ -1279,8 +1277,8 @@ record_name(char *name, int op)
 }
 
 /*
- * This routine adds a symlink in the form of an ASCII dotted quad
- * IP address that is linked to the name already recorded in the
+ * This routine adds a symlink in the form of an IP address in
+ * text string format that is linked to the name already recorded in the
  * filesystem name space by record_name().  Enough information is
  * (hopefully) provided to support other address types in the future.
  * The purpose of this is to cache enough information to contact
@@ -1296,8 +1294,8 @@ record_addr(char *name, sa_family_t family, struct netobj *ah)
 	int i;
 	int path_len;
 	char *famstr;
-	struct in_addr addr;
-	char *addr6;
+	struct in_addr addr = { 0 };
+	char *addr6 = NULL;
 	char ascii_addr[MAXNAMELEN];
 	char path[MAXPATHLEN];
 
@@ -1321,8 +1319,7 @@ record_addr(char *name, sa_family_t family, struct netobj *ah)
 	}
 
 	if (family == AF_INET) {
-		if (addr.s_addr == INADDR_ANY ||
-		    ((addr.s_addr && 0xff000000) == 0)) {
+		if ((ntohl(addr.s_addr) & 0xff000000) == 0) {
 			syslog(LOG_DEBUG,
 			    "record_addr: illegal IP address %x\n",
 			    addr.s_addr);

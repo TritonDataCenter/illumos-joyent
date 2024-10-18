@@ -215,7 +215,7 @@ static int
 xlate_common(topo_mod_t *mp, xmlNodePtr xn, topo_type_t ptype, nvlist_t *nvl,
     const char *name)
 {
-	int rv;
+	int rv = 0;
 	uint64_t ui;
 	double dbl;
 	uint_t i = 0, nelems = 0;
@@ -407,6 +407,12 @@ xlate_common(topo_mod_t *mp, xmlNodePtr xn, topo_type_t ptype, nvlist_t *nvl,
 		    nelems);
 		topo_mod_free(mp, nvlarrbuf, (nelems * sizeof (nvlist_t *)));
 		break;
+	default:
+		/*
+		 * Invalid types were handled in the switch statement above
+		 * this. Items in this case don't need additional processing.
+		 */
+		break;
 	}
 
 	if (rv != 0) {
@@ -574,6 +580,7 @@ prop_create(topo_mod_t *mp,
 		break;
 	default:
 		e = ETOPO_PRSR_BADTYPE;
+		break;
 	}
 	if (e != 0) {
 		topo_dprintf(mp->tm_hdl, TOPO_DBG_ERR,
@@ -625,6 +632,9 @@ prop_create(topo_mod_t *mp,
 	case TOPO_TYPE_FMRI_ARRAY:
 		e = topo_prop_set_fmri_array(ptn, gnm, pnm, flag,
 		    (const nvlist_t **)fmriarr, nelem, &err);
+		break;
+	default:
+		e = ETOPO_PRSR_BADTYPE;
 		break;
 	}
 	if (e != 0 && err != ETOPO_PROP_DEFD) {
@@ -1170,8 +1180,9 @@ static int
 pad_process(topo_mod_t *mp, tf_rdata_t *rd, xmlNodePtr pxn, tnode_t *ptn,
     tf_pad_t **rpad)
 {
-	xmlNodePtr cn, gcn, psn, ecn, target;
-	xmlNodePtr def_set = NULL;
+	xmlNodePtr cn, gcn, psn = NULL, target;
+	/* Explicitly initialize ecn to help -Wmaybe-unit */
+	xmlNodePtr def_set = NULL, ecn = NULL;
 	tnode_t *ct;
 	tf_pad_t *new = *rpad;
 	tf_rdata_t tmp_rd;
@@ -1211,10 +1222,7 @@ pad_process(topo_mod_t *mp, tf_rdata_t *rd, xmlNodePtr pxn, tnode_t *ptn,
 					continue;
 				set = xmlGetProp(cn, (xmlChar *)Setlist);
 
-				if (mp->tm_hdl->th_product)
-					key = mp->tm_hdl->th_product;
-				else
-					key = mp->tm_hdl->th_platform;
+				key = mp->tm_hdl->th_product;
 
 				/*
 				 * If it's the default set then we'll store
@@ -1256,29 +1264,6 @@ pad_process(topo_mod_t *mp, tf_rdata_t *rd, xmlNodePtr pxn, tnode_t *ptn,
 		topo_dprintf(mp->tm_hdl, TOPO_DBG_XML,
 		    "pad_process: dcnt=%d, pgcnt=%d, ecnt=%d, joined_set=%d\n",
 		    dcnt, pgcnt, ecnt, joined_set);
-		/*
-		 * If an enum-method element was found, AND we're a child of a
-		 * node element, then we invoke the enumerator so that it can do
-		 * post-processing of the node.
-		 */
-		if (ecnt && (strcmp((const char *)pxn->name, Node) == 0)) {
-			if ((tmp_rd.rd_einfo = enum_attributes_process(mp, ecn))
-			    == NULL)
-				return (-1);
-			tmp_rd.rd_mod = mp;
-			tmp_rd.rd_name = rd->rd_name;
-			tmp_rd.rd_min = rd->rd_min;
-			tmp_rd.rd_max = rd->rd_max;
-			tmp_rd.rd_pn = ptn;
-			if (enum_run(mp, &tmp_rd) < 0) {
-				/*
-				 * Note the failure but continue on
-				 */
-				topo_dprintf(mp->tm_hdl, TOPO_DBG_ERR,
-				    "pad_process: enumeration failed.\n");
-			}
-			tf_edata_free(mp, tmp_rd.rd_einfo);
-		}
 		/*
 		 * Here we allocate an element in an intermediate data structure
 		 * which keeps track property groups and dependents of the range
@@ -1356,6 +1341,30 @@ pad_process(topo_mod_t *mp, tf_rdata_t *rd, xmlNodePtr pxn, tnode_t *ptn,
 	if (new->tpad_pgcnt > 0)
 		if (pgroups_create(mp, new, ptn) < 0)
 			return (-1);
+
+	/*
+	 * If an enum-method element was found, AND we're a child of a
+	 * node element, then we invoke the enumerator so that it can do
+	 * post-processing of the node.
+	 */
+	if (ecnt && (strcmp((const char *)pxn->name, Node) == 0)) {
+		if ((tmp_rd.rd_einfo = enum_attributes_process(mp, ecn))
+		    == NULL)
+			return (-1);
+		tmp_rd.rd_mod = mp;
+		tmp_rd.rd_name = rd->rd_name;
+		tmp_rd.rd_min = rd->rd_min;
+		tmp_rd.rd_max = rd->rd_max;
+		tmp_rd.rd_pn = ptn;
+		if (enum_run(mp, &tmp_rd) < 0) {
+			/*
+			 * Note the failure but continue on
+			 */
+			topo_dprintf(mp->tm_hdl, TOPO_DBG_ERR,
+			    "pad_process: enumeration failed.\n");
+		}
+		tf_edata_free(mp, tmp_rd.rd_einfo);
+	}
 
 	if (new->tpad_dcnt > 0)
 		if (dependents_create(mp, rd->rd_finfo, new, pxn, ptn) < 0)
@@ -1870,10 +1879,7 @@ topo_xml_walk(topo_mod_t *mp,
 
 			set = xmlGetProp(curr, (xmlChar *)Setlist);
 
-			if (mp->tm_hdl->th_product)
-				key = mp->tm_hdl->th_product;
-			else
-				key = mp->tm_hdl->th_platform;
+			key = mp->tm_hdl->th_product;
 
 			/*
 			 * If it's the default set then we'll store
@@ -2004,8 +2010,6 @@ txml_file_parse(topo_mod_t *tmp,
 	 */
 	if (getenv("TOPOXML_VALIDATE") != NULL) {
 		dtdpath = getenv("TOPO_DTD");
-		if (dtdpath != NULL)
-			xmlLoadExtDtdDefaultValue = 0;
 		validate = 1;
 	}
 

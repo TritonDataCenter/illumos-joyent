@@ -22,19 +22,23 @@
 # Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
+# Copyright 2021 Tintri by DDN, Inc. All rights reserved.
+#
 
 PROG		= in.mpathd
 ROOTFS_PROG	= $(PROG)
 OBJS		= mpd_tables.o mpd_main.o mpd_probe.o
-SRCS		= $(OBJS:%.o=%.c)
 DEFAULTFILES	= mpathd.dfl
+SVCMETHOD	= net-ipmp
+MANIFEST	= network-ipmp.xml
 
 include ../../../Makefile.cmd
 
 ROOTCMDDIR	= $(ROOT)/lib/inet
+ROOTMANIFESTDIR	= $(ROOTSVCNETWORK)
 
 POFILE		= $(PROG).po
-POFILES		= $(SRCS:%.c=%.po)
+POFILES		= $(OBJS:%.o=%.po)
 
 CSTD		= $(CSTD_GNU99)
 
@@ -44,7 +48,6 @@ CSTD		= $(CSTD_GNU99)
 #
 CPPFLAGS += -D_XOPEN_SOURCE=600 -D__EXTENSIONS__
 LDLIBS	+= -lsocket -lnsl -lsysevent -lnvpair -lipmp -linetutil -ldlpi
-LINTFLAGS += -erroff=E_INCONS_ARG_DECL2 -erroff=E_INCONS_ARG_USED2
 
 CERRWARN += $(CNOWARN_UNINIT)
 
@@ -63,23 +66,15 @@ $(PROG):	$(OBJS)
 		$(LINK.c) -o $@ $(OBJS) $(LDLIBS) $(CTFMERGE_HOOK)
 		$(POST_PROCESS)
 
-include ../Makefile.lib
+check:		$(CHKMANIFEST)
 
-$(ROOTLIBINETPROG):
-		$(RM) $@; $(SYMLINK) ../../../lib/inet/$(PROG) $@
-
-$(ROOTSBINPROG):
-		$(RM) $@; $(SYMLINK) ../lib/inet/$(PROG) $@
-
-install:	all $(ROOTLIBINETPROG) $(ROOTSBINPROG) $(ROOTCMD) \
+install:	all $(ROOTCMD) $(ROOTMANIFEST) $(ROOTSVCMETHOD) \
 		$(ROOTETCDEFAULTFILES)
 
 clean:
 		$(RM) $(OBJS)
 
-lint:		lint_SRCS
-
-$(POFILE): 	$(POFILES)
+$(POFILE):	$(POFILES)
 		$(RM) $@
 		$(CAT) $(POFILES) > $@
 

@@ -38,7 +38,7 @@
  */
 /*
  * Copyright 2015 Nexenta Systems, Inc. All rights reserved.
- * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #ifndef _SYS_SOCKETVAR_H
@@ -617,7 +617,7 @@ extern smod_info_t *smod_lookup_byname(const char *);
 
 /*
  * Used to traverse the list of AF_UNIX sockets to construct the kstat
- * for netstat(1m).
+ * for netstat(8).
  */
 struct socklist {
 	kmutex_t	sl_lock;
@@ -899,13 +899,18 @@ extern int sockprinterr;
 
 #endif /* defined(DEBUG) */
 
-extern struct vfsops			sock_vfsops;
 extern struct vnodeops			*socket_vnodeops;
 extern const struct fs_operation_def	socket_vnodeops_template[];
 
+extern vfs_t				*sock_vfsp;
 extern dev_t				sockdev;
 
 extern krwlock_t			sockconf_lock;
+
+/*
+ * sockfs vfsops
+ */
+extern int	sockfs_statvfs(vfs_t *, struct statvfs64 *);
 
 /*
  * sockfs functions
@@ -930,6 +935,8 @@ extern void	fdbuf_free(struct fdbuf *);
 extern mblk_t	*fdbuf_allocmsg(int, struct fdbuf *);
 extern int	fdbuf_create(void *, int, struct fdbuf **);
 extern void	so_closefds(void *, t_uscalar_t, int, int);
+extern void	so_truncatecmsg(void *, t_uscalar_t, uint_t);
+
 extern int	so_getfdopt(void *, t_uscalar_t, int, void **, int *);
 t_uscalar_t	so_optlen(void *, t_uscalar_t, int);
 extern void	so_cmsg2opt(void *, t_uscalar_t, int, mblk_t *);

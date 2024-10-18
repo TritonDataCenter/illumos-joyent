@@ -56,7 +56,7 @@
  */
 #if defined(__sparc)
 char *jexec = "/usr/java/jre/lib/sparc/jexec";
-#elif defined(__i386) || defined(__i386_COMPAT)
+#elif defined(__x86)
 char *jexec = "/usr/java/jre/lib/i386/jexec";
 #else
 #error "Unknown ISA"
@@ -89,7 +89,7 @@ javaexec(vnode_t *vp, struct execa *uap, struct uarg *args,
     caddr_t execfile, cred_t *cred, int *brand_action)
 {
 	struct intpdata idata;
-	int error;
+	int error, eba;
 	ssize_t resid;
 	vnode_t *nvp;
 	off_t xoff, xoff_end;
@@ -145,6 +145,7 @@ javaexec(vnode_t *vp, struct execa *uap, struct uarg *args,
 	/*
 	 * Find and invoke the Java runtime environment on the file
 	 */
+	bzero(&idata, sizeof (intpdata_t));
 	idata.intp = NULL;
 	idata.intp_name[0] = jexec;
 	idata.intp_arg[0] = jexec_arg;
@@ -160,8 +161,9 @@ javaexec(vnode_t *vp, struct execa *uap, struct uarg *args,
 	args->pathname = resolvepn.pn_path;
 	/* don't free resolvepn until we are done with args */
 	pn_free(&lookpn);
-	error = gexec(&nvp, uap, args, &idata, level + 1, execsz, execfile,
-	    cred, EBA_NONE);
+	eba = EBA_NONE;
+	error = gexec(&nvp, uap, args, &idata, level + 1, execsz,
+	    execfile, cred, &eba);
 
 	if (!error) {
 		/*

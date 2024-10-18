@@ -22,6 +22,7 @@
 
 /*
  * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #ifndef __CHELSIO_COMMON_H
@@ -29,9 +30,6 @@
 
 #include "t4_hw.h"
 #include "t4_chip_type.h"
-#include "t4fw_version.h"
-#include "t5fw_version.h"
-#include "t6fw_version.h"
 
 #define GLBL_INTR_MASK (F_CIM | F_MPS | F_PL | F_PCIE | F_MC0 | F_EDC0 | \
 		F_EDC1 | F_LE | F_TP | F_MA | F_PM_TX | F_PM_RX | F_ULP_RX | \
@@ -110,6 +108,7 @@ enum {
 	FEC_RS		= 1 << 0,	/* Reed-Solomon */
 	FEC_BASER_RS	= 1 << 1,	/* Base-R, aka Firecode */
 	FEC_NONE	= 1 << 2,	/* no FEC */
+	FEC_FORCE	= 1 << 3,       /* Force specified FEC */
 
 	/*
 	 * Pseudo FECs that translate to real FECs.  The firmware knows nothing
@@ -332,7 +331,6 @@ struct pf_resources {
 	unsigned int neq;		/* N egress Qs */
 	unsigned int nethctrl;		/* N egress ETH or CTRL Qs */
 	unsigned int niqflint;		/* N ingress Qs/w free list(s) & intr */
-	unsigned int niq;		/* N ingress Qs */
 	unsigned int tc;		/* PCI-E traffic class */
 	unsigned int pmask;		/* port access rights mask */
 	unsigned int nexactf;		/* N exact MPS filters */
@@ -468,11 +466,6 @@ struct mbox_cmd *mbox_cmd_log_entry(struct mbox_cmd_log *log,
 
 #include <t4fw_interface.h>
 
-#define FW_VERSION(chip) ( \
-	V_FW_HDR_FW_VER_MAJOR(chip##FW_VERSION_MAJOR) | \
-	V_FW_HDR_FW_VER_MINOR(chip##FW_VERSION_MINOR) | \
-	V_FW_HDR_FW_VER_MICRO(chip##FW_VERSION_MICRO) | \
-	V_FW_HDR_FW_VER_BUILD(chip##FW_VERSION_BUILD))
 #define FW_INTFVER(chip, intf) (FW_HDR_INTFVER_##intf)
 
 struct fw_info {
@@ -507,20 +500,11 @@ enum fw_caps {
 
 struct link_config {
 	fw_port_cap32_t pcaps;		/* link capabilities */
-	fw_port_cap32_t def_acaps;	/* default advertised capabilities */
 	fw_port_cap32_t	acaps;		/* advertised capabilities */
 	fw_port_cap32_t	lpacaps;	/* peer advertised capabilities */
 
-	fw_port_cap32_t speed_caps;	/* speed(s) user has requested */
-	u32		speed;		/* actual link speed (Mb/s) */
-
-	cc_pause_t	requested_fc;	/* flow control user has requested */
-	cc_pause_t	fc;		/* actual link flow control */
-
-	cc_fec_t	requested_fec;	/* Forward Error Correction: */
-	cc_fec_t	fec;		/*   requested and actual in use */
-
-	unsigned char	autoneg;	/* autonegotiating? */
+	fw_port_cap32_t link_caps;      /* current link capabilities */
+	fw_port_cap32_t admin_caps;     /* admin configured link capabilities */
 
 	unsigned char	link_ok;	/* link up? */
 	unsigned char	link_down_rc;	/* link down reason */
@@ -595,21 +579,31 @@ int t4_slow_intr_handler(struct adapter *adapter);
 
 int t4_hash_mac_addr(const u8 *addr);
 
-fw_port_cap32_t t4_link_acaps(struct adapter *adapter, unsigned int port,
-			      struct link_config *lc);
+unsigned int t4_link_fwcap_to_speed(fw_port_cap32_t caps);
+fw_port_cap32_t t4_link_fwcap_to_fwspeed(fw_port_cap32_t acaps);
+int t4_link_set_autoneg(struct port_info *pi, u8 autoneg,
+			fw_port_cap32_t *new_caps);
+int t4_link_set_pause(struct port_info *pi, cc_pause_t pause,
+		      fw_port_cap32_t *new_caps);
+int t4_link_set_fec(struct port_info *pi, cc_fec_t fec,
+		    fw_port_cap32_t *new_caps);
+int t4_link_set_speed(struct port_info *pi, fw_port_cap32_t speed, u8 en,
+		      fw_port_cap32_t *new_caps);
 int t4_link_l1cfg_core(struct adapter *adapter, unsigned int mbox,
 		       unsigned int port, struct link_config *lc,
-		       bool sleep_ok, int timeout);
+		       fw_port_cap32_t rcap, bool sleep_ok, int timeout);
 static inline int t4_link_l1cfg(struct adapter *adapter, unsigned int mbox,
-				unsigned int port, struct link_config *lc)
+				unsigned int port, struct link_config *lc,
+				fw_port_cap32_t rcap)
 {
-	return t4_link_l1cfg_core(adapter, mbox, port, lc,
+	return t4_link_l1cfg_core(adapter, mbox, port, lc, rcap,
 				  true, FW_CMD_MAX_TIMEOUT);
 }
 static inline int t4_link_l1cfg_ns(struct adapter *adapter, unsigned int mbox,
-				   unsigned int port, struct link_config *lc)
+				   unsigned int port, struct link_config *lc,
+				   fw_port_cap32_t rcap)
 {
-	return t4_link_l1cfg_core(adapter, mbox, port, lc,
+	return t4_link_l1cfg_core(adapter, mbox, port, lc, rcap,
 				  false, FW_CMD_MAX_TIMEOUT);
 }
 

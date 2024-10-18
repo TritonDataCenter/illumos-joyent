@@ -22,6 +22,7 @@
  * Copyright 2014 Garrett D'Amore <garrett@damore.org>
  * Copyright (c) 2012 Gary Mills
  * Copyright (c) 1992, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -684,7 +685,7 @@ is_pnpisa(dev_info_t *dip)
 /*ARGSUSED*/
 static int
 isa_ctlops(dev_info_t *dip, dev_info_t *rdip,
-	ddi_ctl_enum_t ctlop, void *arg, void *result)
+    ddi_ctl_enum_t ctlop, void *arg, void *result)
 {
 	int rn;
 	struct ddi_parent_private_data *pdp;
@@ -1183,7 +1184,7 @@ uart_exists(ushort_t port)
 static void
 isa_enumerate(int reprogram)
 {
-	int circ, i;
+	int i;
 	dev_info_t *xdip;
 	dev_info_t *isa_dip = ddi_find_devinfo("isa", -1, 0);
 
@@ -1204,17 +1205,24 @@ isa_enumerate(int reprogram)
 
 	bzero(isa_extra_resource, MAX_EXTRA_RESOURCE * sizeof (struct regspec));
 
-	ndi_devi_enter(isa_dip, &circ);
+	ndi_devi_enter(isa_dip);
 
+	/*
+	 * Check whether ACPI enumeration is disabled.
+	 *
+	 * Note this property may also be set if ACPI ISA enumeration has
+	 * failed, to communicate that to the i8042 nexus.
+	 */
 	if (ddi_prop_lookup_string(DDI_DEV_T_ANY, ddi_root_node(),
 	    DDI_PROP_DONTPASS, "acpi-enum", &acpi_prop) == DDI_PROP_SUCCESS) {
+		/* 0 == match == false */
 		acpi_enum = strcmp("off", acpi_prop);
 		ddi_prop_free(acpi_prop);
 	}
 
-	if (acpi_enum) {
+	if (acpi_enum != 0) {
 		if (acpi_isa_device_enum(isa_dip)) {
-			ndi_devi_exit(isa_dip, circ);
+			ndi_devi_exit(isa_dip);
 			if (isa_resource_setup() != NDI_SUCCESS) {
 				cmn_err(CE_WARN, "isa nexus: isa "
 				    "resource setup failed");
@@ -1245,8 +1253,7 @@ isa_enumerate(int reprogram)
 		ndi_devi_alloc_sleep(isa_dip, "asy",
 		    (pnode_t)DEVI_SID_NODEID, &xdip);
 		(void) ndi_prop_update_string(DDI_DEV_T_NONE, xdip,
-		    "compatible", "PNP0500");
-		/* This should be gotten from master file: */
+		    "compatible", "pnpPNP,500");
 		(void) ndi_prop_update_string(DDI_DEV_T_NONE, xdip,
 		    "model", "Standard PC COM port");
 		(void) ndi_prop_update_int_array(DDI_DEV_T_NONE, xdip,
@@ -1270,7 +1277,7 @@ isa_enumerate(int reprogram)
 
 	add_known_used_resources();
 
-	ndi_devi_exit(isa_dip, circ);
+	ndi_devi_exit(isa_dip);
 
 	isa_create_ranges_prop(isa_dip);
 }
@@ -1281,7 +1288,6 @@ isa_enumerate(int reprogram)
  * the serial ports there are in the dev_info tree.  If any are missing,
  * this function will add them.
  */
-
 static void
 enumerate_BIOS_serial(dev_info_t *isa_dip)
 {
@@ -1346,8 +1352,7 @@ enumerate_BIOS_serial(dev_info_t *isa_dip)
 			ndi_devi_alloc_sleep(isa_dip, "asy",
 			    (pnode_t)DEVI_SID_NODEID, &xdip);
 			(void) ndi_prop_update_string(DDI_DEV_T_NONE, xdip,
-			    "compatible", "PNP0500");
-			/* This should be gotten from master file: */
+			    "compatible", "pnpPNP,500");
 			(void) ndi_prop_update_string(DDI_DEV_T_NONE, xdip,
 			    "model", "Standard PC COM port");
 			(void) ndi_prop_update_int_array(DDI_DEV_T_NONE, xdip,

@@ -29,13 +29,7 @@ clobber	:=	TARGET = clobber
 
 .KEEP_STATE:
 
-all:	$(SUBDIRS)
-
-clean clobber lint:	$(SUBDIRS)
-
-install:	$(SUBDIRS)
-	-$(RM) $(ROOTPROG)
-	-$(LN) $(ISAEXEC) $(ROOTPROG)
+all install clean clobber:	$(SUBDIRS)
 
 $(SUBDIRS):	FRC
 	@cd $@; pwd; $(MAKE) $(TARGET)

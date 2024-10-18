@@ -34,7 +34,6 @@ UTSBASE	= ../..
 #
 MODULE		= mac
 OBJECTS		= $(MAC_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(MAC_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_MISC_DIR)/$(MODULE)
 
 #
@@ -46,17 +45,12 @@ include $(UTSBASE)/intel/Makefile.intel
 #	Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
 #	Overrides.
 #
 CFLAGS		+= $(CCVERBOSE)
-LDFLAGS		+= -dy
-
-LINTTAGS	+= -erroff=E_PTRDIFF_OVERFLOW
-LINTTAGS	+= -erroff=E_BAD_PTR_CAST_ALIGN
 
 CERRWARN	+= -_gcc=-Wno-unused-label
 CERRWARN	+= $(CNOWARN_UNINIT)
@@ -67,6 +61,8 @@ CERRWARN	+= -_gcc=-Wno-unused-variable
 # needs work
 SMOFF += all_func_returns
 $(OBJS_DIR)/mac_sched.o := SMOFF += assign_vs_compare
+# suppress false-positive for an unsigned overflow
+$(OBJS_DIR)/mac_provider.o := SMOFF += signed_integer_overflow_check
 $(OBJS_DIR)/mac_util.o := SMOFF += signed
 
 #
@@ -81,12 +77,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

@@ -65,7 +65,7 @@ extern "C" {
  * Input buffer size limits maximum line length for both file parsing and
  * interactive mode. 4K chars should be enough even for broad commands and
  * all possible key lenghts of today's symmetric ciphers entered via
- * ipseckey(1M) which has the most bifurcated grammar from all IPsec commands.
+ * ipseckey(8) which has the most bifurcated grammar from all IPsec commands.
  */
 #define	IBUF_SIZE	4096
 
@@ -128,7 +128,7 @@ typedef struct keywdtab {
  * when a program needs to exit because of an error. These exit_types
  * are used in macros, defined later in this file, which call ipsecutil_exit().
  * What happens when ipsecutil_exit() may differ if the command was started
- * on the command line or via smf(5), See ipsecutil_exit() source for details.
+ * on the command line or via smf(7), See ipsecutil_exit() source for details.
  *
  * Note: The calling function should decide what "debug mode" is before calling
  * ipsecutil_exit() with DEBUG_FATAL.
@@ -138,10 +138,10 @@ typedef enum exit_type {
 	SERVICE_DEGRADE,	/* A hint that service should be degraded. */
 	SERVICE_BADPERM,	/* A Permission error occured. */
 	SERVICE_BADCONF,	/* Misconfiguration. */
-	SERVICE_MAINTAIN,	/* smf(5) to put service in maintenance mode. */
-	SERVICE_DISABLE,	/* Tell smf(5) to disable me. */
+	SERVICE_MAINTAIN,	/* smf(7) to put service in maintenance mode. */
+	SERVICE_DISABLE,	/* Tell smf(7) to disable me. */
 	SERVICE_FATAL,		/* Whatever happened is not fixable. */
-	SERVICE_RESTART,	/* Tell smf(5) to restart the service. */
+	SERVICE_RESTART,	/* Tell smf(7) to restart the service. */
 	DEBUG_FATAL		/* Exit in debug mode. */
 } exit_type_t;
 
@@ -372,6 +372,7 @@ extern void print_lifetimes(FILE *, time_t, struct sadb_lifetime *,
 extern void print_address(FILE *, char *, struct sadb_address *, boolean_t);
 extern void print_asn1_name(FILE *, const unsigned char *, long);
 extern void print_key(FILE *, char *, struct sadb_key *);
+extern void print_keystr(FILE *, char *, struct sadb_key *);
 extern void print_ident(FILE *, char *, struct sadb_ident *);
 extern void print_sens(FILE *, char *, const struct sadb_sens *, boolean_t);
 extern void print_prop(FILE *, char *, struct sadb_prop *);
@@ -382,14 +383,18 @@ extern void print_kmc(FILE *, char *, struct sadb_x_kmc *);
 extern void print_samsg(FILE *, uint64_t *, boolean_t, boolean_t, boolean_t);
 extern char *rparsesatype(int);
 extern char *rparsealg(uint8_t, int);
+extern const char *rparsetcpsigalg(uint8_t);
 extern char *rparseidtype(uint16_t);
 extern boolean_t save_lifetime(struct sadb_lifetime *, FILE *);
 extern boolean_t save_address(struct sadb_address *, FILE *);
 extern boolean_t save_key(struct sadb_key *, FILE *);
+extern boolean_t save_keystr(struct sadb_key *, FILE *);
 extern boolean_t save_ident(struct sadb_ident *, FILE *);
 extern void save_assoc(uint64_t *, FILE *);
 extern FILE *opensavefile(char *);
 extern const char *do_inet_ntop(const void *, char *, size_t);
+extern uint8_t gettcpsigalgbyname(const char *);
+extern const char *gettcpsigalgbynum(uint8_t);
 
 /*
  * Label conversion convenience functions.

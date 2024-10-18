@@ -24,7 +24,6 @@
  * All rights reserved.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 #include	<locale.h>
 #include	<euc.h>
 #include	<widec.h>
@@ -96,13 +95,12 @@ double	log(), sqrt(), exp(), atof();
 #define	FLOG	4
 #define	FINT	5
 
-#define	BOTCH	1
 typedef struct nd {
 	char	ntype;
 	char	subtype;
 	struct nd *nnext;
 	int	nobj;
-	struct nd *narg[BOTCH];	/* C won't take a zero length array */
+	struct nd *narg[];
 } NODE;
 
 extern NODE	*winner;
@@ -174,4 +172,4 @@ typedef struct  ccl_chars {
 
 ccl_chars_t	*cclenter();
 
-extern void error();
+extern void error(int, char *, ...);

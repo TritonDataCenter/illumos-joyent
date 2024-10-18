@@ -39,18 +39,12 @@ SRCS=	file.c elf_read.c magicutils.c $(ELFCAP)/elfcap.c
 include ../Makefile.cmd
 
 CSTD=	$(CSTD_GNU99)
-C99LMODE= -Xc99=%all
 
 CERRWARN += $(CNOWARN_UNINIT)
 CERRWARN += -_gcc=-Wno-type-limits
 
 POFILE= file_all.po
 POFILES= $(SRCS:%.c=%.po)
-
-# The debug binary can be built using the flags
-# SOURCEDEBUG=yes CGLOBALSTATIC=
-# This will avoid the multiple symbols definition error
-# for static global variables in elf_read32.o and elf_read64.o
 
 LDLIBS += -lelf
 CPPFLAGS += -I$(ELFCAP) -I$(SGSRTCID)
@@ -106,7 +100,5 @@ install: all $(ROOTPROG) $(ROOTXPG4PROG) $(ROOTETCMAGIC)
 
 clean:
 	$(RM) $(OBJS) $(XPG4OBJS)
-
-lint: lint_SRCS
 
 include ../Makefile.targ

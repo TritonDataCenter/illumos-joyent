@@ -13,19 +13,26 @@
 # Copyright (c) 2012 by Delphix. All rights reserved.
 # Copyright 2015 Garrett D'Amore <garrett@damore.org>
 # Copyright 2019 Joyent, Inc.
+# Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2023 Bill Sommerfeld <sommerfeld@alum.mit.edu>
+# Copyright 2024 Oxide Computer Company
 #
 
 SUBDIRS = \
 	catopen \
+	clocklock \
+	err \
+	fexecve \
 	fpround \
+	i18n \
 	newlocale \
 	nl_langinfo \
 	priv_gettext \
+	qsort \
 	random \
 	regex \
 	select \
 	stdio \
-	strerror \
 	symbols \
 	threads \
 	wcsrtombs \
@@ -34,26 +41,39 @@ SUBDIRS = \
 PROGS = \
 	env-OS-4089 \
 	aligned_alloc \
+	ascftime \
+	asprintf-14933 \
 	c11_threads \
 	c11_tss \
 	call_once \
+	closefrom \
 	endian \
 	env-7076 \
 	fnmatch \
+	isatty \
+	memchr \
 	memset_s \
+	mutex-16200 \
 	posix_memalign \
+	printf-15294 \
 	printf-9511 \
 	psignal-5097 \
+	ptsname \
 	quick_exit_order \
 	quick_exit_status \
 	set_constraint_handler_s \
 	strcoll-strxfrm-6907 \
+	strerror \
+	strtonum \
 	timespec_get \
 	wcsncasecmp \
 	wcsncasecmp-7344 \
-	wcsncasecmp-7350
+	wcsncasecmp-7350 \
+	uchar \
+	utimes
 
 SCRIPTS = \
+	aligned_alloc \
 	quick_exit \
 	psignal
 
@@ -64,15 +84,34 @@ PROGS64 = \
 	$(PROGS:%=%.64) \
 	printf-6961.64
 
+aligned_alloc.32 :=	CSTD=$(GNU_C99)
+aligned_alloc.64 :=	CSTD=$(GNU_C99)
 aligned_alloc.32 :=	LDLIBS += -lproc
 aligned_alloc.64 :=	LDLIBS64 += -lproc
 posix_memalign.32 :=	LDLIBS += -lproc
 posix_memalign.64 :=	LDLIBS64 += -lproc
 
+asprintf-14933.32 :=	CSTD=$(GNU_C99)
+asprintf-14933.64 :=	CSTD=$(GNU_C99)
+
 memset_s.32 :=	CPPFLAGS += -D__STDC_WANT_LIB_EXT1__=1
 memset_s.64 :=	CPPFLAGS += -D__STDC_WANT_LIB_EXT1__=1
 set_constraint_handler_s.32 := CPPFLAGS += -D__STDC_WANT_LIB_EXT1__=1
 set_constraint_handler_s.64 := CPPFLAGS += -D__STDC_WANT_LIB_EXT1__=1
+
+isatty.32 :=	CSTD=$(GNU_C99)
+isatty.64 :=	CSTD=$(GNU_C99)
+
+mutex-16200.32 :=	LDLIBS += -lproc
+mutex-16200.64 :=	LDLIBS64 += -lproc
+mutex-16200.32 :=	CSTD=$(GNU_C99)
+mutex-16200.64 :=	CSTD=$(GNU_C99)
+
+ptsname.32 :=		LDLIBS += -lsocket
+ptsname.64 :=		LDLIBS64 += -lsocket
+
+strtonum.32 :=		CSTD=$(GNU_C99)
+strtonum.64 :=		CSTD=$(GNU_C99)
 
 ROOTOPTDIR = $(ROOT)/opt/libc-tests/tests
 ROOTOPTPROGS = $(PROGS32:%=$(ROOTOPTDIR)/%) \

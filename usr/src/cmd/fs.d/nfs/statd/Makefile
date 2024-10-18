@@ -39,10 +39,8 @@ ATTMK=		$(TYPEPROG)
 include		../../Makefile.fstype
 CPPFLAGS +=     -D_REENTRANT -DSUN_THREADS
 
-CERRWARN +=	-_gcc=-Wno-unused-variable
 CERRWARN +=	-_gcc=-Wno-switch
 CERRWARN +=	-_gcc=-Wno-parentheses
-CERRWARN +=	$(CNOWARN_UNINIT)
 
 # not linted
 SMATCH=off
@@ -69,8 +67,6 @@ daemon.o:	../lib/daemon.c
 
 smfcfg.o:	../lib/smfcfg.c
 		$(COMPILE.c) ../lib/smfcfg.c
-
-lint:		lint_SRCS
 
 clean:
 		$(RM) $(OBJS) $(TYPEPROG)

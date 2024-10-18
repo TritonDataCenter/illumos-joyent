@@ -85,7 +85,7 @@ static bool_t exi_id_overflow;
 avl_tree_t exi_id_tree;
 kmutex_t nfs_exi_id_lock;
 
-static int	unexport(nfs_export_t *, exportinfo_t *);
+static int	unexport(nfs_export_t *, exportinfo_t *, cred_t *);
 static void	exportfree(exportinfo_t *);
 static int	loadindex(exportdata_t *);
 
@@ -975,7 +975,15 @@ nfs_export_zone_shutdown(nfs_globals_t *ng)
 	nfs_export_t *ne = ng->nfs_export;
 	struct exportinfo *exi, *nexi;
 	int i, errors;
+	zoneid_t zoneid = ng->nfs_zoneid;
+	cred_t *cr;
 
+	/*
+	 * Use the zone's credential.  Since this is a zone shutdown method,
+	 * the zone_t should still be around for a zone_get_kcred() call.
+	 */
+	cr = zone_get_kcred(zoneid);
+	VERIFY(cr != NULL);
 	rw_enter(&ne->exported_lock, RW_READER);
 
 	errors = 0;
@@ -986,7 +994,7 @@ nfs_export_zone_shutdown(nfs_globals_t *ng)
 			exi_hold(exi);
 
 		while (exi != NULL) {
-
+			ASSERT3U(zoneid, ==, exi->exi_zoneid);
 			/*
 			 * Get and hold next export before
 			 * dropping the rwlock and unexport
@@ -1002,7 +1010,7 @@ nfs_export_zone_shutdown(nfs_globals_t *ng)
 			 * create/destroy handling.
 			 */
 			if (exi != ne->exi_root &&
-			    unexport(ne, exi) != 0)
+			    unexport(ne, exi, cr) != 0)
 				errors++;
 			exi_rele(exi);
 
@@ -1016,6 +1024,7 @@ nfs_export_zone_shutdown(nfs_globals_t *ng)
 	}
 
 	rw_exit(&ne->exported_lock);
+	crfree(cr);
 }
 
 void
@@ -1264,7 +1273,8 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 	STRUCT_SET_HANDLE(uap, model, args);
 
 	/* Read in pathname from userspace */
-	if (error = pn_get(STRUCT_FGETP(uap, dname), UIO_USERSPACE, &lookpn))
+	error = pn_get(STRUCT_FGETP(uap, dname), UIO_USERSPACE, &lookpn);
+	if (error != 0)
 		return (error);
 
 	/* Walk the export list looking for that pathname */
@@ -1286,7 +1296,7 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 		pn_free(&lookpn);
 		if (ex1 == NULL)
 			return (EINVAL);
-		error = unexport(ne, ex1);
+		error = unexport(ne, ex1, cr);
 		exi_rele(ex1);
 		return (error);
 	}
@@ -1333,7 +1343,8 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 	 * call not the AUTOFS node itself.
 	 */
 	if (vn_mountedvfs(vp) != NULL) {
-		if (error = traverse(&vp)) {
+		error = traverse(&vp);
+		if (error != 0) {
 			VN_RELE(vp);
 			if (dvp != NULL)
 				VN_RELE(dvp);
@@ -1670,12 +1681,14 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 			error = EINVAL;
 			goto out5;
 		}
-		if (error = loadindex(kex))
+		error = loadindex(kex);
+		if (error != 0)
 			goto out5;
 	}
 
 	if (kex->ex_flags & EX_LOG) {
-		if (error = nfslog_setup(exi))
+		error = nfslog_setup(exi);
+		if (error != 0)
 			goto out6;
 	}
 
@@ -1886,7 +1899,7 @@ export_unlink(nfs_export_t *ne, struct exportinfo *exi)
  * Unexport an exported filesystem
  */
 static int
-unexport(nfs_export_t *ne, struct exportinfo *exi)
+unexport(nfs_export_t *ne, struct exportinfo *exi, cred_t *cr)
 {
 	struct secinfo cursec[MAX_FLAVORS];
 	int curcnt;
@@ -1954,18 +1967,14 @@ unexport(nfs_export_t *ne, struct exportinfo *exi)
 	 * the public filehandle to the root.
 	 */
 
-	/*
-	 * XXX KEBE ASKS --> Should CRED() instead be
-	 * exi->exi_zone->zone_kcred?
-	 */
 	if (exi == ne->exi_public) {
 		ne->exi_public = ne->exi_root;
 
-		nfslog_share_record(ne->exi_public, CRED());
+		nfslog_share_record(ne->exi_public, cr);
 	}
 
 	if (exi->exi_export.ex_flags & EX_LOG)
-		nfslog_unshare_record(exi, CRED());
+		nfslog_unshare_record(exi, cr);
 
 	exi_rele(exi);
 	return (0);
@@ -2036,7 +2045,8 @@ nfs_getfh(struct nfs_getfh_args *args, model_t model, cred_t *cr)
 	 * call not the AUTOFS node itself.
 	 */
 	if (vn_mountedvfs(vp) != NULL) {
-		if (error = traverse(&vp)) {
+		error = traverse(&vp);
+		if (error != 0) {
 			VN_RELE(vp);
 			if (dvp != NULL)
 				VN_RELE(dvp);
@@ -2850,7 +2860,8 @@ loadindex(struct exportdata *kex)
 	 * returns the len with the NULL byte included in the calculation
 	 * as long as the max length is not exceeded.
 	 */
-	if (error = copyinstr(kex->ex_index, index, sizeof (index), &len))
+	error = copyinstr(kex->ex_index, index, sizeof (index), &len);
+	if (error != 0)
 		return (error);
 
 	kex->ex_index = kmem_alloc(len, KM_SLEEP);

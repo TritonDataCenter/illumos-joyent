@@ -24,8 +24,9 @@
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
+#include <ctype.h>
 #include <stdio_ext.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -42,6 +43,7 @@
 #include <grp.h>
 #include <unistd.h>
 #include <ulimit.h>
+#include <libdevinfo.h>
 
 #include "sac.h"
 #include "ttymon.h"
@@ -50,25 +52,17 @@
 
 static	int	Initialized;
 
-extern	int	Retry;
-extern	struct	pollfd	*Pollp;
-static	void	initialize();
-static	void	open_all();
-static	int	set_poll();
-static	int	check_spawnlimit();
-static	int	mod_ttydefs();
+static	void	initialize(void);
+static	void	open_all(void);
+static	int	set_poll(struct pollfd *);
+static	int	check_spawnlimit(struct pmtab *);
+static	int	mod_ttydefs(void);
 
-void	open_device();
-void	set_softcar();
-
-extern	int	check_session();
-extern	void	sigalarm();
-extern	void	revokedevaccess(char *, uid_t, gid_t, mode_t);
-/* can't include libdevinfo.h */
-extern int di_devperm_logout(const char *);
+void	open_device(struct pmtab *);
+void	set_softcar(struct pmtab *);
 
 /*
- * 	ttymon	- a port monitor under SAC
+ *	ttymon	- a port monitor under SAC
  *		- monitor ports, set terminal modes, baud rate
  *		  and line discipline for the port
  *		- invoke service on port if connection request received
@@ -91,7 +85,6 @@ int
 main(int argc, char *argv[])
 {
 	int	nfds;
-	extern	char	*lastname();
 
 	/*
 	 * Only the superuser should execute this command.
@@ -149,19 +142,13 @@ main(int argc, char *argv[])
 }
 
 static	void
-initialize()
+initialize(void)
 {
 	struct	pmtab	*tp;
-	register struct passwd *pwdp;
-	register struct	group	*gp;
+	struct passwd *pwdp;
+	struct	group	*gp;
 	struct	rlimit rlimit;
-	extern	struct	rlimit	Rlimit;
-	extern	 uid_t	Uucp_uid;
-	extern	 gid_t	Tty_gid;
 
-#ifdef 	DEBUG
-	extern	opendebug();
-#endif
 	Initialized = FALSE;
 	/*
 	 * get_environ() must be called first,
@@ -177,7 +164,7 @@ initialize()
 	log("Starting state: %s",
 	    (State == PM_ENABLED) ? "enabled" : "disabled");
 
-#ifdef 	DEBUG
+#ifdef	DEBUG
 	opendebug(FALSE);
 	debug("***** ttymon in initialize *****");
 	log("debug mode is \t on");
@@ -214,7 +201,7 @@ initialize()
 
 	/*
 	 * setup poll array
-	 * 	- we allocate 10 extra pollfd so that
+	 *	- we allocate 10 extra pollfd so that
 	 *	  we do not have to re-malloc when there is
 	 *	  minor fluctuation in Nentries
 	 */
@@ -253,7 +240,8 @@ initialize()
 		Retry = FALSE;
 		for (tp = PMtab; tp; tp = tp->p_next) {
 			if ((tp->p_status > 0) && (tp->p_fd == 0) &&
-			    (tp->p_pid == 0) && !(tp->p_ttyflags & I_FLAG) &&
+			    (tp->p_childpid == 0) &&
+			    !(tp->p_ttyflags & I_FLAG) &&
 			    (!((State == PM_DISABLED) &&
 			    ((tp->p_dmsg == NULL)||(*(tp->p_dmsg) == '\0'))))) {
 				open_device(tp);
@@ -265,14 +253,14 @@ initialize()
 	Initialized = TRUE;
 }
 
-static	void	free_defs();
+static	void	free_defs(void);
 
 /*
  *	open_all - open devices in pmtab if the entry is
  *	         - valid, fd = 0, and pid = 0
  */
 static void
-open_all()
+open_all(void)
 {
 	struct	pmtab	*tp;
 	int	check_modtime;
@@ -286,7 +274,7 @@ open_all()
 
 	for (tp = PMtab; tp; tp = tp->p_next) {
 		if ((tp->p_status > 0) && (tp->p_fd == 0) &&
-		    (tp->p_pid == 0) &&
+		    (tp->p_childpid == 0) &&
 		    !(tp->p_ttyflags & I_FLAG) && (!((State == PM_DISABLED) &&
 		    ((tp->p_dmsg == NULL)||(*(tp->p_dmsg) == '\0'))))) {
 			/*
@@ -337,8 +325,7 @@ open_all()
 }
 
 void
-set_softcar(pmptr)
-struct	pmtab	*pmptr;
+set_softcar(struct pmtab *pmptr)
 {
 
 	int fd, val = 0;
@@ -365,7 +352,7 @@ struct	pmtab	*pmptr;
 		log("set soft-carrier (%s) failed: %s", pmptr->p_device,
 		    strerror(errno));
 
-	close(fd);
+	(void) close(fd);
 }
 
 
@@ -378,8 +365,7 @@ struct	pmtab	*pmptr;
  */
 
 void
-open_device(pmptr)
-struct	pmtab	*pmptr;
+open_device(struct pmtab *pmptr)
 {
 	int	fd, tmpfd;
 	struct	sigaction	sigact;
@@ -413,11 +399,12 @@ struct	pmtab	*pmptr;
 				pmptr->p_status = UNACCESS;
 				Nlocked++;
 				if (Nlocked == 1) {
-				    sigact.sa_flags = 0;
-				    sigact.sa_handler = sigalarm;
-				    (void) sigemptyset(&sigact.sa_mask);
-				    (void) sigaction(SIGALRM, &sigact, NULL);
-				    (void) alarm(ALARMTIME);
+					sigact.sa_flags = 0;
+					sigact.sa_handler = sigalarm;
+					(void) sigemptyset(&sigact.sa_mask);
+					(void) sigaction(SIGALRM, &sigact,
+					    NULL);
+					(void) alarm(ALARMTIME);
 				}
 			} else
 				Retry = TRUE;
@@ -515,7 +502,7 @@ struct	pmtab	*pmptr;
 		return;
 	}
 
-	di_devperm_logout((const char *)pmptr->p_device);
+	(void) di_devperm_logout((const char *)pmptr->p_device);
 	pmptr->p_fd = fd;
 }
 
@@ -526,11 +513,10 @@ struct	pmtab	*pmptr;
  */
 
 static	int
-set_poll(fdp)
-struct pollfd *fdp;
+set_poll(struct pollfd *fdp)
 {
 	struct	pmtab	*tp;
-	int 	nfd = 0;
+	int	nfd = 0;
 
 	for (tp = PMtab; tp; tp = tp->p_next) {
 		if (tp->p_fd > 0)  {
@@ -548,8 +534,7 @@ struct pollfd *fdp;
  *				- otherwise return -1
  */
 static	int
-check_spawnlimit(pmptr)
-struct	pmtab	*pmptr;
+check_spawnlimit(struct pmtab *pmptr)
 {
 	time_t	now;
 
@@ -575,10 +560,10 @@ struct	pmtab	*pmptr;
  *		- otherwise, return FALSE
  */
 static	int
-mod_ttydefs()
+mod_ttydefs(void)
 {
 	struct	stat	statbuf;
-	extern	long	Mtime;
+
 	if (stat(TTYDEFS, &statbuf) == -1) {
 		/* if stat failed, don't bother reread ttydefs */
 		return (FALSE);
@@ -594,7 +579,7 @@ mod_ttydefs()
  *	free_defs - free the Gdef table
  */
 static	void
-free_defs()
+free_defs(void)
 {
 	int	i;
 	struct	Gdef	*tp;
@@ -613,26 +598,106 @@ free_defs()
 }
 
 /*
+ * rebuild flags entry using speed from ttymode.
+ */
+static char *
+merge_flags(char *src, char *ttymode)
+{
+	char *data, *ptr, *flags;
+
+	/* copy speed entry */
+	data = strsave(src);
+	flags = strsave(ttymode);
+	ptr = strchr(flags, ',');
+	if (ptr == NULL) {	/* ttymode is corrupted */
+		free(flags);
+		return (data);
+	}
+	*ptr = '\0';
+	ptr = flags;
+	flags = strsave(flags);
+	free(ptr);
+
+	/*
+	 * The flags line is supposed to have stty keywords separated by space.
+	 * We need to split up the keywords, replace the speed and
+	 * reconstruct the flags line.
+	 */
+
+	ptr = strtok(data, " \t");
+	if (ptr == NULL) {
+		free(data);
+		return (flags);
+	}
+
+	do {
+		char *tmp;
+
+		/* skip speed */
+		if (isdigit(*ptr))
+			continue;
+
+		if (asprintf(&tmp, "%s %s", flags, ptr) <= 0) {
+			/* should we complain? */
+			break;
+		}
+		free(flags);
+		flags = tmp;
+	} while ((ptr = strtok(NULL, " \t")) != NULL);
+
+	free(data);
+	return (flags);
+}
+
+/*
  * struct Gdef *get_speed(ttylabel)
  *	- search "/etc/ttydefs" for speed and term. specification
  *	  using "ttylabel". If "ttylabel" is NULL, default
  *	  to DEFAULT
+ *	- for /dev/console, if we are in fact using serial console,
+ *	  use ttyX-mode value to get speed. This allows us to use
+ *	  the value set for serial console either from firmware (or BMC sol),
+ *	  or boot loader default.
  * arg:	  ttylabel - label/id of speed settings.
  */
 
 struct Gdef *
-get_speed(char *ttylabel)
+get_speed(struct pmtab *pmptr)
 {
-	register struct Gdef *sp;
-	extern   struct Gdef DEFAULT;
+	static struct Gdef serial = { 0 };
+	struct Gdef *sp;
+	char *ttylabel = pmptr->p_ttylabel;
 
 	if ((ttylabel != NULL) && (*ttylabel != '\0')) {
 		if ((sp = find_def(ttylabel)) == NULL) {
 			log("unable to find <%s> in \"%s\"", ttylabel, TTYDEFS);
 			sp = &DEFAULT; /* use default */
 		}
-	} else sp = &DEFAULT; /* use default */
-	return (sp);
+	} else {
+		sp = &DEFAULT; /* use default */
+	}
+
+	/*
+	 * if this is not /dev/console or /dev/console is not using serial,
+	 * we are done.
+	 */
+	if (pmptr->p_ttymode == NULL ||
+	    strcmp(pmptr->p_device, "/dev/console") != 0)
+		return (sp);
+
+	/* is entry for serial set up? */
+	if (serial.g_id == NULL) {
+		/*
+		 * Copy data from sp, except we need to update inital and
+		 * final flags.
+		 */
+		serial.g_id = strsave(sp->g_id);
+		serial.g_iflags = merge_flags(sp->g_iflags, pmptr->p_ttymode);
+		serial.g_fflags = merge_flags(sp->g_fflags, pmptr->p_ttymode);
+		serial.g_autobaud = sp->g_autobaud;
+		serial.g_nextid = strsave(sp->g_nextid);
+	}
+	return (&serial);
 }
 
 /*
@@ -644,7 +709,7 @@ get_speed(char *ttylabel)
  *			  to detect failure of ttymon
  */
 void
-setup_PCpipe()
+setup_PCpipe(void)
 {
 	int	flag = 0;
 
@@ -674,7 +739,7 @@ setup_PCpipe()
 	if (ioctl(PCpipe[0], I_SETSIG, S_INPUT) == -1)
 		fatal("I_SETSIG S_INPUT failed: %s", strerror(errno));
 
-#ifdef 	DEBUG
+#ifdef	DEBUG
 	log("PCpipe[0]\t = %d", PCpipe[0]);
 	log("PCpipe[1]\t = %d", PCpipe[1]);
 #endif

@@ -22,6 +22,7 @@
 /*
  * Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
@@ -157,12 +158,14 @@ typedef union {
 #define	SMB_TYPE_MCHI		42	/* mgmt controller host interface */
 #define	SMB_TYPE_TPM		43	/* TPM device */
 #define	SMB_TYPE_PROCESSOR_INFO	44	/* Processor Additional Information */
+#define	SMB_TYPE_FWINFO		45	/* Firmware Inventory Information */
+#define	SMB_TYPE_STRPROP	46	/* String Property */
 #define	SMB_TYPE_INACTIVE	126	/* inactive table entry */
 #define	SMB_TYPE_EOT		127	/* end of table */
 
 #define	SMB_TYPE_OEM_LO		128	/* start of OEM-specific type range */
 #define	SUN_OEM_EXT_PROCESSOR	132	/* processor extended info */
-#define	SUN_OEM_EXT_PORT	136	/* port exteded info */
+#define	SUN_OEM_EXT_PORT	136	/* port extended info */
 #define	SUN_OEM_PCIEXRC		138	/* PCIE RootComplex/RootPort info */
 #define	SUN_OEM_EXT_MEMARRAY	144	/* phys memory array extended info */
 #define	SUN_OEM_EXT_MEMDEVICE	145	/* memory device extended info */
@@ -201,8 +204,6 @@ typedef struct smbios_version {
 	uint8_t smbv_minor;		/* version minor number */
 } smbios_version_t;
 
-#define	SMB_CONT_BYTE	1		/* contained elements are byte size */
-#define	SMB_CONT_WORD	2		/* contained elements are word size */
 #define	SMB_CONT_MAX	255		/* maximum contained objects */
 
 /*
@@ -285,6 +286,8 @@ typedef struct smbios_bios {
 #define	SMB_BIOSXB2_ETCDIST	0x04	/* Enable Targeted Content Distrib. */
 #define	SMB_BIOSXB2_UEFI	0x08	/* UEFI Specification supported */
 #define	SMB_BIOSXB2_VM		0x10	/* SMBIOS table describes a VM */
+#define	SMB_BIOSXB2_MFG_MODE	0x20	/* Manufacturing mode is supported */
+#define	SMB_BIOSXB2_MFG_EN	0x40	/* Manufacturing mode is enabled */
 
 /*
  * SMBIOS System Information.  See DSP0134 Section 7.2 for more information.
@@ -322,7 +325,7 @@ typedef struct smbios_bboard {
 #define	SMB_BBFL_MOTHERBOARD	0x01	/* board is a motherboard */
 #define	SMB_BBFL_NEEDAUX	0x02	/* auxiliary card or daughter req'd */
 #define	SMB_BBFL_REMOVABLE	0x04	/* board is removable */
-#define	SMB_BBFL_REPLACABLE	0x08	/* board is field-replacable */
+#define	SMB_BBFL_REPLACABLE	0x08	/* board is field-replaceable */
 #define	SMB_BBFL_HOTSWAP	0x10	/* board is hot-swappable */
 
 #define	SMB_BBT_UNKNOWN		0x1	/* unknown */
@@ -355,7 +358,7 @@ typedef struct smbios_chassis {
 	uint8_t smbc_cords;		/* number of power cords */
 	uint8_t smbc_elems;		/* number of element records (n) */
 	uint8_t smbc_elemlen;		/* length of contained element (m) */
-	char smbc_sku[256];		/* SKU number (as a string) */
+	const char *smbc_sku;		/* SKU number (as a string) */
 } smbios_chassis_t;
 
 #define	SMB_CHT_OTHER		0x01	/* other */
@@ -409,6 +412,19 @@ typedef struct smbios_chassis {
 #define	SMB_CHSC_EIENAB		0x05	/* external interface enabled */
 
 /*
+ * Chassis element record types
+ */
+typedef struct smbios_chassis_entry {
+	uint8_t	smbce_type;		/* Type of elt */
+	uint8_t	smbce_elt;		/* Containing Element */
+	uint8_t	smbce_min;		/* minimum number of elt */
+	uint8_t	smbce_max;		/* minimum number of elt */
+} smbios_chassis_entry_t;
+
+#define	SMB_CELT_BBOARD		0	/* smbce_elt is a base board type */
+#define	SMB_CELT_SMBIOS		1	/* smbce_elt is an smbios type */
+
+/*
  * SMBIOS Processor description.  See DSP0134 Section 7.5 for more details.
  * If the L1, L2, or L3 cache handle is -1, the cache information is unknown.
  * If the handle refers to something of size 0, that type of cache is absent.
@@ -439,6 +455,8 @@ typedef struct smbios_processor {
 		/* number of threads per processor socket */
 	uint16_t smbp_cflags;
 		/* processor characteristics (SMB_PRC_*) */
+	uint32_t smbp_threadsenabled;	/* number of enabled threads */
+	const char *smbp_socktype;	/* socket type string */
 } smbios_processor_t;
 
 #define	SMB_PRT_OTHER		0x01	/* other */
@@ -527,6 +545,33 @@ typedef struct smbios_processor {
 #define	SMB_PRU_BGA1392		0x3A	/* Socket BGA1392 */
 #define	SMB_PRU_BGA1510		0x3B	/* Socket BGA1510 */
 #define	SMB_PRU_BGA1528		0x3C	/* Socket BGA1528 */
+#define	SMB_PRU_LGA4189		0x3D	/* Socket LGA4189 */
+#define	SMB_PRU_LGA1200		0x3E	/* Socket LGA1200 */
+#define	SMB_PRU_LGA4677		0x3F	/* Socket LGA4677 */
+#define	SMB_PRU_LGA1700		0x40	/* Socket LGA1700 */
+#define	SMB_PRU_BGA1744		0x41	/* Socket BGA1744 */
+#define	SMB_PRU_BGA1781		0x42	/* Socket BGA1781 */
+#define	SMB_PRU_BGA1211		0x43	/* Socket BGA1211 */
+#define	SMB_PRU_BGA2422		0x44	/* Socket BGA2422 */
+#define	SMB_PRU_LGA1211		0x45	/* Socket LGA1211 */
+#define	SMB_PRU_LGA2422		0x46	/* Socket LGA2422 */
+#define	SMB_PRU_LGA5773		0x47	/* Socket LGA5773 */
+#define	SMB_PRU_BGA5773		0x48	/* Socket BGA5773 */
+#define	SMB_PRU_AM5		0x49	/* Socket AM5 */
+#define	SMB_PRU_SP5		0x4A	/* Socket SP5 */
+#define	SMB_PRU_SP6		0x4B	/* Socket SP6 */
+#define	SMB_PRU_BGA883		0x4C	/* Socket BGA883 */
+#define	SMB_PRU_BGA1190		0x4D	/* Socket BGA1190 */
+#define	SMB_PRU_BGA4129		0x4E	/* Socket BGA4129 */
+#define	SMB_PRU_LGA4710		0x4F	/* Socket LBA4710 */
+#define	SMB_PRU_LGA7529		0x50	/* Socket LBA7529 */
+#define	SMB_PRU_BGA1964		0x51	/* Socket BGA1964 */
+#define	SMB_PRU_BGA1792		0x52	/* Socket BGA1792 */
+#define	SMB_PRU_BGA2049		0x53	/* Socket BGA2049 */
+#define	SMB_PRU_BGA2551		0x54	/* Socket BGA2551 */
+#define	SMB_PRU_LGA1851		0x55	/* Socket LGA1851 */
+#define	SMB_PRU_BGA2114		0x56	/* Socket BGA2114 */
+#define	SMB_PRU_BGA2883		0x57	/* Socket BGA2883 */
 
 #define	SMB_PRC_RESERVED	0x0001	/* reserved */
 #define	SMB_PRC_UNKNOWN		0x0002	/* unknown */
@@ -559,6 +604,7 @@ typedef struct smbios_processor {
 #define	SMB_PRF_M2		0x13	/* M2 */
 #define	SMB_PRF_CELERON_M	0x14	/* Celeron M */
 #define	SMB_PRF_PENTIUMIV_HT	0x15	/* Pentium 4 HT */
+#define	SMB_PRF_INTC_PROC	0x16	/* Intel Processor */
 #define	SMB_PRF_DURON		0x18	/* AMD Duron */
 #define	SMB_PRF_K5		0x19	/* K5 */
 #define	SMB_PRF_K6		0x1A	/* K6 */
@@ -710,6 +756,7 @@ typedef struct smbios_processor {
 #define	SMB_PRF_CORE_I5		0xCD	/* Intel Core i5 */
 #define	SMB_PRF_CORE_I3		0xCE	/* Intel Core i3 */
 #define	SMB_PRF_CORE_I9		0xCF	/* Intel Core i9 */
+#define	SMD_PRF_XEON_D		0xD0	/* Intel Xeon D */
 #define	SMB_PRF_C7M		0xD2	/* VIA C7-M */
 #define	SMB_PRF_C7D		0xD3	/* VIA C7-D */
 #define	SMB_PRF_C7		0xD4	/* VIA C7 */
@@ -740,6 +787,7 @@ typedef struct smbios_processor {
 #define	SMB_PRF_I960		0xFB	/* i960 */
 #define	SMB_PRF_ARMv7		0x100	/* ARMv7 */
 #define	SMB_PRF_ARMv8		0x101	/* ARMv8 */
+#define	SMB_PRF_ARMv9		0x102	/* ARMv9 */
 #define	SMB_PRF_SH3		0x104	/* SH-3 */
 #define	SMB_PRF_SH4		0x105	/* SH-4 */
 #define	SMB_PRF_ARM		0x118	/* ARM */
@@ -753,6 +801,33 @@ typedef struct smbios_processor {
 #define	SMB_PRF_RV32		0x200	/* RISC-V RV32 */
 #define	SMB_PRF_RV64		0x201	/* RISC-V RV64 */
 #define	SMB_PRF_RV128		0x202	/* RISC-V RV128 */
+#define	SMG_PRF_LOONG_ARCH	0x258	/* LoongArch */
+#define	SMG_PRF_LOONG_1		0x259	/* Loongson 1 Processor Family */
+#define	SMG_PRF_LOONG_2		0x25A	/* Loongson 1 Processor Family */
+#define	SMG_PRF_LOONG_3		0x25B	/* Loongson 3 Processor Family */
+#define	SMG_PRF_LOONG_2K	0x25C	/* Loongson 2K Processor Family */
+#define	SMG_PRF_LOONG_3A	0x25D	/* Loongson 3A Processor Family */
+#define	SMG_PRF_LOONG_3B	0x25E	/* Loongson 3B Processor Family */
+#define	SMG_PRF_LOONG_3C	0x25F	/* Loongson 3C Processor Family */
+#define	SMG_PRF_LOONG_3D	0x260	/* Loongson 3D Processor Family */
+#define	SMG_PRF_LOONG_E3	0x261	/* Loongson 3E Processor Family */
+/* BEGIN CSTYLED */
+#define	SMG_PRF_LOONG_2K_DC	0x262	/* Dual-Core Loongson 2K Processor 2xxx Series */
+#define	SMG_PRF_LOONG_3A_QC	0x26C	/* Quad-Core Loongson 3A Processor 5xxx Series */
+#define	SMG_PRF_LOONG_3A_MC	0x26D	/* Multi-Core Loongson 3A Processor 5xxx Series */
+#define	SMG_PRF_LOONG_3B_QC	0x26E	/* Quad-Core Loongson 3B Processor 5xxx Series */
+#define	SMG_PRF_LOONG_3B_MC	0x26F	/* Multi-Core Loongson 3B Processor 5xxx Series */
+#define	SMG_PRF_LOONG_3C_MC	0x270	/* Multi-Core Loongson 3C Processor 5xxx Series */
+#define	SMG_PRF_LOONG_3D_MC	0x271	/* Multi-Core Loongson 3D Processor 5xxx Series */
+/* END CSTYLED */
+#define	SMG_PRF_CORE_3		0x300	/* Intel Core 3 */
+#define	SMG_PRF_CORE_5		0x301	/* Intel Core 5 */
+#define	SMG_PRF_CORE_7		0x302	/* Intel Core 7 */
+#define	SMG_PRF_CORE_9		0x303	/* Intel Core 9 */
+#define	SMG_PRF_CORE_ULT_3	0x304	/* Intel Core Ultra 3 */
+#define	SMG_PRF_CORE_ULT_5	0x305	/* Intel Core Ultra 5 */
+#define	SMG_PRF_CORE_ULT_7	0x306	/* Intel Core Ultra 7 */
+#define	SMG_PRF_CORE_ULT_9	0x307	/* Intel Core Ultra 9 */
 
 /*
  * SMBIOS Cache Information.  See DSP0134 Section 7.8 for more information.
@@ -944,6 +1019,10 @@ typedef struct smbios_slot {
 	uint8_t smbl_df;		/* device/function number */
 	uint8_t smbl_dbw;		/* data bus width */
 	uint8_t smbl_npeers;		/* PCIe bifurcation peers */
+	uint8_t smbl_info;		/* slot info */
+	uint8_t smbl_pwidth;		/* slot physical width */
+	uint32_t smbl_pitch;		/* slot pitch in 10um */
+	uint8_t smbl_height;		/* slot height */
 } smbios_slot_t;
 
 #define	SMB_SLT_OTHER		0x01	/* other */
@@ -976,8 +1055,8 @@ typedef struct smbios_slot {
 #define	SMB_SLT_MXM_V		0x1C	/* MXM Type IV */
 #define	SMB_SLT_MXM3_A		0x1D	/* MXM 3.0 Type A */
 #define	SMB_SLT_MXM3_B		0x1E	/* MXM 3.0 Type B */
-#define	SMB_SLT_PCIEG2_SFF	0x1F	/* PCI Express Gen 2 SFF-8639 */
-#define	SMB_SLT_PCIEG3_SFF	0x20	/* PCI Express Gen 3 SFF-8639 */
+#define	SMB_SLT_PCIEG2_SFF	0x1F	/* PCI Express Gen 2 SFF-8639 (U.2) */
+#define	SMB_SLT_PCIEG3_SFF	0x20	/* PCI Express Gen 3 SFF-8639 (U.2) */
 /*
  * These lines must be on one line for the string generating code.
  */
@@ -986,6 +1065,11 @@ typedef struct smbios_slot {
 #define	SMB_SLT_PCIE_M52_WOBSKO	0x22	/* PCI Express Mini 52-pin without bottom-side keep-outs */
 /* END CSTYLED */
 #define	SMB_SLT_PCIE_M76	0x23	/* PCI Express Mini 72-pin */
+#define	SMB_SLT_PCIEG4_SFF	0x24	/* PCI Express Gen 4 SFF-8639 (U.2) */
+#define	SMB_SLT_PCIEG5_SFF	0x25	/* PCI Express Gen 5 SFF-8639 (U.2) */
+#define	SMB_SLT_OCP3_SFF	0x26	/* OCP NIC 3.0 Small Form Factor */
+#define	SMB_SLT_OCP3_LFF	0x27	/* OCP NIC 3.0 Large Form Factor */
+#define	SMB_SLT_OCP_PRE		0x28	/* OCP NIC prior to 3.0 */
 #define	SMB_SLT_CXL1		0x30	/* CXL Flexbus 1.0 */
 #define	SMB_SLT_PC98_C20	0xA0	/* PC-98/C20 */
 #define	SMB_SLT_PC98_C24	0xA1	/* PC-98/C24 */
@@ -1016,6 +1100,15 @@ typedef struct smbios_slot {
 #define	SMB_SLT_PCIE4G4		0xBB	/* PCI Exp. Gen 4 x4 */
 #define	SMB_SLT_PCIE4G8		0xBC	/* PCI Exp. Gen 4 x8 */
 #define	SMB_SLT_PCIE4G16	0xBD	/* PCI Exp. Gen 4 x16 */
+#define	SMB_SLT_PCIE5G		0xBE	/* PCI Exp. Gen 5 */
+#define	SMB_SLT_PCIE5G1		0xBF	/* PCI Exp. Gen 5 x1 */
+#define	SMB_SLT_PCIE5G2		0xC0	/* PCI Exp. Gen 5 x2 */
+#define	SMB_SLT_PCIE5G4		0xC1	/* PCI Exp. Gen 5 x4 */
+#define	SMB_SLT_PCIE5G8		0xC2	/* PCI Exp. Gen 5 x8 */
+#define	SMB_SLT_PCIE5G16	0xC3	/* PCI Exp. Gen 5 x16 */
+#define	SMB_SLT_PCIEG6P		0xC4	/* PCI Exp. Gen 6+ */
+#define	SMB_SLT_EDSFF_E1	0xC5	/* Ent. and DC 1U E1 Form Factor */
+#define	SMB_SLT_EDSFF_E3	0xC6	/* Ent. and DC 3" E3 Form Factor */
 
 #define	SMB_SLW_OTHER		0x01	/* other */
 #define	SMB_SLW_UNKNOWN		0x02	/* unknown */
@@ -1041,6 +1134,8 @@ typedef struct smbios_slot {
 #define	SMB_SLL_UNKNOWN		0x02	/* unknown */
 #define	SMB_SLL_SHORT		0x03	/* short length */
 #define	SMB_SLL_LONG		0x04	/* long length */
+#define	SMB_SLL_2IN5		0x05	/* 2.5" drive form factor */
+#define	SMB_SLL_3IN5		0x06	/* 3.5" drive form factor */
 
 #define	SMB_SLCH1_UNKNOWN	0x01	/* characteristics unknown */
 #define	SMB_SLCH1_5V		0x02	/* provides 5.0V */
@@ -1055,6 +1150,16 @@ typedef struct smbios_slot {
 #define	SMB_SLCH2_HOTPLUG	0x02	/* slot supports hot-plug devices */
 #define	SMB_SLCH2_SMBUS		0x04	/* slot supports SMBus signal */
 #define	SMB_SLCH2_BIFUR		0x08	/* slot supports PCIe bifurcation */
+#define	SMB_SLCH2_SURPREM	0x10	/* slot supports surprise removal */
+#define	SMB_SLCH2_CXL1		0x20	/* Flexbus slot, CXL 1.0 capable */
+#define	SMB_SLCH2_CXL2		0x40	/* Flexbus slot, CXL 2.0 capable */
+#define	SMB_SLCH2_CXL3		0x80	/* Flexbus slot, CXL 3.0 capable */
+
+#define	SMB_SLHT_NA		0x00	/* not applicable */
+#define	SMB_SLHT_OTHER		0x01	/* other */
+#define	SMB_SLHT_UNKNOWN	0x02	/* unknown */
+#define	SMB_SLHT_FULL		0x03	/* full height */
+#define	SMB_SLHT_LP		0x04	/* low profile */
 
 /*
  * SMBIOS 7.10.9 Slot Peer Devices
@@ -1178,7 +1283,7 @@ typedef struct smbios_memarray {
 #define	SMB_MAL_PC98C24		0xA1	/* PC-98/C24 add-on card */
 #define	SMB_MAL_PC98E		0xA2	/* PC-98/E add-on card */
 #define	SMB_MAL_PC98LB		0xA3	/* PC-98/Local bus add-on card */
-#define	SMB_MAL_CXL1		0xA4	/* CXL Flexbus 1.0 add-on card */
+#define	SMB_MAL_CXL1		0xA4	/* CXL add-on card */
 
 #define	SMB_MAU_OTHER		0x01	/* other */
 #define	SMB_MAU_UNKNOWN		0x02	/* unknown */
@@ -1236,7 +1341,14 @@ typedef struct smbios_memdevice {
 	uint64_t smbmd_logical_size;	/* logical size in bytes */
 	uint64_t smbmd_extspeed;	/* extended device speed */
 	uint64_t smbmd_extclkspeed;	/* extended configured speed */
+	uint16_t smbmd_pmic0_mfgid;	/* JEDEC PMIC0 mfg id */
+	uint16_t smbmd_pmic0_rev;	/* JEDEC PMIC0 revision id */
+	uint16_t smbmd_rcd_mfgid;	/* JEDEC RCD mfg id */
+	uint16_t smbmd_rcd_rev;		/* JEDEC RCD revision id */
 } smbios_memdevice_t;
+
+#define	SMB_MD_MFG_UNKNOWN	0x0000
+#define	SMB_MD_REV_UNKNOWN	0xff00
 
 #define	SMB_MDFF_OTHER		0x01	/* other */
 #define	SMB_MDFF_UNKNOWN	0x02	/* unknown */
@@ -1285,6 +1397,9 @@ typedef struct smbios_memdevice {
 #define	SMB_MDT_LOGNV		0x1F	/* Logical non-volatile device */
 #define	SMB_MDT_HBM		0x20	/* High Bandwidth Memory */
 #define	SMB_MDT_HBM2		0x21	/* High Bandwidth Memory 2 */
+#define	SMB_MDT_DDR5		0x22	/* DDR5 */
+#define	SMB_MDT_LPDDR5		0x23	/* LPDDR5 */
+#define	SMB_MDT_HBM3		0x24	/* HBM3 */
 
 #define	SMB_MDF_OTHER		0x0002	/* other */
 #define	SMB_MDF_UNKNOWN		0x0004	/* unknown */
@@ -1313,7 +1428,7 @@ typedef struct smbios_memdevice {
 #define	SMB_MTECH_NVDIMM_N	0x04	/* NVDIMM-N */
 #define	SMB_MTECH_NVDIMM_F	0x05	/* NVDIMM-F */
 #define	SMB_MTECH_NVDIMM_P	0x06	/* NVDIMM-P */
-#define	SMB_MTECH_INTCPM	0x07	/* Intel Optane DC Persistent Memory */
+#define	SMB_MTECH_INTCPM	0x07	/* Intel Optane persistent memory */
 
 #define	SMB_MOMC_RESERVED	0x01	/* reserved */
 #define	SMB_MOMC_OTHER		0x02	/* other */
@@ -1377,7 +1492,9 @@ typedef struct smbios_pointdev {
 #define	SMB_PDI_ADB		0x08	/* ADB (Apple Desktop Bus) */
 #define	SMB_PDI_BUSM_DB9	0xA0	/* Bus mouse DB-9 */
 #define	SMB_PDI_BUSM_UDIN	0xA1	/* Bus mouse micro-DIN */
-#define	SMB_PDI_BUSM_USB	0xA2	/* USB */
+#define	SMB_PDI_USB		0xA2	/* USB */
+#define	SMB_PDI_I2C		0xA3	/* I2C */
+#define	SMB_PDI_SPI		0xA4	/* SPI */
 
 /*
  * SMBIOS Portable Battery.  See DSP0134 Section 7.23 for more information.
@@ -1672,6 +1789,21 @@ typedef struct smbios_powersup {
 #define	SMB_POWERSUP_T_REGL	0x08	/* regulator */
 
 /*
+ * SMBIOS Additional Information. The top level structure defines a number of
+ * additional information entries, each of which is variable length and intended
+ * to augment some existing field in the system. Therefore we have a single
+ * function to get the number of additional entries present and then a different
+ * one that retrieves each entity function.
+ */
+typedef struct smbios_addinfo_ent {
+	id_t smbai_ref;			/* referenced handle */
+	uint32_t smbai_ref_off;		/* offset into referenced handle */
+	const char *smbai_str;		/* optional string description */
+	uint32_t smbai_dlen;		/* optional data length */
+	void *smbai_data;		/* optional data */
+} smbios_addinfo_ent_t;
+
+/*
  * SMBIOS Onboard Devices Extended Information.  See DSP0134 Section 7.42
  * for more information.
  */
@@ -1684,8 +1816,25 @@ typedef struct smbios_obdev_ext {
 	uint8_t smboe_df;		/* device/function number */
 } smbios_obdev_ext_t;
 
+#define	SMB_OBET_OTHER		0x01	/* Other */
+#define	SMB_OBET_UNKNOWN	0x02	/* Unknown */
+#define	SMB_OBET_VIDEO		0x03	/* video */
+#define	SMB_OBET_SCSI		0x04	/* SCSI */
+#define	SMB_OBET_ETHERNET	0x05	/* Ethernet */
+#define	SMB_OBET_TOKEN		0x06	/* Token Ring */
+#define	SMB_OBET_SOUND		0x07	/* Sound */
+#define	SMB_OBET_PATA		0x08	/* PATA */
+#define	SMB_OBET_SATA		0x09	/* SATA */
+#define	SMB_OBET_SAS		0x0A	/* SAS */
+#define	SMB_OBET_WLAN		0x0B	/* Wireless LAN */
+#define	SMB_OBET_BT		0x0C	/* Bluetooth */
+#define	SMB_OBET_WWAN		0x0D	/* WWAN */
+#define	SMB_OBET_EMMC		0x0E	/* eMMC */
+#define	SMB_OBET_NVME		0x0F	/* NVMe */
+#define	SMB_OBET_UFS		0x10	/* UFS */
+
 /*
- * SMBIOS Processor Additional Information (Type 44). See sectoin 7.45 for more
+ * SMBIOS Processor Additional Information (Type 44). See section 7.45 for more
  * information.
  */
 typedef struct smbios_processor_info {
@@ -1703,6 +1852,8 @@ typedef struct smbios_processor_info {
 #define	SMB_PROCINFO_T_RV32	0x06	/* 32-bit RISC-V (RV32) */
 #define	SMB_PROCINFO_T_RV64	0x07	/* 64-bit RISC-V (RV64) */
 #define	SMB_PROCINFO_T_RV128	0x08	/* 128-bit RISC-V (RV128) */
+#define	SMB_PROCINFO_T_LA32	0x09	/* 32-bit LoongArch */
+#define	SMB_PROCINFO_T_LA64	0x0A	/* 64-bit LoongArch */
 /* END CSTYLED */
 
 typedef struct smbios_processor_info_riscv {
@@ -1757,7 +1908,7 @@ typedef struct smbios_processor_info_riscv {
 #define	SMB_RV_ISA_N	(1 << 13)	/* User-level interrupts */
 #define	SMB_RV_ISA_O	(1 << 14)	/* Reserved */
 #define	SMB_RV_ISA_P	(1 << 15)	/* Reserved */
-#define	SMB_RV_ISA_Q	(1 << 16)	/* Quad-precision floating-poit */
+#define	SMB_RV_ISA_Q	(1 << 16)	/* Quad-precision floating-point */
 #define	SMB_RV_ISA_R	(1 << 17)	/* Reserved */
 #define	SMB_RV_ISA_S	(1 << 18)	/* Supervisor mode */
 #define	SMB_RV_ISA_T	(1 << 19)	/* Reserved */
@@ -1770,11 +1921,78 @@ typedef struct smbios_processor_info_riscv {
 /* END CSTYLED */
 
 /*
+ * SMBIOS Firmware Inventory Information (Type 45).
+ */
+typedef struct smbios_fwinfo {
+	const char *smbfw_name;		/* Firmware component name */
+	const char *smbfw_id;		/* Firmware ID */
+	const char *smbfw_reldate;	/* Release date */
+	const char *smbfw_lsv;		/* Lowest supported version */
+	uint64_t smbfw_imgsz;		/* Image size */
+	uint16_t smbfw_chars;		/* Characteristics */
+	uint16_t smbfw_state;		/* State */
+	uint16_t smbfw_ncomps;		/* Number of associated components */
+	uint8_t smbfw_vers_fmt;		/* Firmware version format */
+	uint8_t smbfw_id_fmt;		/* Firmware ID format */
+} smbios_fwinfo_t;
+
+typedef struct smbios_fwinfo_comp {
+	id_t smbfwe_id;			/* Contained element ID */
+} smbios_fwinfo_comp_t;
+
+/*
+ * Firmware version format constants.
+ */
+#define	SMB_FWV_FF		0x00	/* free-form */
+#define	SMB_FWV_MM		0x01	/* major.minor */
+#define	SMB_FWV_HEX32		0x02	/* 32-bit hex */
+#define	SMB_FWV_HEX64		0x03	/* 64-bit hex */
+
+/*
+ * Firmware ID format constants.
+ */
+#define	SMB_FWI_FF		0x00	/* free-form */
+#define	SMB_FWI_UEFI		0x01	/* UEFI GUID */
+
+/*
+ * Firmware characteristic bitfields.
+ */
+#define	SMB_FWC_UPDATE		0x01	/* updatable */
+#define	SMB_FWC_WP		0x02	/* write-protect */
+
+/*
+ * Firmware state constants.
+ */
+#define	SMB_FWS_OTHER		0x01	/* other */
+#define	SMB_FWS_UNKNOWN		0x02	/* unknown */
+#define	SMB_FWS_DISABLED	0x03	/* disabled */
+#define	SMB_FWS_ENABLED		0x04	/* enabled */
+#define	SMB_FWS_ABSENT		0x05	/* absent */
+#define	SMB_FWS_STB_OFFLINE	0x06	/* standby offline */
+#define	SMB_FWS_STB_SPARE	0x07	/* standby spare */
+#define	SMB_FWS_UA_OFFLINE	0x08	/* unavailable offline */
+
+/*
+ * SMBIOS String Property (Type 46). See section 7.47 for more information.
+ */
+typedef struct smbios_strprop {
+	uint32_t smbsp_prop_id;		/* property ID */
+	const char *smbsp_prop_val;	/* property Value */
+	id_t smbsp_parent;		/* parent handle */
+} smbios_strprop_t;
+
+/*
+ * String Property IDs
+ */
+#define	SMB_STRP_RESERVED	0x00		/* reserved */
+#define	SMB_STRP_UEFI_DEVPATH	0x01		/* UEFI device path */
+
+/*
  * SMBIOS OEM-specific (Type 132) Processor Extended Information.
  */
 typedef struct smbios_processor_ext {
 	uint16_t smbpe_processor;	/* extending processor handle */
-	uint8_t smbpe_fru;		/* FRU indicaor */
+	uint8_t smbpe_fru;		/* FRU indicator */
 	uint8_t smbpe_n;		/* number of APIC IDs */
 	uint16_t *smbpe_apicid;		/* strand Inital APIC IDs */
 } smbios_processor_ext_t;
@@ -1814,7 +2032,6 @@ typedef struct smbios_memdevice_ext {
 	uint16_t smbmdeve_md;		/* memory device handle */
 	uint8_t smbmdeve_drch;		/* DRAM channel */
 	uint8_t smbmdeve_ncs;		/* number of chip selects */
-	uint8_t *smbmdeve_cs;		/* array of chip select numbers */
 } smbios_memdevice_ext_t;
 
 /*
@@ -1838,7 +2055,12 @@ typedef struct smbios_memdevice_ext {
 #define	SMB_VERSION_31	0x0301		/* SMBIOS encoding for DMTF spec 3.1 */
 #define	SMB_VERSION_32	0x0302		/* SMBIOS encoding for DMTF spec 3.2 */
 #define	SMB_VERSION_33	0x0303		/* SMBIOS encoding for DMTF spec 3.3 */
-#define	SMB_VERSION	SMB_VERSION_33	/* SMBIOS latest version definitions */
+#define	SMB_VERSION_34	0x0304		/* SMBIOS encoding for DMTF spec 3.4 */
+#define	SMB_VERSION_35	0x0305		/* SMBIOS encoding for DMTF spec 3.5 */
+#define	SMB_VERSION_36	0x0306		/* SMBIOS encoding for DMTF spec 3.6 */
+#define	SMB_VERSION_37	0x0307		/* SMBIOS encoding for DMTF spec 3.7 */
+#define	SMB_VERSION_38	0x0308		/* SMBIOS encoding for DMTF spec 3.8 */
+#define	SMB_VERSION	SMB_VERSION_38	/* SMBIOS latest version definitions */
 
 #define	SMB_O_NOCKSUM	0x1		/* do not verify header checksums */
 #define	SMB_O_NOVERS	0x2		/* do not verify header versions */
@@ -1891,6 +2113,10 @@ extern id_t smbios_info_bios(smbios_hdl_t *, smbios_bios_t *);
 extern id_t smbios_info_system(smbios_hdl_t *, smbios_system_t *);
 extern int smbios_info_bboard(smbios_hdl_t *, id_t, smbios_bboard_t *);
 extern int smbios_info_chassis(smbios_hdl_t *, id_t, smbios_chassis_t *);
+extern int smbios_info_chassis_elts(smbios_hdl_t *, id_t, uint_t *,
+    smbios_chassis_entry_t **);
+extern void smbios_info_chassis_elts_free(smbios_hdl_t *, uint_t,
+    smbios_chassis_entry_t *);
 extern int smbios_info_processor(smbios_hdl_t *, id_t, smbios_processor_t *);
 extern int smbios_info_extprocessor(smbios_hdl_t *, id_t,
     smbios_processor_ext_t *);
@@ -1916,6 +2142,9 @@ extern int smbios_info_memarrmap(smbios_hdl_t *, id_t, smbios_memarrmap_t *);
 extern int smbios_info_memdevice(smbios_hdl_t *, id_t, smbios_memdevice_t *);
 extern int smbios_info_extmemdevice(smbios_hdl_t *, id_t,
     smbios_memdevice_ext_t *);
+extern int smbios_info_extmemdevice_cs(smbios_hdl_t *, id_t, uint_t *,
+    uint8_t **);
+extern void smbios_info_extmemdevice_cs_free(smbios_hdl_t *, uint_t, uint8_t *);
 extern int smbios_info_memdevmap(smbios_hdl_t *, id_t, smbios_memdevmap_t *);
 extern id_t smbios_info_hwsec(smbios_hdl_t *, smbios_hwsec_t *);
 extern int smbios_info_vprobe(smbios_hdl_t *, id_t, smbios_vprobe_t *);
@@ -1925,12 +2154,22 @@ extern int smbios_info_iprobe(smbios_hdl_t *, id_t, smbios_iprobe_t *);
 extern id_t smbios_info_boot(smbios_hdl_t *, smbios_boot_t *);
 extern id_t smbios_info_ipmi(smbios_hdl_t *, smbios_ipmi_t *);
 extern int smbios_info_powersup(smbios_hdl_t *, id_t, smbios_powersup_t *);
+extern int smbios_info_addinfo_nents(smbios_hdl_t *, id_t, uint_t *);
+extern int smbios_info_addinfo_ent(smbios_hdl_t *, id_t, uint_t,
+    smbios_addinfo_ent_t **);
+extern void smbios_info_addinfo_ent_free(smbios_hdl_t *,
+    smbios_addinfo_ent_t *);
 extern int smbios_info_pciexrc(smbios_hdl_t *, id_t, smbios_pciexrc_t *);
 extern int smbios_info_processor_info(smbios_hdl_t *, id_t,
     smbios_processor_info_t *);
 extern int smbios_info_processor_riscv(smbios_hdl_t *, id_t,
     smbios_processor_info_riscv_t *);
-
+extern int smbios_info_strprop(smbios_hdl_t *, id_t, smbios_strprop_t *);
+extern int smbios_info_fwinfo(smbios_hdl_t *, id_t, smbios_fwinfo_t *);
+extern int smbios_info_fwinfo_comps(smbios_hdl_t *, id_t, uint_t *,
+    smbios_fwinfo_comp_t **);
+extern void smbios_info_fwinfo_comps_free(smbios_hdl_t *, uint_t,
+    smbios_fwinfo_comp_t *);
 
 extern const char *smbios_psn(smbios_hdl_t *);
 extern const char *smbios_csn(smbios_hdl_t *);
@@ -1938,7 +2177,7 @@ extern const char *smbios_csn(smbios_hdl_t *);
 #ifndef _KERNEL
 /*
  * The smbios_*_desc() and smbios_*_name() interfaces can be used for utilities
- * such as smbios(1M) that wish to decode SMBIOS fields for humans.  The _desc
+ * such as smbios(8) that wish to decode SMBIOS fields for humans.  The _desc
  * functions return the comment string next to the #defines listed above, and
  * the _name functions return the appropriate #define identifier itself.
  */
@@ -1975,6 +2214,12 @@ extern const char *smbios_evlog_flag_desc(uint_t);
 extern const char *smbios_evlog_flag_name(uint_t);
 extern const char *smbios_evlog_format_desc(uint_t);
 extern const char *smbios_evlog_method_desc(uint_t);
+
+extern const char *smbios_fwinfo_ch_name(uint_t);
+extern const char *smbios_fwinfo_ch_desc(uint_t);
+extern const char *smbios_fwinfo_id_desc(uint_t);
+extern const char *smbios_fwinfo_state_desc(uint_t);
+extern const char *smbios_fwinfo_vers_desc(uint_t);
 
 extern const char *smbios_vprobe_loc_desc(uint_t);
 extern const char *smbios_vprobe_status_desc(uint_t);
@@ -2014,6 +2259,7 @@ extern const char *smbios_memdevice_op_capab_name(uint_t);
 extern const char *smbios_memdevice_op_capab_desc(uint_t);
 
 extern const char *smbios_onboard_type_desc(uint_t);
+extern const char *smbios_onboard_ext_type_desc(uint_t);
 
 extern const char *smbios_pointdev_iface_desc(uint_t);
 extern const char *smbios_pointdev_type_desc(uint_t);
@@ -2043,6 +2289,9 @@ extern const char *smbios_slot_ch1_desc(uint_t);
 extern const char *smbios_slot_ch1_name(uint_t);
 extern const char *smbios_slot_ch2_desc(uint_t);
 extern const char *smbios_slot_ch2_name(uint_t);
+extern const char *smbios_slot_height_desc(uint_t);
+
+extern const char *smbios_strprop_id_desc(uint_t);
 
 extern const char *smbios_type_desc(uint_t);
 extern const char *smbios_type_name(uint_t);

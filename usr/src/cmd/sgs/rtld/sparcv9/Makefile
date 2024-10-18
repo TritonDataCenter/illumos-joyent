@@ -25,7 +25,7 @@
 #
 
 # Object lists are organized into primary (most frequently used code) and
-# secondary lists (less frequently used code, ie. a.out support).
+# secondary lists (less frequently used code).
 
 P_COMOBJS=	debugdata.o \
 		analyze.o	elf.o		external.o	globals.o \
@@ -58,9 +58,7 @@ BASEPLAT =	sparc
 
 include		$(SRC)/Makefile.master
 
-# We build sparc objects with cc by default
-MAPFILE-ORDER =		../common/mapfile-order-devpro
-$(__GNUC64)MAPFILE-ORDER =	../common/mapfile-order-gcc
+MAPFILE-ORDER =	../common/mapfile-order-gcc
 
 include		$(SRC)/cmd/sgs/rtld/Makefile.com
 include		$(SRC)/lib/Makefile.lib.64
@@ -68,10 +66,8 @@ include		$(SRC)/lib/Makefile.lib.64
 # Add any machine specific flags.
 
 CPPFLAGS +=	-I../../../../uts/sparc/krtld
-CFLAGS +=	-xregs=no%appl
 ASFLAGS +=	-s $(AS_PICFLAGS) -D__sparcv9 -D_ELF64 $(sparcv9_XARCH)
 ADBGENFLAGS +=	-mlp64
-ADBGENCFLAGS +=	-erroff=%all
 ADBSUB=		$(ADBSUB64)
 CPPFLAGS +=	-D_ELF64
 SONAME=		/lib/sparcv9/ld.so.1
@@ -101,4 +97,4 @@ pics/%.o:	../sparc/%.c
 		$(POST_PROCESS_O)
 
 include		$(SRC)/cmd/sgs/rtld/Makefile.targ
-include		../../Makefile.sub.64
+include		$(SRC)/Makefile.master.64

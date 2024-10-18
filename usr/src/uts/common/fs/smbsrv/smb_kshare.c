@@ -23,6 +23,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2017 Joyent, Inc.
+ * Copyright 2020-2023 RackTop Systems, Inc.
  */
 
 #include <smbsrv/smb_door.h>
@@ -44,7 +45,7 @@ static boolean_t smb_kshare_rele(const void *);
 static void smb_kshare_destroy(void *);
 static char *smb_kshare_oemname(const char *);
 static int smb_kshare_is_special(const char *);
-static boolean_t smb_kshare_is_admin(const char *);
+static int smb_kshare_is_admin(const char *);
 static smb_kshare_t *smb_kshare_decode(nvlist_t *);
 static uint32_t smb_kshare_decode_bool(nvlist_t *, const char *, uint32_t);
 static void smb_kshare_unexport_thread(smb_thread_t *, void *);
@@ -318,7 +319,7 @@ int
 smb_kshare_start(smb_server_t *sv)
 {
 	smb_thread_init(&sv->sv_export.e_unexport_thread, "smb_kshare_unexport",
-	    smb_kshare_unexport_thread, sv, smbsrv_base_pri);
+	    smb_kshare_unexport_thread, sv, smbsrv_base_pri, sv);
 
 	return (smb_thread_start(&sv->sv_export.e_unexport_thread));
 }
@@ -358,18 +359,14 @@ smb_kshare_g_fini(void)
  * be exported.
  */
 int
-smb_kshare_export_list(smb_ioc_share_t *ioc)
+smb_kshare_export_list(smb_server_t *sv, smb_ioc_share_t *ioc)
 {
-	smb_server_t	*sv = NULL;
 	nvlist_t	*shrlist = NULL;
 	nvlist_t	 *share;
 	nvpair_t	 *nvp;
 	smb_kshare_t	 *shr;
 	char		*shrname;
 	int		rc;
-
-	if ((rc = smb_server_lookup(&sv)) != 0)
-		return (rc);
 
 	if (!smb_export_isready(sv)) {
 		rc = ENOTACTIVE;
@@ -428,7 +425,6 @@ smb_kshare_export_list(smb_ioc_share_t *ioc)
 
 out:
 	nvlist_free(shrlist);
-	smb_server_release(sv);
 	return (rc);
 }
 
@@ -449,18 +445,14 @@ out:
  * the path lookup due to a forced unmount finishing first.
  */
 int
-smb_kshare_unexport_list(smb_ioc_share_t *ioc)
+smb_kshare_unexport_list(smb_server_t *sv, smb_ioc_share_t *ioc)
 {
-	smb_server_t	*sv = NULL;
 	smb_unshare_t	*ux;
 	nvlist_t	*shrlist = NULL;
 	nvpair_t	*nvp;
 	boolean_t	unexport = B_FALSE;
 	char		*shrname;
 	int		rc;
-
-	if ((rc = smb_server_lookup(&sv)) != 0)
-		return (rc);
 
 	/*
 	 * Reality check that the nvlist's reported length doesn't exceed the
@@ -498,7 +490,6 @@ smb_kshare_unexport_list(smb_ioc_share_t *ioc)
 
 out:
 	nvlist_free(shrlist);
-	smb_server_release(sv);
 	return (rc);
 }
 
@@ -507,10 +498,62 @@ out:
  * of specified share.
  */
 int
-smb_kshare_info(smb_ioc_shareinfo_t *ioc)
+smb_kshare_info(smb_server_t *sv, smb_ioc_shareinfo_t *ioc)
 {
-	ioc->shortnames = smb_shortnames;
+
+	ioc->shortnames = sv->sv_cfg.skc_short_names;
+
 	return (0);
+}
+
+/*
+ * smb_kshare_access
+ *
+ * Does this user have access to the share?
+ * returns: 0 (access OK) or errno
+ *
+ * SMB users always have VEXEC (traverse) via privileges,
+ * so just check for READ or WRITE permissions.
+ */
+int
+smb_kshare_access(smb_server_t *sv, smb_ioc_shareaccess_t *ioc)
+{
+	smb_user_t	*user = NULL;
+	smb_kshare_t	*shr = NULL;
+	smb_node_t	*shroot = NULL;
+	vnode_t		*vp = NULL;
+	int		rc = EACCES;
+
+	shr = smb_kshare_lookup(sv, ioc->shrname);
+	if (shr == NULL) {
+		rc = ENOENT;
+		goto out;
+	}
+	if ((shroot = shr->shr_root_node) == NULL) {
+		/* Only "file" shares have shr_root_node */
+		rc = 0;
+		goto out;
+	}
+	vp = shroot->vp;
+
+	user = smb_server_lookup_user(sv, ioc->session_id, ioc->user_id);
+	if (user == NULL) {
+		rc = EINVAL;
+		goto out;
+	}
+	ASSERT(user->u_cred != NULL);
+
+	rc = smb_vop_access(vp, VREAD, 0, NULL, user->u_cred);
+	if (rc != 0)
+		rc = smb_vop_access(vp, VWRITE, 0, NULL, user->u_cred);
+
+out:
+	if (user != NULL)
+		smb_user_release(user);
+	if (shr != NULL)
+		smb_kshare_release(sv, shr);
+
+	return (rc);
 }
 
 /*
@@ -813,13 +856,13 @@ smb_kshare_export_trans(smb_server_t *sv, char *name, char *path, char *cmnt)
 
 	shr->shr_magic = SMB_SHARE_MAGIC;
 	shr->shr_refcnt = 1;
-	shr->shr_flags = SMB_SHRF_TRANS | smb_kshare_is_admin(shr->shr_name);
+	shr->shr_flags = SMB_SHRF_TRANS | smb_kshare_is_admin(name);
 	if (strcasecmp(name, "IPC$") == 0)
 		shr->shr_type = STYPE_IPC;
 	else
 		shr->shr_type = STYPE_DISKTREE;
 
-	shr->shr_type |= smb_kshare_is_special(shr->shr_name);
+	shr->shr_type |= smb_kshare_is_special(name);
 
 	shr->shr_name = smb_mem_strdup(name);
 	if (path)
@@ -1111,18 +1154,18 @@ smb_kshare_is_special(const char *sharename)
 /*
  * Check whether or not this is a default admin share: C$, D$ etc.
  */
-static boolean_t
+static int
 smb_kshare_is_admin(const char *sharename)
 {
 	if (sharename == NULL)
-		return (B_FALSE);
+		return (0);
 
 	if (strlen(sharename) == 2 &&
 	    smb_isalpha(sharename[0]) && sharename[1] == '$') {
-		return (B_TRUE);
+		return (SMB_SHRF_ADMIN);
 	}
 
-	return (B_FALSE);
+	return (0);
 }
 
 /*

@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/processor.h>
 #include <sys/zfs_context.h>
+#include <zfs_fletcher.h>
 #include <sys/rrwlock.h>
 #include <sys/zmod.h>
 #include <sys/utsname.h>
@@ -533,12 +534,16 @@ kernel_init(int mode)
 
 	spa_init(mode);
 
+	fletcher_4_init();
+
 	tsd_create(&rrw_tsd_key, rrw_tsd_destroy);
 }
 
 void
 kernel_fini(void)
 {
+	fletcher_4_fini();
+
 	spa_fini();
 
 	system_taskq_fini();
@@ -686,7 +691,7 @@ crypto_create_ctx_template(crypto_mechanism_t *mech,
 }
 
 crypto_mech_type_t
-crypto_mech2id(crypto_mech_name_t name)
+crypto_mech2id(const char *name)
 {
 	return (CRYPTO_MECH_INVALID);
 }

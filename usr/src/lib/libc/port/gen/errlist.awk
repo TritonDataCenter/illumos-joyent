@@ -21,11 +21,11 @@
 # Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# ident	"%Z%%M%	%I%	%E% SMI"
+# Copyright 2024 Oxide Computer Company
 #
 # Create two files from a list of input strings;
 # new_list.c contains an array of characters indexed into by perror and
-# strerror;
+# strerror and an array of strings for strerrorname_np;
 # errlst.c contains an array of pointers to strings for compatibility
 # with existing user programs that reference it directly;
 # errlst.c references the strings in new_list.c indirectly using a library
@@ -56,7 +56,6 @@ BEGIN	{
 		newfile = "new_list.c"
 		oldfile = "errlst.c"
 
-		print "#pragma ident\t\"%Z%%M%\t%I%\t%E% SMI\"\n" >oldfile
 		print "#pragma weak _sys_errlist = sys_errlist\n" >oldfile
 		print "#include \"lint.h\"\n" >oldfile
 		# We need to include the errors strings proper in the
@@ -66,16 +65,17 @@ BEGIN	{
 		print "extern const char __sys_errs[];\n" >oldfile
 		print "const char *sys_errlist[] = {" >oldfile
 
-		print "#pragma ident\t\"%Z%%M%\t%I%\t%E% SMI\"\n" >newfile
 		print "#include \"lint.h\"" >newfile
 		print "#include <sys/isa_defs.h>\n" >newfile
+		print "#include <errno.h>\n" >newfile
 		print "#pragma weak __sys_errs = _sys_errs\n" >newfile
 	}
 
 /^[0-9]+/ {
 		if ($1 > hi)
 			hi = $1
-		astr[$1] = $2
+		aname[$1] = $2
+		astr[$1] = $3
 	}
 
 END	{
@@ -108,6 +108,20 @@ END	{
 		}
 		print ";\n" >newfile
 		print "};\n" >oldfile
+
+		#
+		# This stanza is used to generate the array of names for mapping
+		# an errno to its constant (e.g. "ENOENT").
+		#
+		printf "const char *_sys_err_names[%d] = {\n", hi + 1 >newfile
+		printf "\t[0] = \"0\",\n" >newfile
+		for (j = 1; j <= hi; ++j)
+		{
+			if (aname[j] != "" && aname[j] != "SKIP")
+				printf "\t[%s] = \"%s\",\n", aname[j], aname[j] \
+				>newfile
+		}
+		print "};\n" > newfile
 
 		print "const int _sys_num_err = " hi + 1 ";\n" >newfile
 		print "#undef sys_nerr" >newfile

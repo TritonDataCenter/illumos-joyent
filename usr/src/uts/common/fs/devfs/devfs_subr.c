@@ -23,6 +23,10 @@
  */
 
 /*
+ * Copyright 2023 Oxide Computer Company
+ */
+
+/*
  * miscellaneous routines for the devfs
  */
 
@@ -72,7 +76,7 @@ struct dv_node *dvroot;
 
 /* prototype memory vattrs */
 vattr_t dv_vattr_dir = {
-	AT_TYPE|AT_MODE|AT_UID|AT_GID, 		/* va_mask */
+	AT_TYPE|AT_MODE|AT_UID|AT_GID,		/* va_mask */
 	VDIR,					/* va_type */
 	DV_DIRMODE_DEFAULT,			/* va_mode */
 	DV_UID_DEFAULT,				/* va_uid */
@@ -380,7 +384,7 @@ dv_mkdir(struct dv_node *ddv, dev_info_t *devi, char *nm)
  */
 static struct dv_node *
 dv_mknod(struct dv_node *ddv, dev_info_t *devi, char *nm,
-	struct ddi_minor_data *dmd)
+    struct ddi_minor_data *dmd)
 {
 	struct dv_node	*dv;
 	struct vnode	*vp;
@@ -922,11 +926,10 @@ dv_clone_mknod(struct dv_node *ddv, char *drvname)
  */
 int
 dv_find(struct dv_node *ddv, char *nm, struct vnode **vpp, struct pathname *pnp,
-	struct vnode *rdir, struct cred *cred, uint_t ndi_flags)
+    struct vnode *rdir, struct cred *cred, uint_t ndi_flags)
 {
 	extern int isminiroot;	/* see modctl.c */
 
-	int			circ;
 	int			rv = 0, was_busy = 0, nmlen, write_held = 0;
 	struct vnode		*vp;
 	struct dv_node		*dv, *dup;
@@ -1154,7 +1157,7 @@ founddv:
 		 * ndi_devi_enter.
 		 */
 		dmd = kmem_zalloc(sizeof (*dmd), KM_SLEEP);
-		ndi_devi_enter(devi, &circ);
+		ndi_devi_enter(devi);
 		if (devi == clone_dip) {
 			/*
 			 * For clone minors, load the driver indicated by
@@ -1171,7 +1174,7 @@ founddv:
 					dpfree(dmd->ddm_node_priv);
 			}
 		}
-		ndi_devi_exit(devi, circ);
+		ndi_devi_exit(devi);
 		kmem_free(dmd, sizeof (*dmd));
 	}
 	/*
@@ -1271,7 +1274,6 @@ dv_filldir(struct dv_node *ddv)
 	dev_info_t		*devi, *pdevi;
 	struct ddi_minor_data	*dmd;
 	char			devnm[MAXNAMELEN];
-	int			circ, ccirc;
 
 	ASSERT(DVTOV(ddv)->v_type == VDIR);
 	ASSERT(RW_WRITE_HELD(&ddv->dv_contents));
@@ -1286,7 +1288,7 @@ dv_filldir(struct dv_node *ddv)
 		dcmn_err3(("dv_filldir: config error %s\n", ddv->dv_name));
 	}
 
-	ndi_devi_enter(pdevi, &circ);
+	ndi_devi_enter(pdevi);
 	for (devi = ddi_get_child(pdevi); devi;
 	    devi = ddi_get_next_sibling(devi)) {
 		/*
@@ -1307,7 +1309,7 @@ dv_filldir(struct dv_node *ddv)
 
 		dcmn_err3(("dv_filldir: node %s\n", ddi_node_name(devi)));
 
-		ndi_devi_enter(devi, &ccirc);
+		ndi_devi_enter(devi);
 		for (dmd = DEVI(devi)->devi_minor; dmd; dmd = dmd->next) {
 			char *addr;
 
@@ -1339,7 +1341,7 @@ dv_filldir(struct dv_node *ddv)
 			dv_insert(ddv, dv);
 			VN_RELE(DVTOV(dv));
 		}
-		ndi_devi_exit(devi, ccirc);
+		ndi_devi_exit(devi);
 
 		(void) ddi_deviname(devi, devnm);
 		if ((dv = dv_findbyname(ddv, devnm + 1)) == NULL) {
@@ -1349,7 +1351,7 @@ dv_filldir(struct dv_node *ddv)
 		}
 		VN_RELE(DVTOV(dv));
 	}
-	ndi_devi_exit(pdevi, circ);
+	ndi_devi_exit(pdevi);
 
 	ddv->dv_flags &= ~DV_BUILD;
 }

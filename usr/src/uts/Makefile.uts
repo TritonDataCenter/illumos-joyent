@@ -26,6 +26,7 @@
 # Copyright (c) 2013 Andrew Stormont.  All rights reserved.
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 # Copyright 2019 Joyent, Inc.
+# Copyright 2021 Oxide Computer Company
 #
 
 #
@@ -56,7 +57,7 @@ COMMONBASE=	$(UTSBASE)/../common
 #
 
 #
-#	DEF_BUILDS is for def, lint, sischeck, and install
+#	DEF_BUILDS is for def, sischeck, and install
 #	ALL_BUILDS is for everything else (all, clean, ...)
 #
 # The NOT_RELEASE_BUILD noise is to maintain compatibility with the
@@ -71,14 +72,6 @@ $(NOT_RELEASE_BUILD)DEF_BUILDSONLY64	= debug64
 ALL_BUILDS32				= obj32 debug32
 ALL_BUILDS64				= obj64 debug64
 ALL_BUILDSONLY64			= obj64 debug64
-
-#
-#	For modules in 64b dirs that aren't built 64b
-#	or modules in 64b dirs that aren't built 32b we
-#	need to create empty modlintlib files so global lint works
-#
-LINT32_BUILDS	= debug32
-LINT64_BUILDS	= debug64
 
 #
 #	Build class (32b or 64b)
@@ -135,57 +128,15 @@ LD_amd64_64	= $(amd64_LD)
 
 LD		= $(LD_$(MACH)_$(CLASS))
 
-LINT_sparc_32	= $(sparc_LINT)
-LINT_sparc_64	= $(sparcv9_LINT)
-
-LINT_i386_32	= $(i386_LINT)
-LINT_i386_64	= $(amd64_LINT)
-LINT_amd64_64	= $(amd64_LINT)
-
-LINT		= $(LINT_$(MACH)_$(CLASS))
-
 MODEL_32	= ilp32
 MODEL_64	= lp64
 MODEL		= $(MODEL_$(CLASS))
 
 #
-#	Build rules for linting the kernel.
-#
-LHEAD =	$(ECHO) "\n$@";
-
-# Note: egrep returns "failure" if there are no matches, which is
-# exactly the opposite of what we need.
-LGREP.2 =	if egrep -v ' (_init|_fini|_info) '; then false; else true; fi
-
-LTAIL =
-
-LINT.c =	$(LINT) -c -dirout=$(LINTS_DIR) $(LINTFLAGS) $(LINT_DEFS) $(CPPFLAGS)
-
-# Please do not add new erroff directives here.  If you need to disable
-# lint warnings in your module for things that cannot be fixed in any
-# reasonable manner, please augment LINTTAGS in your module Makefile
-# instead.
-LINTTAGS	= -erroff=E_INCONS_ARG_DECL2
-LINTTAGS	+= -erroff=E_INCONS_VAL_TYPE_DECL2
-
-LINTFLAGS_sparc_32	= $(LINTCCMODE) -nsxmuF -errtags=yes
-LINTFLAGS_sparc_64	= $(LINTFLAGS_sparc_32) -m64
-LINTFLAGS_i386_32	= $(LINTCCMODE) -nsxmuF -errtags=yes
-LINTFLAGS_i386_64	= $(LINTFLAGS_i386_32) -m64
-
-LINTFLAGS	= $(LINTFLAGS_$(MACH)_$(CLASS)) $(LINTTAGS)
-LINTFLAGS	+= $(C99LMODE)
-
-#
-#	Override this variable to modify the name of the lint target.
-#
-LINT_MODULE=	$(MODULE)
-
-#
 #	Build the compile/assemble lines:
 #
 EXTRA_OPTIONS		=
-AS_DEFS			= -D_ASM -D__STDC__=0
+AS_DEFS			= -D_ASM
 
 ALWAYS_DEFS_32		= -D_KERNEL -D_SYSCALL32 -D_DDI_STRICT
 ALWAYS_DEFS_64		= -D_KERNEL -D_SYSCALL32 -D_SYSCALL32_IMPL -D_ELF64 \
@@ -204,7 +155,6 @@ ALWAYS_DEFS		= $(ALWAYS_DEFS_$(CLASS))
 #
 CPPFLAGS	= $(ALWAYS_DEFS) $(ALL_DEFS) $(CONFIG_DEFS) \
 		   $(INCLUDE_PATH) $(EXTRA_OPTIONS)
-ASFLAGS		+= -P
 AS_CPPFLAGS	= $(ALWAYS_DEFS) $(ALL_DEFS) $(CONFIG_DEFS) $(AS_DEFS) \
 		   $(AS_INC_PATH) $(EXTRA_OPTIONS)
 
@@ -221,11 +171,9 @@ CERRWARN += -_gcc=-Wno-sign-compare
 CERRWARN += -_gcc=-Wno-unknown-pragmas
 CERRWARN += -_gcc=-Wno-unused-parameter
 CERRWARN += -_gcc=-Wno-missing-field-initializers
+CERRWARN += $(CCWARNINLINE)
 
-# gcc4 lacks -Wno-maybe-uninitialized
-CNOWARN_UNINIT = -_gcc4=-Wno-uninitialized \
-    -_gcc7=-Wno-maybe-uninitialized \
-    -_gcc8=-Wno-maybe-uninitialized
+CNOWARN_UNINIT = -_gcc=-Wno-maybe-uninitialized
 
 # DEBUG v. -nd make for frequent unused variables, empty conditions, etc. in
 # -nd builds
@@ -236,61 +184,41 @@ CERRWARN += -_smatch=-p=illumos_kernel
 include $(SRC)/Makefile.smatch
 
 #
-# Unfortunately, _IOWR() is regularly used with a third argument of 0,
-# so we have to disable all these smatch checks.
-#
-SMOFF += sizeof
-
-#
-# Add specific compiler options that are required based on the
-# architecture in question.
-#
-CFLAGS_uts_i386 += -_gcc7=-mindirect-branch=thunk-extern
-CFLAGS_uts_i386 += -_gcc7=-mindirect-branch-register
-CFLAGS_uts_i386 += -_gcc8=-mindirect-branch=thunk-extern
-CFLAGS_uts_i386 += -_gcc8=-mindirect-branch-register
-
-#
 # Ensure that the standard function prologue remains at the very start
 # of a function, so DTrace fbt will instrument the right place.
 #
-CFLAGS_uts_i386 += -_gcc7=-fno-shrink-wrap
-CFLAGS_uts_i386 += -_gcc8=-fno-shrink-wrap
-CFLAGS_uts_i386 += -_gcc9=-fno-shrink-wrap
-
+CFLAGS_uts_i386 += -_gcc=-fno-shrink-wrap
 #
 # retpoline support
 #
-CFLAGS_uts_i386 += -_gcc7=-mindirect-branch=thunk-extern
-CFLAGS_uts_i386 += -_gcc7=-mindirect-branch-register
-CFLAGS_uts_i386 += -_gcc8=-mindirect-branch=thunk-extern
-CFLAGS_uts_i386 += -_gcc8=-mindirect-branch-register
-CFLAGS_uts_i386 += -_gcc9=-mindirect-branch=thunk-extern
-CFLAGS_uts_i386 += -_gcc9=-mindirect-branch-register
+CFLAGS_uts_i386 += -_gcc=-mindirect-branch=thunk-extern
+CFLAGS_uts_i386 += -_gcc=-mindirect-branch-register
 
 CSTD = $(CSTD_GNU99)
 
 CFLAGS_uts		=
 CFLAGS_uts		+= $(STAND_FLAGS_$(CLASS))
 CFLAGS_uts		+= $(CCVERBOSE)
-CFLAGS_uts		+= $(ILDOFF)
 CFLAGS_uts		+= $(XAOPT)
 CFLAGS_uts		+= $(CTF_FLAGS_$(CLASS))
 CFLAGS_uts		+= $(CERRWARN)
 CFLAGS_uts		+= $(CCNOAUTOINLINE)
 CFLAGS_uts		+= $(CCNOREORDER)
 CFLAGS_uts		+= $(CCNOAGGRESSIVELOOPS)
-CFLAGS_uts		+= $(CGLOBALSTATIC)
+CFLAGS_uts		+= $(CCINLINESIZE)
 CFLAGS_uts		+= $(EXTRA_CFLAGS)
 CFLAGS_uts		+= $(CSOURCEDEBUGFLAGS)
 CFLAGS_uts		+= $(CUSERFLAGS)
 CFLAGS_uts		+= $(CFLAGS_uts_$(MACH))
+CFLAGS_uts		+= -_gcc=-fno-asynchronous-unwind-tables
+
+ASFLAGS_uts=		$(CFLAGS_uts)
 
 #
-#	Declare that $(OBJECTS) and $(LINTS) can be compiled in parallel.
-#	The DUMMY target is for those instances where OBJECTS and LINTS
-#	are empty (to avoid an unconditional .PARALLEL).
-.PARALLEL:	$(OBJECTS) $(LINTS) DUMMY
+#	Declare that $(OBJECTS) can be compiled in parallel.  The DUMMY target
+#	is for those instances where OBJECTS is empty (to avoid an
+#	unconditional .PARALLEL).
+.PARALLEL:	$(OBJECTS) DUMMY
 
 #
 #	Expanded dependencies
@@ -299,10 +227,6 @@ DEF_DEPS	= $(DEF_BUILDS:%=def.%)
 ALL_DEPS	= $(ALL_BUILDS:%=all.%)
 CLEAN_DEPS	= $(ALL_BUILDS:%=clean.%)
 CLOBBER_DEPS	= $(ALL_BUILDS:%=clobber.%)
-LINT_DEPS	= $(DEF_BUILDS:%=lint.%)
-MODLINTLIB_DEPS	= $(DEF_BUILDS:%=modlintlib.%)
-MODLIST_DEPS	= $(DEF_BUILDS:%=modlist.%)
-CLEAN_LINT_DEPS	= $(ALL_BUILDS:%=clean.lint.%)
 INSTALL_DEPS	= $(DEF_BUILDS:%=install.%)
 SYM_DEPS	= $(SYM_BUILDS:%=symcheck.%)
 SISCHECK_DEPS	= $(DEF_BUILDS:%=sischeck.%)
@@ -316,8 +240,7 @@ BINARY		= $(OBJS_DIR)/$(MODULE)
 #
 #	Default cleanup definitions
 #
-CLEANLINTFILES	= $(LINTS) $(MOD_LINT_LIB)
-CLEANFILES	= $(OBJECTS) $(CLEANLINTFILES)
+CLEANFILES	= $(OBJECTS)
 CLOBBERFILES	= $(BINARY) $(CLEANFILES)
 
 #
@@ -562,6 +485,7 @@ USR_SOCK_DIR_32		= $(USR_MOD_DIR)/socketmod
 USR_STRMOD_DIR_32	= $(USR_MOD_DIR)/strmod
 USR_SYS_DIR_32		= $(USR_MOD_DIR)/sys
 USR_MISC_DIR_32		= $(USR_MOD_DIR)/misc
+USR_KTEST_DIR_32	= $(USR_MOD_DIR)/misc/ktest
 USR_DACF_DIR_32		= $(USR_MOD_DIR)/dacf
 USR_PCBE_DIR_32		= $(USR_MOD_DIR)/pcbe
 USR_DTRACE_DIR_32	= $(USR_MOD_DIR)/dtrace
@@ -575,6 +499,7 @@ USR_SOCK_DIR_64		= $(USR_MOD_DIR)/socketmod/$(SUBDIR64)
 USR_STRMOD_DIR_64	= $(USR_MOD_DIR)/strmod/$(SUBDIR64)
 USR_SYS_DIR_64		= $(USR_MOD_DIR)/sys/$(SUBDIR64)
 USR_MISC_DIR_64		= $(USR_MOD_DIR)/misc/$(SUBDIR64)
+USR_KTEST_DIR_64	= $(USR_MOD_DIR)/misc/ktest/$(SUBDIR64)
 USR_DACF_DIR_64		= $(USR_MOD_DIR)/dacf/$(SUBDIR64)
 USR_PCBE_DIR_64		= $(USR_MOD_DIR)/pcbe/$(SUBDIR64)
 USR_DTRACE_DIR_64	= $(USR_MOD_DIR)/dtrace/$(SUBDIR64)
@@ -588,6 +513,7 @@ USR_SOCK_DIR		= $(USR_SOCK_DIR_$(CLASS))
 USR_STRMOD_DIR		= $(USR_STRMOD_DIR_$(CLASS))
 USR_SYS_DIR		= $(USR_SYS_DIR_$(CLASS))
 USR_MISC_DIR		= $(USR_MISC_DIR_$(CLASS))
+USR_KTEST_DIR		= $(USR_KTEST_DIR_$(CLASS))
 USR_DACF_DIR		= $(USR_DACF_DIR_$(CLASS))
 USR_PCBE_DIR		= $(USR_PCBE_DIR_$(CLASS))
 USR_DTRACE_DIR		= $(USR_DTRACE_DIR_$(CLASS))
@@ -597,6 +523,7 @@ USR_MOD_DIRS_32		= $(USR_DRV_DIR_32) $(USR_EXEC_DIR_32)
 USR_MOD_DIRS_32		+= $(USR_FS_DIR_32) $(USR_SCHED_DIR_32)
 USR_MOD_DIRS_32		+= $(USR_STRMOD_DIR_32) $(USR_SYS_DIR_32)
 USR_MOD_DIRS_32		+= $(USR_MISC_DIR_32) $(USR_DACF_DIR_32)
+USR_MOD_DIRS_32		+= $(USR_KTEST_DIR_32)
 USR_MOD_DIRS_32		+= $(USR_PCBE_DIR_32)
 USR_MOD_DIRS_32		+= $(USR_DTRACE_DIR_32) $(USR_BRAND_DIR_32)
 USR_MOD_DIRS_32		+= $(USR_SOCK_DIR_32)
@@ -642,19 +569,12 @@ PARALLEL_KMODS = $(DRV_KMODS) $(EXEC_KMODS) $(FS_KMODS) $(SCHED_KMODS) \
 		 $(MMU_KMODS) $(DACF_KMODS) $(EXPORT_KMODS) $(IPP_KMODS) \
 		 $(CRYPTO_KMODS) $(PCBE_KMODS) \
 		 $(DRV_KMODS_$(CLASS)) $(MISC_KMODS_$(CLASS)) $(MAC_KMODS) \
-		 $(BRAND_KMODS) $(KICONV_KMODS) $(OVERLAY_KMODS) $(CC_KMODS) \
+		 $(BRAND_KMODS) $(KICONV_KMODS) $(CC_KMODS) $(OVERLAY_KMODS) \
 		 $(SOCKET_KMODS)
 
 KMODS = $(GENUNIX_KMODS) $(PARALLEL_KMODS)
 
 $(PARALLEL_KMODS): $(GENUNIX_KMODS)
-
-LINT_KMODS = $(DRV_KMODS) $(EXEC_KMODS) $(FS_KMODS) $(SCHED_KMODS) \
-	  $(TOD_KMODS) $(STRMOD_KMODS) $(SYS_KMODS) $(MISC_KMODS) \
-	  $(MACH_KMODS) $(GSS_KMODS) $(DACF_KMODS) $(IPP_KMODS) \
-	  $(CRYPTO_KMODS) $(PCBE_KMODS) \
-	  $(DRV_KMODS_$(CLASS)) $(MISC_KMODS_$(CLASS)) $(MAC_KMODS) \
-	  $(BRAND_KMODS) $(KICONV_KMODS) $(CC_KMODS) $(SOCKET_KMODS)
 
 #
 #	Files to be compiled with -xa, to generate basic block execution
@@ -678,7 +598,6 @@ $(BB_FILES)	:= XAOPT = -xa
 #	$(RELEASE_BUILD) is on for a number of the late beta and fcs builds.
 #
 $(NOT_RELEASE_BUILD)$(OBJS_DIR)/unix_bb.o   := CPPFLAGS     += -DKCOV
-$(NOT_RELEASE_BUILD)$(OBJS_DIR)/unix_bb.ln  := CPPFLAGS     += -DKCOV
 
 #
 #	Do not let unix_bb.o get compiled with -xa!

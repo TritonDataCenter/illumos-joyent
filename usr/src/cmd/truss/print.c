@@ -22,6 +22,8 @@
 /*
  * Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2022 Garrett D'Amore
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
@@ -61,6 +63,7 @@
 #include <sys/aiocb.h>
 #include <sys/corectl.h>
 #include <sys/cpc_impl.h>
+#include <sys/execx.h>
 #include <sys/priocntl.h>
 #include <sys/tspriocntl.h>
 #include <sys/iapriocntl.h>
@@ -75,6 +78,8 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <netinet/sctp.h>
+#include <netinet/ip_mroute.h>
+#include <netinet/icmp6.h>
 #include <net/route.h>
 #include <sys/utrap.h>
 #include <sys/lgrp_user.h>
@@ -85,6 +90,8 @@
 #include <sys/fork.h>
 #include <sys/task.h>
 #include <sys/random.h>
+#include <sys/sysmacros.h>
+#include <sys/fdsync.h>
 #include "ramdata.h"
 #include "print.h"
 #include "proto.h"
@@ -317,12 +324,10 @@ prt_ioa(private_t *pri, int raw, long val)	/* print ioctl argument */
 	/* kstat ioctl()s */
 	case KSTAT_IOC_READ:
 	case KSTAT_IOC_WRITE:
-#ifdef _LP64
 		if (data_model == PR_MODEL_ILP32)
 			prt_stg(pri, raw,
 			    val + offsetof(kstat32_t, ks_name[0]));
 		else
-#endif
 			prt_stg(pri, raw,
 			    val + offsetof(kstat_t, ks_name[0]));
 		break;
@@ -376,26 +381,25 @@ prt_ioa(private_t *pri, int raw, long val)	/* print ioctl argument */
 void
 prt_pip(private_t *pri, int raw, long val)	/* print pipe code */
 {
-	const char *s = NULL;
+	int first = 1;
+	long flags = ~(O_CLOEXEC | O_CLOFORK | O_NONBLOCK);
 
-	if (!raw) {
-		switch (val) {
-		case O_CLOEXEC:
-			s = "O_CLOEXEC";
-			break;
-		case O_NONBLOCK:
-			s = "O_NONBLOCK";
-			break;
-		case O_CLOEXEC|O_NONBLOCK:
-			s = "O_CLOEXEC|O_NONBLOCK";
-			break;
-		}
+	if (raw != 0 || val == 0 || (val & flags) != 0) {
+		prt_dex(pri, 0, val);
+		return;
 	}
 
-	if (s == NULL)
-		prt_dex(pri, 0, val);
-	else
-		outstring(pri, s);
+	if (val & O_CLOEXEC) {
+		outstring(pri, "|O_CLOEXEC" + first);
+		first = 0;
+	}
+	if (val & O_CLOFORK) {
+		outstring(pri, "|O_CLOFORK" + first);
+		first = 0;
+	}
+	if (val & O_NONBLOCK) {
+		outstring(pri, "|O_NONBLOCK" + first);
+	}
 }
 
 void
@@ -1734,7 +1738,6 @@ prt_mif(private_t *pri, int raw, long val)
 {
 	struct meminfo	minfo;
 
-#ifdef _LP64
 	if (data_model == PR_MODEL_ILP32) {
 		struct meminfo32 minfo32;
 
@@ -1761,7 +1764,6 @@ prt_mif(private_t *pri, int raw, long val)
 		prt_hex(pri, 0, minfo32.mi_validity);
 		return;
 	}
-#endif
 	if (Pread(Proc, &minfo, sizeof (struct meminfo), val) !=
 		sizeof (struct meminfo)) {
 		prt_dec(pri, 0, pri->sys_args[1]);	/* addr_count */
@@ -1844,6 +1846,15 @@ prt_skt(private_t *pri, int raw, long val)
 		if ((val & SOCK_CLOEXEC) != 0) {
 			outstring(pri, "|SOCK_CLOEXEC");
 		}
+		if ((val & SOCK_CLOFORK) != 0) {
+			outstring(pri, "|SOCK_CLOFORK");
+		}
+		if ((val & SOCK_NDELAY) != 0) {
+			outstring(pri, "|SOCK_NDELAY");
+		}
+		if ((val & SOCK_NONBLOCK) != 0) {
+			outstring(pri, "|SOCK_NONBLOCK");
+		}
 	} else {
 		prt_dec(pri, 0, val);
 	}
@@ -1863,13 +1874,14 @@ prt_skp(private_t *pri, int raw, long val)
 	switch (pri->sys_args[0]) {
 	case PF_INET6:
 	case PF_INET:
-	case PF_NCA:	if ((s = ipprotos((int)val)) != NULL) {
-				outstring(pri, s);
-				break;
-			}
-			/* FALLTHROUGH */
-	default:	prt_dec(pri, 0, val);
+		if ((s = ipprotos((int)val)) != NULL) {
+			outstring(pri, s);
 			break;
+		}
+		/* FALLTHROUGH */
+	default:
+		prt_dec(pri, 0, val);
+		break;
 	}
 }
 
@@ -1899,13 +1911,17 @@ prt_acf(private_t *pri, int raw, long val)
 {
 	int first = 1;
 	if (raw || !val ||
-	    (val & ~(SOCK_CLOEXEC|SOCK_NDELAY|SOCK_NONBLOCK))) {
+	    (val & ~(SOCK_CLOEXEC|SOCK_NDELAY|SOCK_NONBLOCK|SOCK_CLOFORK))) {
 		prt_dex(pri, 0, val);
 		return;
 	}
 
 	if (val & SOCK_CLOEXEC) {
 		outstring(pri, "|SOCK_CLOEXEC" + first);
+		first = 0;
+	}
+	if (val & SOCK_CLOFORK) {
+		outstring(pri, "|SOCK_CLOFORK" + first);
 		first = 0;
 	}
 	if (val & SOCK_NDELAY) {
@@ -2050,6 +2066,8 @@ tcp_optname(private_t *pri, long val)
 	case TCP_KEEPCNT:		return ("TCP_KEEPCNT");
 	case TCP_KEEPINTVL:		return ("TCP_KEEPINTVL");
 	case TCP_CONGESTION:		return ("TCP_CONGESTION");
+	case TCP_QUICKACK:		return ("TCP_QUICKACK");
+	case TCP_MD5SIG:		return ("TCP_MD5SIG");
 
 	default:			(void) snprintf(pri->code_buf,
 					    sizeof (pri->code_buf),
@@ -2113,6 +2131,129 @@ udp_optname(private_t *pri, long val)
 }
 
 
+const char *
+ip_optname(private_t *pri, long val)
+{
+	switch (val) {
+	case IP_OPTIONS:		return ("IP_OPTIONS");
+	case IP_HDRINCL:		return ("IP_HDRINCL");
+	case IP_TOS:			return ("IP_TOS");
+	case IP_TTL:			return ("IP_TTL");
+	case IP_RECVOPTS:		return ("IP_RECVOPTS");
+	case IP_RECVRETOPTS:		return ("IP_RECVRETOPTS");
+	case IP_RECVDSTADDR:		return ("IP_RECVDSTADDR");
+	case IP_RETOPTS:		return ("IP_RETOPTS");
+	case IP_RECVIF:			return ("IP_RECVIF");
+	case IP_RECVSLLA:		return ("IP_RECVSLLA");
+	case IP_RECVTTL:		return ("IP_RECVTTL");
+	case IP_RECVTOS:		return ("IP_RECVTOS");
+	case IP_MULTICAST_IF:		return ("IP_MULTICAST_IF");
+	case IP_MULTICAST_TTL:		return ("IP_MULTICAST_TTL");
+	case IP_MULTICAST_LOOP:		return ("IP_MULTICAST_LOOP");
+	case IP_ADD_MEMBERSHIP:		return ("IP_ADD_MEMBERSHIP");
+	case IP_DROP_MEMBERSHIP:	return ("IP_DROP_MEMBERSHIP");
+	case IP_BLOCK_SOURCE:		return ("IP_BLOCK_SOURCE");
+	case IP_UNBLOCK_SOURCE:		return ("IP_UNBLOCK_SOURCE");
+	case IP_ADD_SOURCE_MEMBERSHIP:	return ("IP_ADD_SOURCE_MEMBERSHIP");
+	case IP_DROP_SOURCE_MEMBERSHIP:	return ("IP_DROP_SOURCE_MEMBERSHIP");
+	case IP_NEXTHOP:		return ("IP_NEXTHOP");
+	/* IP_PKTINFO and IP_RECVPKTINFO share the same code */
+	case IP_PKTINFO:		return ("IP_PKTINFO/IP_RECVPKTINFO");
+	case IP_DONTFRAG:		return ("IP_DONTFRAG");
+	case IP_MINTTL:			return ("IP_MINTTL");
+	case IP_SEC_OPT:		return ("IP_SEC_OPT");
+	case MCAST_JOIN_GROUP:		return ("MCAST_JOIN_GROUP");
+	case MCAST_LEAVE_GROUP:		return ("MCAST_LEAVE_GROUP");
+	case MCAST_BLOCK_SOURCE:	return ("MCAST_BLOCK_SOURCE");
+	case MCAST_UNBLOCK_SOURCE:	return ("MCAST_UNBLOCK_SOURCE");
+	case MCAST_JOIN_SOURCE_GROUP:	return ("MCAST_JOIN_SOURCE_GROUP");
+	case MCAST_LEAVE_SOURCE_GROUP:	return ("MCAST_LEAVE_SOURCE_GROUP");
+	case MRT_INIT:			return ("MRT_INIT");
+	case MRT_DONE:			return ("MRT_DONE");
+	case MRT_ADD_VIF:		return ("MRT_ADD_VIF");
+	case MRT_DEL_VIF:		return ("MRT_DEL_VIF");
+	case MRT_ADD_MFC:		return ("MRT_ADD_MFC");
+	case MRT_DEL_MFC:		return ("MRT_DEL_MFC");
+	case MRT_VERSION:		return ("MRT_VERSION");
+	case MRT_ASSERT:		return ("MRT_ASSERT");
+	case IP_BOUND_IF:		return ("IP_BOUND_IF");
+	case IP_UNSPEC_SRC:		return ("IP_UNSPEC_SRC");
+	case IP_BROADCAST_TTL:		return ("IP_BROADCAST_TTL");
+	case IP_DHCPINIT_IF:		return ("IP_DHCPINIT_IF");
+	case IP_REUSEADDR:		return ("IP_REUSEADDR");
+	case IP_DONTROUTE:		return ("IP_DONTROUTE");
+	case IP_BROADCAST:		return ("IP_BROADCAST");
+
+	default:			(void) snprintf(pri->code_buf,
+					    sizeof (pri->code_buf), "0x%lx",
+					    val);
+					return (pri->code_buf);
+	}
+}
+
+const char *
+ipv6_optname(private_t *pri, long val)
+{
+	switch (val) {
+	case IPV6_UNICAST_HOPS:		return ("IPV6_UNICAST_HOPS");
+	case IPV6_MULTICAST_IF:		return ("IPV6_MULTICAST_IF");
+	case IPV6_MULTICAST_HOPS:	return ("IPV6_MULTICAST_HOPS");
+	case IPV6_MULTICAST_LOOP:	return ("IPV6_MULTICAST_LOOP");
+	case IPV6_JOIN_GROUP:		return ("IPV6_JOIN_GROUP");
+	case IPV6_LEAVE_GROUP:		return ("IPV6_LEAVE_GROUP");
+	case IPV6_PKTINFO:		return ("IPV6_PKTINFO");
+	case IPV6_HOPLIMIT:		return ("IPV6_HOPLIMIT");
+	case IPV6_NEXTHOP:		return ("IPV6_NEXTHOP");
+	case IPV6_HOPOPTS:		return ("IPV6_HOPOPTS");
+	case IPV6_DSTOPTS:		return ("IPV6_DSTOPTS");
+	case IPV6_RTHDR:		return ("IPV6_RTHDR");
+	case IPV6_RTHDRDSTOPTS:		return ("IPV6_RTHDRDSTOPTS");
+	case IPV6_RECVPKTINFO:		return ("IPV6_RECVPKTINFO");
+	case IPV6_RECVHOPLIMIT:		return ("IPV6_RECVHOPLIMIT");
+	case IPV6_RECVHOPOPTS:		return ("IPV6_RECVHOPOPTS");
+	case _OLD_IPV6_RECVDSTOPTS:	return ("_OLD_IPV6_RECVDSTOPTS");
+	case IPV6_RECVRTHDR:		return ("IPV6_RECVRTHDR");
+	case IPV6_RECVRTHDRDSTOPTS:	return ("IPV6_RECVRTHDRDSTOPTS");
+	case IPV6_CHECKSUM:		return ("IPV6_CHECKSUM");
+	case IPV6_RECVTCLASS:		return ("IPV6_RECVTCLASS");
+	case IPV6_USE_MIN_MTU:		return ("IPV6_USE_MIN_MTU");
+	case IPV6_DONTFRAG:		return ("IPV6_DONTFRAG");
+	case IPV6_SEC_OPT:		return ("IPV6_SEC_OPT");
+	case IPV6_SRC_PREFERENCES:	return ("IPV6_SRC_PREFERENCES");
+	case IPV6_RECVPATHMTU:		return ("IPV6_RECVPATHMTU");
+	case IPV6_PATHMTU:		return ("IPV6_PATHMTU");
+	case IPV6_TCLASS:		return ("IPV6_TCLASS");
+	case IPV6_V6ONLY:		return ("IPV6_V6ONLY");
+	case IPV6_RECVDSTOPTS:		return ("IPV6_RECVDSTOPTS");
+	case MCAST_JOIN_GROUP:		return ("MCAST_JOIN_GROUP");
+	case MCAST_LEAVE_GROUP:		return ("MCAST_LEAVE_GROUP");
+	case MCAST_BLOCK_SOURCE:	return ("MCAST_BLOCK_SOURCE");
+	case MCAST_UNBLOCK_SOURCE:	return ("MCAST_UNBLOCK_SOURCE");
+	case MCAST_JOIN_SOURCE_GROUP:	return ("MCAST_JOIN_SOURCE_GROUP");
+	case MCAST_LEAVE_SOURCE_GROUP:	return ("MCAST_LEAVE_SOURCE_GROUP");
+	case IPV6_MINHOPCOUNT:		return ("IPV6_MINHOPCOUNT");
+
+	default:			(void) snprintf(pri->code_buf,
+					    sizeof (pri->code_buf), "0x%lx",
+					    val);
+					return (pri->code_buf);
+	}
+}
+
+
+const char *
+icmpv6_optname(private_t *pri, long val)
+{
+	switch (val) {
+	case ICMP6_FILTER:		return ("ICMP6_FILTER");
+	default:			(void) snprintf(pri->code_buf,
+					    sizeof (pri->code_buf), "0x%lx",
+					    val);
+					return (pri->code_buf);
+	}
+}
+
+
 /*
  * Print setsockopt()/getsockopt() 3rd argument.
  */
@@ -2125,6 +2266,12 @@ prt_son(private_t *pri, int raw, long val)
 	case SOL_SOCKET:	outstring(pri, sol_optname(pri, val));
 				break;
 	case SOL_ROUTE:		outstring(pri, route_optname(pri, val));
+				break;
+	case IPPROTO_IP:	outstring(pri, ip_optname(pri, val));
+				break;
+	case IPPROTO_IPV6:	outstring(pri, ipv6_optname(pri, val));
+				break;
+	case IPPROTO_ICMPV6:	outstring(pri, icmpv6_optname(pri, val));
 				break;
 	case IPPROTO_TCP:	outstring(pri, tcp_optname(pri, val));
 				break;
@@ -2341,7 +2488,6 @@ prt_ffg(private_t *pri, int raw, long val)
 #define	CBSIZE	sizeof (pri->code_buf)
 	char *s = pri->code_buf;
 	size_t used = 1;
-	struct fcntl_flags *fp;
 
 	if (raw) {
 		(void) snprintf(s, CBSIZE, "0x%lx", val);
@@ -2354,8 +2500,54 @@ prt_ffg(private_t *pri, int raw, long val)
 	}
 
 	*s = '\0';
-	for (fp = fcntl_flags;
-	    fp < &fcntl_flags[sizeof (fcntl_flags) / sizeof (*fp)]; fp++) {
+	for (size_t i = 0; i < ARRAY_SIZE(fcntl_flags); i++) {
+		struct fcntl_flags *fp = &fcntl_flags[i];
+		if (val & fp->val) {
+			used = strlcat(s, fp->name, CBSIZE);
+			val &= ~fp->val;
+		}
+	}
+
+	if (val != 0 && used <= CBSIZE)
+		used += snprintf(s + used, CBSIZE - used, "|0x%lx", val);
+
+	if (used >= CBSIZE)
+		(void) snprintf(s + 1, CBSIZE-1, "0x%lx", val);
+	outstring(pri, s + 1);
+#undef CBSIZE
+}
+
+/*
+ * Print fcntl() F_GETFD/F_SETFD values
+ */
+static struct fcntl_fdflags {
+	long		val;
+	const char	*name;
+} fcntl_fdflags[] = {
+	{ FD_CLOEXEC, "|FD_CLOEXEC" },
+	{ FD_CLOFORK, "|FD_CLOFORK" }
+};
+
+void
+prt_ffd(private_t *pri, int raw, long val)
+{
+#define	CBSIZE	sizeof (pri->code_buf)
+	char *s = pri->code_buf;
+	size_t used = 1;
+
+	if (raw) {
+		(void) snprintf(s, CBSIZE, "0x%lx", val);
+		outstring(pri, s);
+		return;
+	}
+	if (val == 0) {
+		outstring(pri, "(no flags)");
+		return;
+	}
+
+	*s = '\0';
+	for (size_t i = 0; i < ARRAY_SIZE(fcntl_fdflags); i++) {
+		struct fcntl_fdflags *fp = &fcntl_fdflags[i];
 		if (val & fp->val) {
 			used = strlcat(s, fp->name, CBSIZE);
 			val &= ~fp->val;
@@ -2551,8 +2743,21 @@ prt_zga(private_t *pri, int raw, long val)
 		case ZONE_ATTR_INITNAME:	s = "ZONE_ATTR_INITNAME"; break;
 		case ZONE_ATTR_BOOTARGS:	s = "ZONE_ATTR_BOOTARGS"; break;
 		case ZONE_ATTR_BRAND:	s = "ZONE_ATTR_BRAND"; break;
+		case ZONE_ATTR_SCHED_CLASS: s = "ZONE_ATTR_SCHED_CLASS"; break;
 		case ZONE_ATTR_FLAGS:	s = "ZONE_ATTR_FLAGS"; break;
-		case ZONE_ATTR_DID:	s = "ZONE_ATTR_DID"; break;
+		case ZONE_ATTR_HOSTID:	s = "ZONE_ATTR_HOSTID"; break;
+		case ZONE_ATTR_FS_ALLOWED: s = "ZONE_ATTR_FS_ALLOWED"; break;
+		case ZONE_ATTR_NETWORK:	s = "ZONE_ATTR_NETWORK"; break;
+		case ZONE_ATTR_INITNORESTART: s = "ZONE_ATTR_INITNORESTART";
+			break;
+		case ZONE_ATTR_SECFLAGS: s = "ZONE_ATTR_SECFLAGS"; break;
+		case ZONE_ATTR_INITRESTART0: s = "ZONE_ATTR_INITRESTART0";
+			break;
+		case ZONE_ATTR_INITREBOOT: s = "ZONE_ATTR_INITREBOOT"; break;
+		case ZONE_ATTR_DID: s = "ZONE_ATTR_DID"; break;
+		case ZONE_ATTR_APP_SVC_CT: s = "ZONE_ATTR_APP_SVC_CT"; break;
+		case ZONE_ATTR_SCHED_FIXEDHI: s = "ZONE_ATTR_SCHED_FIXEDHI";
+			break;
 		}
 	}
 
@@ -2874,6 +3079,123 @@ prt_grf(private_t *pri, int raw, long val)
 	}
 }
 
+void
+prt_exc(private_t *pri, int raw, long val)
+{
+#define	CBSIZE	sizeof (pri->code_buf)
+	char *str = pri->code_buf;
+	size_t used = 0;
+
+	if (raw) {
+		prt_hex(pri, 0, val);
+		return;
+	}
+	if (val == 0) {
+		outstring(pri, "0");
+		return;
+	}
+
+	*str = '\0';
+	if (val & EXEC_DESCRIPTOR) {
+		used = strlcat(str, "|EXEC_DESCRIPTOR", CBSIZE);
+		val &= ~EXEC_DESCRIPTOR;
+	}
+
+	if (val != 0 && used <= CBSIZE)
+		used += snprintf(str + used, CBSIZE - used, "|0x%lx", val);
+
+	if (used >= CBSIZE)
+		(void) snprintf(str + 1, CBSIZE - 1, "0x%lx", val);
+
+	outstring(pri, str + 1);
+#undef CBSIZE
+}
+
+/*
+ * Print recv*(), send*() flags. This includes all the msg_flags data as well as
+ * they're the same namespace.
+ */
+static struct sendrecv_flags {
+	long		val;
+	const char	*name;
+} sendrecv_flags[] = {
+	{ MSG_OOB, "|MSG_OOB" },
+	{ MSG_PEEK, "|MSG_PEEK" },
+	{ MSG_DONTROUTE, "|MSG_DONTROUTE" },
+	{ MSG_CTRUNC, "|MSG_CTRUNC" },
+	{ MSG_TRUNC, "|MSG_TRUNC" },
+	{ MSG_WAITALL, "|MSG_WAITALL" },
+	{ MSG_DONTWAIT, "|MSG_DONTWAIT" },
+	{ MSG_NOTIFICATION, "|MSG_NOTIFICATION" },
+	{ MSG_NOSIGNAL, "|MSG_NOSIGNAL" },
+	{ MSG_DUPCTRL, "|MSG_DUPCTRL" },
+	{ MSG_CMSG_CLOEXEC, "|MSG_CMSG_CLOEXEC" },
+	{ MSG_CMSG_CLOFORK, "|MSG_CMSG_CLOFORK" },
+	{ MSG_XPG4_2, "|MSG_XPG4_2" }
+};
+
+void
+prt_srf(private_t *pri, int raw, long val)
+{
+#define	CBSIZE	sizeof (pri->code_buf)
+	char *s = pri->code_buf;
+	size_t used = 1;
+
+	if (raw) {
+		(void) snprintf(s, CBSIZE, "0x%lx", val);
+		outstring(pri, s);
+		return;
+	}
+	if (val == 0) {
+		outstring(pri, "(no flags)");
+		return;
+	}
+
+	*s = '\0';
+	for (size_t i = 0; i < ARRAY_SIZE(sendrecv_flags); i++) {
+		struct sendrecv_flags *fp = &sendrecv_flags[i];
+		if (val & fp->val) {
+			used = strlcat(s, fp->name, CBSIZE);
+			val &= ~fp->val;
+		}
+	}
+
+	if (val != 0 && used <= CBSIZE)
+		used += snprintf(s + used, CBSIZE - used, "|0x%lx", val);
+
+	if (used >= CBSIZE)
+		(void) snprintf(s + 1, CBSIZE-1, "0x%lx", val);
+	outstring(pri, s + 1);
+#undef CBSIZE
+}
+
+/*
+ * Print fdsync() internal argument.
+ */
+void
+prt_fds(private_t *pri, int raw, long val)
+{
+	if (raw) {
+		prt_hex(pri, 0, val);
+		return;
+	}
+
+	switch (val) {
+	case FDSYNC_FS:
+		outstring(pri, "FDSYNC_FS");
+		break;
+	case FDSYNC_FILE:
+		outstring(pri, "FDSYNC_FILE");
+		break;
+	case FDSYNC_DATA:
+		outstring(pri, "FDSYNC_DATA");
+		break;
+	default:
+		prt_hex(pri, 0, val);
+		break;
+	}
+}
+
 /*
  * Array of pointers to print functions, one for each format.
  */
@@ -2982,5 +3304,9 @@ void (* const Print[])() = {
 	prt_grf,	/* GRF -- print getrandom flags */
 	prt_psdelta,	/* PSDLT -- print psecflags(2) delta */
 	prt_psfw,	/* PSFW -- print psecflags(2) set */
+	prt_exc,	/* EXC -- print execvex() flags */
+	prt_ffd,	/* FFD -- print fcntl() F_SETFD flags */
+	prt_srf,	/* SRF -- print send*()/recv*() flags */
+	prt_fds,	/* FDS -- print fdsync() flags */
 	prt_dec,	/* HID -- hidden argument, make this the last one */
 };

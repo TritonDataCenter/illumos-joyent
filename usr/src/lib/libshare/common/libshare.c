@@ -265,7 +265,7 @@ add_handle_for_root(xmlNodePtr root, sa_handle_impl_t handle)
 	struct doc2handle *item;
 	int ret = SA_NO_MEMORY;
 
-	item = (struct doc2handle *)calloc(sizeof (struct doc2handle), 1);
+	item = calloc(1, sizeof (struct doc2handle));
 	if (item != NULL) {
 		item->root = root;
 		item->handle = handle;
@@ -842,7 +842,7 @@ sa_init_impl(int init_service, void *arg)
 	sa_handle_impl_t handle;
 	int err;
 
-	handle = calloc(sizeof (struct sa_handle_impl), 1);
+	handle = calloc(1, sizeof (struct sa_handle_impl));
 
 	if (handle != NULL) {
 		handle->sa_service = init_service;
@@ -2278,7 +2278,7 @@ _sa_set_share_description(void *share, char *content)
 	xmlNodePtr node;
 	node = xmlNewChild((xmlNodePtr)share, NULL, (xmlChar *)"description",
 	    NULL);
-	xmlNodeSetContent(node, (xmlChar *)content);
+	(void) xmlNodeSetContent(node, (xmlChar *)content);
 	return (node);
 }
 
@@ -2611,7 +2611,7 @@ sa_set_share_description(sa_share_t share, char *content)
 		node = _sa_set_share_description(share, content);
 	} else if (node != NULL && content != NULL) {
 		/* update a description */
-		xmlNodeSetContent(node, (xmlChar *)content);
+		(void) xmlNodeSetContent(node, (xmlChar *)content);
 	} else if (node != NULL && content == NULL) {
 		/* remove an existing description */
 		xmlUnlinkNode(node);
@@ -2918,7 +2918,7 @@ sa_destroy_optionset(sa_optionset_t optionset)
 {
 	char name[SA_STRSIZE];
 	int len;
-	int ret;
+	int ret = SA_OK;
 	char *id = NULL;
 	sa_group_t group;
 	int ispersist = 1;
@@ -3855,7 +3855,7 @@ _sa_get_next_resource_index(sa_share_t share)
 sa_resource_t
 sa_add_resource(sa_share_t share, char *resource, int persist, int *error)
 {
-	xmlNodePtr node;
+	xmlNodePtr node = NULL;
 	int err = SA_OK;
 	sa_resource_t res;
 	sa_group_t group;
@@ -4446,7 +4446,7 @@ sa_set_resource_description(sa_resource_t resource, char *content)
 		node = _sa_set_share_description(resource, content);
 	} else if (node != NULL && content != NULL) {
 		/* update a description */
-		xmlNodeSetContent(node, (xmlChar *)content);
+		(void) xmlNodeSetContent(node, (xmlChar *)content);
 	} else if (node != NULL && content == NULL) {
 		/* remove an existing description */
 		xmlUnlinkNode(node);

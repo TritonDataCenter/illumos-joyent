@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2020, The University of Queensland
+ * Copyright 2023 The University of Queensland
  * Copyright (c) 2018, Joyent, Inc.
  * Copyright 2020 RackTop Systems, Inc.
  */
@@ -163,7 +163,7 @@ mlxcx_cq_alloc_dma(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq,
 	mlcq->mlcq_doorbell =
 	    (mlxcx_completionq_doorbell_t *)mlcq->mlcq_doorbell_dma.mxdb_va;
 
-	mlcq->mlcq_state |= MLXCX_CQ_ALLOC;
+	atomic_or_uint(&mlcq->mlcq_state, MLXCX_CQ_ALLOC);
 
 	return (B_TRUE);
 }
@@ -180,7 +180,7 @@ mlxcx_cq_rele_dma(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq)
 	mlxcx_dma_free(&mlcq->mlcq_doorbell_dma);
 	mlcq->mlcq_doorbell = NULL;
 
-	mlcq->mlcq_state &= ~MLXCX_CQ_ALLOC;
+	atomic_and_uint(&mlcq->mlcq_state, ~MLXCX_CQ_ALLOC);
 }
 
 void
@@ -314,7 +314,7 @@ mlxcx_cq_teardown(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq)
 		 */
 		if (mlcq->mlcq_state & MLXCX_CQ_EQAVL) {
 			avl_remove(&mleq->mleq_cqs, mlcq);
-			mlcq->mlcq_state &= ~MLXCX_CQ_EQAVL;
+			atomic_and_uint(&mlcq->mlcq_state, ~MLXCX_CQ_EQAVL);
 		}
 		mutex_exit(&mlcq->mlcq_mtx);
 		mutex_exit(&mleq->mleq_mtx);
@@ -326,6 +326,7 @@ mlxcx_cq_teardown(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq)
 	mutex_exit(&mlcq->mlcq_mtx);
 
 	mutex_destroy(&mlcq->mlcq_mtx);
+	mutex_destroy(&mlcq->mlcq_arm_mtx);
 	mutex_destroy(&mlcq->mlcq_bufbmtx);
 	list_destroy(&mlcq->mlcq_buffers);
 	list_destroy(&mlcq->mlcq_buffers_b);
@@ -340,6 +341,8 @@ mlxcx_cq_setup(mlxcx_t *mlxp, mlxcx_event_queue_t *eq,
 
 	cq = kmem_zalloc(sizeof (mlxcx_completion_queue_t), KM_SLEEP);
 	mutex_init(&cq->mlcq_mtx, NULL, MUTEX_DRIVER,
+	    DDI_INTR_PRI(mlxp->mlx_intr_pri));
+	mutex_init(&cq->mlcq_arm_mtx, NULL, MUTEX_DRIVER,
 	    DDI_INTR_PRI(mlxp->mlx_intr_pri));
 	mutex_init(&cq->mlcq_bufbmtx, NULL, MUTEX_DRIVER,
 	    DDI_INTR_PRI(mlxp->mlx_intr_pri));
@@ -375,12 +378,14 @@ mlxcx_cq_setup(mlxcx_t *mlxp, mlxcx_event_queue_t *eq,
 	mutex_exit(&cq->mlcq_mtx);
 
 	mutex_enter(&eq->mleq_mtx);
+	mutex_enter(&cq->mlcq_arm_mtx);
 	mutex_enter(&cq->mlcq_mtx);
 	ASSERT0(cq->mlcq_state & MLXCX_CQ_EQAVL);
 	avl_add(&eq->mleq_cqs, cq);
-	cq->mlcq_state |= MLXCX_CQ_EQAVL;
+	atomic_or_uint(&cq->mlcq_state, MLXCX_CQ_EQAVL);
 	mlxcx_arm_cq(mlxp, cq);
 	mutex_exit(&cq->mlcq_mtx);
+	mutex_exit(&cq->mlcq_arm_mtx);
 	mutex_exit(&eq->mleq_mtx);
 
 	*cqp = cq;
@@ -553,16 +558,22 @@ mlxcx_teardown_rx_group(mlxcx_t *mlxp, mlxcx_ring_group_t *g)
 			mutex_enter(&g->mlg_rx_vlan_ft->mlft_mtx);
 			ASSERT(list_is_empty(&g->mlg_rx_vlans));
 			fg = g->mlg_rx_vlan_def_fg;
-			fe = list_head(&fg->mlfg_entries);
-			if (fe->mlfe_state & MLXCX_FLOW_ENTRY_CREATED) {
-				(void) mlxcx_cmd_delete_flow_table_entry(
-				    mlxp, fe);
+			if (fg != NULL) {
+				fe = list_head(&fg->mlfg_entries);
+				if (fe->mlfe_state & MLXCX_FLOW_ENTRY_CREATED) {
+					(void)
+					    mlxcx_cmd_delete_flow_table_entry(
+					    mlxp, fe);
+				}
 			}
 			fg = g->mlg_rx_vlan_promisc_fg;
-			fe = list_head(&fg->mlfg_entries);
-			if (fe->mlfe_state & MLXCX_FLOW_ENTRY_CREATED) {
-				(void) mlxcx_cmd_delete_flow_table_entry(
-				    mlxp, fe);
+			if (fg != NULL) {
+				fe = list_head(&fg->mlfg_entries);
+				if (fe->mlfe_state & MLXCX_FLOW_ENTRY_CREATED) {
+					(void)
+					    mlxcx_cmd_delete_flow_table_entry(
+					    mlxp, fe);
+				}
 			}
 			mlxcx_teardown_flow_table(mlxp, g->mlg_rx_vlan_ft);
 			list_destroy(&g->mlg_rx_vlans);
@@ -771,7 +782,7 @@ mlxcx_rx_group_setup(mlxcx_t *mlxp, mlxcx_ring_group_t *g)
 		while (eq == NULL) {
 			eq = &mlxp->mlx_eqs[mlxp->mlx_next_eq++];
 			if (mlxp->mlx_next_eq >= mlxp->mlx_intr_count)
-				mlxp->mlx_next_eq = 1;
+				mlxp->mlx_next_eq = mlxp->mlx_intr_cq0;
 			if (eq->mleq_type != MLXCX_EQ_TYPE_ANY &&
 			    eq->mleq_type != MLXCX_EQ_TYPE_RX) {
 				/* Try the next one */
@@ -1344,7 +1355,7 @@ mlxcx_tx_group_setup(mlxcx_t *mlxp, mlxcx_ring_group_t *g)
 		while (eq == NULL) {
 			eq = &mlxp->mlx_eqs[mlxp->mlx_next_eq++];
 			if (mlxp->mlx_next_eq >= mlxp->mlx_intr_count)
-				mlxp->mlx_next_eq = 1;
+				mlxp->mlx_next_eq = mlxp->mlx_intr_cq0;
 			if (eq->mleq_type != MLXCX_EQ_TYPE_ANY &&
 			    eq->mleq_type != MLXCX_EQ_TYPE_TX) {
 				/* Try the next one */
@@ -2023,8 +2034,9 @@ mlxcx_rx_completion(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq,
     mlxcx_completionq_ent_t *ent, mlxcx_buffer_t *buf)
 {
 	uint32_t chkflags = 0;
-	uint_t wqe_index;
+	uint_t wqe_index, used;
 	ddi_fm_error_t err;
+	mblk_t *mp;
 
 	ASSERT(mutex_owned(&mlcq->mlcq_mtx));
 
@@ -2072,15 +2084,36 @@ mlxcx_rx_completion(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq,
 	 */
 	wqe_index = buf->mlb_wqe_index;
 
-	if (!mlxcx_buf_loan(mlxp, buf)) {
+	/* Set the used field with the actual length of the packet. */
+	buf->mlb_used = (used = from_be32(ent->mlcqe_byte_cnt));
+
+	/* Try to loan this buffer to MAC directly. */
+	if (mlxcx_buf_loan(mlxp, buf)) {
+		mp = buf->mlb_mp;
+
+	} else {
+		/*
+		 * Loan rejected: we will try to allocate a new mblk and copy
+		 * this packet for MAC instead.
+		 */
+		mp = allocb(buf->mlb_used, 0);
+		if (mp == NULL) {
+			/* No memory :( */
+			atomic_add_64(&mlcq->mlcq_stats->mlps_rx_drops, 1);
+			mlxcx_buf_return(mlxp, buf);
+			return (NULL);
+		}
+		bcopy((unsigned char *)buf->mlb_dma.mxdb_va, mp->b_rptr,
+		    buf->mlb_used);
+
+		/* We're done with this buf now, return it to the free list. */
 		mlxcx_buf_return(mlxp, buf);
-		return (NULL);
+		buf = NULL;
 	}
 
-	buf->mlb_mp->b_next = NULL;
-	buf->mlb_mp->b_cont = NULL;
-	buf->mlb_mp->b_wptr = buf->mlb_mp->b_rptr +
-	    from_be32(ent->mlcqe_byte_cnt);
+	mp->b_next = NULL;
+	mp->b_cont = NULL;
+	mp->b_wptr = mp->b_rptr + used;
 
 	if (get_bit8(ent->mlcqe_csflags, MLXCX_CQE_CSFLAGS_L4_OK)) {
 		chkflags |= HCK_FULLCKSUM_OK;
@@ -2089,8 +2122,8 @@ mlxcx_rx_completion(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq,
 		chkflags |= HCK_IPV4_HDRCKSUM_OK;
 	}
 	if (chkflags != 0) {
-		mac_hcksum_set(buf->mlb_mp, 0, 0, 0,
-		    from_be16(ent->mlcqe_checksum), chkflags);
+		mac_hcksum_set(mp, 0, 0, 0, from_be16(ent->mlcqe_checksum),
+		    chkflags);
 	}
 
 	/*
@@ -2106,7 +2139,7 @@ mlxcx_rx_completion(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq,
 		mutex_exit(&wq->mlwq_mtx);
 	}
 
-	return (buf->mlb_mp);
+	return (mp);
 }
 
 static void
@@ -2375,8 +2408,8 @@ mlxcx_buf_take(mlxcx_t *mlxp, mlxcx_work_queue_t *wq)
 }
 
 size_t
-mlxcx_buf_take_n(mlxcx_t *mlxp, mlxcx_work_queue_t *wq,
-    mlxcx_buffer_t **bp, size_t nbufs)
+mlxcx_buf_take_n(mlxcx_t *mlxp, mlxcx_work_queue_t *wq, mlxcx_buffer_t **bp,
+    size_t nbufs)
 {
 	mlxcx_buffer_t *b;
 	size_t done = 0;
@@ -2415,12 +2448,23 @@ mlxcx_buf_loan(mlxcx_t *mlxp, mlxcx_buffer_t *b)
 			return (B_FALSE);
 	}
 
+	mutex_enter(&s->mlbs_mtx);
+
+	/* Check if we have too many buffers on loan. */
+	if (s->mlbs_nloaned >= s->mlbs_hiwat1 &&
+	    b->mlb_used < mlxp->mlx_props.mldp_rx_p50_loan_min_size) {
+		mutex_exit(&s->mlbs_mtx);
+		return (B_FALSE);
+	} else if (s->mlbs_nloaned >= s->mlbs_hiwat2) {
+		mutex_exit(&s->mlbs_mtx);
+		return (B_FALSE);
+	}
+
 	b->mlb_state = MLXCX_BUFFER_ON_LOAN;
 	b->mlb_wqe_index = 0;
-
-	mutex_enter(&s->mlbs_mtx);
 	list_remove(&s->mlbs_busy, b);
 	list_insert_tail(&s->mlbs_loaned, b);
+	s->mlbs_nloaned++;
 	mutex_exit(&s->mlbs_mtx);
 
 	return (B_TRUE);
@@ -2444,6 +2488,14 @@ mlxcx_buf_return_chain(mlxcx_t *mlxp, mlxcx_buffer_t *b0, boolean_t keepmp)
 		b0->mlb_tx_head = NULL;
 	}
 	mlxcx_buf_return(mlxp, b0);
+}
+
+inline void
+mlxcx_bufshard_adjust_total(mlxcx_buf_shard_t *s, int64_t incr)
+{
+	s->mlbs_ntotal += incr;
+	s->mlbs_hiwat1 = s->mlbs_ntotal / 2;
+	s->mlbs_hiwat2 = 3 * (s->mlbs_ntotal / 4);
 }
 
 void
@@ -2479,12 +2531,14 @@ mlxcx_buf_return(mlxcx_t *mlxp, mlxcx_buffer_t *b)
 	mutex_enter(&s->mlbs_mtx);
 	switch (oldstate) {
 	case MLXCX_BUFFER_INIT:
+		mlxcx_bufshard_adjust_total(s, 1);
 		break;
 	case MLXCX_BUFFER_ON_WQ:
 		list_remove(&s->mlbs_busy, b);
 		break;
 	case MLXCX_BUFFER_ON_LOAN:
 		ASSERT(!b->mlb_foreign);
+		--s->mlbs_nloaned;
 		list_remove(&s->mlbs_loaned, b);
 		if (s->mlbs_state == MLXCX_SHARD_DRAINING) {
 			/*
@@ -2537,8 +2591,10 @@ mlxcx_buf_destroy(mlxcx_t *mlxp, mlxcx_buffer_t *b)
 	    b->mlb_state == MLXCX_BUFFER_INIT);
 	ASSERT(mutex_owned(&s->mlbs_mtx));
 
-	if (b->mlb_state == MLXCX_BUFFER_FREE)
+	if (b->mlb_state == MLXCX_BUFFER_FREE) {
 		list_remove(&s->mlbs_free, b);
+		mlxcx_bufshard_adjust_total(s, -1);
+	}
 
 	/*
 	 * This is going back to the kmem cache, so it needs to be set up in

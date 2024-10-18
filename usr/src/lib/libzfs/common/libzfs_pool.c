@@ -21,12 +21,14 @@
 
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2011, 2017 by Delphix. All rights reserved.
+ * Copyright (c) 2011, 2020 by Delphix. All rights reserved.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2016 Nexenta Systems, Inc.
  * Copyright 2016 Igor Kozhukhov <ikozhukhov@gmail.com>
  * Copyright (c) 2017 Datto Inc.
  * Copyright (c) 2017, Intel Corporation.
+ * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2022 Oxide Computer Company
  */
 
 #include <ctype.h>
@@ -39,9 +41,12 @@
 #include <strings.h>
 #include <unistd.h>
 #include <libgen.h>
+#include <sys/dkio.h>
 #include <sys/efi_partition.h>
 #include <sys/vtoc.h>
 #include <sys/zfs_ioctl.h>
+#include <sys/modctl.h>
+#include <sys/mkdev.h>
 #include <dlfcn.h>
 #include <libzutil.h>
 
@@ -327,7 +332,7 @@ zpool_get_prop(zpool_handle_t *zhp, zpool_prop_t prop, char *buf, size_t len,
 				(void) snprintf(buf, len, "%llu",
 				    (u_longlong_t)intval);
 			} else {
-				(void) zfs_nicenum(intval, buf, len);
+				(void) zfs_nicebytes(intval, buf, len);
 			}
 			break;
 		case ZPOOL_PROP_CAPACITY:
@@ -342,15 +347,23 @@ zpool_get_prop(zpool_handle_t *zhp, zpool_prop_t prop, char *buf, size_t len,
 		case ZPOOL_PROP_FRAGMENTATION:
 			if (intval == UINT64_MAX) {
 				(void) strlcpy(buf, "-", len);
+			} else if (literal) {
+				(void) snprintf(buf, len, "%llu",
+				    (u_longlong_t)intval);
 			} else {
 				(void) snprintf(buf, len, "%llu%%",
 				    (u_longlong_t)intval);
 			}
 			break;
 		case ZPOOL_PROP_DEDUPRATIO:
-			(void) snprintf(buf, len, "%llu.%02llux",
-			    (u_longlong_t)(intval / 100),
-			    (u_longlong_t)(intval % 100));
+			if (literal)
+				(void) snprintf(buf, len, "%llu.%02llu",
+				    (u_longlong_t)(intval / 100),
+				    (u_longlong_t)(intval % 100));
+			else
+				(void) snprintf(buf, len, "%llu.%02llux",
+				    (u_longlong_t)(intval / 100),
+				    (u_longlong_t)(intval % 100));
 			break;
 		case ZPOOL_PROP_HEALTH:
 			verify(nvlist_lookup_nvlist(zpool_get_config(zhp, NULL),
@@ -397,7 +410,7 @@ zpool_get_prop(zpool_handle_t *zhp, zpool_prop_t prop, char *buf, size_t len,
  * Assuming bootfs is a valid dataset name.
  */
 static boolean_t
-bootfs_name_valid(const char *pool, char *bootfs)
+bootfs_name_valid(const char *pool, const char *bootfs)
 {
 	int len = strlen(pool);
 	if (bootfs[0] == '\0')
@@ -1305,7 +1318,8 @@ zpool_create(libzfs_handle_t *hdl, const char *pool, nvlist_t *nvroot,
 			{
 				char buf[64];
 
-				zfs_nicenum(SPA_MINDEVSIZE, buf, sizeof (buf));
+				zfs_nicebytes(SPA_MINDEVSIZE, buf,
+				    sizeof (buf));
 
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 				    "one or more devices is less than the "
@@ -1489,7 +1503,8 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 			{
 				char buf[64];
 
-				zfs_nicenum(SPA_MINDEVSIZE, buf, sizeof (buf));
+				zfs_nicebytes(SPA_MINDEVSIZE, buf,
+				    sizeof (buf));
 
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 				    "device is less than the minimum "
@@ -1502,13 +1517,6 @@ zpool_add(zpool_handle_t *zhp, nvlist_t *nvroot)
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 			    "pool must be upgraded to add these vdevs"));
 			(void) zfs_error(hdl, EZFS_BADVERSION, msg);
-			break;
-
-		case EDOM:
-			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
-			    "root pool can not have multiple vdevs"
-			    " or separate logs"));
-			(void) zfs_error(hdl, EZFS_POOL_NOTSUP, msg);
 			break;
 
 		default:
@@ -2797,12 +2805,14 @@ zpool_get_physpath(zpool_handle_t *zhp, char *physpath, size_t phypath_size)
  * the disk to use the new unallocated space.
  */
 static int
-zpool_relabel_disk(libzfs_handle_t *hdl, const char *name)
+zpool_relabel_disk(libzfs_handle_t *hdl, const char *name, const char *msg)
 {
 	char path[MAXPATHLEN];
-	char errbuf[1024];
 	int fd, error;
 	int (*_efi_use_whole_disk)(int);
+	char drv[MODMAXNAMELEN];
+	major_t maj;
+	struct stat st;
 
 	if ((_efi_use_whole_disk = (int (*)(int))dlsym(RTLD_DEFAULT,
 	    "efi_use_whole_disk")) == NULL)
@@ -2813,7 +2823,7 @@ zpool_relabel_disk(libzfs_handle_t *hdl, const char *name)
 	if ((fd = open(path, O_RDWR | O_NDELAY)) < 0) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "cannot "
 		    "relabel '%s': unable to open device"), name);
-		return (zfs_error(hdl, EZFS_OPENFAILED, errbuf));
+		return (zfs_error(hdl, EZFS_OPENFAILED, msg));
 	}
 
 	/*
@@ -2822,12 +2832,34 @@ zpool_relabel_disk(libzfs_handle_t *hdl, const char *name)
 	 * ignore that error and continue on.
 	 */
 	error = _efi_use_whole_disk(fd);
-	(void) close(fd);
 	if (error && error != VT_ENOSPC) {
+		(void) close(fd);
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN, "cannot "
 		    "relabel '%s': unable to read disk capacity"), name);
-		return (zfs_error(hdl, EZFS_NOCAP, errbuf));
+		return (zfs_error(hdl, EZFS_NOCAP, msg));
 	}
+
+	/*
+	 * Writing a new EFI partition table to the disk will have marked
+	 * the geometry as needing re-validation. Before returning, force
+	 * it to be checked by querying the device state, otherwise the
+	 * subsequent vdev_reopen() will very likely fail to read the device
+	 * size, faulting the pool.
+	 *
+	 * The dkio(4I) ioctls are implemented by the disk driver rather than
+	 * some generic framework, so we limit its use here to drivers with
+	 * which it has been tested.
+	 */
+	if (fstat(fd, &st) == 0 &&
+	    (maj = major(st.st_rdev)) != (major_t)NODEV &&
+	    modctl(MODGETNAME, drv, sizeof (drv), &maj) == 0 &&
+	    (strcmp(drv, "blkdev") == 0 || strcmp(drv, "sd") == 0)) {
+		enum dkio_state dkst = DKIO_NONE;
+		(void) ioctl(fd, DKIOCSTATE, &dkst);
+	}
+
+	(void) close(fd);
+
 	return (0);
 }
 
@@ -2845,6 +2877,7 @@ zpool_vdev_online(zpool_handle_t *zhp, const char *path, int flags,
 	nvlist_t *tgt;
 	boolean_t avail_spare, l2cache, islog;
 	libzfs_handle_t *hdl = zhp->zpool_hdl;
+	int error;
 
 	if (flags & ZFS_ONLINE_EXPAND) {
 		(void) snprintf(msg, sizeof (msg),
@@ -2883,7 +2916,9 @@ zpool_vdev_online(zpool_handle_t *zhp, const char *path, int flags,
 
 		if (wholedisk) {
 			pathname += strlen(ZFS_DISK_ROOT) + 1;
-			(void) zpool_relabel_disk(hdl, pathname);
+			error = zpool_relabel_disk(hdl, pathname, msg);
+			if (error != 0)
+				return (error);
 		}
 	}
 
@@ -3932,17 +3967,70 @@ set_path(zpool_handle_t *zhp, nvlist_t *nv, const char *path)
 }
 
 /*
- * Given a vdev, return the name to display in iostat.  If the vdev has a path,
- * we use that, stripping off any leading "/dev/dsk/"; if not, we use the type.
- * We also check if this is a whole disk, in which case we strip off the
- * trailing 's0' slice name.
- *
- * This routine is also responsible for identifying when disks have been
+ * This routine is responsible for identifying when disks have been
  * reconfigured in a new location.  The kernel will have opened the device by
  * devid, but the path will still refer to the old location.  To catch this, we
- * first do a path -> devid translation (which is fast for the common case).  If
- * the devid matches, we're done.  If not, we do a reverse devid -> path
- * translation and issue the appropriate ioctl() to update the path of the vdev.
+ * first do a path -> devid translation (which is fast for the common case).
+ * If the devid matches, we're done.  If not, we do a reverse devid -> path
+ * translation and issue the appropriate ioctl() to update the path of the
+ * vdev.
+ */
+void
+zpool_vdev_refresh_path(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv)
+{
+	char *path = NULL;
+	char *newpath = NULL;
+	char *physpath = NULL;
+	char *devid = NULL;
+
+	if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PATH, &path) != 0) {
+		return;
+	}
+
+	if (nvlist_lookup_string(nv, ZPOOL_CONFIG_DEVID, &devid) == 0) {
+		/*
+		 * This vdev has a devid.  We can use it to check the current
+		 * path.
+		 */
+		char *newdevid = path_to_devid(path);
+
+		if (newdevid == NULL || strcmp(devid, newdevid) != 0) {
+			newpath = devid_to_path(devid);
+		}
+
+		if (newdevid != NULL) {
+			devid_str_free(newdevid);
+		}
+
+	} else if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PHYS_PATH,
+	    &physpath) == 0) {
+		/*
+		 * This vdev does not have a devid, but it does have a physical
+		 * path.  Attempt to translate this to a /dev path.
+		 */
+		newpath = path_from_physpath(hdl, path, physpath);
+	}
+
+	if (newpath == NULL) {
+		/*
+		 * No path update is required.
+		 */
+		return;
+	}
+
+	set_path(zhp, nv, newpath);
+	fnvlist_add_string(nv, ZPOOL_CONFIG_PATH, newpath);
+
+	free(newpath);
+}
+
+/*
+ * Given a vdev, return the name to display in iostat.  If the vdev has a path,
+ * we use that, stripping off any leading "/dev/dsk/"; if not, we use the type.
+ * We will confirm that the path and name of the vdev are current, and update
+ * them if not.  We also check if this is a whole disk, in which case we strip
+ * off the trailing 's0' slice name.
+ *
  * If 'zhp' is NULL, then this is an exported pool, and we don't need to do any
  * of these checks.
  */
@@ -3952,7 +4040,6 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 {
 	char *path, *type, *env;
 	uint64_t value;
-	char buf[64];
 
 	/*
 	 * vdev_name will be "root"/"root-0" for the root vdev, but it is the
@@ -3980,14 +4067,10 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 	if (nvlist_lookup_uint64(nv, ZPOOL_CONFIG_NOT_PRESENT, &value) == 0 ||
 	    name_flags & VDEV_NAME_GUID) {
 		nvlist_lookup_uint64(nv, ZPOOL_CONFIG_GUID, &value);
-		(void) snprintf(buf, sizeof (buf), "%llu", (u_longlong_t)value);
-		path = buf;
+		path = zfs_asprintf(hdl, "%llu", (u_longlong_t)value);
 	} else if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PATH, &path) == 0) {
 		vdev_stat_t *vs;
 		uint_t vsc;
-		char *newpath = NULL;
-		char *physpath = NULL;
-		char *devid = NULL;
 
 		/*
 		 * If the device is dead (faulted, offline, etc) then don't
@@ -3999,58 +4082,33 @@ zpool_vdev_name(libzfs_handle_t *hdl, zpool_handle_t *zhp, nvlist_t *nv,
 		    (uint64_t **)&vs, &vsc) != 0 ||
 		    vs->vs_state < VDEV_STATE_DEGRADED ||
 		    zhp == NULL) {
+			path = zfs_strdup(hdl, path);
 			goto after_open;
 		}
 
-		if (nvlist_lookup_string(nv, ZPOOL_CONFIG_DEVID, &devid) == 0) {
-			/*
-			 * This vdev has a devid.  We can use it to check the
-			 * current path.
-			 */
-			char *newdevid = path_to_devid(path);
-
-			if (newdevid == NULL || strcmp(devid, newdevid) != 0) {
-				newpath = devid_to_path(devid);
-			}
-
-			if (newdevid != NULL)
-				devid_str_free(newdevid);
-
-		} else if (nvlist_lookup_string(nv, ZPOOL_CONFIG_PHYS_PATH,
-		    &physpath) == 0) {
-			/*
-			 * This vdev does not have a devid, but it does have a
-			 * physical path.  Attempt to translate this to a /dev
-			 * path.
-			 */
-			newpath = path_from_physpath(hdl, path, physpath);
-		}
-
-		if (newpath != NULL) {
-			/*
-			 * Update the path appropriately.
-			 */
-			set_path(zhp, nv, newpath);
-			if (nvlist_add_string(nv, ZPOOL_CONFIG_PATH,
-			    newpath) == 0) {
-				verify(nvlist_lookup_string(nv,
-				    ZPOOL_CONFIG_PATH, &path) == 0);
-			}
-			free(newpath);
-		}
+		/*
+		 * Refresh the /dev path for this vdev if required, then ensure
+		 * we're using the latest path value:
+		 */
+		zpool_vdev_refresh_path(hdl, zhp, nv);
+		path = fnvlist_lookup_string(nv, ZPOOL_CONFIG_PATH);
 
 		if (name_flags & VDEV_NAME_FOLLOW_LINKS) {
 			char *rp = realpath(path, NULL);
-			if (rp) {
-				strlcpy(buf, rp, sizeof (buf));
-				path = buf;
-				free(rp);
-			}
+			if (rp == NULL)
+				no_memory(hdl);
+			path = rp;
+		} else {
+			path = zfs_strdup(hdl, path);
 		}
 
 after_open:
-		if (strncmp(path, ZFS_DISK_ROOTD, strlen(ZFS_DISK_ROOTD)) == 0)
-			path += strlen(ZFS_DISK_ROOTD);
+		if (strncmp(path, ZFS_DISK_ROOTD,
+		    sizeof (ZFS_DISK_ROOTD) - 1) == 0) {
+			const char *p2 = path + sizeof (ZFS_DISK_ROOTD) - 1;
+
+			memmove(path, p2, strlen(p2) + 1);
+		}
 
 		/*
 		 * Remove the partition from the path it this is a whole disk.
@@ -4058,38 +4116,38 @@ after_open:
 		if (nvlist_lookup_uint64(nv, ZPOOL_CONFIG_WHOLE_DISK, &value)
 		    == 0 && value && !(name_flags & VDEV_NAME_PATH)) {
 			int pathlen = strlen(path);
-			char *tmp = zfs_strdup(hdl, path);
 
 			/*
 			 * If it starts with c#, and ends with "s0" or "s1",
 			 * chop the slice off, or if it ends with "s0/old" or
 			 * "s1/old", remove the slice from the middle.
 			 */
-			if (CTD_CHECK(tmp)) {
-				if (strcmp(&tmp[pathlen - 2], "s0") == 0 ||
-				    strcmp(&tmp[pathlen - 2], "s1") == 0) {
-					tmp[pathlen - 2] = '\0';
+			if (CTD_CHECK(path)) {
+				if (strcmp(&path[pathlen - 2], "s0") == 0 ||
+				    strcmp(&path[pathlen - 2], "s1") == 0) {
+					path[pathlen - 2] = '\0';
 				} else if (pathlen > 6 &&
-				    (strcmp(&tmp[pathlen - 6], "s0/old") == 0 ||
-				    strcmp(&tmp[pathlen - 6], "s1/old") == 0)) {
-					(void) strcpy(&tmp[pathlen - 6],
+				    (strcmp(&path[pathlen - 6],
+				    "s0/old") == 0 ||
+				    strcmp(&path[pathlen - 6],
+				    "s1/old") == 0)) {
+					(void) strcpy(&path[pathlen - 6],
 					    "/old");
 				}
 			}
-			return (tmp);
+			return (path);
 		}
 	} else {
-		path = type;
-
 		/*
 		 * If it's a raidz device, we need to stick in the parity level.
 		 */
-		if (strcmp(path, VDEV_TYPE_RAIDZ) == 0) {
+		if (strcmp(type, VDEV_TYPE_RAIDZ) == 0) {
 			verify(nvlist_lookup_uint64(nv, ZPOOL_CONFIG_NPARITY,
 			    &value) == 0);
-			(void) snprintf(buf, sizeof (buf), "%s%llu", path,
+			path = zfs_asprintf(hdl, "%s%llu", type,
 			    (u_longlong_t)value);
-			path = buf;
+		} else {
+			path = zfs_strdup(hdl, type);
 		}
 
 		/*
@@ -4098,16 +4156,18 @@ after_open:
 		 */
 		if (name_flags & VDEV_NAME_TYPE_ID) {
 			uint64_t id;
+			char *tmp;
 
 			verify(nvlist_lookup_uint64(nv, ZPOOL_CONFIG_ID,
 			    &id) == 0);
-			(void) snprintf(buf, sizeof (buf), "%s-%llu", path,
+			tmp = zfs_asprintf(hdl, "%s-%llu", path,
 			    (u_longlong_t)id);
-			path = buf;
+			free(path);
+			path = tmp;
 		}
 	}
 
-	return (zfs_strdup(hdl, path));
+	return (path);
 }
 
 static int
@@ -4421,6 +4481,38 @@ zpool_obj_to_path(zpool_handle_t *zhp, uint64_t dsobj, uint64_t obj,
 	free(mntpnt);
 }
 
+int
+zpool_set_bootenv(zpool_handle_t *zhp, const nvlist_t *envmap)
+{
+	int error = lzc_set_bootenv(zhp->zpool_name, envmap);
+	if (error != 0) {
+		(void) zpool_standard_error_fmt(zhp->zpool_hdl, error,
+		    dgettext(TEXT_DOMAIN,
+		    "error setting bootenv in pool '%s'"), zhp->zpool_name);
+	}
+
+	return (error);
+}
+
+int
+zpool_get_bootenv(zpool_handle_t *zhp, nvlist_t **nvlp)
+{
+	nvlist_t *nvl;
+	int error;
+
+	nvl = NULL;
+	error = lzc_get_bootenv(zhp->zpool_name, &nvl);
+	if (error != 0) {
+		(void) zpool_standard_error_fmt(zhp->zpool_hdl, error,
+		    dgettext(TEXT_DOMAIN,
+		    "error getting bootenv in pool '%s'"), zhp->zpool_name);
+	} else {
+		*nvlp = nvl;
+	}
+
+	return (error);
+}
+
 /*
  * Read the EFI label from the config, if a label does not exist then
  * pass back the error to the caller. If the caller has passed a non-NULL
@@ -4679,7 +4771,7 @@ zpool_label_disk(libzfs_handle_t *hdl, zpool_handle_t *zhp, const char *name,
 		efi_free(vtoc);
 
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
-		    "try using fdisk(1M) and then provide a specific slice"));
+		    "try using fdisk(8) and then provide a specific slice"));
 		return (zfs_error(hdl, EZFS_LABELFAILED, errbuf));
 	}
 

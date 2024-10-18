@@ -3,24 +3,22 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
  /*
   * This module implements a simple access control language that is based on
   * host (or domain) names, NIS (host) netgroup names, IP addresses (or
   * network numbers) and daemon process names. When a match is found the
   * search is terminated, and depending on whether PROCESS_OPTIONS is defined,
   * a list of options is executed or an optional shell command is executed.
-  * 
+  *
   * Host and user names are looked up on demand, provided that suitable endpoint
   * information is available as sockaddr_in structures or TLI netbufs. As a
   * side effect, the pattern matching process may change the contents of
   * request structure fields.
-  * 
+  *
   * Diagnostics are reported through syslog(3).
-  * 
+  *
   * Compile with -DNETGROUP if your library provides support for netgroups.
-  * 
+  *
   * Author: Wietse Venema, Eindhoven University of Technology, The Netherlands.
   */
 
@@ -114,7 +112,7 @@ struct request_info *request;
      * client) pair is matched by an entry in the file /etc/hosts.deny,
      * access is denied. Otherwise, access is granted. A non-existent
      * access-control file is treated as an empty file.
-     * 
+     *
      * After a rule has been matched, the optional language extensions may
      * decide to grant or refuse service anyway. Or, while a rule is being
      * processed, a serious error is found, and it seems better to play safe
@@ -265,7 +263,7 @@ struct host_info *host;
     /*
      * This code looks a little hairy because we want to avoid unnecessary
      * hostname lookups.
-     * 
+     *
      * The KNOWN pattern requires that both address AND name be known; some
      * patterns are specific to host names or to host addresses; all other
      * patterns are satisfied when either the address OR the name match.
@@ -300,8 +298,7 @@ struct host_info *host;
 	     * and match against that.
 	     */
 	    if (host->sin == NULL) {
-		if (host->addr == NULL ||
-		    inet_pton(AF_INET6, host->addr, &hostin6) != 1) {
+		if (inet_pton(AF_INET6, host->addr, &hostin6) != 1) {
 		    return (NO);
 		}
 		hip = &hostin6;
@@ -316,7 +313,7 @@ struct host_info *host;
 
 	    /*
 	     * A /nnn prefix specifies how many bits of the address we
-	     * need to check. 
+	     * need to check.
 	     */
 	    if (slash = strchr(tok, '/')) {
 		*slash = '\0';

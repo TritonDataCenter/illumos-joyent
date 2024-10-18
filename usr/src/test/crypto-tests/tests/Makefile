@@ -14,7 +14,7 @@
 # Copyright 2019 Joyent, Inc.
 #
 
-SUBDIRS = modes common digest hmac
+SUBDIRS = modes common digest hmac longhash
 
 all: $(SUBDIRS)
 

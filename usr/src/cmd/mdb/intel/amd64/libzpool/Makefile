@@ -35,7 +35,6 @@ include ../../../../Makefile.cmd
 include ../../../../Makefile.cmd.64
 include ../../Makefile.amd64
 include ../../../Makefile.module
-include ../../../common/modules/zfs/Makefile.zfs
 
 MODSRCS_DIR = ../../../common/modules/zfs
 GENUNIX_DIR = ../../../common/modules/genunix
@@ -46,13 +45,9 @@ CPPFLAGS += -I../../../../../lib/libzpool/common \
 	-I../../../../../common/zfs
 
 CSTD=	$(CSTD_GNU99)
-C99LMODE=	-Xc99=%all
 
-CERRWARN 	+= -_gcc=-Wno-type-limits
+CERRWARN	+= -_gcc=-Wno-type-limits
 
 dmod/%.o: $(GENUNIX_DIR)/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
-
-dmod/%.ln: $(GENUNIX_DIR)/%.c
-	$(LINT.c) -c $<

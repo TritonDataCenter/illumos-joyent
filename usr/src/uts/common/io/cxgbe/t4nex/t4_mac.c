@@ -22,6 +22,7 @@
 
 /*
  * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <sys/ddi.h>
@@ -113,6 +114,202 @@ char *t4_priv_props[] = {
 	NULL
 };
 
+/*
+ * To determine the actual Ethernet mode that we're in we need to look at the
+ * port type. That will tell us whether we're using a BASE-T PHY, have an
+ * external SFP connection whose module type we also need to use to qualify
+ * this, and then the link speed itself. Combining that tuple we can then get
+ * the current media.
+ *
+ * Our tables below assume we have gotten it down so the last thing we need to
+ * consider is a single speed. If port types end up supporting the same class of
+ * transceiver at a given speed, then this will need to be changed to use
+ * additional information to disambiguate that (which will require additional
+ * logic from the firmware).
+ */
+typedef struct {
+	fw_port_cap32_t tmm_speed;
+	mac_ether_media_t tmm_ether;
+} t4nex_media_map_t;
+
+static const t4nex_media_map_t t4nex_map_baset[] = {
+	/*
+	 * We're assuming that the 100 Mb/s mode is 100BASE-TX. It's hard to say
+	 * for certain what the phy would have done, but given the rest of the
+	 * market, that seems the most likely one.
+	 */
+	{ FW_PORT_CAP32_SPEED_100M, ETHER_MEDIA_100BASE_TX },
+	{ FW_PORT_CAP32_SPEED_1G, ETHER_MEDIA_1000BASE_T },
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_T }
+};
+
+static const t4nex_media_map_t t4nex_map_kx[] = {
+	{ FW_PORT_CAP32_SPEED_1G, ETHER_MEDIA_1000BASE_KX },
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_KX4 }
+};
+
+static const t4nex_media_map_t t4nex_map_cx[] = {
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_CX4 }
+};
+
+static const t4nex_media_map_t t4nex_map_kr[] = {
+	{ FW_PORT_CAP32_SPEED_1G, ETHER_MEDIA_1000BASE_KX },
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_KR },
+	{ FW_PORT_CAP32_SPEED_25G, ETHER_MEDIA_25GBASE_KR },
+	{ FW_PORT_CAP32_SPEED_40G, ETHER_MEDIA_40GBASE_KR4 },
+	{ FW_PORT_CAP32_SPEED_50G, ETHER_MEDIA_50GBASE_KR2 },
+	{ FW_PORT_CAP32_SPEED_100G, ETHER_MEDIA_100GBASE_KR4 },
+};
+
+static const t4nex_media_map_t t4nex_map_lr[] = {
+	{ FW_PORT_CAP32_SPEED_1G, ETHER_MEDIA_1000BASE_LX },
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_LR },
+	{ FW_PORT_CAP32_SPEED_25G, ETHER_MEDIA_25GBASE_LR },
+	{ FW_PORT_CAP32_SPEED_40G, ETHER_MEDIA_40GBASE_LR4 },
+	{ FW_PORT_CAP32_SPEED_50G, ETHER_MEDIA_50GBASE_LR2 },
+	{ FW_PORT_CAP32_SPEED_100G, ETHER_MEDIA_100GBASE_LR4 },
+};
+
+static const t4nex_media_map_t t4nex_map_sr[] = {
+	{ FW_PORT_CAP32_SPEED_1G, ETHER_MEDIA_1000BASE_SX },
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_SR },
+	{ FW_PORT_CAP32_SPEED_25G, ETHER_MEDIA_25GBASE_SR },
+	{ FW_PORT_CAP32_SPEED_40G, ETHER_MEDIA_40GBASE_SR4 },
+	{ FW_PORT_CAP32_SPEED_50G, ETHER_MEDIA_50GBASE_SR2 },
+	{ FW_PORT_CAP32_SPEED_100G, ETHER_MEDIA_100GBASE_SR4 },
+};
+
+static const t4nex_media_map_t t4nex_map_er[] = {
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_ER },
+	{ FW_PORT_CAP32_SPEED_25G, ETHER_MEDIA_25GBASE_ER },
+	{ FW_PORT_CAP32_SPEED_40G, ETHER_MEDIA_40GBASE_ER4 },
+	{ FW_PORT_CAP32_SPEED_100G, ETHER_MEDIA_100GBASE_ER4 },
+};
+
+static const t4nex_media_map_t t4nex_map_cr[] = {
+	{ FW_PORT_CAP32_SPEED_1G, ETHER_MEDIA_1000BASE_CX },
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_CR },
+	{ FW_PORT_CAP32_SPEED_25G, ETHER_MEDIA_25GBASE_CR },
+	{ FW_PORT_CAP32_SPEED_40G, ETHER_MEDIA_40GBASE_CR4 },
+	{ FW_PORT_CAP32_SPEED_50G, ETHER_MEDIA_50GBASE_CR2 },
+	{ FW_PORT_CAP32_SPEED_100G, ETHER_MEDIA_100GBASE_CR4 },
+};
+
+static const t4nex_media_map_t t4nex_map_acc[] = {
+	{ FW_PORT_CAP32_SPEED_1G, ETHER_MEDIA_1000BASE_CX },
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_ACC },
+	{ FW_PORT_CAP32_SPEED_25G, ETHER_MEDIA_25GBASE_ACC },
+	{ FW_PORT_CAP32_SPEED_40G, ETHER_MEDIA_40GBASE_ACC4 },
+	{ FW_PORT_CAP32_SPEED_50G, ETHER_MEDIA_50GBASE_ACC2 },
+	{ FW_PORT_CAP32_SPEED_100G, ETHER_MEDIA_100GBASE_ACC4 },
+};
+
+static const t4nex_media_map_t t4nex_map_lrm[] = {
+	{ FW_PORT_CAP32_SPEED_10G, ETHER_MEDIA_10GBASE_LRM },
+};
+
+static mac_ether_media_t
+t4_port_to_media(struct port_info *pi)
+{
+	fw_port_cap32_t speed;
+	struct link_config *lc = &pi->link_cfg;
+	const t4nex_media_map_t *map = NULL;
+	size_t count = 0;
+
+	if (lc->link_ok != 0) {
+		speed = t4_link_fwcap_to_fwspeed(lc->link_caps);
+	} else {
+		return (ETHER_MEDIA_UNKNOWN);
+	}
+
+	switch (pi->port_type) {
+	case FW_PORT_TYPE_FIBER_XFI:
+	case FW_PORT_TYPE_FIBER_XAUI:
+	case FW_PORT_TYPE_SFP:
+	case FW_PORT_TYPE_QSFP_10G:
+	case FW_PORT_TYPE_QSA:
+	case FW_PORT_TYPE_QSFP:
+	case FW_PORT_TYPE_CR4_QSFP:
+	case FW_PORT_TYPE_CR_QSFP:
+	case FW_PORT_TYPE_CR2_QSFP:
+	case FW_PORT_TYPE_SFP28:
+		switch (pi->mod_type) {
+		case FW_PORT_MOD_TYPE_LR:
+			map = t4nex_map_lr;
+			count = ARRAY_SIZE(t4nex_map_lr);
+			break;
+		case FW_PORT_MOD_TYPE_SR:
+			map = t4nex_map_sr;
+			count = ARRAY_SIZE(t4nex_map_sr);
+			break;
+		case FW_PORT_MOD_TYPE_ER:
+			map = t4nex_map_er;
+			count = ARRAY_SIZE(t4nex_map_er);
+			break;
+		case FW_PORT_MOD_TYPE_TWINAX_PASSIVE:
+			map = t4nex_map_cr;
+			count = ARRAY_SIZE(t4nex_map_cr);
+			break;
+		case FW_PORT_MOD_TYPE_TWINAX_ACTIVE:
+			map = t4nex_map_acc;
+			count = ARRAY_SIZE(t4nex_map_acc);
+			break;
+		case FW_PORT_MOD_TYPE_LRM:
+			map = t4nex_map_lrm;
+			count = ARRAY_SIZE(t4nex_map_lrm);
+			break;
+		case FW_PORT_MOD_TYPE_ERROR:
+		case FW_PORT_MOD_TYPE_UNKNOWN:
+		case FW_PORT_MOD_TYPE_NOTSUPPORTED:
+		case FW_PORT_MOD_TYPE_NONE:
+		case FW_PORT_MOD_TYPE_NA:
+		default:
+			break;
+		}
+		break;
+	case FW_PORT_TYPE_KX4:
+	case FW_PORT_TYPE_KX:
+		map = t4nex_map_kx;
+		count = ARRAY_SIZE(t4nex_map_kx);
+		break;
+	case FW_PORT_TYPE_CX4:
+		map = t4nex_map_cx;
+		count = ARRAY_SIZE(t4nex_map_cx);
+		break;
+	case FW_PORT_TYPE_KR:
+	case FW_PORT_TYPE_BP_AP:
+	case FW_PORT_TYPE_BP4_AP:
+	case FW_PORT_TYPE_BP40_BA:
+	case FW_PORT_TYPE_KR4_100G:
+	case FW_PORT_TYPE_KR_SFP28:
+	case FW_PORT_TYPE_KR_XLAUI:
+		map = t4nex_map_kr;
+		count = ARRAY_SIZE(t4nex_map_kr);
+		break;
+	case FW_PORT_TYPE_BT_SGMII:
+	case FW_PORT_TYPE_BT_XFI:
+	case FW_PORT_TYPE_BT_XAUI:
+		map = t4nex_map_baset;
+		count = ARRAY_SIZE(t4nex_map_baset);
+		break;
+	case FW_PORT_TYPE_NONE:
+	default:
+		break;
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		if (map[i].tmm_speed == speed) {
+			return (map[i].tmm_ether);
+		}
+	}
+
+	/*
+	 * At this point we return unknown as we already checked for a down link
+	 * earlier.
+	 */
+	return (ETHER_MEDIA_UNKNOWN);
+}
+
 static int
 t4_mc_getstat(void *arg, uint_t stat, uint64_t *val)
 {
@@ -126,7 +323,7 @@ t4_mc_getstat(void *arg, uint_t stat, uint64_t *val)
 	switch (stat) {
 	case MAC_STAT_IFSPEED:
 		if (lc->link_ok != 0) {
-			*val = lc->speed;
+			*val = t4_link_fwcap_to_speed(lc->link_caps);
 			*val *= 1000000;
 		} else
 			*val = 0;
@@ -228,11 +425,17 @@ t4_mc_getstat(void *arg, uint_t stat, uint64_t *val)
 
 	case ETHER_STAT_XCVR_ADDR:
 	case ETHER_STAT_XCVR_ID:
-	case ETHER_STAT_XCVR_INUSE:
 		return (ENOTSUP);
+	case ETHER_STAT_XCVR_INUSE:
+		*val = t4_port_to_media(pi);
+		break;
 
 	case ETHER_STAT_CAP_100GFDX:
 		*val = !!(lc->pcaps & FW_PORT_CAP32_SPEED_100G);
+		break;
+
+	case ETHER_STAT_CAP_50GFDX:
+		*val = !!(lc->pcaps & FW_PORT_CAP32_SPEED_50G);
 		break;
 
 	case ETHER_STAT_CAP_40GFDX:
@@ -251,26 +454,22 @@ t4_mc_getstat(void *arg, uint_t stat, uint64_t *val)
 		*val = !!(lc->pcaps & FW_PORT_CAP32_SPEED_1G);
 		break;
 
-	case ETHER_STAT_CAP_1000HDX:
-		return (ENOTSUP);
-
 	case ETHER_STAT_CAP_100FDX:
 		*val = !!(lc->pcaps & FW_PORT_CAP32_SPEED_100M);
 		break;
 
+	case ETHER_STAT_CAP_1000HDX:
 	case ETHER_STAT_CAP_100HDX:
-		return (ENOTSUP);
-
 	case ETHER_STAT_CAP_10FDX:
 	case ETHER_STAT_CAP_10HDX:
 		return (ENOTSUP);
 
 	case ETHER_STAT_CAP_ASMPAUSE:
-		*val = 0;
+		*val = !!(lc->pcaps & FW_PORT_CAP32_FC_RX);
 		break;
 
 	case ETHER_STAT_CAP_PAUSE:
-		*val = 1;
+		*val = !!(lc->pcaps & FW_PORT_CAP32_FC_TX);
 		break;
 
 	case ETHER_STAT_CAP_AUTONEG:
@@ -301,90 +500,153 @@ t4_mc_getstat(void *arg, uint_t stat, uint64_t *val)
 
 	/* Advertised asymmetric pause capability */
 	case ETHER_STAT_ADV_CAP_ASMPAUSE:
-		*val = (((lc->requested_fc & PAUSE_TX) ? 1 : 0) ^
-		    (lc->requested_fc & PAUSE_RX));
+		if (lc->pcaps & FW_PORT_CAP32_802_3_ASM_DIR)
+			*val = !!(lc->admin_caps & FW_PORT_CAP32_802_3_ASM_DIR);
+		else
+			*val = (!!(lc->admin_caps & FW_PORT_CAP32_FC_TX)) ^
+			       (!!(lc->admin_caps & FW_PORT_CAP32_FC_RX));
 		break;
 
 	/* Advertised pause capability */
 	case ETHER_STAT_ADV_CAP_PAUSE:
-		*val = (lc->requested_fc & PAUSE_TX) ? 1 : 0;
+		if (lc->pcaps & FW_PORT_CAP32_802_3_PAUSE)
+			*val = !!(lc->admin_caps & FW_PORT_CAP32_802_3_PAUSE);
+		else
+			*val = !!(lc->admin_caps & FW_PORT_CAP32_FC_TX);
 		break;
 
 	case ETHER_STAT_ADV_CAP_100GFDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_100G);
+		*val = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_100G);
+		break;
+
+	case ETHER_STAT_ADV_CAP_50GFDX:
+		*val = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_50G);
 		break;
 
 	case ETHER_STAT_ADV_CAP_40GFDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_40G);
+		*val = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_40G);
 		break;
 
 	case ETHER_STAT_ADV_CAP_25GFDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_25G);
+		*val = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_25G);
 		break;
 
 	case ETHER_STAT_ADV_CAP_10GFDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_10G);
+		*val = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_10G);
 		break;
 
 	case ETHER_STAT_ADV_CAP_1000FDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_1G);
+		*val = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_1G);
+		break;
+
+	case ETHER_STAT_ADV_CAP_100FDX:
+		*val = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_100M);
 		break;
 
 	case ETHER_STAT_ADV_CAP_AUTONEG:
-		*val = !!(lc->acaps & FW_PORT_CAP32_ANEG);
+		*val = !!(lc->admin_caps & FW_PORT_CAP32_ANEG);
 		break;
 
 	case ETHER_STAT_ADV_CAP_1000HDX:
-	case ETHER_STAT_ADV_CAP_100FDX:
 	case ETHER_STAT_ADV_CAP_100HDX:
 	case ETHER_STAT_ADV_CAP_10FDX:
 	case ETHER_STAT_ADV_CAP_10HDX:
 		return (ENOTSUP);	/* TODO */
 
+	case ETHER_STAT_LP_CAP_ASMPAUSE:
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		if (lc->pcaps & FW_PORT_CAP32_802_3_ASM_DIR)
+			*val = !!(lc->lpacaps & FW_PORT_CAP32_802_3_ASM_DIR);
+		else
+			*val = (!!(lc->lpacaps & FW_PORT_CAP32_FC_TX)) ^
+			       (!!(lc->lpacaps & FW_PORT_CAP32_FC_RX));
+		break;
+
+	case ETHER_STAT_LP_CAP_PAUSE:
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		if (lc->pcaps & FW_PORT_CAP32_802_3_PAUSE)
+			*val = !!(lc->lpacaps & FW_PORT_CAP32_802_3_PAUSE);
+		else
+			*val = !!(lc->lpacaps & FW_PORT_CAP32_FC_TX);
+		break;
 
 	case ETHER_STAT_LP_CAP_100GFDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_100G);
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		*val = !!(lc->lpacaps & FW_PORT_CAP32_SPEED_100G);
+		break;
+
+	case ETHER_STAT_LP_CAP_50GFDX:
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		*val = !!(lc->lpacaps & FW_PORT_CAP32_SPEED_50G);
 		break;
 
 	case ETHER_STAT_LP_CAP_40GFDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_40G);
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		*val = !!(lc->lpacaps & FW_PORT_CAP32_SPEED_40G);
 		break;
 
 	case ETHER_STAT_LP_CAP_25GFDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_25G);
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		*val = !!(lc->lpacaps & FW_PORT_CAP32_SPEED_25G);
 		break;
 
 	case ETHER_STAT_LP_CAP_10GFDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_10G);
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		*val = !!(lc->lpacaps & FW_PORT_CAP32_SPEED_10G);
 		break;
 
 	case ETHER_STAT_LP_CAP_1000FDX:
-		*val = !!(lc->acaps & FW_PORT_CAP32_SPEED_1G);
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		*val = !!(lc->lpacaps & FW_PORT_CAP32_SPEED_1G);
+		break;
+
+	case ETHER_STAT_LP_CAP_100FDX:
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		*val = !!(lc->lpacaps & FW_PORT_CAP32_SPEED_100M);
 		break;
 
 	case ETHER_STAT_LP_CAP_AUTONEG:
-		*val = !!(lc->acaps & FW_PORT_CAP32_ANEG);
+		if (!(lc->acaps & FW_PORT_CAP32_ANEG))
+			return (ENOTSUP);
+
+		*val = !!(lc->lpacaps & FW_PORT_CAP32_ANEG);
 		break;
 
 	case ETHER_STAT_LP_CAP_1000HDX:
-	case ETHER_STAT_LP_CAP_100FDX:
 	case ETHER_STAT_LP_CAP_100HDX:
 	case ETHER_STAT_LP_CAP_10FDX:
 	case ETHER_STAT_LP_CAP_10HDX:
-	case ETHER_STAT_LP_CAP_ASMPAUSE:
-	case ETHER_STAT_LP_CAP_PAUSE:
 		return (ENOTSUP);
 
 	case ETHER_STAT_LINK_ASMPAUSE:
-		*val = 0;
+		*val = (!!(lc->link_caps & FW_PORT_CAP32_FC_TX)) ^
+		       (!!(lc->link_caps & FW_PORT_CAP32_FC_RX));
 		break;
 
 	case ETHER_STAT_LINK_PAUSE:
-		*val = 1;
+		*val = !!(lc->link_caps & FW_PORT_CAP32_FC_TX);
 		break;
 
 	case ETHER_STAT_LINK_AUTONEG:
-		*val = lc->autoneg == AUTONEG_ENABLE;
+		*val = !!(lc->link_caps & FW_PORT_CAP32_ANEG);
 		break;
 
 	case ETHER_STAT_LINK_DUPLEX:
@@ -395,9 +657,6 @@ t4_mc_getstat(void *arg, uint_t stat, uint64_t *val)
 		break;
 
 	default:
-#ifdef DEBUG
-		cxgb_printf(pi->dip, CE_NOTE, "stat %d not implemented.", stat);
-#endif
 		return (ENOTSUP);
 	}
 #undef GET_STAT
@@ -867,7 +1126,8 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 	case MAC_CAPAB_HCKSUM:
 		if (pi->features & CXGBE_HW_CSUM) {
 			uint32_t *d = data;
-			*d = HCKSUM_INET_FULL_V4 | HCKSUM_IPHDRCKSUM;
+			*d = HCKSUM_INET_FULL_V4 | HCKSUM_IPHDRCKSUM |
+			    HCKSUM_INET_FULL_V6;
 		} else
 			status = B_FALSE;
 		break;
@@ -878,8 +1138,10 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 		    pi->features & CXGBE_HW_CSUM) {
 			mac_capab_lso_t *d = data;
 
-			d->lso_flags = LSO_TX_BASIC_TCP_IPV4;
+			d->lso_flags = LSO_TX_BASIC_TCP_IPV4 |
+			    LSO_TX_BASIC_TCP_IPV6;
 			d->lso_basic_tcp_ipv4.lso_max = 65535;
+			d->lso_basic_tcp_ipv6.lso_max = 65535;
 		} else
 			status = B_FALSE;
 		break;
@@ -934,52 +1196,112 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 	return (status);
 }
 
-static link_fec_t
-fec_to_link_fec(cc_fec_t cc_fec)
+static void t4_mac_link_caps_to_flowctrl(fw_port_cap32_t caps,
+					 link_flowctrl_t *fc)
+{
+	u8 pause_tx = 0, pause_rx = 0;
+
+	if (caps & FW_PORT_CAP32_FC_TX)
+		pause_tx = 1;
+
+	if (caps & FW_PORT_CAP32_FC_RX)
+		pause_rx = 1;
+
+	if (pause_rx & pause_tx)
+		*fc = LINK_FLOWCTRL_BI;
+	else if (pause_tx)
+		*fc = LINK_FLOWCTRL_TX;
+	else if (pause_rx)
+		*fc = LINK_FLOWCTRL_RX;
+	else
+		*fc = LINK_FLOWCTRL_NONE;
+}
+
+static int t4_mac_flowctrl_to_link_caps(struct port_info *pi,
+					link_flowctrl_t fc,
+					fw_port_cap32_t *new_caps)
+{
+	cc_pause_t pause = 0;
+
+	switch (fc) {
+	case LINK_FLOWCTRL_BI:
+		pause |= PAUSE_TX | PAUSE_RX;
+		break;
+	case LINK_FLOWCTRL_TX:
+		pause |= PAUSE_TX;
+		break;
+	case LINK_FLOWCTRL_RX:
+		pause |= PAUSE_RX;
+		break;
+	default:
+		break;
+	}
+
+	if (pi->link_cfg.admin_caps & FW_PORT_CAP32_ANEG)
+		pause |= PAUSE_AUTONEG;
+
+	return t4_link_set_pause(pi, pause, new_caps);
+}
+
+static link_fec_t t4_mac_port_caps_to_fec_cap(fw_port_cap32_t caps)
 {
 	link_fec_t link_fec = 0;
 
-	if ((cc_fec & (FEC_RS | FEC_BASER_RS)) == (FEC_RS | FEC_BASER_RS))
-		return (LINK_FEC_AUTO);
-
-	if ((cc_fec & FEC_NONE) != 0)
-		link_fec |= LINK_FEC_NONE;
-
-	if ((cc_fec & FEC_AUTO) != 0)
-		link_fec |= LINK_FEC_AUTO;
-
-	if ((cc_fec & FEC_RS) != 0)
+	if (caps & FW_PORT_CAP32_FEC_RS)
 		link_fec |= LINK_FEC_RS;
 
-	if ((cc_fec & FEC_BASER_RS) != 0)
+	if (caps & FW_PORT_CAP32_FEC_BASER_RS)
 		link_fec |= LINK_FEC_BASE_R;
 
-	return (link_fec);
+	if (caps & FW_PORT_CAP32_FEC_NO_FEC)
+		link_fec |= LINK_FEC_NONE;
+
+	if ((link_fec & (link_fec - 1)) &&
+	    !(caps & FW_PORT_CAP32_FORCE_FEC))
+		return LINK_FEC_AUTO;
+
+	return link_fec;
 }
 
-static int
-link_fec_to_fec(int v)
+static void t4_mac_admin_caps_to_fec_cap(fw_port_cap32_t caps,
+					 link_fec_t *fec)
 {
-	int fec = 0;
+	*fec = t4_mac_port_caps_to_fec_cap(caps);
+}
 
-	if ((v & LINK_FEC_AUTO) != 0) {
+static void t4_mac_link_caps_to_fec_cap(fw_port_cap32_t caps,
+					link_fec_t *fec)
+{
+	link_fec_t link_fec;
+
+	caps &= ~FW_PORT_CAP32_FEC_NO_FEC;
+	link_fec = t4_mac_port_caps_to_fec_cap(caps);
+	*fec = link_fec ? link_fec : LINK_FEC_NONE;
+}
+
+static int t4_mac_fec_cap_to_link_caps(struct port_info *pi, link_fec_t v,
+				       fw_port_cap32_t *new_caps)
+{
+	cc_fec_t fec = 0;
+
+	if (v == LINK_FEC_AUTO) {
 		fec = FEC_AUTO;
-		v &= ~LINK_FEC_AUTO;
-	} else {
-		if ((v & LINK_FEC_NONE) != 0) {
-			fec = FEC_NONE;
-			v &= ~LINK_FEC_NONE;
-		}
+		goto out;
+	}
 
-		if ((v & LINK_FEC_RS) != 0) {
-			fec |= FEC_RS;
-			v &= ~LINK_FEC_RS;
-		}
+	if (v & LINK_FEC_NONE) {
+		v &= ~LINK_FEC_NONE;
+		fec |= FEC_NONE;
+	}
 
-		if ((v & LINK_FEC_BASE_R) != 0) {
-			fec |= FEC_BASER_RS;
-			v &= ~LINK_FEC_BASE_R;
-		}
+	if (v & LINK_FEC_RS) {
+		v &= ~LINK_FEC_RS;
+		fec |= FEC_RS;
+	}
+
+	if (v & LINK_FEC_BASE_R) {
+		v &= ~LINK_FEC_BASE_R;
+		fec |= FEC_BASER_RS;
 	}
 
 	if (v != 0)
@@ -987,7 +1309,10 @@ link_fec_to_fec(int v)
 
 	ASSERT3S(fec, !=, 0);
 
-	return (fec);
+	fec |= FEC_FORCE;
+
+out:
+	return t4_link_set_fec(pi, fec, new_caps);
 }
 
 /* ARGSUSED */
@@ -997,49 +1322,18 @@ t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 {
 	struct port_info *pi = arg;
 	struct adapter *sc = pi->adapter;
-	struct link_config lc_copy, *lc = &pi->link_cfg;
-	uint8_t v8 = *(uint8_t *)val;
+	struct link_config *lc = &pi->link_cfg;
+	fw_port_cap32_t new_caps = lc->admin_caps;
+	int relink = 0, rx_mode = 0, rc = 0;
 	uint32_t v32 = *(uint32_t *)val;
-	int old, new = 0, relink = 0, rx_mode = 0, rc = 0;
-	boolean_t down_link = B_TRUE;
+	uint8_t v8 = *(uint8_t *)val;
 	link_flowctrl_t fc;
 	link_fec_t fec;
 
-	/*
-	 * Save a copy of link_config. This can be used to restore link_config
-	 * if t4_link_l1cfg() fails.
-	 */
-	bcopy(lc, &lc_copy, sizeof (struct link_config));
-
 	switch (id) {
 	case MAC_PROP_AUTONEG:
-		if (lc->pcaps & FW_PORT_CAP32_ANEG) {
-			old = lc->autoneg;
-			new = v8 ? AUTONEG_ENABLE : AUTONEG_DISABLE;
-			if (old != new) {
-				/* LINTED: E_CONSTANT_CONDITION */
-				lc->autoneg = new;
-				relink = 1;
-				if (new == AUTONEG_DISABLE) {
-					/* Only 100M is available */
-					lc->speed_caps =
-					    FW_PORT_CAP32_SPEED_100M;
-					lc->acaps =
-					    FW_PORT_CAP32_SPEED_100M;
-				} else {
-					/*
-					 * Advertise autonegotiation capability
-					 * along with supported speeds
-					 */
-					lc->acaps |= (FW_PORT_CAP32_ANEG |
-					    (lc->pcaps &
-					    (FW_PORT_CAP32_SPEED_100M |
-					    FW_PORT_CAP32_SPEED_1G)));
-					lc->speed_caps = 0;
-				}
-			}
-		} else
-			rc = ENOTSUP;
+		rc = t4_link_set_autoneg(pi, v8, &new_caps);
+		relink = 1;
 		break;
 
 	case MAC_PROP_MTU:
@@ -1055,87 +1349,56 @@ t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 
 	case MAC_PROP_FLOWCTRL:
 		fc = *(link_flowctrl_t *)val;
-		old = lc->requested_fc & (PAUSE_TX | PAUSE_RX);
-
-		if (fc == LINK_FLOWCTRL_BI)
-			new = (PAUSE_TX | PAUSE_RX);
-		else if (fc == LINK_FLOWCTRL_TX)
-			new = PAUSE_TX;
-		else if (fc == LINK_FLOWCTRL_RX)
-			new = PAUSE_RX;
-
-		if (new != old) {
-			lc->requested_fc &= ~(PAUSE_TX | PAUSE_RX);
-			lc->requested_fc |= new;
-			relink = 1;
-		}
+		rc = t4_mac_flowctrl_to_link_caps(pi, fc, &new_caps);
+		relink = 1;
 		break;
 
 	case MAC_PROP_EN_FEC_CAP:
-		if (!fec_supported(lc->pcaps)) {
-			rc = ENOTSUP;
-			break;
-		}
-
 		fec = *(link_fec_t *)val;
-		new = link_fec_to_fec(fec);
-		if (new < 0) {
-			rc = EINVAL;
-		} else if (new != lc->requested_fec) {
-			lc->requested_fec = new;
-			relink = 1;
-			/*
-			 * For fec, do not preemptively force the link
-			 * down. If changing fec causes the link state
-			 * to transition, then appropriate asynchronous
-			 * events are generated which correctly reflect
-			 * the link state.
-			 */
-			down_link = B_FALSE;
-		}
+		rc = t4_mac_fec_cap_to_link_caps(pi, fec, &new_caps);
+		relink = 1;
+		break;
+
+	case MAC_PROP_EN_100GFDX_CAP:
+		rc = t4_link_set_speed(pi, FW_PORT_CAP32_SPEED_100G, v8,
+				       &new_caps);
+		relink = 1;
+		break;
+
+	case MAC_PROP_EN_50GFDX_CAP:
+		rc = t4_link_set_speed(pi, FW_PORT_CAP32_SPEED_50G, v8,
+				       &new_caps);
+		relink = 1;
+		break;
+
+	case MAC_PROP_EN_40GFDX_CAP:
+		rc = t4_link_set_speed(pi, FW_PORT_CAP32_SPEED_40G, v8,
+				       &new_caps);
+		relink = 1;
+		break;
+
+	case MAC_PROP_EN_25GFDX_CAP:
+		rc = t4_link_set_speed(pi, FW_PORT_CAP32_SPEED_25G, v8,
+				       &new_caps);
+		relink = 1;
 		break;
 
 	case MAC_PROP_EN_10GFDX_CAP:
-		if (lc->pcaps & FW_PORT_CAP32_ANEG && is_10G_port(pi)) {
-			old = lc->acaps & FW_PORT_CAP32_SPEED_10G;
-			new = v8 ? FW_PORT_CAP32_SPEED_10G : 0;
-			if (new != old) {
-				lc->acaps &= ~FW_PORT_CAP32_SPEED_10G;
-				lc->acaps |= new;
-				relink = 1;
-			}
-		} else
-			rc = ENOTSUP;
-
+		rc = t4_link_set_speed(pi, FW_PORT_CAP32_SPEED_10G, v8,
+				       &new_caps);
+		relink = 1;
 		break;
 
 	case MAC_PROP_EN_1000FDX_CAP:
-		/* Forced 1G */
-		if (lc->autoneg == AUTONEG_ENABLE) {
-			old = lc->acaps & FW_PORT_CAP32_SPEED_1G;
-			new = v8 ? FW_PORT_CAP32_SPEED_1G : 0;
-
-			if (old != new) {
-				lc->acaps &= ~FW_PORT_CAP32_SPEED_1G;
-				lc->acaps |= new;
-				relink = 1;
-			}
-		} else
-			rc = ENOTSUP;
+		rc = t4_link_set_speed(pi, FW_PORT_CAP32_SPEED_1G, v8,
+				       &new_caps);
+		relink = 1;
 		break;
 
 	case MAC_PROP_EN_100FDX_CAP:
-		/* Forced 100M */
-		if (lc->autoneg == AUTONEG_ENABLE) {
-			old = lc->acaps & FW_PORT_CAP32_SPEED_100M;
-			new = v8 ? FW_PORT_CAP32_SPEED_100M : 0;
-			if (old != new) {
-				lc->acaps &= ~FW_PORT_CAP32_SPEED_100M;
-				lc->acaps |= new;
-				relink = 1;
-			}
-		} else
-			rc = ENOTSUP;
+		rc = t4_link_set_speed(pi, FW_PORT_CAP32_SPEED_100M, v8,
+				       &new_caps);
+		relink = 1;
 		break;
 
 	case MAC_PROP_PRIVATE:
@@ -1144,25 +1407,25 @@ t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 
 	default:
 		rc = ENOTSUP;
+		break;
 	}
+
+	if (rc != 0)
+		return (rc);
 
 	if (isset(&sc->open_device_map, pi->port_id) != 0) {
 		if (relink != 0) {
-			if (down_link)
-				t4_os_link_changed(pi->adapter, pi->port_id, 0);
 			rc = begin_synchronized_op(pi, 1, 1);
 			if (rc != 0)
 				return (rc);
-			rc = -t4_link_l1cfg(sc, sc->mbox, pi->tx_chan,
-			    &pi->link_cfg);
+			rc = -t4_link_l1cfg(sc, sc->mbox, pi->tx_chan, lc,
+					    new_caps);
 			end_synchronized_op(pi, 1);
 			if (rc != 0) {
 				cxgb_printf(pi->dip, CE_WARN,
-				    "start_link failed:%d", rc);
-
-				/* Restore link_config */
-				bcopy(&lc_copy, lc,
-				    sizeof (struct link_config));
+					    "%s link config failed: %d",
+					    __func__, rc);
+				return (rc);
 			}
 		}
 
@@ -1176,11 +1439,15 @@ t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 			if (rc != 0) {
 				cxgb_printf(pi->dip, CE_WARN,
 				    "set_rxmode failed: %d", rc);
+				return (rc);
 			}
 		}
 	}
 
-	return (rc);
+	if (relink != 0)
+		lc->admin_caps = new_caps;
+
+	return (0);
 }
 
 static int
@@ -1190,6 +1457,7 @@ t4_mc_getprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 	struct port_info *pi = arg;
 	struct link_config *lc = &pi->link_cfg;
 	uint8_t *u = val;
+	int rc = 0;
 
 	switch (id) {
 	case MAC_PROP_DUPLEX:
@@ -1199,10 +1467,11 @@ t4_mc_getprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 
 	case MAC_PROP_SPEED:
 		if (lc->link_ok != 0) {
-			*(uint64_t *)val = lc->speed;
+			*(uint64_t *)val = t4_link_fwcap_to_speed(lc->link_caps);
 			*(uint64_t *)val *= 1000000;
-		} else
+		} else {
 			*(uint64_t *)val = 0;
+		}
 		break;
 
 	case MAC_PROP_STATUS:
@@ -1210,8 +1479,12 @@ t4_mc_getprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 		    LINK_STATE_DOWN;
 		break;
 
+	case MAC_PROP_MEDIA:
+		*(mac_ether_media_t *)val = t4_port_to_media(pi);
+		break;
+
 	case MAC_PROP_AUTONEG:
-		*u = lc->autoneg == AUTONEG_ENABLE;
+		*u = !!(lc->link_caps & FW_PORT_CAP32_ANEG);
 		break;
 
 	case MAC_PROP_MTU:
@@ -1219,59 +1492,71 @@ t4_mc_getprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 		break;
 
 	case MAC_PROP_FLOWCTRL:
-		if ((lc->requested_fc & (PAUSE_TX | PAUSE_RX)) ==
-		    (PAUSE_TX | PAUSE_RX))
-			*(link_flowctrl_t *)val = LINK_FLOWCTRL_BI;
-		else if (lc->requested_fc & PAUSE_TX)
-			*(link_flowctrl_t *)val = LINK_FLOWCTRL_TX;
-		else if (lc->requested_fc & PAUSE_RX)
-			*(link_flowctrl_t *)val = LINK_FLOWCTRL_RX;
-		else
-			*(link_flowctrl_t *)val = LINK_FLOWCTRL_NONE;
+		t4_mac_link_caps_to_flowctrl(lc->link_caps, val);
 		break;
 
 	case MAC_PROP_ADV_FEC_CAP:
-		if (!fec_supported(lc->pcaps))
-			return (ENOTSUP);
-
-		*(link_fec_t *)val = fec_to_link_fec(lc->fec);
+		t4_mac_link_caps_to_fec_cap(lc->link_caps, val);
 		break;
 
 	case MAC_PROP_EN_FEC_CAP:
-		if (!fec_supported(lc->pcaps))
-			return (ENOTSUP);
-
-		*(link_fec_t *)val = fec_to_link_fec(lc->requested_fec);
+		t4_mac_admin_caps_to_fec_cap(lc->admin_caps, val);
 		break;
 
 	case MAC_PROP_ADV_100GFDX_CAP:
+		*u = !!(lc->link_caps & FW_PORT_CAP32_SPEED_100G);
+		break;
+
 	case MAC_PROP_EN_100GFDX_CAP:
-		*u = !!(lc->acaps & FW_PORT_CAP32_SPEED_100G);
+		*u = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_100G);
+		break;
+
+	case MAC_PROP_ADV_50GFDX_CAP:
+		*u = !!(lc->link_caps & FW_PORT_CAP32_SPEED_50G);
+		break;
+
+	case MAC_PROP_EN_50GFDX_CAP:
+		*u = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_50G);
 		break;
 
 	case MAC_PROP_ADV_40GFDX_CAP:
+		*u = !!(lc->link_caps & FW_PORT_CAP32_SPEED_40G);
+		break;
+
 	case MAC_PROP_EN_40GFDX_CAP:
-		*u = !!(lc->acaps & FW_PORT_CAP32_SPEED_40G);
+		*u = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_40G);
 		break;
 
 	case MAC_PROP_ADV_25GFDX_CAP:
+		*u = !!(lc->link_caps & FW_PORT_CAP32_SPEED_25G);
+		break;
+
 	case MAC_PROP_EN_25GFDX_CAP:
-		*u = !!(lc->acaps & FW_PORT_CAP32_SPEED_25G);
+		*u = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_25G);
 		break;
 
 	case MAC_PROP_ADV_10GFDX_CAP:
+		*u = !!(lc->link_caps & FW_PORT_CAP32_SPEED_10G);
+		break;
+
 	case MAC_PROP_EN_10GFDX_CAP:
-		*u = !!(lc->acaps & FW_PORT_CAP32_SPEED_10G);
+		*u = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_10G);
 		break;
 
 	case MAC_PROP_ADV_1000FDX_CAP:
+		*u = !!(lc->link_caps & FW_PORT_CAP32_SPEED_1G);
+		break;
+
 	case MAC_PROP_EN_1000FDX_CAP:
-		*u = !!(lc->acaps & FW_PORT_CAP32_SPEED_1G);
+		*u = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_1G);
 		break;
 
 	case MAC_PROP_ADV_100FDX_CAP:
+		*u = !!(lc->link_caps & FW_PORT_CAP32_SPEED_100M);
+		break;
+
 	case MAC_PROP_EN_100FDX_CAP:
-		*u = !!(lc->acaps & FW_PORT_CAP32_SPEED_100M);
+		*u = !!(lc->admin_caps & FW_PORT_CAP32_SPEED_100M);
 		break;
 
 	case MAC_PROP_PRIVATE:
@@ -1281,7 +1566,7 @@ t4_mc_getprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 		return (ENOTSUP);
 	}
 
-	return (0);
+	return (rc);
 }
 
 static void
@@ -1322,30 +1607,59 @@ t4_mc_propinfo(void *arg, const char *name, mac_prop_id_t id,
 		mac_prop_info_set_default_fec(ph, LINK_FEC_AUTO);
 		break;
 
+	case MAC_PROP_EN_100GFDX_CAP:
+		if (lc->pcaps & FW_PORT_CAP32_SPEED_100G)
+			mac_prop_info_set_default_uint8(ph, 1);
+		else
+			mac_prop_info_set_perm(ph, MAC_PROP_PERM_READ);
+		break;
+
+	case MAC_PROP_EN_50GFDX_CAP:
+		if (lc->pcaps & FW_PORT_CAP32_SPEED_50G)
+			mac_prop_info_set_default_uint8(ph, 1);
+		else
+			mac_prop_info_set_perm(ph, MAC_PROP_PERM_READ);
+		break;
+
+	case MAC_PROP_EN_40GFDX_CAP:
+		if (lc->pcaps & FW_PORT_CAP32_SPEED_40G)
+			mac_prop_info_set_default_uint8(ph, 1);
+		else
+			mac_prop_info_set_perm(ph, MAC_PROP_PERM_READ);
+		break;
+
+	case MAC_PROP_EN_25GFDX_CAP:
+		if (lc->pcaps & FW_PORT_CAP32_SPEED_25G)
+			mac_prop_info_set_default_uint8(ph, 1);
+		else
+			mac_prop_info_set_perm(ph, MAC_PROP_PERM_READ);
+		break;
+
 	case MAC_PROP_EN_10GFDX_CAP:
-		if (lc->pcaps & FW_PORT_CAP32_ANEG &&
-		    lc->pcaps & FW_PORT_CAP32_SPEED_10G)
+		if (lc->pcaps & FW_PORT_CAP32_SPEED_10G)
 			mac_prop_info_set_default_uint8(ph, 1);
 		else
 			mac_prop_info_set_perm(ph, MAC_PROP_PERM_READ);
 		break;
 
 	case MAC_PROP_EN_1000FDX_CAP:
-		if (lc->pcaps & FW_PORT_CAP32_ANEG &&
-		    lc->pcaps & FW_PORT_CAP32_SPEED_1G)
+		if (lc->pcaps & FW_PORT_CAP32_SPEED_1G)
 			mac_prop_info_set_default_uint8(ph, 1);
 		else
 			mac_prop_info_set_perm(ph, MAC_PROP_PERM_READ);
 		break;
 
 	case MAC_PROP_EN_100FDX_CAP:
-		if (lc->pcaps & FW_PORT_CAP32_ANEG &&
-		    lc->pcaps & FW_PORT_CAP32_SPEED_100M)
+		if (lc->pcaps & FW_PORT_CAP32_SPEED_100M)
 			mac_prop_info_set_default_uint8(ph, 1);
 		else
 			mac_prop_info_set_perm(ph, MAC_PROP_PERM_READ);
 		break;
 
+	case MAC_PROP_ADV_100GFDX_CAP:
+	case MAC_PROP_ADV_50GFDX_CAP:
+	case MAC_PROP_ADV_40GFDX_CAP:
+	case MAC_PROP_ADV_25GFDX_CAP:
 	case MAC_PROP_ADV_10GFDX_CAP:
 	case MAC_PROP_ADV_1000FDX_CAP:
 	case MAC_PROP_ADV_100FDX_CAP:
@@ -1447,7 +1761,8 @@ t4_init_synchronized(struct port_info *pi)
 		/* LINTED: E_ASSIGN_NARROW_CONV */
 		pi->xact_addr_filt = rc;
 
-	rc = -t4_link_l1cfg(sc, sc->mbox, pi->tx_chan, &pi->link_cfg);
+	rc = -t4_link_l1cfg(sc, sc->mbox, pi->tx_chan, &pi->link_cfg,
+			    pi->link_cfg.admin_caps);
 	if (rc != 0) {
 		cxgb_printf(pi->dip, CE_WARN, "start_link failed: %d", rc);
 		goto done;
@@ -1497,7 +1812,6 @@ t4_uninit_synchronized(struct port_info *pi)
 	clrbit(&sc->open_device_map, pi->port_id);
 
 	pi->link_cfg.link_ok = 0;
-	pi->link_cfg.speed = 0;
 	mac_link_update(pi->mh, LINK_STATE_UNKNOWN);
 
 	return (0);
@@ -1521,9 +1835,9 @@ propinfo(struct port_info *pi, const char *name, mac_prop_info_handle_t ph)
 	else if (strcmp(name, T4PROP_HW_LSO) == 0)
 		v = (pi->features & CXGBE_HW_LSO) ? 1 : 0;
 	else if (strcmp(name, T4PROP_TX_PAUSE) == 0)
-		v = (lc->fc & PAUSE_TX) ? 1 : 0;
+		v = (lc->pcaps & FW_PORT_CAP32_FC_TX) ? 1 : 0;
 	else if (strcmp(name, T4PROP_RX_PAUSE) == 0)
-		v = (lc->fc & PAUSE_RX) ? 1 : 0;
+		v = (lc->pcaps & FW_PORT_CAP32_FC_RX) ? 1 : 0;
 #if MAC_VERSION == 1
 	else if (strcmp(name, T4PROP_MTU) == 0)
 		v = ETHERMTU;
@@ -1550,9 +1864,9 @@ getprop(struct port_info *pi, const char *name, uint_t size, void *val)
 	else if (strcmp(name, T4PROP_HW_LSO) == 0)
 		v = (pi->features & CXGBE_HW_LSO) ? 1 : 0;
 	else if (strcmp(name, T4PROP_TX_PAUSE) == 0)
-		v = (lc->fc & PAUSE_TX) ? 1 : 0;
+		v = (lc->link_caps & FW_PORT_CAP32_FC_TX) ? 1 : 0;
 	else if (strcmp(name, T4PROP_RX_PAUSE) == 0)
-		v = (lc->fc & PAUSE_RX) ? 1 : 0;
+		v = (lc->link_caps & FW_PORT_CAP32_FC_RX) ? 1 : 0;
 #if MAC_VERSION == 1
 	else if (strcmp(name, T4PROP_MTU) == 0)
 		v = pi->mtu;
@@ -1567,17 +1881,13 @@ getprop(struct port_info *pi, const char *name, uint_t size, void *val)
 static int
 setprop(struct port_info *pi, const char *name, const void *val)
 {
-	struct adapter *sc = pi->adapter;
-	long v;
+	struct link_config *lc = &pi->link_cfg;
+	fw_port_cap32_t new_caps = lc->admin_caps;
 	int i, rc = 0, relink = 0, rx_mode = 0;
+	struct adapter *sc = pi->adapter;
 	struct sge_rxq *rxq;
-	struct link_config lc_old, *lc = &pi->link_cfg;
-
-	/*
-	 * Save a copy of link_config. This can be used to restore link_config
-	 * if t4_link_l1cfg() fails.
-	 */
-	bcopy(lc, &lc_old, sizeof (struct link_config));
+	cc_pause_t fc = 0;
+	long v;
 
 	(void) ddi_strtol(val, NULL, 0, &v);
 
@@ -1627,22 +1937,28 @@ setprop(struct port_info *pi, const char *name, const void *val)
 		if (v != 0 && v != 1)
 			return (EINVAL);
 
-		if (v != 0)
-			lc->requested_fc |= PAUSE_TX;
-		else
-			lc->requested_fc &= ~PAUSE_TX;
+		if ((new_caps & FW_PORT_CAP32_FC_TX) && (v == 1))
+			fc |= PAUSE_TX;
+		if (new_caps & FW_PORT_CAP32_FC_RX)
+			fc |= PAUSE_RX;
+		if (lc->admin_caps & FW_PORT_CAP32_ANEG)
+			fc |= PAUSE_AUTONEG;
 
+		t4_link_set_pause(pi, fc, &new_caps);
 		relink = 1;
 
 	} else if (strcmp(name, T4PROP_RX_PAUSE) == 0) {
 		if (v != 0 && v != 1)
 			return (EINVAL);
 
-		if (v != 0)
-			lc->requested_fc |= PAUSE_RX;
-		else
-			lc->requested_fc &= ~PAUSE_RX;
+		if (new_caps & FW_PORT_CAP32_FC_TX)
+			fc |= PAUSE_TX;
+		if ((new_caps & FW_PORT_CAP32_FC_RX) && (v == 1))
+			fc |= PAUSE_RX;
+		if (lc->admin_caps & FW_PORT_CAP32_ANEG)
+			fc |= PAUSE_AUTONEG;
 
+		t4_link_set_pause(pi, fc, &new_caps);
 		relink = 1;
 	}
 #if MAC_VERSION == 1
@@ -1669,13 +1985,14 @@ setprop(struct port_info *pi, const char *name, const void *val)
 			rc = begin_synchronized_op(pi, 1, 1);
 			if (rc != 0)
 				return (rc);
-			rc = -t4_link_l1cfg(sc, sc->mbox, pi->tx_chan, lc);
+			rc = -t4_link_l1cfg(sc, sc->mbox, pi->tx_chan, lc,
+					    new_caps);
 			end_synchronized_op(pi, 1);
 			if (rc != 0) {
 				cxgb_printf(pi->dip, CE_WARN,
-				    "start_link failed:%d", rc);
-				/* Restore link_config */
-				bcopy(&lc_old, lc, sizeof (struct link_config));
+					    "%s link config failed: %d",
+					    __func__, rc);
+				return (rc);
 			}
 		} else if (rx_mode != 0) {
 			rc = begin_synchronized_op(pi, 1, 1);
@@ -1686,11 +2003,14 @@ setprop(struct port_info *pi, const char *name, const void *val)
 			end_synchronized_op(pi, 1);
 			if (rc != 0)  {
 				cxgb_printf(pi->dip, CE_WARN,
-				    "set_rxmode failed: %d", rc);
+					    "set_rxmode failed: %d", rc);
+				return (rc);
 			}
 		}
-		return (rc);
 	}
+
+	if (relink != 0)
+		lc->admin_caps = new_caps;
 
 	return (0);
 }

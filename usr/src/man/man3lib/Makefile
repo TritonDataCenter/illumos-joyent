@@ -13,6 +13,7 @@
 # Copyright 2011, Richard Lowe
 # Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
 # Copyright 2020 Joyent, Inc.
+# Copyright 2023 Peter Tribble
 #
 
 include		$(SRC)/Makefile.master
@@ -52,6 +53,7 @@ MANFILES=	libMPAPI.3lib		\
 		libgss.3lib		\
 		libintl.3lib		\
 		libiscsit.3lib		\
+		libjedec.3lib		\
 		libkmf.3lib		\
 		libkrb5.3lib		\
 		libkstat.3lib		\
@@ -97,12 +99,9 @@ MANFILES=	libMPAPI.3lib		\
 		libslp.3lib		\
 		libsocket.3lib		\
 		libstmf.3lib		\
-		libsys.3lib		\
 		libsysevent.3lib	\
 		libtecla.3lib		\
 		libthread.3lib		\
-		libtnfctl.3lib		\
-		libtsalarm.3lib		\
 		libtsnet.3lib		\
 		libtsol.3lib		\
 		libumem.3lib		\

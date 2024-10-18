@@ -27,8 +27,6 @@
 #ifndef	_MDB_SIGNAL_H
 #define	_MDB_SIGNAL_H
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #ifdef	__cplusplus
 extern "C" {
 #endif
@@ -39,6 +37,9 @@ extern "C" {
 typedef void mdb_signal_f(int, siginfo_t *, ucontext_t *, void *);
 
 #ifdef _MDB
+
+#define	MDB_SIG_DFL	(mdb_signal_f *)0
+#define	MDB_SIG_IGN	(mdb_signal_f *)1
 
 extern int mdb_signal_sethandler(int, mdb_signal_f *, void *);
 extern mdb_signal_f *mdb_signal_gethandler(int, void **);

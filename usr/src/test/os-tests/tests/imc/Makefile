@@ -39,7 +39,7 @@ include $(SRC)/cmd/Makefile.cmd
 include $(SRC)/test/Makefile.com
 include $(SRC)/cmd/Makefile.ctf
 
-CPPFLAGS += -I$(SRC)/uts/i86pc/io/imc
+CPPFLAGS += -I$(SRC)/uts/intel/io/imc
 
 CMDS = $(PROG:%=$(TESTDIR)/%)
 $(CMDS) := FILEMODE = 0555
@@ -55,6 +55,9 @@ clean:
 	-$(RM) *.o
 
 $(CMDS): $(TESTDIR) $(PROG)
+
+$(TESTDIR):
+	$(INS.dir)
 
 $(TESTDIR)/%: %
 	$(INS.file)

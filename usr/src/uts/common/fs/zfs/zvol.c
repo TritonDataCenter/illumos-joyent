@@ -819,20 +819,12 @@ zvol_update_live_volsize(zvol_state_t *zv, uint64_t volsize)
 	 * Generate a LUN expansion event.
 	 */
 	if (error == 0) {
-		sysevent_id_t eid;
-		nvlist_t *attr;
 		char *physpath = kmem_zalloc(MAXPATHLEN, KM_SLEEP);
 
 		(void) snprintf(physpath, MAXPATHLEN, "%s%u", ZVOL_PSEUDO_DEV,
 		    zv->zv_minor);
 
-		VERIFY(nvlist_alloc(&attr, NV_UNIQUE_NAME, KM_SLEEP) == 0);
-		VERIFY(nvlist_add_string(attr, DEV_PHYS_PATH, physpath) == 0);
-
-		(void) ddi_log_sysevent(zfs_dip, SUNW_VENDOR, EC_DEV_STATUS,
-		    ESC_DEV_DLE, attr, &eid, DDI_SLEEP);
-
-		nvlist_free(attr);
+		zfs_post_dle_sysevent(physpath);
 		kmem_free(physpath, MAXPATHLEN);
 	}
 	return (error);
@@ -1158,13 +1150,13 @@ zvol_dumpio(zvol_state_t *zv, void *addr, uint64_t offset, uint64_t size,
 	    P2BOUNDARY(offset, size, zv->zv_volblocksize)) {
 		return (SET_ERROR(EINVAL));
 	}
-	ASSERT(size <= zv->zv_volblocksize);
+	VERIFY3U(size, <=, zv->zv_volblocksize);
 
 	/* Locate the extent this belongs to */
-	ze = list_head(&zv->zv_extents);
-	while (offset >= ze->ze_nblks * zv->zv_volblocksize) {
+	for (ze = list_head(&zv->zv_extents);
+	    ze != NULL && offset >= ze->ze_nblks * zv->zv_volblocksize;
+	    ze = list_next(&zv->zv_extents, ze)) {
 		offset -= ze->ze_nblks * zv->zv_volblocksize;
-		ze = list_next(&zv->zv_extents, ze);
 	}
 
 	if (ze == NULL)
@@ -1232,7 +1224,7 @@ zvol_strategy(buf_t *bp)
 	addr = bp->b_un.b_addr;
 	resid = bp->b_bcount;
 
-	if (resid > 0 && (off < 0 || off >= volsize)) {
+	if (resid > 0 && off >= volsize) {
 		bioerror(bp, EIO);
 		biodone(bp);
 		return (0);
@@ -1709,7 +1701,7 @@ zvol_log_truncate(zvol_state_t *zv, dmu_tx_t *tx, uint64_t off, uint64_t len,
 }
 
 /*
- * Dirtbag ioctls to support mkfs(1M) for UFS filesystems.  See dkio(7I).
+ * Dirtbag ioctls to support mkfs(8) for UFS filesystems.  See dkio(4I).
  * Also a dirtbag dkio ioctl for unmap/free-block functionality.
  */
 /*ARGSUSED*/
@@ -1767,6 +1759,7 @@ zvol_ioctl(dev_t dev, int cmd, intptr_t arg, int flag, cred_t *cr, int *rvalp)
 	case DKIOCGMEDIAINFOEXT:
 	{
 		struct dk_minfo_ext dkmext;
+		size_t len;
 
 		bzero(&dkmext, sizeof (dkmext));
 		dkmext.dki_lbsize = 1U << zv->zv_min_bs;
@@ -1774,7 +1767,17 @@ zvol_ioctl(dev_t dev, int cmd, intptr_t arg, int flag, cred_t *cr, int *rvalp)
 		dkmext.dki_capacity = zv->zv_volsize >> zv->zv_min_bs;
 		dkmext.dki_media_type = DK_UNKNOWN;
 		mutex_exit(&zfsdev_state_lock);
-		if (ddi_copyout(&dkmext, (void *)arg, sizeof (dkmext), flag))
+
+		switch (ddi_model_convert_from(flag & FMODELS)) {
+		case DDI_MODEL_ILP32:
+			len = sizeof (struct dk_minfo_ext32);
+			break;
+		default:
+			len = sizeof (struct dk_minfo_ext);
+			break;
+		}
+
+		if (ddi_copyout(&dkmext, (void *)arg, len, flag))
 			error = SET_ERROR(EFAULT);
 		return (error);
 	}

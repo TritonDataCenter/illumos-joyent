@@ -269,12 +269,6 @@ SMATCH=off
 
 MAPFILES =	../mapfile-vers
 
-#CPPFLAGS +=	-D_REENTRANT
-$(PICS) :=	CFLAGS += $(XFFLAG)
-$(PICS) :=	CFLAGS64 += $(XFFLAG)
-$(PICS) :=	CCFLAGS += $(XFFLAG)
-$(PICS) :=	CCFLAGS64 += $(XFFLAG)
-
 LIBS = $(DYNLIB) $(K5LIBLINK)
 
 # override ROOTLIBDIR and ROOTLINKS
@@ -316,7 +310,7 @@ LDLIBS += -lgss -lsocket -lresolv -lc -lpkcs11 -lnsl -lkstat
 DYNFLAGS += $(ZIGNORE)
 
 # mech lib needs special initialization at load time
-DYNFLAGS += -zinitarray=krb5_ld_init
+DYNFLAGS += -Wl,-zinitarray=krb5_ld_init
 
 objs/%.o pics/%.o: $(SRC)/uts/common/gssapi/%.c
 	$(COMPILE.c)  -o $@ $<

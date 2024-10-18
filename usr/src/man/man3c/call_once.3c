@@ -11,14 +11,14 @@
 .\"
 .\" Copyright 2016 Joyent, Inc.
 .\"
-.Dd "Jan 11, 2015"
+.Dd "February 17, 2023"
 .Dt CALL_ONCE 3C
 .Os
 .Sh NAME
 .Nm call_once
 .Nd ensure function is only called once
 .Sh SYNOPSIS
-.In treads.h
+.In threads.h
 .Vt "once_flag once = ONCE_FLAG_INIT;"
 .Ft void
 .Fo call_once
@@ -32,7 +32,7 @@ function is used to ensure that an operation occurs only once, even
 across multiple threads.
 Each instance of a properly initialized
 .Ft once_flag
-can be pased to the
+can be passed to the
 .Ft call_once
 function; however, only a single caller will successfully execute the
 specified function,
@@ -50,7 +50,7 @@ but use different values for
 then only one of the functions will be successfully called.
 .Pp
 The argument
-.Fn once
+.Fa once
 should always be initialized to the symbol
 .Sy ONCE_FLAG_INIT
 before calling
@@ -88,5 +88,5 @@ argument .
 .Sh SEE ALSO
 .Xr pthread_once 3C ,
 .Xr threads.h 3HEAD ,
-.Xr attributes 5 ,
-.Xr threads 5
+.Xr attributes 7 ,
+.Xr threads 7

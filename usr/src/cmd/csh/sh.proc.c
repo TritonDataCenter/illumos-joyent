@@ -4,15 +4,13 @@
  */
 
 /*	Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 /*
  * Copyright (c) 1980 Regents of the University of California.
  * All rights reserved. The Berkeley Software License Agreement
  * specifies the terms and conditions for redistribution.
  */
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #include "sh.h"
 #include "sh.dir.h"
@@ -23,6 +21,15 @@
 /*
  * C Shell - functions that manage processes, handling hanging, termination
  */
+
+bool	neednote;
+bool	pjobs;
+static struct process *pprevious;
+static short	pmaxindex;
+static struct process proclist;
+static struct process *pcurrent;
+struct process *pcurrjob;
+static struct process *pholdjob;
 
 #define	BIGINDEX	9	/* largest desirable job index */
 
@@ -46,7 +53,7 @@ struct process	*pfind(tchar *);
  *	to mask interrupts when playing with the proclist data structures!
  */
 void
-pchild(void)
+pchild(int signal __unused)
 {
 	struct process *pp;
 	struct process	*fp;
@@ -71,7 +78,6 @@ loop:
 			errno = 0;
 			goto loop;
 		}
-		pnoprocesses = pid == -1;
 		return;
 	}
 	for (pp = proclist.p_next; pp != PNULL; pp = pp->p_next)
@@ -266,7 +272,7 @@ pjwait(struct process *pp)
 		 * SIGCHLD signal handler (pchild()) directly.
 		 */
 		if (csh_wait_noreap() > 0)
-			pchild();	/* simulate receipt of SIGCHLD */
+			pchild(SIGCHLD);	/* simulate receipt of SIGCHLD */
 	}
 	(void) sigsetmask(omask);
 	if (tpgrp > 0)			/* get tty back */

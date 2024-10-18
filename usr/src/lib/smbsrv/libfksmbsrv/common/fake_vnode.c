@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2019-2024 RackTop Systems, Inc.
  */
 
 #include <sys/types.h>
@@ -49,9 +50,20 @@ vn_compare(vnode_t *vp1, vnode_t *vp2)
 	return (VN_CMP(vp1, vp2));
 }
 
-/* ARGSUSED */
+vnodeops_t *
+vn_getops(vnode_t *vp)
+{
+	return (vp->v_op);
+}
+
+int
+vn_ismntpt(vnode_t *vp __unused)
+{
+	return (0);
+}
+
 vfs_t *
-vn_mountedvfs(vnode_t *vp)
+vn_mountedvfs(vnode_t *vp __unused)
 {
 	return (NULL);
 }

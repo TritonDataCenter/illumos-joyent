@@ -11,8 +11,8 @@
 #
 
 #
-# Copyright 2015 Joyent, Inc.
-# Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
+# Copyright 2021 Joyent, Inc.
+# Copyright 2016 OmniTI Computer Consulting, Inc. All rights reserved.
 #
 
 #
@@ -57,39 +57,35 @@ case "\$1" in
     start)
     [ "\$EUID" != "0" ] && exit 4
 
-    if [ ! -e /etc/resolv.conf ]; then
-        if [ -h /etc/resolv.conf ]; then
-            rm -f /etc/resolv.conf
-        fi
-        echo "# AUTOMATIC ZONE CONFIG" > /etc/resolv.conf
 EOF
-zonecfg -z $ZONENAME info attr name=resolvers |
-awk '
-    {
-        if ($1 == "value:") {
-            nres = split($2, resolvers, ",")
-        }
-    }
-    END {
-        for (i = 1; i <= nres; i++) {
-            printf("        echo \"nameserver %s\" >> %s\n", resolvers[i],
-                "/etc/resolv.conf")
-        }
-    }
-' >> $tmpfile
-zonecfg -z $ZONENAME info attr name=dns-domain |
-awk '
-    {
-        if ($1 == "value:") {
-            dom = $2
-        }
-    }
-    END {
-        printf("        echo \"search %s\" >> %s\n", dom, "/etc/resolv.conf")
-    }
-' >> $tmpfile
-cat >> $tmpfile <<EOF
+
+# Populate resolv.conf setup files IFF we have resolvers information.
+resolvers=$(zone_attr resolvers)
+if [ -n "$resolvers" ]; then
+
+    echo "# AUTOMATIC ZONE CONFIG" > $tmpfile
+    _IFS=$IFS; IFS=,; for r in $resolvers; do
+        echo "nameserver $r"
+    done >> $tmpfile
+    IFS=$_IFS
+    domain=$(zone_attr dns-domain)
+    [ -n "$domain" ] && echo "search $domain" >> $tmpfile
+
+    if [ -f $ZONEROOT/etc/systemd/resolved.conf ]; then
+        cf=$ZONEROOT/etc/systemd/resolved.conf
+	sed -i -E '/^(DNS|Domains) *=/d' $cf
+        echo "DNS=$resolvers" >> $cf
+        [[ -n "$domain" ]] && echo "Domains=$domain" >> $cf
+        mv -f $tmpfile $ZONEROOT/etc/resolv.conf
+    else
+        fnm=$ZONEROOT/etc/resolv.conf
+        if [[ -f $fnm || -h $fnm || ! -e $fnm ]]; then
+            mv -f $tmpfile $fnm
+        fi
     fi
+fi
+
+cat >> $tmpfile <<EOF
     touch /var/lock/subsys/network
     rc=0
     ;;
@@ -172,7 +168,7 @@ if ! egrep -s "NETWORKING=yes" $fnm; then
 		cat > $fnm <<- EOF
 		NETWORKING=yes
 		HOSTNAME=$cfghnm
-		EOF
+EOF
 	fi
 fi
 
@@ -282,7 +278,7 @@ if [[ ! -f $ZONEROOT/etc/init/tty.override ]]; then
 	respawn
 	instance console
 	exec /sbin/mingetty console
-	EOF
+EOF
 fi
 
 if [[ ! -f $ZONEROOT/etc/init/start-ttys.override ]]; then
@@ -296,7 +292,7 @@ if [[ ! -f $ZONEROOT/etc/init/start-ttys.override ]]; then
 	script
 		initctl start tty
 	end script
-	EOF
+EOF
 fi
 
 #

@@ -137,7 +137,7 @@ extern "C" {
  * torn down.
  *
  * Oh, and last but not least: these ioctls are totally private and only
- * for use by lofiadm(1M).
+ * for use by lofiadm(8).
  *
  */
 
@@ -260,6 +260,7 @@ struct lofi_state {
 	int		ls_openflag;
 	boolean_t	ls_cleanup;	/* cleanup on close */
 	boolean_t	ls_readonly;
+	boolean_t	ls_canfree;	/* supports DKIOCFREE */
 	taskq_t		*ls_taskq;
 	kstat_t		*ls_kstat;
 	kmutex_t	ls_kstat_lock;

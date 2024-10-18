@@ -24,6 +24,7 @@
  *	  All Rights Reserved
  *
  * Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2022 Oxide Computer Company
  */
 
 /*
@@ -33,8 +34,6 @@
 #include	"msg.h"
 #include	"_libld.h"
 
-Ld_heap		*ld_heap;	/* list of allocated blocks for */
-				/*	link-edit dynamic allocations */
 APlist		*lib_support;	/* list of support libraries specified */
 				/*	(-S option) */
 int		demangle_flag;	/* symbol demangling required */
@@ -79,9 +78,10 @@ reject[SGS_REJ_NUM] = {
 		MSG_REJ_PLATCAP,	/* MSG_INTL(MSG_REJ_PLATCAP) */
 		MSG_REJ_HWCAP_2,	/* MSG_INTL(MSG_REJ_HWCAP_2) */
 		MSG_REJ_ARCHIVE,	/* MSG_INTL(MSG_REJ_ARCHIVE) */
-		MSG_REJ_KMOD		/* MSG_INTL(MSG_REJ_KMOD) */
+		MSG_REJ_KMOD,		/* MSG_INTL(MSG_REJ_KMOD) */
+		MSG_REJ_HWCAP_3		/* MSG_INTL(MSG_REJ_HWCAP_3) */
 	};
-#if SGS_REJ_NUM != (SGS_REJ_KMOD + 1)
+#if SGS_REJ_NUM != (SGS_REJ_HWCAP_3 + 1)
 #error SGS_REJ_NUM has changed
 #endif
 

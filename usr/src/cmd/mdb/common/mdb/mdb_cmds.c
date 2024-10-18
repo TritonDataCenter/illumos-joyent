@@ -26,10 +26,11 @@
 
 /*
  * Copyright (c) 2012 by Delphix. All rights reserved.
- * Copyright 2019 Joyent, Inc.
+ * Copyright 2021 Joyent, Inc.
  * Copyright (c) 2013 Josef 'Jeff' Sipek <jeffpc@josefsipek.net>
  * Copyright (c) 2015, 2017 by Delphix. All rights reserved.
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <sys/elf.h>
@@ -71,6 +72,7 @@
 #include <mdb/mdb_macalias.h>
 #include <mdb/mdb_tab.h>
 #include <mdb/mdb_typedef.h>
+#include <mdb/mdb_linkerset.h>
 #ifdef _KMDB
 #include <kmdb/kmdb_kdi.h>
 #endif
@@ -320,6 +322,9 @@ write_arglist(mdb_tgt_as_t as, mdb_tgt_addr_t addr,
 	case 'Z':
 		write_value = write_uint64;
 		break;
+	default:
+		write_value = NULL;
+		break;
 	}
 
 	for (argv++, i = 1; i < argc; i++, argv++) {
@@ -434,6 +439,10 @@ match_arglist(mdb_tgt_as_t as, uint_t flags, mdb_tgt_addr_t addr,
 	case 'M':
 		match_value = match_uint64;
 		break;
+	default:
+		mdb_warn("unknown match value %c\n",
+		    argv->a_un.a_char);
+		return (DCMD_ERR);
 	}
 
 	for (argv++, i = 1; i < argc; i++, argv++) {
@@ -1730,7 +1739,7 @@ showrev_objectversions(int showall)
 }
 
 /*
- * Display information similar to what showrev(1M) displays when invoked
+ * Display information similar to what showrev(8) displays when invoked
  * with no arguments.
  */
 static int
@@ -1747,7 +1756,7 @@ showrev_sysinfo(void)
 	}
 
 	/*
-	 * Match the order of the showrev(1M) output and put "Application
+	 * Match the order of the showrev(8) output and put "Application
 	 * architecture" before "Kernel version"
 	 */
 	if ((s = mdb_tgt_isa(mdb.m_target)) != NULL)
@@ -2014,6 +2023,7 @@ cmd_dis(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	int i;
 
 	uint_t opt_f = FALSE;		/* File-mode off by default */
+	uint_t opt_p = FALSE;		/* Physical mode off by default */
 	uint_t opt_w = FALSE;		/* Window mode off by default */
 	uint_t opt_a = FALSE;		/* Raw-address mode off by default */
 	uint_t opt_b = FALSE;		/* Address & symbols off by default */
@@ -2022,6 +2032,7 @@ cmd_dis(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 
 	i = mdb_getopts(argc, argv,
 	    'f', MDB_OPT_SETBITS, TRUE, &opt_f,
+	    'p', MDB_OPT_SETBITS, TRUE, &opt_p,
 	    'w', MDB_OPT_SETBITS, TRUE, &opt_w,
 	    'a', MDB_OPT_SETBITS, TRUE, &opt_a,
 	    'b', MDB_OPT_SETBITS, TRUE, &opt_b,
@@ -2084,11 +2095,26 @@ cmd_dis(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	/*
 	 * If the state is IDLE (i.e. no address space), turn on -f.
 	 */
-	if (mdb_tgt_status(tgt, &st) == 0 && st.st_state == MDB_TGT_IDLE)
+	if (mdb_tgt_status(tgt, &st) == 0 && st.st_state == MDB_TGT_IDLE) {
+		if (opt_p) {
+			mdb_warn("cannot use -p (physical address mode) when "
+			    "operating on a file\n");
+			return (DCMD_ERR);
+		}
 		opt_f = TRUE;
+	}
+
+	if (opt_f && opt_p) {
+		mdb_warn("-f (file mode) and -p (physical address mode) "
+		    "cannot be used together\n");
+		return (DCMD_ERR);
+	}
+
 
 	if (opt_f)
 		as = MDB_TGT_AS_FILE;
+	else if (opt_p)
+		as = MDB_TGT_AS_PHYS;
 	else
 		as = MDB_TGT_AS_VIRT_I;
 
@@ -2182,6 +2208,8 @@ dis_help(void)
 "values.\n"
 "  -f         Read instructions from the target's object file instead of the \n"
 "             target's virtual address space.\n"
+"  -p         Read instructions from the target's physical address space\n"
+"             rather than its virtual address space.\n"
 "  -n instr   Display 'instr' instructions before and after the given "
 "address.\n"
 "  -w         Force window behavior, even at the start of a function.\n"
@@ -3145,7 +3173,7 @@ const mdb_dcmd_t mdb_dcmd_builtins[] = {
 	{ "dcmds", "[[-n] pattern]",
 	    "list available debugger commands", cmd_dcmds, cmd_dcmds_help },
 	{ "delete", "?[id|all]", "delete traced software events", cmd_delete },
-	{ "dis", "?[-abfw] [-n cnt] [addr]", "disassemble near addr", cmd_dis,
+	{ "dis", "?[-abfpw] [-n cnt] [addr]", "disassemble near addr", cmd_dis,
 	    dis_help },
 	{ "disasms", NULL, "list available disassemblers", cmd_disasms },
 	{ "dismode", "[mode]", "get/set disassembly mode", cmd_dismode },
@@ -3171,6 +3199,8 @@ const mdb_dcmd_t mdb_dcmd_builtins[] = {
 	    head_help },
 	{ "help", "[cmd]", "list commands/command help", cmd_help, NULL,
 	    cmd_help_tab },
+	{ "linkerset", "[name]", "display linkersets", cmd_linkerset,
+	    linkerset_help, cmd_linkerset_tab },
 	{ "list", "?type member [variable]",
 	    "walk list using member as link pointer", cmd_list, NULL,
 	    mdb_tab_complete_mt },

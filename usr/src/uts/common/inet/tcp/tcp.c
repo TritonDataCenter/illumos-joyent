@@ -21,10 +21,11 @@
 
 /*
  * Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2011 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2013, 2017 by Delphix. All rights reserved.
  * Copyright 2014, OmniTI Computer Consulting, Inc. All rights reserved.
+ * Copyright 2020 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 /* Copyright (c) 1990 Mentat Inc. */
 
@@ -72,6 +73,7 @@
 #include <net/if.h>
 #include <net/route.h>
 #include <inet/ipsec_impl.h>
+#include <inet/tcp_sig.h>
 
 #include <inet/common.h>
 #include <inet/cc.h>
@@ -1018,10 +1020,23 @@ finish:
 
 	/* If we have an upper handle (socket), release it */
 	if (IPCL_IS_NONSTR(connp)) {
-		ASSERT(connp->conn_upper_handle != NULL);
-		(*connp->conn_upcalls->su_closed)(connp->conn_upper_handle);
+		sock_upcalls_t *upcalls = connp->conn_upcalls;
+		sock_upper_handle_t handle = connp->conn_upper_handle;
+
+		ASSERT(upcalls != NULL);
+		ASSERT(upcalls->su_closed != NULL);
+		ASSERT(handle != NULL);
+		/*
+		 * Set these to NULL first because closed() will free upper
+		 * structures.  Acquire conn_lock because an external caller
+		 * like conn_get_socket_info() will upcall if these are
+		 * non-NULL.
+		 */
+		mutex_enter(&connp->conn_lock);
 		connp->conn_upper_handle = NULL;
 		connp->conn_upcalls = NULL;
+		mutex_exit(&connp->conn_lock);
+		upcalls->su_closed(handle);
 	}
 }
 
@@ -1409,6 +1424,15 @@ tcp_free(tcp_t *tcp)
 	 */
 	tcp_close_mpp(&tcp->tcp_conn.tcp_eager_conn_ind);
 
+	if (tcp->tcp_sig_sa_in != NULL) {
+		tcpsig_sa_rele(tcp->tcp_sig_sa_in);
+		tcp->tcp_sig_sa_in = NULL;
+	}
+	if (tcp->tcp_sig_sa_out != NULL) {
+		tcpsig_sa_rele(tcp->tcp_sig_sa_out);
+		tcp->tcp_sig_sa_out = NULL;
+	}
+
 	/* Allow the CC algorithm to clean up after itself. */
 	if (tcp->tcp_cc_algo != NULL && tcp->tcp_cc_algo->cb_destroy != NULL)
 		tcp->tcp_cc_algo->cb_destroy(&tcp->tcp_ccv);
@@ -1435,13 +1459,26 @@ tcp_free(tcp_t *tcp)
 	 * nothing to do other than clearing the field.
 	 */
 	if (connp->conn_upper_handle != NULL) {
-		if (IPCL_IS_NONSTR(connp)) {
-			(*connp->conn_upcalls->su_closed)(
-			    connp->conn_upper_handle);
-			tcp->tcp_detached = B_TRUE;
-		}
+		sock_upcalls_t *upcalls = connp->conn_upcalls;
+		sock_upper_handle_t handle = connp->conn_upper_handle;
+
+		/*
+		 * Set these to NULL first because closed() will free upper
+		 * structures.  Acquire conn_lock because an external caller
+		 * like conn_get_socket_info() will upcall if these are
+		 * non-NULL.
+		 */
+		mutex_enter(&connp->conn_lock);
 		connp->conn_upper_handle = NULL;
 		connp->conn_upcalls = NULL;
+		mutex_exit(&connp->conn_lock);
+		if (IPCL_IS_NONSTR(connp)) {
+			ASSERT(upcalls != NULL);
+			ASSERT(upcalls->su_closed != NULL);
+			ASSERT(handle != NULL);
+			upcalls->su_closed(handle);
+			tcp->tcp_detached = B_TRUE;
+		}
 	}
 }
 
@@ -2056,13 +2093,8 @@ tcp_reinit_values(tcp_t *tcp)
 	tcp_stack_t	*tcps = tcp->tcp_tcps;
 	conn_t		*connp = tcp->tcp_connp;
 
-#ifndef	lint
 #define	DONTCARE(x)
 #define	PRESERVE(x)
-#else
-#define	DONTCARE(x)	((x) = (x))
-#define	PRESERVE(x)	((x) = (x))
-#endif	/* lint */
 
 	PRESERVE(tcp->tcp_bind_hash_port);
 	PRESERVE(tcp->tcp_bind_hash);
@@ -2314,6 +2346,15 @@ tcp_reinit_values(tcp_t *tcp)
 
 	PRESERVE(tcp->tcp_connid);
 
+	if (tcp->tcp_sig_sa_in != NULL) {
+		tcpsig_sa_rele(tcp->tcp_sig_sa_in);
+		tcp->tcp_sig_sa_in = NULL;
+	}
+	if (tcp->tcp_sig_sa_out != NULL) {
+		tcpsig_sa_rele(tcp->tcp_sig_sa_out);
+		tcp->tcp_sig_sa_out = NULL;
+	}
+
 	ASSERT(tcp->tcp_listen_cnt == NULL);
 	ASSERT(tcp->tcp_reass_tid == 0);
 
@@ -2394,6 +2435,8 @@ tcp_init_values(tcp_t *tcp, tcp_t *parent)
 
 		tcp->tcp_fin_wait_2_flush_interval =
 		    parent->tcp_fin_wait_2_flush_interval;
+		tcp->tcp_quickack = parent->tcp_quickack;
+		tcp->tcp_md5sig = parent->tcp_md5sig;
 
 		tcp->tcp_ka_interval = parent->tcp_ka_interval;
 		tcp->tcp_ka_abort_thres = parent->tcp_ka_abort_thres;
@@ -2877,7 +2920,7 @@ tcp_build_hdrs(tcp_t *tcp)
 
 	/*
 	 * We might be called after the connection is set up, and we might
-	 * have TS options already in the TCP header. Thus we  save any
+	 * have TS options already in the TCP header. Thus we save any
 	 * existing tcp header.
 	 */
 	buflen = connp->conn_ht_ulp_len;
@@ -3847,6 +3890,8 @@ tcp_stack_init(netstackid_t stackid, netstack_t *ns)
 	tcps->tcps_default_cc_algo = cc_load_algo(CC_DEFAULT_ALGO_NAME);
 	VERIFY3P(tcps->tcps_default_cc_algo, !=, NULL);
 
+	tcpsig_init(tcps);
+
 	return (tcps);
 }
 
@@ -3931,6 +3976,8 @@ tcp_stack_fini(netstackid_t stackid, void *arg)
 
 	tcp_kstat_fini(stackid, tcps->tcps_mibkp);
 	tcps->tcps_mibkp = NULL;
+
+	tcpsig_fini(tcps);
 
 	ldi_ident_release(tcps->tcps_ldi_ident);
 	kmem_free(tcps, sizeof (*tcps));

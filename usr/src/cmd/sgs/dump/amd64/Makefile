@@ -30,15 +30,11 @@ include		../Makefile.com
 
 .KEEP_STATE:
 
-LLDFLAGS =	$(LLDFLAGS64)
-ELFLIBDIR =	$(ELFLIBDIR64)
-CONVLIBDIR =	$(CONVLIBDIR64)
-
-VAR_SGSBINPROG=	$(VAR_SGSBINPROG64)
-VAR_SGSCCSLINK=	$(VAR_SGSCCSLINK64)
-
 include		../Makefile.targ
-include		../../Makefile.sub.64
+include		$(SRC)/Makefile.master.64
 
-install \
-package:	$(VAR_SGSBINPROG64)
+install:	$(ROOTPROG) $(ROOTPROG64) \
+	$(ROOTCCSBINLINK) $(ROOTCCSBINLINK64)
+
+$(ROOTBIN64)/dump:
+	$(RM) $@; $(SYMLINK) ../../bin/dump $@

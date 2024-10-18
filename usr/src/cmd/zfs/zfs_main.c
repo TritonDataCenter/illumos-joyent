@@ -30,6 +30,7 @@
  * Copyright 2016 Igor Kozhukhov <ikozhukhov@gmail.com>.
  * Copyright 2016 Nexenta Systems, Inc.
  * Copyright (c) 2018 Datto Inc.
+ * Copyright 2021 RackTop Systems, Inc.
  */
 
 #include <assert.h>
@@ -53,6 +54,7 @@
 #include <signal.h>
 #include <sys/debug.h>
 #include <sys/list.h>
+#include <sys/sysmacros.h>
 #include <sys/mkdev.h>
 #include <sys/mntent.h>
 #include <sys/mnttab.h>
@@ -692,15 +694,56 @@ finish_progress(char *done)
 	pt_header = NULL;
 }
 
-/*
- * Check if the dataset is mountable and should be automatically mounted.
- */
-static boolean_t
-should_auto_mount(zfs_handle_t *zhp)
+static int
+zfs_mount_and_share(libzfs_handle_t *hdl, const char *dataset, zfs_type_t type,
+    boolean_t keeptrying)
 {
-	if (!zfs_prop_valid_for_type(ZFS_PROP_CANMOUNT, zfs_get_type(zhp)))
-		return (B_FALSE);
-	return (zfs_prop_get_int(zhp, ZFS_PROP_CANMOUNT) == ZFS_CANMOUNT_ON);
+	zfs_handle_t *zhp = NULL;
+	int ret = 0;
+
+	zhp = zfs_open(hdl, dataset, type);
+	if (zhp == NULL)
+		return (1);
+
+	/*
+	 * Volumes may neither be mounted or shared.  Potentially in the
+	 * future filesystems detected on these volumes could be mounted.
+	 */
+	if (zfs_get_type(zhp) == ZFS_TYPE_VOLUME) {
+		zfs_close(zhp);
+		return (0);
+	}
+
+	/*
+	 * Mount and/or share the new filesystem as appropriate.  We provide a
+	 * verbose error message to let the user know that their filesystem was
+	 * in fact created, even if we failed to mount or share it.
+	 *
+	 * If the user doesn't want the dataset automatically mounted, then
+	 * skip the mount/share step
+	 */
+	if (zfs_prop_valid_for_type(ZFS_PROP_CANMOUNT, type, B_FALSE) &&
+	    zfs_prop_get_int(zhp, ZFS_PROP_CANMOUNT) == ZFS_CANMOUNT_ON) {
+		ret = 0;
+		while (zfs_mount(zhp, NULL, 0) != 0) {
+			/* Only persist on -F clone operations, per OS-993. */
+			if (!keeptrying || errno != EBUSY) {
+				(void) fprintf(stderr, gettext("filesystem "
+				    "successfully created, but not mounted\n"));
+				ret = 1;
+				break; /* out of while loop */
+			}
+		}
+		if (ret == 0 && zfs_share(zhp) != 0) {
+			(void) fprintf(stderr, gettext("filesystem "
+			    "successfully created, but not shared\n"));
+			ret = 1;
+		}
+	}
+
+	zfs_close(zhp);
+
+	return (ret);
 }
 
 /*
@@ -795,33 +838,13 @@ zfs_do_clone(int argc, char **argv)
 
 	/* create the mountpoint if necessary */
 	if (ret == 0) {
-		zfs_handle_t *clone;
-
-		clone = zfs_open(g_zfs, argv[1], ZFS_TYPE_DATASET);
-		if (clone != NULL) {
-			/*
-			 * If the user doesn't want the dataset
-			 * automatically mounted, then skip the mount/share
-			 * step.
-			 */
-			if (should_auto_mount(clone)) {
-				while ((ret = zfs_mount(clone, NULL, 0)) != 0) {
-					if (!keeptrying || errno != EBUSY) {
-						(void) fprintf(stderr,
-						    gettext("clone "
-						    "successfully created, "
-						    "but not mounted\n"));
-						break;
-					}
-				}
-				if (ret == 0 && (ret = zfs_share(clone)) != 0) {
-					(void) fprintf(stderr, gettext("clone "
-					    "successfully created, "
-					    "but not shared\n"));
-				}
-			}
-			zfs_close(clone);
+		if (log_history) {
+			(void) zpool_log_history(g_zfs, history_str);
+			log_history = B_FALSE;
 		}
+
+		ret = zfs_mount_and_share(g_zfs, argv[1], ZFS_TYPE_DATASET,
+		    keeptrying);
 	}
 
 	zfs_close(zhp);
@@ -864,7 +887,6 @@ static int
 zfs_do_create(int argc, char **argv)
 {
 	zfs_type_t type = ZFS_TYPE_FILESYSTEM;
-	zfs_handle_t *zhp = NULL;
 	zpool_handle_t *zpool_handle = NULL;
 	nvlist_t *real_props = NULL;
 	uint64_t volsize = 0;
@@ -986,6 +1008,31 @@ zfs_do_create(int argc, char **argv)
 		}
 	}
 
+	/*
+	 * if volsize is not a multiple of volblocksize, round it up to the
+	 * nearest multiple of the volblocksize
+	 */
+	if (type == ZFS_TYPE_VOLUME) {
+		uint64_t volblocksize;
+
+		if (nvlist_lookup_uint64(props,
+		    zfs_prop_to_name(ZFS_PROP_VOLBLOCKSIZE),
+		    &volblocksize) != 0)
+			volblocksize = ZVOL_DEFAULT_BLOCKSIZE;
+
+		if (volsize % volblocksize) {
+			volsize = P2ROUNDUP_TYPED(volsize, volblocksize,
+			    uint64_t);
+
+			if (nvlist_add_uint64(props,
+			    zfs_prop_to_name(ZFS_PROP_VOLSIZE), volsize) != 0) {
+				nvlist_free(props);
+				nomem();
+			}
+		}
+	}
+
+
 	if (type == ZFS_TYPE_VOLUME && !noreserve) {
 		uint64_t spa_version;
 		zfs_prop_t resv_prop;
@@ -1075,33 +1122,13 @@ zfs_do_create(int argc, char **argv)
 	if (zfs_create(g_zfs, argv[0], type, props) != 0)
 		goto error;
 
-	if ((zhp = zfs_open(g_zfs, argv[0], ZFS_TYPE_DATASET)) == NULL)
-		goto error;
-
-	ret = 0;
-
-	/*
-	 * Mount and/or share the new filesystem as appropriate.  We provide a
-	 * verbose error message to let the user know that their filesystem was
-	 * in fact created, even if we failed to mount or share it.
-	 * If the user doesn't want the dataset automatically mounted,
-	 * then skip the mount/share step altogether.
-	 */
-	if (should_auto_mount(zhp)) {
-		if (zfs_mount(zhp, NULL, 0) != 0) {
-			(void) fprintf(stderr, gettext("filesystem "
-			    "successfully created, but not mounted\n"));
-			ret = 1;
-		} else if (zfs_share(zhp) != 0) {
-			(void) fprintf(stderr, gettext("filesystem "
-			    "successfully created, but not shared\n"));
-			ret = 1;
-		}
+	if (log_history) {
+		(void) zpool_log_history(g_zfs, history_str);
+		log_history = B_FALSE;
 	}
 
+	ret = zfs_mount_and_share(g_zfs, argv[0], ZFS_TYPE_DATASET, B_FALSE);
 error:
-	if (zhp)
-		zfs_close(zhp);
 	nvlist_free(props);
 	return (ret);
 badusage:
@@ -1543,7 +1570,7 @@ zfs_do_destroy(int argc, char **argv)
 
 		if (cb.cb_verbose) {
 			char buf[16];
-			zfs_nicenum(cb.cb_snapused, buf, sizeof (buf));
+			zfs_nicebytes(cb.cb_snapused, buf, sizeof (buf));
 			if (cb.cb_parsable) {
 				(void) printf("reclaim\t%llu\n",
 				    cb.cb_snapused);
@@ -1754,7 +1781,7 @@ get_callback(zfs_handle_t *zhp, void *data)
 				if (pl->pl_all)
 					continue;
 				if (!zfs_prop_valid_for_type(pl->pl_prop,
-				    ZFS_TYPE_DATASET)) {
+				    ZFS_TYPE_DATASET, B_FALSE)) {
 					(void) fprintf(stderr,
 					    gettext("No such property '%s'\n"),
 					    zfs_prop_to_name(pl->pl_prop));
@@ -2096,7 +2123,7 @@ inherit_recurse_cb(zfs_handle_t *zhp, void *data)
 	 * are not valid for this type of dataset.
 	 */
 	if (prop != ZPROP_INVAL &&
-	    !zfs_prop_valid_for_type(prop, zfs_get_type(zhp)))
+	    !zfs_prop_valid_for_type(prop, zfs_get_type(zhp), B_FALSE))
 		return (0);
 
 	return (zfs_prop_inherit(zhp, cb->cb_propname, cb->cb_received) != 0);
@@ -2331,7 +2358,7 @@ zfs_do_upgrade(int argc, char **argv)
 	boolean_t showversions = B_FALSE;
 	int ret = 0;
 	upgrade_cbdata_t cb = { 0 };
-	char c;
+	int c;
 	int flags = ZFS_ITER_ARGS_CAN_BE_PATHS;
 
 	/* check options */
@@ -2794,7 +2821,7 @@ userspace_cb(void *arg, const char *domain, uid_t rid, uint64_t space)
 		    prop == ZFS_PROP_USERQUOTA || prop == ZFS_PROP_GROUPQUOTA ||
 		    prop == ZFS_PROP_PROJECTUSED ||
 		    prop == ZFS_PROP_PROJECTQUOTA) {
-			zfs_nicenum(space, sizebuf, sizeof (sizebuf));
+			zfs_nicebytes(space, sizebuf, sizeof (sizebuf));
 		} else {
 			zfs_nicenum(space, sizebuf, sizeof (sizebuf));
 		}
@@ -2895,21 +2922,34 @@ print_us_node(boolean_t scripted, boolean_t parsable, int *fields, int types,
 			break;
 		case USFIELD_USED:
 		case USFIELD_QUOTA:
+			if (type == DATA_TYPE_UINT64) {
+				if (parsable) {
+					(void) sprintf(valstr, "%llu", val64);
+					strval = valstr;
+				} else if (field == USFIELD_QUOTA &&
+				    val64 == 0) {
+					strval = "none";
+				} else {
+					zfs_nicebytes(val64, valstr,
+					    sizeof (valstr));
+					strval = valstr;
+				}
+			}
+			break;
 		case USFIELD_OBJUSED:
 		case USFIELD_OBJQUOTA:
 			if (type == DATA_TYPE_UINT64) {
 				if (parsable) {
 					(void) sprintf(valstr, "%llu", val64);
+					strval = valstr;
+				} else if (field == USFIELD_OBJQUOTA &&
+				    val64 == 0) {
+					strval = "none";
 				} else {
 					zfs_nicenum(val64, valstr,
 					    sizeof (valstr));
-				}
-				if ((field == USFIELD_QUOTA ||
-				    field == USFIELD_OBJQUOTA) &&
-				    strcmp(valstr, "0") == 0)
-					strval = "none";
-				else
 					strval = valstr;
+				}
 			}
 			break;
 		}
@@ -3964,7 +4004,7 @@ static int
 zfs_do_snapshot(int argc, char **argv)
 {
 	int ret = 0;
-	char c;
+	int c;
 	nvlist_t *props;
 	snap_cbdata_t sd = { 0 };
 	boolean_t multiple_snaps = B_FALSE;
@@ -5581,7 +5621,6 @@ print_set_creat_perms(uu_avl_t *who_avl)
 		gettext("Create time permissions:\n"),
 		NULL
 	};
-	const char **title_ptr = sc_title;
 	who_perm_node_t *who_node = NULL;
 	int prev_weight = -1;
 
@@ -5595,7 +5634,9 @@ print_set_creat_perms(uu_avl_t *who_avl)
 		deleg_perm_node_t *deleg_node;
 
 		if (prev_weight != weight) {
-			(void) printf(*title_ptr++);
+			VERIFY3S(weight, >=, 0);
+			VERIFY3S(weight, <=, 1);
+			(void) printf(sc_title[weight]);
 			prev_weight = weight;
 		}
 
@@ -6142,7 +6183,7 @@ zfs_do_holds(int argc, char **argv)
 		/*
 		 *  1. collect holds data, set format options
 		 */
-		ret = zfs_for_each(argc, argv, flags, types, NULL, NULL, limit,
+		ret = zfs_for_each(1, &argv[i], flags, types, NULL, NULL, limit,
 		    holds_callback, &cb);
 		if (ret != 0)
 			++errors;
@@ -6152,9 +6193,6 @@ zfs_do_holds(int argc, char **argv)
 	 *  2. print holds data
 	 */
 	print_holds(scripted, cb.cb_max_namelen, cb.cb_max_taglen, nvl);
-
-	if (nvlist_empty(nvl))
-		(void) printf(gettext("no datasets available\n"));
 
 	nvlist_free(nvl);
 
@@ -6310,7 +6348,7 @@ share_mount_one(zfs_handle_t *zhp, int op, int flags, char *protocol,
 
 		(void) fprintf(stderr, gettext("cannot share '%s': "
 		    "legacy share\n"), zfs_get_name(zhp));
-		(void) fprintf(stderr, gettext("use share(1M) to "
+		(void) fprintf(stderr, gettext("use share(8) to "
 		    "share this filesystem, or set "
 		    "sharenfs property on\n"));
 		return (1);
@@ -6327,7 +6365,7 @@ share_mount_one(zfs_handle_t *zhp, int op, int flags, char *protocol,
 
 		(void) fprintf(stderr, gettext("cannot %s '%s': "
 		    "legacy mountpoint\n"), cmdname, zfs_get_name(zhp));
-		(void) fprintf(stderr, gettext("use %s(1M) to "
+		(void) fprintf(stderr, gettext("use %s(8) to "
 		    "%s this filesystem\n"), cmdname, cmdname);
 		return (1);
 	}
@@ -6828,7 +6866,7 @@ unshare_unmount_path(int op, char *path, int flags, boolean_t is_manual)
 			(void) fprintf(stderr, gettext("cannot unshare "
 			    "'%s': legacy share\n"), path);
 			(void) fprintf(stderr, gettext("use "
-			    "unshare(1M) to unshare this filesystem\n"));
+			    "unshare(8) to unshare this filesystem\n"));
 		} else if (!zfs_is_shared(zhp)) {
 			(void) fprintf(stderr, gettext("cannot unshare '%s': "
 			    "not currently shared\n"), path);
@@ -6847,7 +6885,7 @@ unshare_unmount_path(int op, char *path, int flags, boolean_t is_manual)
 			(void) fprintf(stderr, gettext("cannot unmount "
 			    "'%s': legacy mountpoint\n"),
 			    zfs_get_name(zhp));
-			(void) fprintf(stderr, gettext("use umount(1M) "
+			(void) fprintf(stderr, gettext("use umount(8) "
 			    "to unmount this filesystem\n"));
 		} else {
 			ret = zfs_unmountall(zhp, flags);
@@ -7103,7 +7141,7 @@ unshare_unmount(int op, int argc, char **argv)
 				    "unshare '%s': legacy share\n"),
 				    zfs_get_name(zhp));
 				(void) fprintf(stderr, gettext("use "
-				    "unshare(1M) to unshare this "
+				    "unshare(8) to unshare this "
 				    "filesystem\n"));
 				ret = 1;
 			} else if (!zfs_is_shared(zhp)) {
@@ -7122,7 +7160,7 @@ unshare_unmount(int op, int argc, char **argv)
 				    "unmount '%s': legacy "
 				    "mountpoint\n"), zfs_get_name(zhp));
 				(void) fprintf(stderr, gettext("use "
-				    "umount(1M) to unmount this "
+				    "umount(8) to unmount this "
 				    "filesystem\n"));
 				ret = 1;
 			} else if (!zfs_is_mounted(zhp, NULL)) {
@@ -7251,7 +7289,7 @@ manual_mount(int argc, char **argv)
 		    "instead.\n"), path);
 		(void) fprintf(stderr, gettext("If you must use 'mount -F zfs' "
 		    "or /etc/vfstab, use 'zfs set mountpoint=legacy'.\n"));
-		(void) fprintf(stderr, gettext("See zfs(1M) for more "
+		(void) fprintf(stderr, gettext("See zfs(8) for more "
 		    "information.\n"));
 		ret = 1;
 	}
@@ -7376,9 +7414,10 @@ zfs_do_diff(int argc, char **argv)
 	if ((atp = strchr(copy, '@')) != NULL)
 		*atp = '\0';
 
-	if ((zhp = zfs_open(g_zfs, copy, ZFS_TYPE_FILESYSTEM)) == NULL)
+	if ((zhp = zfs_open(g_zfs, copy, ZFS_TYPE_FILESYSTEM)) == NULL) {
+		free(copy);
 		return (1);
-
+	}
 	free(copy);
 
 	/*
@@ -7494,7 +7533,7 @@ zfs_do_bookmark(int argc, char **argv)
 	fnvlist_free(nvl);
 
 	if (ret != 0) {
-		const char *err_msg;
+		const char *err_msg = NULL;
 		char errbuf[1024];
 
 		(void) snprintf(errbuf, sizeof (errbuf),
@@ -7518,11 +7557,13 @@ zfs_do_bookmark(int argc, char **argv)
 			err_msg = "out of space";
 			break;
 		default:
-			err_msg = "unknown error";
+			(void) zfs_standard_error(g_zfs, ret, errbuf);
 			break;
 		}
-		(void) fprintf(stderr, "%s: %s\n", errbuf,
-		    dgettext(TEXT_DOMAIN, err_msg));
+		if (err_msg != NULL) {
+			(void) fprintf(stderr, "%s: %s\n", errbuf,
+			    dgettext(TEXT_DOMAIN, err_msg));
+		}
 	}
 
 	return (ret != 0);
@@ -7536,10 +7577,10 @@ static int
 zfs_do_channel_program(int argc, char **argv)
 {
 	int ret, fd;
-	char c;
+	int c;
 	char *progbuf, *filename, *poolname;
 	size_t progsize, progread;
-	nvlist_t *outnvl;
+	nvlist_t *outnvl = NULL;
 	uint64_t instrlimit = ZCP_DEFAULT_INSTRLIMIT;
 	uint64_t memlimit = ZCP_DEFAULT_MEMLIMIT;
 	boolean_t sync_flag = B_TRUE, json_output = B_FALSE;
@@ -7679,7 +7720,8 @@ zfs_do_channel_program(int argc, char **argv)
 		 * falling back on strerror() for an unexpected return code.
 		 */
 		char *errstring = NULL;
-		if (nvlist_exists(outnvl, ZCP_RET_ERROR)) {
+		const char *msg = gettext("Channel program execution failed");
+		if (outnvl != NULL && nvlist_exists(outnvl, ZCP_RET_ERROR)) {
 			(void) nvlist_lookup_string(outnvl,
 			    ZCP_RET_ERROR, &errstring);
 			if (errstring == NULL)
@@ -7704,12 +7746,11 @@ zfs_do_channel_program(int argc, char **argv)
 				    "programs must be run as root.";
 				break;
 			default:
-				errstring = strerror(ret);
+				(void) zfs_standard_error(g_zfs, ret, msg);
 			}
 		}
-		(void) fprintf(stderr,
-		    gettext("Channel program execution failed:\n%s\n"),
-		    errstring);
+		if (errstring != NULL)
+			(void) fprintf(stderr, "%s:\n%s\n", msg, errstring);
 	} else {
 		if (json_output) {
 			(void) nvlist_print_json(stdout, outnvl);

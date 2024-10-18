@@ -22,6 +22,7 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2017 Joyent, Inc.
+ * Copyright 2023 MNX Cloud, Inc.
  */
 
 /*	Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989 AT&T	*/
@@ -53,12 +54,17 @@ enum nfssys_op	{ OLD_NFS_SVC, OLD_ASYNC_DAEMON, EXPORTFS, OLD_NFS_GETFH,
     NFS4_DSS_SETPATHS_SIZE, NFS4_EPHEMERAL_MOUNT_TO, MOUNTD_ARGS,
     NFSCMD_ARGS };
 
+/*
+ * The protocol version below represents protocol version number and
+ *  for version 4  - minor version number. Use NFS_PROT_VERSION() and
+ * NFS_PROT_V4_MINORVERSION() to analyse them.
+ */
 struct nfs_svc_args {
 	int		fd;		/* Connection endpoint */
 	char		*netid;		/* Identify transport */
 	struct netbuf	addrmask;	/* Address mask for host */
-	int		versmin;	/* Min protocol version to offer */
-	int		versmax;	/* Max protocol version to offer */
+	uint32_t	nfs_versmin;	/* Min protocol version. NFS_VERS_ */
+	uint32_t	nfs_versmax;	/* Max protocol version. NFS_VERS_ */
 	int		delegation;	/* NFSv4 delegation on/off? */
 };
 
@@ -67,8 +73,8 @@ struct nfs_svc_args32 {
 	int32_t		fd;		/* Connection endpoint */
 	caddr32_t	netid;		/* Identify transport */
 	struct netbuf32	addrmask;	/* Address mask for host */
-	int32_t		versmin;	/* Min protocol version to offer */
-	int32_t		versmax;	/* Max protocol version to offer */
+	uint32_t	nfs_versmin;	/* Min protocol version. NFS_VERS_ */
+	uint32_t	nfs_versmax;	/* Max protocol version. NFS_VERS_ */
 	int32_t		delegation;	/* NFSv4 delegation on/off? */
 };
 #endif
@@ -185,8 +191,8 @@ struct nfsl_flush_args32 {
 struct rdma_svc_args {
 	uint32_t	poolid;		/* Thread Pool ID */
 	char		*netid;		/* Network Identifier */
-	int		nfs_versmin;	/* Min NFS version to offer */
-	int		nfs_versmax;	/* Max NFS version to offer */
+	uint32_t	nfs_versmin;	/* Min NFS version. NFS_VERS_... */
+	uint32_t	nfs_versmax;	/* Max NFS version. NFS_VERS_... */
 	int		delegation;	/* NFSv4 delegation on/off? */
 };
 
@@ -194,8 +200,8 @@ struct rdma_svc_args {
 struct rdma_svc_args32 {
 	uint32_t	poolid;		/* Thread Pool ID */
 	caddr32_t	netid;		/* Network Identifier */
-	int32_t		nfs_versmin;	/* Min NFS version to offer */
-	int32_t		nfs_versmax;	/* Max NFS version to offer */
+	uint32_t	nfs_versmin;	/* Min NFS version. NFS_VERS_... */
+	uint32_t	nfs_versmax;	/* Max NFS version. NFS_VERS_... */
 	int32_t		delegation;	/* NFSv4 delegation on/off? */
 };
 #endif
@@ -322,8 +328,8 @@ extern int	lm_svc(struct lm_svc_args *uap);
 extern int	lm_shutdown(void);
 extern int	nfsl_flush(struct nfsl_flush_args *, model_t);
 extern int	nfs4_svc(struct nfs4_svc_args *, model_t);
-extern int 	rdma_start(struct rdma_svc_args *);
-extern void	rfs4_clear_client_state(struct nfs4clrst_args *);
+extern int	rdma_start(struct rdma_svc_args *);
+extern int	rfs4_clear_client_state(struct nfs4clrst_args *);
 extern void	nfs_idmap_args(struct nfsidmap_args *);
 extern void	nfs4_ephemeral_set_mount_to(uint_t);
 extern void	mountd_args(uint_t);

@@ -21,8 +21,10 @@
 /*
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2020 Joyent, Inc.
+ * Copyright 2023 RackTop Systems, Inc.
  */
-
 #include <pthread.h>
 #include <stdlib.h>
 #include <security/cryptoki.h>
@@ -165,7 +167,7 @@ C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 			goto fail;
 		}
 
-		new_object->session_handle = (CK_SESSION_HANDLE)NULL;
+		new_object->session_handle = CK_INVALID_HANDLE;
 		/*
 		 * Add the newly created token object to the global
 		 * token object list in the slot struct.
@@ -173,10 +175,12 @@ C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 		soft_add_token_object_to_slot(new_object);
 		OBJ_REFRELE(old_object);
 		SES_REFRELE(session_p, lock_held);
-		*phNewObject = (CK_ULONG)new_object;
+		*phNewObject = set_objecthandle(new_object);
 
 		return (CKR_OK);
 	}
+
+	*phNewObject = set_objecthandle(new_object);
 
 	/* Insert new object into this session's object list */
 	soft_add_object_to_session(new_object, session_p);
@@ -187,9 +191,6 @@ C_CopyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 	 */
 	OBJ_REFRELE(old_object);
 	SES_REFRELE(session_p, lock_held);
-
-	/* set handle of the new object */
-	*phNewObject = (CK_ULONG)new_object;
 
 	return (rv);
 
@@ -210,7 +211,7 @@ C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
 
 	CK_RV rv;
 	soft_object_t *object_p;
-	soft_session_t *session_p = (soft_session_t *)(hSession);
+	soft_session_t *session_p;
 	boolean_t lock_held = B_FALSE;
 	CK_SESSION_HANDLE creating_session;
 
@@ -218,21 +219,14 @@ C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
 	if (!softtoken_initialized)
 		return (CKR_CRYPTOKI_NOT_INITIALIZED);
 
-	/*
-	 * The reason that we don't call handle2session is because
-	 * the argument hSession may not be the creating_session of
-	 * the object to be destroyed, and we want to avoid the lock
-	 * contention. The handle2session will be called later for
-	 * the creating_session.
-	 */
-	if ((session_p == NULL) ||
-	    (session_p->magic_marker != SOFTTOKEN_SESSION_MAGIC)) {
-		return (CKR_SESSION_HANDLE_INVALID);
-	}
+	rv = handle2session(hSession, &session_p);
+	if (rv != CKR_OK)
+		return (rv);
 
 	/* Obtain the object pointer. */
 	HANDLE2OBJECT_DESTROY(hObject, object_p, rv);
 	if (rv != CKR_OK) {
+		SES_REFRELE(session_p, lock_held);
 		return (rv);
 	}
 
@@ -247,12 +241,7 @@ C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
 		 */
 		rv = soft_pin_expired_check(object_p);
 		if (rv != CKR_OK) {
-			return (rv);
-		}
-
-		/* Obtain the session pointer just for validity check. */
-		rv = handle2session(hSession, &session_p);
-		if (rv != CKR_OK) {
+			SES_REFRELE(session_p, lock_held);
 			return (rv);
 		}
 
@@ -287,12 +276,17 @@ C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
 	}
 
 	/*
-	 * Obtain the session pointer. Also, increment the session
-	 * reference count.
+	 * Switch to the creating_session, which actually holds the object.
+	 * If we use the wrong session in the call to soft_delete_object(),
+	 * deletion will silently fail, and we'll leak memory until
+	 * C_CloseSession is called (which, if metaslot is active, may be
+	 * never).
 	 */
-	rv = handle2session(creating_session, &session_p);
-	if (rv != CKR_OK) {
-		return (rv);
+	if (hSession != creating_session) {
+		SES_REFRELE(session_p, lock_held);
+		rv = handle2session(creating_session, &session_p);
+		if (rv != CKR_OK)
+			return (rv);
 	}
 
 	/*

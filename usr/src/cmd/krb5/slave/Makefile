@@ -47,7 +47,7 @@ TEXT_DOMAIN = SUNW_OST_OSCMD
 POFILE = kprop.po
 POFILES = generic.po
 
-CFLAGS += $(XESS) $(CCOPTS) $(DEFS) $(LOCALINCLUDE)
+CFLAGS += $(CCOPTS) $(DEFS) $(LOCALINCLUDE)
 CPPFLAGS +=	-I. \
 		-I$(KRB5IPROPDIR) \
 		-I$(SRC)/lib/gss_mechs/mech_krb5/include \
@@ -60,7 +60,6 @@ CERRWARN +=	-_gcc=-Wno-unused-variable
 CERRWARN +=	-_gcc=-Wno-unused-function
 CERRWARN +=	-_gcc=-Wno-implicit-function-declaration
 CERRWARN +=	-_gcc=-Wno-parentheses
-CERRWARN +=	$(CNOWARN_UNINIT)
 CERRWARN +=	-_gcc=-Wno-unused-value
 CERRWARN +=	-_gcc=-Wno-address
 
@@ -104,10 +103,6 @@ check:	$(CHKMANIFEST)
 install_h:
 clean:
 	$(RM) $(CLIENTOBJS) $(SERVEROBJS) $(DERIVED_OBJS) $(COMMONOBJS) $(PROG) $(ISRC)
-
-lint:
-	$(LINT.c) $(CLIENTSRCS) $(COMMONSRCS) $(LDLIBS)
-	$(LINT.c) $(SERVERSRCS) $(DERIVED_SRCS) $(COMMONSRCS) $(LDLIBS)
 
 include ../../Makefile.targ
 

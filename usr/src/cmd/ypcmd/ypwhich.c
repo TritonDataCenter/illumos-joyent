@@ -32,8 +32,6 @@
  * California.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * This is a user command which tells which yp server is being used by a
  * given machine, or which yp server is the master for a named map.
@@ -148,8 +146,7 @@ struct old_ypbind_resp {
  * This is the main line for the ypwhich process.
  */
 int
-main(argc, argv)
-char **argv;
+main(int argc, char **argv)
 {
 	get_command_line_args(argc, argv);
 

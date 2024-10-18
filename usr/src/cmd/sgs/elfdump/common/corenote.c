@@ -26,6 +26,7 @@
 /*
  * Copyright 2012 DEY Storage Systems, Inc.  All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <stdlib.h>
@@ -39,12 +40,14 @@
 #include <_elfdump.h>
 #include <struct_layout.h>
 #include <conv.h>
+#include <ctype.h>
+#include <sys/sysmacros.h>
 
 
 /*
  * This module contains the code that displays data from the note
- * sections found in Solaris core files. The format of these
- * note sections are described in the core(4) manpage.
+ * sections found in illumos core files. The format of these
+ * note sections are described in the core(5) manpage.
  */
 
 
@@ -94,7 +97,6 @@
 	print_strbuf(state, _title, &layout->_field)
 
 
-
 /*
  * Structure used to maintain state data for a core note, or a subregion
  * (sub-struct) of a core note. These values would otherwise need to be
@@ -136,26 +138,59 @@ typedef void (* dump_func_t)(note_state_t *state, const char *title);
 static const char *
 safe_str(const char *str, size_t n)
 {
-	static char	buf[512];
-	char		*s;
-	size_t		i;
+	static char	buf[2048];
+	size_t		i, used;
 
 	if (n == 0)
 		return (MSG_ORIG(MSG_STR_EMPTY));
 
-	for (i = 0; i < n; i++)
+	/*
+	 * If the string is terminated and doesn't need escaping, we can return
+	 * it as is.
+	 */
+	for (i = 0; i < n; i++) {
 		if (str[i] == '\0')
 			return (str);
 
-	i = (n >= sizeof (buf)) ? (sizeof (buf) - 4) : (n - 1);
-	(void) memcpy(buf, str, i);
-	s = buf + i;
-	if (n >= sizeof (buf)) {
-		*s++ = '.';
-		*s++ = '.';
-		*s++ = '.';
+		if (!isascii(str[i]) || !isprint(str[i])) {
+			break;
+		}
 	}
-	*s = '\0';
+
+	for (i = 0, used = 0; i < n; i++) {
+		if (str[i] == '\0') {
+			if (used + 1 > sizeof (buf))
+				break;
+			buf[used++] = str[i];
+			return (buf);
+		} else if (isascii(str[i]) && isprint(str[i])) {
+			if (used + 1 > sizeof (buf))
+				break;
+			buf[used++] = str[i];
+		} else {
+			size_t len = snprintf(NULL, 0, "\\x%02x", str[i]);
+			if (used + len > sizeof (buf))
+				break;
+			(void) snprintf(buf + used, sizeof (buf) - used,
+			    "\\x%02x", str[i]);
+			used += len;
+		}
+	}
+
+	if (i == n && used < sizeof (buf)) {
+		buf[used] = '\0';
+		return (buf);
+	}
+
+	/*
+	 * If we got here, we would have overflowed. Figure out where we need to
+	 * start and truncate.
+	 */
+	used = MIN(used, sizeof (buf) - 4);
+	buf[used++] = '.';
+	buf[used++] = '.';
+	buf[used++] = '.';
+	buf[used++] = '\0';
 	return (buf);
 }
 
@@ -198,7 +233,7 @@ data_present(note_state_t *state, const sl_field_t *fdesc)
 /*
  * indent_enter/exit are used to start/end output for a subitem.
  * On entry, a title is output, and the indentation level is raised
- * by one unit. On exit, the indentation level is restrored to its
+ * by one unit. On exit, the indentation level is restored to its
  * previous value.
  */
 static void
@@ -435,6 +470,7 @@ dump_auxv(note_state_t *state, const char *title)
 	union {
 		Conv_cap_val_hw1_buf_t		hw1;
 		Conv_cap_val_hw2_buf_t		hw2;
+		Conv_cap_val_hw3_buf_t		hw3;
 		Conv_cnote_auxv_af_buf_t	auxv_af;
 		Conv_ehdr_flags_buf_t		ehdr_flags;
 		Conv_secflags_buf_t		secflags;
@@ -551,8 +587,27 @@ dump_auxv(note_state_t *state, const char *title)
 				vstr = NULL;
 			num_fmt = SL_FMT_NUM_HEX;
 			break;
-
-
+		case AT_SUN_HWCAP3:
+			w = extract_as_word(state, &layout->a_val);
+			vstr = conv_cap_val_hw3(w, state->ns_mach,
+			    0, &conv_buf.hw3);
+			/*
+			 * conv_cap_val_hw3() produces output like:
+			 *
+			 *	0xfff [ flg1 flg2 0xff]
+			 *
+			 * where the first hex value is the complete value,
+			 * and the second is the leftover bits. We only
+			 * want the part in brackets, and failing that,
+			 * would rather fall back to formatting the full
+			 * value ourselves.
+			 */
+			while ((*vstr != '\0') && (*vstr != '['))
+				vstr++;
+			if (*vstr != '[')
+				vstr = NULL;
+			num_fmt = SL_FMT_NUM_HEX;
+			break;
 
 		case AT_SUN_AUXFLAGS:
 			w = extract_as_word(state, &layout->a_val);
@@ -1635,7 +1690,7 @@ dump_prfdinfo(note_state_t *state, const char *title)
 {
 	const sl_prfdinfo_layout_t *layout = state->ns_arch->prfdinfo;
 	char buf[1024];
-	uint32_t fileflags, mode;
+	uint32_t fileflags, mode, fdflags;
 
 	indent_enter(state, title, &layout->pr_fd);
 
@@ -1663,7 +1718,9 @@ dump_prfdinfo(note_state_t *state, const char *title)
 	print_str(state, MSG_ORIG(MSG_CNOTE_T_PR_FILEFLAGS),
 	    conv_cnote_fileflags(fileflags, 0, buf, sizeof (buf)));
 
-	PRINT_DEC(MSG_ORIG(MSG_CNOTE_T_PR_FDFLAGS), pr_fdflags);
+	fdflags = extract_as_word(state, &layout->pr_fdflags);
+	print_str(state, MSG_ORIG(MSG_CNOTE_T_PR_FDFLAGS),
+	    conv_cnote_fdflags(fdflags, 0, buf, sizeof (buf)));
 
 	PRINT_STRBUF(MSG_ORIG(MSG_CNOTE_T_PR_PATH), pr_path);
 
@@ -1754,6 +1811,74 @@ dump_asrset(note_state_t *state, const char *title)
 		    fmt_num(state, &fdesc2, SL_FMT_NUM_ZHEX, buf2));
 		fdesc1.slf_offset += 2 * fdesc1.slf_eltlen;
 		w += 2;
+	}
+
+	indent_exit(state);
+}
+
+static void
+dump_upanic(note_state_t *state, const char *title)
+{
+	const sl_prupanic_layout_t *layout = state->ns_arch->prupanic;
+	Conv_upanic_buf_t inv;
+	Word w;
+
+	indent_enter(state, title, &layout->pru_version);
+	w = extract_as_word(state, &layout->pru_version);
+	if (w != PRUPANIC_VERSION_1) {
+		PRINT_DEC(MSG_INTL(MSG_NOTE_BAD_UPANIC_VER), pru_version);
+		dump_hex_bytes(state->ns_data, state->ns_len, state->ns_indent,
+		    4, 3);
+	} else {
+		PRINT_DEC(MSG_ORIG(MSG_CNOTE_T_PRU_VERSION), pru_version);
+		w = extract_as_word(state, &layout->pru_flags);
+		print_str(state, MSG_ORIG(MSG_CNOTE_T_PRU_FLAGS),
+		    conv_prupanic(w, 0, &inv));
+
+		if ((w & PRUPANIC_FLAG_MSG_VALID) != 0) {
+			/*
+			 * We have a message that is _probably_ a text string,
+			 * but the interface allows for arbitrary data. The only
+			 * guarantee is that someone using this is probably up
+			 * to no good. As a result, we basically try to print
+			 * this as a string, but in the face of certain types of
+			 * data, we hex escape it.
+			 */
+			print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_PRU_DATA),
+			    &layout->pru_data);
+		}
+	}
+}
+
+static void
+dump_cwd(note_state_t *state, const char *title)
+{
+	const sl_prcwd_layout_t *layout = state->ns_arch->prcwd;
+
+	indent_enter(state, title, &layout->prcwd_fsid);
+
+	if (data_present(state, &layout->prcwd_fsid)) {
+		PRINT_HEX(MSG_ORIG(MSG_CNOTE_T_CWD_FSID), prcwd_fsid);
+	}
+
+	if (data_present(state, &layout->prcwd_fsname)) {
+		print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_CWD_FSNAME),
+		    &layout->prcwd_fsname);
+	}
+
+	if (data_present(state, &layout->prcwd_mntpt)) {
+		print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_CWD_MNTPT),
+		    &layout->prcwd_mntpt);
+	}
+
+	if (data_present(state, &layout->prcwd_mntspec)) {
+		print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_CWD_MNTSPEC),
+		    &layout->prcwd_mntspec);
+	}
+
+	if (data_present(state, &layout->prcwd_cwd)) {
+		print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_CWD_CWD),
+		    &layout->prcwd_cwd);
 	}
 
 	indent_exit(state);
@@ -1927,6 +2052,16 @@ corenote(Half mach, int do_swap, Word type,
 	case NT_LWPNAME:
 		state.ns_vcol = 20;
 		dump_lwpname(&state, MSG_ORIG(MSG_CNOTE_DESC_PRLWPNAME_T));
+		return (CORENOTE_R_OK);
+
+	case NT_UPANIC:
+		state.ns_vcol = 23;
+		dump_upanic(&state, MSG_ORIG(MSG_CNOTE_DESC_PRUPANIC_T));
+		return (CORENOTE_R_OK);
+
+	case NT_CWD:
+		state.ns_vcol = 23;
+		dump_cwd(&state, MSG_ORIG(MSG_CNOTE_DESC_PRCWD_T));
 		return (CORENOTE_R_OK);
 	}
 

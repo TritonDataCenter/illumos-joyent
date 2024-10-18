@@ -23,7 +23,7 @@
 # Copyright 2016 Gary Mills
 # Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2013, OmniTI Computer Consulting, Inc. All rights reserved.
-# Copyright 2013 Garrett D'Amore <garrett@damore.org>
+# Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2019 Joyent, Inc.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
@@ -33,7 +33,6 @@
 LIBCDIR=	$(SRC)/lib/libc
 LIB_PIC=	libc_pic.a
 VERS=		.1
-CPP=		/usr/lib/cpp
 TARGET_ARCH=	sparc
 
 # objects are grouped by source directory
@@ -105,6 +104,7 @@ FPOBJS64=			\
 
 FPASMOBJS=			\
 	_Q_get_rp_rd.o		\
+	__quad.o		\
 	__quad_mag64.o		\
 	fpgetmask.o		\
 	fpgetrnd.o		\
@@ -112,9 +112,6 @@ FPASMOBJS=			\
 	fpsetmask.o		\
 	fpsetrnd.o		\
 	fpsetsticky.o
-
-$(__GNUC)FPASMOBJS +=		\
-	__quad.o
 
 ATOMICOBJS=			\
 	atomic.o
@@ -130,12 +127,15 @@ COMOBJS=			\
 	bcopy.o			\
 	bsearch.o		\
 	bzero.o			\
+	explicit_bzero.o	\
 	memccpy.o		\
+	memmem.o		\
 	qsort.o			\
 	strtol.o		\
 	strtoul.o		\
 	strtoll.o		\
-	strtoull.o
+	strtoull.o		\
+	multi3.o
 
 GENOBJS=			\
 	_getsp.o		\
@@ -216,7 +216,7 @@ COMSYSOBJS=			\
 	chroot.o		\
 	cladm.o			\
 	close.o			\
-	execve.o		\
+	execvex.o		\
 	exit.o			\
 	facl.o			\
 	fchdir.o		\
@@ -301,6 +301,7 @@ COMSYSOBJS=			\
 	ulimit.o		\
 	umask.o			\
 	umount2.o		\
+	upanic.o		\
 	utssys.o		\
 	uucopy.o		\
 	vhangup.o		\
@@ -408,7 +409,6 @@ PORTGEN=			\
 	euclen.o		\
 	event_port.o		\
 	execvp.o		\
-	explicit_bzero.o	\
 	fattach.o		\
 	fdetach.o		\
 	fdopendir.o		\
@@ -488,7 +488,7 @@ PORTGEN=			\
 	madvise.o		\
 	malloc.o		\
 	memalign.o		\
-	memmem.o		\
+	memrchr.o		\
 	memset_s.o		\
 	mkdev.o			\
 	mkdtemp.o		\
@@ -558,6 +558,7 @@ PORTGEN=			\
 	sigsend.o		\
 	sigsetops.o		\
 	ssignal.o		\
+	ssp.o			\
 	stack.o			\
 	stpcpy.o		\
 	stpncpy.o		\
@@ -766,6 +767,8 @@ PORTI18N_COND=			\
 PORTLOCALE=			\
 	big5.o			\
 	btowc.o			\
+	c16rtomb.o		\
+	c32rtomb.o		\
 	collate.o		\
 	collcmp.o		\
 	euc.o			\
@@ -791,6 +794,8 @@ PORTLOCALE=			\
 	mbftowc.o		\
 	mblen.o			\
 	mbrlen.o		\
+	mbrtoc16.o		\
+	mbrtoc32.o		\
 	mbrtowc.o		\
 	mbsinit.o		\
 	mbsnrtowcs.o		\
@@ -915,7 +920,9 @@ PORTSYS=			\
 	execl.o			\
 	execle.o		\
 	execv.o			\
+	execve.o		\
 	fcntl.o			\
+	fexecve.o		\
 	getpagesizes.o		\
 	getpeerucred.o		\
 	inst_sync.o		\
@@ -1044,10 +1051,6 @@ SONAME = libc.so.1
 
 CFLAGS64 += $(CCVERBOSE)
 
-# This is necessary to avoid problems with calling _ex_unwind().
-# We probably don't want any inlining anyway.
-CFLAGS64 += -xinline=
-
 CERRWARN += -_gcc=-Wno-parentheses
 CERRWARN += -_gcc=-Wno-switch
 CERRWARN += $(CNOWARN_UNINIT)
@@ -1060,18 +1063,15 @@ CERRWARN += -_gcc=-Wno-clobbered
 CERRWARN += -_gcc=-Wno-unused-function
 CERRWARN += -_gcc=-Wno-address
 
-# Setting THREAD_DEBUG = -DTHREAD_DEBUG (make THREAD_DEBUG=-DTHREAD_DEBUG ...)
-# enables ASSERT() checking in the threads portion of the library.
+# Setting THREAD_DEBUG = -DDEBUG (make THREAD_DEBUG=-DDEBUG ...)
+# enables ASSERT() checking in the library.
 # This is automatically enabled for DEBUG builds, not for non-debug builds.
 THREAD_DEBUG =
-$(NOT_RELEASE_BUILD)THREAD_DEBUG = -DTHREAD_DEBUG
-
-# Make string literals read-only to save memory.
-CFLAGS64 += $(XSTRCONST)
+$(NOT_RELEASE_BUILD)THREAD_DEBUG = -DDEBUG
 
 ALTPICS= $(TRACEOBJS:%=pics/%)
 
-$(DYNLIB) := BUILD.SO = $(LD) -o $@ -G $(DYNFLAGS) $(PICS) $(ALTPICS) $(EXTPICS)
+$(DYNLIB) := BUILD.SO = $(LD) -o $@ $(GSHARED) $(DYNFLAGS) $(PICS) $(ALTPICS) $(EXTPICS)
 
 MAPFILES =	$(LIBCDIR)/port/mapfile-vers
 
@@ -1079,8 +1079,8 @@ sparcv9_C_PICFLAGS= $(sparcv9_C_BIGPICFLAGS)
 CFLAGS64 +=	$(EXTN_CFLAGS)
 CPPFLAGS=	-D_REENTRANT -Dsparc $(EXTN_CPPFLAGS) $(THREAD_DEBUG) \
 		-I$(LIBCBASE)/inc -I$(LIBCDIR)/inc $(CPPFLAGS.master)
-ASFLAGS=	$(EXTN_ASFLAGS) $(AS_BIGPICFLAGS) -P -D__STDC__ -D_ASM -D__sparcv9 $(CPPFLAGS) \
-		$(sparcv9_AS_XARCH)
+ASFLAGS=	$(EXTN_ASFLAGS) $(AS_BIGPICFLAGS) -D__STDC__ \
+		-D_ASM -D__sparcv9 $(CPPFLAGS) $(sparcv9_XARCH)
 
 # As a favor to the dtrace syscall provider, libc still calls the
 # old syscall traps that have been obsoleted by the *at() interfaces.
@@ -1098,7 +1098,7 @@ DYNFLAGS +=	-znow
 
 DYNFLAGS +=	$(EXTN_DYNFLAGS)
 
-BUILD.s=	$(AS) $(ASFLAGS) $< -o $@
+BUILD.s=	$(AS) $(ASFLAGS) $< -c -o $@
 
 # Override this top level flag so the compiler builds in its native
 # C99 mode.  This has been enabled to support the complex arithmetic
@@ -1127,82 +1127,8 @@ CLOBBERFILES +=	$(LIB_PIC)
 $(DYNLIB) := CRTI = crti.o
 $(DYNLIB) := CRTN = crtn.o
 
-# Files which need the threads .il inline template
-TIL=				\
-	aio.o			\
-	alloc.o			\
-	assfail.o		\
-	atexit.o		\
-	atfork.o		\
-	cancel.o		\
-	door_calls.o		\
-	err.o			\
-	errno.o			\
-	getctxt.o		\
-	lwp.o			\
-	ma.o			\
-	machdep.o		\
-	posix_aio.o		\
-	pthr_attr.o		\
-	pthr_barrier.o		\
-	pthr_cond.o		\
-	pthr_mutex.o		\
-	pthr_rwlock.o		\
-	pthread.o		\
-	rand.o			\
-	rwlock.o		\
-	scalls.o		\
-	sched.o			\
-	sema.o			\
-	sigaction.o		\
-	sigev_thread.o		\
-	spawn.o			\
-	stack.o			\
-	swapctxt.o		\
-	synch.o			\
-	tdb_agent.o		\
-	thr.o			\
-	thread_interface.o	\
-	thread_pool.o		\
-	tls.o			\
-	tsd.o			\
-	unwind.o
-
-$(TIL:%=pics/%) := CFLAGS64 += $(LIBCBASE)/threads/sparcv9.il
-
-# Files in fp, port/fp subdirectories that need base.il inline template
-IL=				\
-	__flt_decim.o		\
-	decimal_bin.o
-
-$(IL:%=pics/%) := CFLAGS64 += $(LIBCBASE)/fp/base.il
-
-# Files in fp subdirectory which need __quad.il inline template
-QIL=				\
-	_Q_add.o		\
-	_Q_cmp.o		\
-	_Q_cmpe.o		\
-	_Q_div.o		\
-	_Q_dtoq.o		\
-	_Q_fcc.o		\
-	_Q_mul.o		\
-	_Q_qtod.o		\
-	_Q_qtoi.o		\
-	_Q_qtos.o		\
-	_Q_qtou.o		\
-	_Q_sqrt.o		\
-	_Q_stoq.o		\
-	_Q_sub.o		\
-	_Qp_qtox.o		\
-	_Qp_qtoux.o
-
-$(QIL:%=pics/%) := CFLAGS64 += $(LIBCDIR)/$(MACH)/fp/__quad.il
 pics/_Qp%.o := CFLAGS64 += -I$(LIBCDIR)/$(MACH)/fp
 pics/_Q%.o := sparcv9_COPTFLAG = -xO4 -xchip=ultra
-
-# Files in crt subdirectory which need muldiv64.il inline template
-#CIL=	mul64.o divrem64.o
-#$(CIL:%=pics/%) := CFLAGS += $(LIBCBASE)/crt/mul64.il
 
 # large-file-aware components that should be built large
 
@@ -1235,15 +1161,15 @@ pics/arc4random.o :=	CPPFLAGS += -I$(SRC)/common/crypto/chacha
 # Files which need extra optimization
 pics/getenv.o := sparcv9_COPTFLAG = -xO4
 
+#
+# Disable the stack protector due to issues with bootstrapping rtld. See
+# cmd/sgs/rtld/Makefile.com for more information.
+#
+STACKPROTECT = none
+
 .KEEP_STATE:
 
 all: $(LIBS) $(LIB_PIC)
-
-# object files that depend on inline template
-$(TIL:%=pics/%): $(LIBCBASE)/threads/sparcv9.il
-$(IL:%=pics/%): $(LIBCBASE)/fp/base.il
-$(QIL:%=pics/%): $(LIBCDIR)/$(MACH)/fp/__quad.il
-#$(CIL:%=pics/%): $(LIBCBASE)/crt/muldiv64.il
 
 # include common libc targets
 include $(LIBCDIR)/Makefile.targ
@@ -1286,7 +1212,9 @@ $(ASSYMDEP_OBJS:%=pics/%): assym.h
 assym.h := CFLAGS64 += $(CCGDEBUG)
 
 GENASSYM_C = $(LIBCDIR)/$(MACH)/genassym.c
-LDFLAGS.native = $(LDASSERTS) $(ZASSERTDEFLIB)=libc.so $(BDIRECT)
+LDFLAGS.native = $(LDASSERTS) $(BDIRECT)
+
+genassym := NATIVE_LIBS += libc.so
 
 genassym: $(GENASSYM_C)
 	$(NATIVECC) $(NATIVE_CFLAGS) -I$(LIBCBASE)/inc -I$(LIBCDIR)/inc \

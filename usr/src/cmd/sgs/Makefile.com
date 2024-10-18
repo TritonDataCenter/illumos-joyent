@@ -29,8 +29,6 @@
 .KEEP_STATE_FILE: .make.state.$(MACH)
 
 
-include		$(SRC)/cmd/sgs/Makefile.var
-
 i386_ARCH =	intel
 sparc_ARCH =	sparc
 
@@ -47,13 +45,11 @@ $(NOT_RELEASE_BUILD)DEBUG = -DDEBUG
 
 CSTD_GNU89 =	$(CSTD_GNU99)
 
-CFLAGS +=	$(CCVERBOSE) $(DEBUG) $(XFFLAG)
-CFLAGS64 +=	$(CCVERBOSE) $(DEBUG) $(XFFLAG)
+CFLAGS +=	$(CCVERBOSE) $(DEBUG)
+CFLAGS64 +=	$(CCVERBOSE) $(DEBUG)
 
-NATIVE_CFLAGS +=	$(CCVERBOSE) $(DEBUG) $(XFFLAG)
+NATIVE_CFLAGS +=	$(CCVERBOSE) $(DEBUG)
 
-CERRWARN +=	-_gcc=-Wno-type-limits
-CERRWARN +=	-_gcc=-Wno-parentheses
 CERRWARN +=	-_gcc=-Wno-unused-value
 
 #
@@ -67,8 +63,8 @@ CPPFLAGS =	-I. -I../common -I$(SGSHOME)/include -I$(SGSHOME)/include/$(MACH) \
 		$(CPPFLAGS.master) -I$(ELFCAP)
 
 # PICS64 is unique to our environment
-$(PICS64) :=	sparc_CFLAGS += -xregs=no%appl $(C_PICFLAGS)
-$(PICS64) :=	sparcv9_CFLAGS += -xregs=no%appl $(C_PICFLAGS)
+$(PICS64) :=	sparc_CFLAGS += $(C_PICFLAGS)
+$(PICS64) :=	sparcv9_CFLAGS += $(C_PICFLAGS)
 $(PICS64) :=	CPPFLAGS += -DPIC -D_REENTRANT
 
 LDFLAGS +=	$(ZIGNORE)

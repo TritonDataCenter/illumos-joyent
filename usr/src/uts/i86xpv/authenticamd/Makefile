@@ -32,7 +32,6 @@ UTSBASE = ../..
 MODULE		= cpu_ms.AuthenticAMD
 #
 OBJECTS		= $(CPU_AUTHAMD_OBJS:%=$(OBJS_DIR)/%)
-LINTS           = $(CPU_AUTHAMD_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE      = $(ROOT_PSM_CPU_DIR)/$(MODULE)
 
 SRCDIR		= ../cpu/authenticamd
@@ -44,15 +43,9 @@ include $(UTSBASE)/i86xpv/Makefile.i86xpv
 include $(UTSBASE)/i86pc/cpu/Makefile.files
 
 #
-#	Our lint library has a different name from that of the module we build.
-#
-LINT_MODULE	= authenticamd
-
-#
 #       Define targets
 #
 ALL_TARGET      = $(BINARY)
-LINT_TARGET     = $(LINT_MODULE).lint
 INSTALL_TARGET  = $(BINARY) $(ROOTMODULE)
 
 #
@@ -60,7 +53,7 @@ INSTALL_TARGET  = $(BINARY) $(ROOTMODULE)
 #
 CPPFLAGS	+= -I$(SRCDIR) -I$(OBJS_DIR)
 ASFLAGS		+= -I$(SRCDIR) -I$(OBJS_DIR)
-LDFLAGS		+= -dy -N misc/acpica
+LDFLAGS		+= -N misc/acpica
 
 #
 #       Default build targets.
@@ -74,12 +67,6 @@ all:            $(ALL_DEPS)
 clean:          $(CLEAN_DEPS)
 
 clobber:        $(CLOBBER_DEPS)
-
-lint:           $(LINT_DEPS)
-
-modlintlib:     $(MODLINTLIB_DEPS)
-
-clean.lint:     $(CLEAN_LINT_DEPS)
 
 install:        $(INSTALL_DEPS)
 

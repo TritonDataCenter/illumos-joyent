@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011 Nexenta Systems, Inc. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -81,6 +82,7 @@ struct tcphdr {
 #define	TCPOPT_SACK_PERMITTED	4
 #define	TCPOPT_SACK	5
 #define	TCPOPT_TSTAMP	8
+#define	TCPOPT_MD5	19	/* RFC 2385 */
 
 /*
  * Default maximum segment size for TCP.
@@ -130,6 +132,8 @@ struct tcphdr {
 #define	TCP_KEEPCNT			0x23
 #define	TCP_KEEPINTVL			0x24
 #define	TCP_CONGESTION			0x25
+#define	TCP_QUICKACK			0x26	/* enable/disable quick acks */
+#define	TCP_MD5SIG			0x27
 
 #ifdef	__cplusplus
 }

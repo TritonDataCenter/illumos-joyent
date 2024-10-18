@@ -22,12 +22,11 @@
 /*
  * Copyright 2004 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ * Copyright 2024 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #ifndef	_LDAP_HEADERS_H
 #define	_LDAP_HEADERS_H
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #ifdef __cplusplus
 extern "C" {
@@ -72,7 +71,7 @@ typedef struct _ldap_authtok_data_ {
 int		__ldap_to_pamerror(int ldaperror);
 
 /* from ldap_utils.c */
-extern int 	authenticate(ns_cred_t **, char *, char *, int *);
+extern int 	authenticate(ns_cred_t **, const char *, const char *, int *);
 
 #ifdef __cplusplus
 }

@@ -44,7 +44,7 @@
 
 /*
  * IP Tunneling Administration Library.
- * This library is used by dladm(1M) and to configure IP tunnel links.
+ * This library is used by dladm(8) and to configure IP tunnel links.
  */
 
 #define	IPTUN_CONF_TYPE		"type"
@@ -122,6 +122,8 @@ i_iptun_kparams(dladm_handle_t handle, const iptun_params_t *params,
 		case IPTUN_TYPE_IPV6:
 			hints.ai_family = AF_INET6;
 			break;
+		case IPTUN_TYPE_UNKNOWN:
+			return (DLADM_STATUS_BADIPTUNLADDR);
 		}
 	}
 

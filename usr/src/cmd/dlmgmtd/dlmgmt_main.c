@@ -262,15 +262,17 @@ again:
 		 * logging errors for any that failed.
 		 */
 		if (zone_getattr(zids[i], ZONE_ATTR_STATUS, &status,
-		    sizeof (status)) < 0)
+		    sizeof (status)) < 0) {
 			continue;
+		}
 		switch (status) {
 			case ZONE_IS_SHUTTING_DOWN:
 			case ZONE_IS_EMPTY:
 			case ZONE_IS_DOWN:
 			case ZONE_IS_DYING:
 			case ZONE_IS_DEAD:
-				/* FALLTHRU */
+			case ZONE_IS_INITIALIZED:
+			case ZONE_IS_UNINITIALIZED:
 				continue;
 			default:
 				break;
@@ -315,7 +317,7 @@ dlmgmt_init(void)
 		    DLMGMT_TMPFS_DIR, progname, ".debug.cache");
 	} else {
 		if ((fmri = getenv("SMF_FMRI")) == NULL) {
-			dlmgmt_log(LOG_ERR, "dlmgmtd is an smf(5) managed "
+			dlmgmt_log(LOG_ERR, "dlmgmtd is an smf(7) managed "
 			    "service and should not be run from the command "
 			    "line.");
 			return (EINVAL);

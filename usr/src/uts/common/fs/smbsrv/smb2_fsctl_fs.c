@@ -10,7 +10,8 @@
  */
 
 /*
- * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 /*
@@ -23,7 +24,12 @@
 #include <smbsrv/smb_fsops.h>
 #include <smb/winioctl.h>
 
-/* ARGSUSED */
+static uint32_t
+smb2_fsctl_invalid(smb_request_t *sr, smb_fsctl_t *fsctl)
+{
+	return (NT_STATUS_INVALID_DEVICE_REQUEST);
+}
+
 static uint32_t
 smb2_fsctl_notsup(smb_request_t *sr, smb_fsctl_t *fsctl)
 {
@@ -31,7 +37,7 @@ smb2_fsctl_notsup(smb_request_t *sr, smb_fsctl_t *fsctl)
 }
 
 /*
- * Same as smb2_fsctl_notsup, but make some noise (if DEBUG)
+ * Same as smb2_fsctl_invalid, but make some noise (if DEBUG)
  * so we'll learn about new fsctl codes clients start using.
  */
 /* ARGSUSED */
@@ -41,7 +47,7 @@ smb2_fsctl_unknown(smb_request_t *sr, smb_fsctl_t *fsctl)
 #ifdef	DEBUG
 	cmn_err(CE_NOTE, "smb2_fsctl_unknown: code 0x%x", fsctl->CtlCode);
 #endif
-	return (NT_STATUS_NOT_SUPPORTED);
+	return (NT_STATUS_INVALID_DEVICE_REQUEST);
 }
 
 /*
@@ -52,9 +58,12 @@ smb2_fsctl_get_compression(smb_request_t *sr, smb_fsctl_t *fsctl)
 {
 	_NOTE(ARGUNUSED(sr))
 	uint16_t compress_state = 0;
+	int rc;
 
-	(void) smb_mbc_encodef(fsctl->in_mbc, "w",
+	rc = smb_mbc_encodef(fsctl->in_mbc, "w",
 	    compress_state);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (NT_STATUS_SUCCESS);
 }
@@ -97,6 +106,7 @@ smb2_fsctl_get_resume_key(smb_request_t *sr, smb_fsctl_t *fsctl)
 {
 	smb_ofile_t *of = sr->fid_ofile;
 	smb2fid_t smb2fid;
+	int rc;
 
 	/* Caller makes sure we have of = sr->fid_ofile */
 	/* Don't insist on a plain file (see above). */
@@ -104,10 +114,12 @@ smb2_fsctl_get_resume_key(smb_request_t *sr, smb_fsctl_t *fsctl)
 	smb2fid.persistent = of->f_persistid;
 	smb2fid.temporal = of->f_fid;
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    fsctl->out_mbc, "qq16.",
 	    smb2fid.persistent,
 	    smb2fid.temporal);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (NT_STATUS_SUCCESS);
 }
@@ -130,8 +142,10 @@ smb2_fsctl_fs(smb_request_t *sr, smb_fsctl_t *fsctl)
 		break;
 	case FSCTL_SET_REPARSE_POINT:		/* 41 */
 	case FSCTL_GET_REPARSE_POINT:		/* 42 */
+		func = smb2_fsctl_invalid;
+		break;
 	case FSCTL_CREATE_OR_GET_OBJECT_ID:	/* 48 */
-		func = smb2_fsctl_notsup;
+		func = smb2_fsctl_invalid;
 		break;
 	case FSCTL_SET_SPARSE:			/* 49 */
 		func = smb2_fsctl_set_sparse;
@@ -143,7 +157,7 @@ smb2_fsctl_fs(smb_request_t *sr, smb_fsctl_t *fsctl)
 		func = smb2_fsctl_query_alloc_ranges;
 		break;
 	case FSCTL_FILE_LEVEL_TRIM:		/* 130 */
-		func = smb2_fsctl_notsup;
+		func = smb2_fsctl_invalid;
 		break;
 	case FSCTL_OFFLOAD_READ:		/* 153 */
 		func = smb2_fsctl_odx_read;
@@ -151,11 +165,17 @@ smb2_fsctl_fs(smb_request_t *sr, smb_fsctl_t *fsctl)
 	case FSCTL_OFFLOAD_WRITE:		/* 154 */
 		func = smb2_fsctl_odx_write;
 		break;
+	case FSCTL_GET_INTEGRITY_INFORMATION:	/* 159 */
 	case FSCTL_SET_INTEGRITY_INFORMATION:	/* 160 */
-		func = smb2_fsctl_notsup;
+		func = smb2_fsctl_invalid;
 		break;
 	case FSCTL_QUERY_FILE_REGIONS:		/* 161 */
 		func = smb2_fsctl_query_file_regions;
+		break;
+
+	case FSCTL_REFS_STREAM_SNAPSHOT_MANAGEMENT:
+		/* WPTS wants NOT_SUPPORTED here. */
+		func = smb2_fsctl_notsup;
 		break;
 
 	default:
@@ -196,14 +216,14 @@ smb2_fsctl_netfs(smb_request_t *sr, smb_fsctl_t *fsctl)
 		func = smb2_fsctl_copychunk;
 		break;
 	case FSCTL_SRV_READ_HASH:		/* 0x6e */
-		func = smb2_fsctl_notsup;
+		func = smb2_fsctl_invalid;
 		break;
 	case FSCTL_LMR_REQUEST_RESILIENCY:	/* 0x75 */
 		func = smb2_fsctl_set_resilient;
 		break;
 	case FSCTL_QUERY_NETWORK_INTERFACE_INFO: /* 0x7f */
 		need_disk_file = B_FALSE;
-		func = smb2_fsctl_notsup;
+		func = smb2_fsctl_invalid;
 		break;
 	case FSCTL_VALIDATE_NEGOTIATE_INFO:	/* 0x81 */
 		need_disk_file = B_FALSE;

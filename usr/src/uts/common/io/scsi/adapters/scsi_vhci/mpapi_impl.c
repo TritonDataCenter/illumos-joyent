@@ -20,6 +20,8 @@
  */
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2021 Racktop Systems, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -244,10 +246,6 @@ vhci_mpapi_validate(void *udata, mp_iocdata_t *mpioc, int mode, cred_t *credp)
 	case MP_GET_DRIVER_PROP:
 	{
 		olen = sizeof (mp_driver_prop_t);
-		/* Adjust olen to account for the caddr_t in 32-bit mode */
-		if (mode32 == 1) {
-			olen -= 4;
-		}
 
 		if ((mpioc->mp_obuf == NULL) ||
 		    (mpioc->mp_olen < olen) ||
@@ -282,10 +280,6 @@ vhci_mpapi_validate(void *udata, mp_iocdata_t *mpioc, int mode, cred_t *credp)
 	case MP_GET_LU_PROP:
 	{
 		olen = sizeof (mp_logical_unit_prop_t);
-		/* Adjust olen to account for the caddr_t in 32-bit mode */
-		if (mode32 == 1) {
-			olen -= 4;
-		}
 
 		if ((mpioc->mp_ilen != sizeof (uint64_t)) ||
 		    (mpioc->mp_ibuf == NULL) ||
@@ -304,10 +298,6 @@ vhci_mpapi_validate(void *udata, mp_iocdata_t *mpioc, int mode, cred_t *credp)
 	case MP_GET_PATH_PROP:
 	{
 		olen = sizeof (mp_path_prop_t);
-		/* Adjust olen to account for the caddr_t in 32-bit mode */
-		if (mode32 == 1) {
-			olen -= 4;
-		}
 
 		if ((mpioc->mp_ilen != sizeof (uint64_t)) ||
 		    (mpioc->mp_ibuf == NULL) ||
@@ -380,10 +370,6 @@ vhci_mpapi_validate(void *udata, mp_iocdata_t *mpioc, int mode, cred_t *credp)
 	case MP_GET_PROPRIETARY_LOADBALANCE_PROP:
 	{
 		olen = sizeof (mp_proprietary_loadbalance_prop_t);
-		/* Adjust olen to account for the caddr_t in 32-bit mode */
-		if (mode32 == 1) {
-			olen -= 4;
-		}
 
 		if ((mpioc->mp_ilen != sizeof (uint64_t)) ||
 		    (mpioc->mp_ibuf == NULL) ||
@@ -4468,7 +4454,7 @@ static int
 vhci_mpapi_chk_last_path(mdi_pathinfo_t *pip)
 {
 	dev_info_t	*pdip = NULL, *cdip = NULL;
-	int		count = 0, circular;
+	int		count = 0;
 	mdi_pathinfo_t	*ret_pip;
 
 	if (pip == NULL) {
@@ -4482,7 +4468,7 @@ vhci_mpapi_chk_last_path(mdi_pathinfo_t *pip)
 		return (-1);
 	}
 
-	ndi_devi_enter(cdip, &circular);
+	ndi_devi_enter(cdip);
 	ret_pip = mdi_get_next_phci_path(cdip, NULL);
 
 	while ((ret_pip != NULL) && (count < 2)) {
@@ -4498,7 +4484,7 @@ vhci_mpapi_chk_last_path(mdi_pathinfo_t *pip)
 		mdi_pi_unlock(ret_pip);
 		ret_pip = mdi_get_next_phci_path(cdip, ret_pip);
 	}
-	ndi_devi_exit(cdip, circular);
+	ndi_devi_exit(cdip);
 
 	if (count > 1) {
 		return (0);

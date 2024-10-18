@@ -42,14 +42,10 @@ LIBS =		$(DYNLIB)
 LDLIBS +=	-lshare -lscf -lumem -lc -lxml2
 NATIVE_LIBS +=	libxml2.so
 
+CSTD =		$(CSTD_GNU99)
+
 #add nfs/lib directory as part of the include path
 CFLAGS +=	$(CCVERBOSE)
-CERRWARN +=	-_gcc=-Wno-switch
-CERRWARN +=	-_gcc=-Wno-unused-variable
-CERRWARN +=	$(CNOWARN_UNINIT)
-
-# not linted
-SMATCH=off
 
 CPPFLAGS +=	-D_REENTRANT -I$(AUTOFSSMFLIB_DIR) \
 			-I$(ADJUNCT_PROTO)/usr/include/libxml2 \

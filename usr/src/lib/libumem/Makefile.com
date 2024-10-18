@@ -74,7 +74,7 @@ OBJECTS_common_isadep = \
 	asm_subr.o
 
 SRCS_common_isadep = \
-	$(ISASRCDIR)/asm_subr.s
+	$(ISASRCDIR)/asm_subr.S
 
 # Architecture-independent files common to both versions  of libumem
 OBJECTS_common_common = \
@@ -120,13 +120,14 @@ MAPFILE_SUPPLEMENTAL = $(MAPFILE_SUPPLEMENTAL_$(CURTYPE))
 
 LDLIBS +=	-lc
 
-LDFLAGS_standalone = $(ZNOVERSION) $(BREDUCE) -M../common/mapfile-vers \
-	-M$(MAPFILE_SUPPLEMENTAL) -dy -r
+LDFLAGS_standalone = $(ZNOVERSION) $(BREDUCE) -Wl,-M../common/mapfile-vers \
+	-Wl,-M$(MAPFILE_SUPPLEMENTAL) -dy -r
 LDFLAGS = $(LDFLAGS_$(CURTYPE))
 
 ASFLAGS_standalone = -DUMEM_STANDALONE
 ASFLAGS_library =
-ASFLAGS += -P $(ASFLAGS_$(CURTYPE)) -D_ASM
+ASFLAGS += $(ASFLAGS_$(CURTYPE)) -D_ASM
+ASFLAGS64 += $(ASFLAGS_$(CURTYPE)) -D_ASM
 
 # We want the thread-specific errno in the library, but we don't want it in
 # the standalone.  $(DTS_ERRNO) is designed to add -D_TS_ERRNO to $(CPPFLAGS),
@@ -154,6 +155,12 @@ CFLAGS += $(CFLAGS_$(CURTYPE)) $(CFLAGS_common)
 
 CFLAGS64_standalone = $(STAND_FLAGS_64)
 CFLAGS64 += $(CCVERBOSE) $(CFLAGS64_$(CURTYPE)) $(CFLAGS64_common)
+
+#
+# For the standalone environment, disable the stack protector for the
+# time being.
+#
+$(STANDLIBRARY) := STACKPROTECT = none
 
 # false positive for umem_alloc_sizes_add()
 pics/umem.o := SMOFF += index_overflow

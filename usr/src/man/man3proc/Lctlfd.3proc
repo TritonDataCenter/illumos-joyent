@@ -11,14 +11,15 @@
 .\"
 .\" Copyright 2015 Joyent, Inc.
 .\"
-.Dd May 11, 2016
+.Dd November 27, 2023
 .Dt LCTLFD 3PROC
 .Os
 .Sh NAME
 .Nm Lctlfd
 .Nd obtain the thread control file descriptor
-.Sh SYNOPSIS
+.Sh LIBRARY
 .Lb libproc
+.Sh SYNOPSIS
 .In libproc.h
 .Ft int
 .Fo Lctlfd
@@ -55,4 +56,4 @@ in
 .Xr libproc 3LIB ,
 .Xr Lfree 3PROC ,
 .Xr Lgrab 3PROC ,
-.Xr proc 4
+.Xr proc 5

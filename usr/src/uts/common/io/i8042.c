@@ -23,6 +23,10 @@
  * Use is subject to license terms.
  */
 
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 #include <sys/types.h>
 #include <sys/ddi.h>
 #include <sys/inline.h>
@@ -86,7 +90,7 @@
 #if defined(__sparc)
 #define	I8042_CMD_DISABLE_ALL	0x34
 #define	I8042_CMD_ENABLE_ALL	0x07
-#elif defined(__i386) || defined(__amd64)
+#elif defined(__x86)
 #define	I8042_CMD_DISABLE_ALL	0x74
 #define	I8042_CMD_ENABLE_ALL	0x47
 #endif
@@ -346,7 +350,7 @@ static struct dev_ops i8042_ops = {
 extern struct mod_ops mod_driverops;
 
 static struct modldrv modldrv = {
-	&mod_driverops, 	/* Type of module.  This one is a driver */
+	&mod_driverops,		/* Type of module.  This one is a driver */
 	"i8042 nexus driver",	/* Name of module. */
 	&i8042_ops,		/* driver ops */
 };
@@ -1456,7 +1460,7 @@ i8042_intr_ops(dev_info_t *dip, dev_info_t *rdip, ddi_intr_op_t intr_op,
 
 static int
 i8042_ctlops(dev_info_t *dip, dev_info_t *rdip,
-	ddi_ctl_enum_t op, void *arg, void *result)
+    ddi_ctl_enum_t op, void *arg, void *result)
 {
 	int	*iprop;
 	unsigned int	iprop_len;
@@ -1507,7 +1511,7 @@ i8042_ctlops(dev_info_t *dip, dev_info_t *rdip,
 	/* NOTREACHED */
 }
 
-#if defined(__i386) || defined(__amd64)
+#if defined(__x86)
 static dev_info_t *
 i8042_devi_findchild_by_node_name(dev_info_t *pdip, char *nodename)
 {
@@ -1535,7 +1539,10 @@ alloc_kb_mouse(dev_info_t *i8042_dip, int nodes_needed)
 	int acpi_off = 0;
 	char *acpi_prop;
 
-	/* don't alloc unless acpi is off */
+	/*
+	 * If ACPI enumeration is not disabled and has taken place, return
+	 * early and do nothing.
+	 */
 	if (ddi_prop_lookup_string(DDI_DEV_T_ANY, ddi_root_node(),
 	    DDI_PROP_DONTPASS, "acpi-enum", &acpi_prop) == DDI_PROP_SUCCESS) {
 		if (strcmp("off", acpi_prop) == 0) {
@@ -1587,9 +1594,8 @@ static int
 i8042_bus_config(dev_info_t *parent, uint_t flags,
     ddi_bus_config_op_t op, void *arg, dev_info_t **childp)
 {
-#if defined(__i386) || defined(__amd64)
+#if defined(__x86)
 	int nodes_needed = 0;
-	int circ;
 
 	/*
 	 * On x86 systems, if ACPI is disabled, the only way the
@@ -1598,7 +1604,7 @@ i8042_bus_config(dev_info_t *parent, uint_t flags,
 	 * the keyboard and mouse nodes and creates them if they are not
 	 * found.
 	 */
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 	if (i8042_devi_findchild_by_node_name(parent, "keyboard") == NULL)
 		nodes_needed |= I8042_KEYBOARD;
 	if (i8042_devi_findchild_by_node_name(parent, "mouse") == NULL)
@@ -1607,7 +1613,7 @@ i8042_bus_config(dev_info_t *parent, uint_t flags,
 	/* If the mouse and keyboard nodes do not already exist, create them */
 	if (nodes_needed)
 		alloc_kb_mouse(parent, nodes_needed);
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 #endif
 	return (ndi_busop_bus_config(parent, flags, op, arg, childp, 0));
 }

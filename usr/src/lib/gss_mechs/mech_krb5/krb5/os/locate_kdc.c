@@ -13,7 +13,7 @@
  *   require a specific license from the United States Government.
  *   It is the responsibility of any person or organization contemplating
  *   export to obtain such a license before exporting.
- * 
+ *
  * WITHIN THAT CONSTRAINT, permission to use, copy, modify, and
  * distribute this software and its documentation for any purpose and
  * without fee is hereby granted, provided that the above copyright
@@ -27,7 +27,7 @@
  * M.I.T. makes no representations about the suitability of
  * this software for any purpose.  It is provided "as is" without express
  * or implied warranty.
- * 
+ *
  *
  * get socket addresses for KDC.
  */
@@ -88,7 +88,7 @@
 #define DEFAULT_LOOKUP_REALM 0
 
 static int
-maybe_use_dns (krb5_context context, const char *name, int defalt)
+maybe_use_dns (krb5_context context, const char *name, int def_val)
 {
     krb5_error_code code;
     char * value = NULL;
@@ -100,10 +100,10 @@ maybe_use_dns (krb5_context context, const char *name, int defalt)
 	code = profile_get_string(context->profile, "libdefaults",
 				  "dns_fallback", 0, 0, &value);
     if (code)
-        return defalt;
+        return def_val;
 
     if (value == 0)
-	return defalt;
+	return def_val;
 
     use_dns = _krb5_conf_boolean(value);
     profile_release_string(value);
@@ -392,7 +392,7 @@ module_locate_server (krb5_context ctx, const krb5_data *realm,
     Tprintf("in module_locate_server\n");
     cbdata.lp = addrlist;
     if (!PLUGIN_DIR_OPEN (&ctx->libkrb5_plugins)) {
-        
+
 	code = krb5int_open_plugin_dirs (objdirs, NULL, &ctx->libkrb5_plugins,
 					 &ctx->err);
 	if (code)
@@ -549,7 +549,7 @@ prof_locate_server (krb5_context context, const krb5_data *realm,
 	return EINVAL;
     }
 
-    if ((host = malloc(realm->length + 1)) == NULL) 
+    if ((host = malloc(realm->length + 1)) == NULL)
 	return ENOMEM;
 
     (void) strncpy(host, realm->data, realm->length);
@@ -669,7 +669,7 @@ dns_hostnames2netaddrs(
 	    (void) add_host_to_list (addrlist, entry->host,
 				    htons (entry->port), 0,
 				    SOCK_DGRAM, family);
-		
+
 	    code = add_host_to_list (addrlist, entry->host,
 				    htons (entry->port), 0,
 				    SOCK_STREAM, family);
@@ -725,7 +725,7 @@ hostlist2str(char **hostlist)
 {
 	unsigned int c = 0, size = 0, buf_size;
 	char **hl = hostlist, *s = NULL;
-	
+
 	while (hl && *hl) {
 	    size += strlen(*hl);
 	    hl++;
@@ -773,7 +773,7 @@ prof_hostnames2netaddrs(
 	if (count == 0) {
 		return 0;
 	}
-    
+
     switch (svc) {
     case locate_service_kdc:
     case locate_service_master_kdc:
@@ -876,7 +876,7 @@ krb5int_locate_server (krb5_context context, const krb5_data *realm,
      */
     code = override_locate_server(context, realm, &al, svc, socktype, family);
     if (code != KRB5_PLUGIN_NO_HANDLE) {
-    	if (code == 0) 
+    	if (code == 0)
 	    *addrlist = al;
 	else if (al.space)
 	    free_list (&al);
@@ -898,7 +898,7 @@ krb5int_locate_server (krb5_context context, const krb5_data *realm,
 	 * Solaris Kerberos:
 	 * If kpasswd_server has not been configured and dns_lookup_kdc -
 	 * dns_fallback are not configured then admin_server should
-	 * be inferred, per krb5.conf(4).
+	 * be inferred, per krb5.conf(5).
 	 */
 	if (code && svc == locate_service_kpasswd &&
 	    !maybe_use_dns(context, "dns_lookup_kdc", 0)) {
@@ -948,30 +948,30 @@ krb5int_locate_server (krb5_context context, const krb5_data *realm,
 	    krb5_set_error_message(context,
 				KRB5_REALM_CANT_RESOLVE,
 				dgettext(TEXT_DOMAIN,
-					"Cannot find a master KDC entry in krb5.conf(4) or DNS Service Location records for realm '%.*s'"),
+					"Cannot find a master KDC entry in krb5.conf(5) or DNS Service Location records for realm '%.*s'"),
 				realm->length, realm->data);
 	    break;
 	case locate_service_kadmin:
 	    krb5_set_error_message(context,
 				KRB5_REALM_CANT_RESOLVE,
 				dgettext(TEXT_DOMAIN,
-					"Cannot find a kadmin KDC entry in krb5.conf(4) or DNS Service Location records for realm '%.*s'"),
+					"Cannot find a kadmin KDC entry in krb5.conf(5) or DNS Service Location records for realm '%.*s'"),
 				realm->length, realm->data);
 	    break;
 	case locate_service_kpasswd:
 	    krb5_set_error_message(context,
 				KRB5_REALM_CANT_RESOLVE,
 				dgettext(TEXT_DOMAIN,
-					"Cannot find a kpasswd KDC entry in krb5.conf(4) or DNS Service Location records for realm '%.*s'"),
+					"Cannot find a kpasswd KDC entry in krb5.conf(5) or DNS Service Location records for realm '%.*s'"),
 				realm->length, realm->data);
 	    break;
 	default: 	  /*  locate_service_kdc: */
 		krb5_set_error_message(context,
 				    KRB5_REALM_CANT_RESOLVE,
 				    dgettext(TEXT_DOMAIN,
-					    "Cannot find any KDC entries in krb5.conf(4) or DNS Service Location records for realm '%.*s'"),
+					    "Cannot find any KDC entries in krb5.conf(5) or DNS Service Location records for realm '%.*s'"),
 				    realm->length, realm->data);
-			       
+
 	}
 	return KRB5_REALM_CANT_RESOLVE;
     }
@@ -1019,7 +1019,7 @@ krb5int_locate_server (krb5_context context, const krb5_data *realm,
 			for (a = al.addrs[i].ai; a != NULL; a = a->ai_next)
 			    ((struct sockaddr_in *)a->ai_addr)->sin_port =
 				htons(KRB5_DEFAULT_PORT);
-				
+
 		    if (al.addrs[i].ai->ai_family == AF_INET6)
 			for (a = al.addrs[i].ai; a != NULL; a = a->ai_next)
 			     ((struct sockaddr_in6 *)a->ai_addr)->sin6_port =
@@ -1039,7 +1039,7 @@ krb5int_locate_server (krb5_context context, const krb5_data *realm,
 	    hostlist_str = hostlist2str(hostlist);
 	    krb5_set_error_message(context, KRB5_REALM_CANT_RESOLVE,
 				dgettext(TEXT_DOMAIN,
-					"Cannot resolve network address for KDCs '%s' specified in krb5.conf(4) for realm %.*s"),
+					"Cannot resolve network address for KDCs '%s' specified in krb5.conf(5) for realm %.*s"),
 				hostlist_str ? hostlist_str : "unknown",
 				realm->length, realm->data);
 	    if (hostlist_str)
@@ -1084,7 +1084,7 @@ krb5_locate_kdc(krb5_context context, const krb5_data *realm,
 				 socktype, family);
 }
 
-/* 
+/*
  * Solaris Kerberos: for backward compat.  Avoid using this
  * function!
  */

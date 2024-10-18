@@ -24,6 +24,7 @@
  * Copyright (c) 2013 by Delphix. All rights reserved.
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2014, OmniTI Computer Consulting, Inc. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -7825,6 +7826,10 @@ ip_sioctl_get_lifconf(ipif_t *dummy_ipif, sin_t *dummy_sin, queue_t *q,
 				lifr->lifr_addrlen =
 				    ip_mask_to_plen_v6(
 				    &ipif->ipif_v6net_mask);
+				if (IN6_IS_ADDR_LINKLOCAL(&sin6->sin6_addr)) {
+					sin6->sin6_scope_id =
+					    ill->ill_phyint->phyint_ifindex;
+				}
 			} else {
 				sin = (sin_t *)&lifr->lifr_addr;
 				*sin = sin_null;
@@ -8656,8 +8661,8 @@ ip_sioctl_plink_ipmp(ill_t *ill, int ioccmd)
  * Do I_PLINK/I_LINK or I_PUNLINK/I_UNLINK with consistency checks and also
  * atomically set/clear the muxids. Also complete the ioctl by acking or
  * naking it.  Note that the code is structured such that the link type,
- * whether it's persistent or not, is treated equally.  ifconfig(1M) and
- * its clones use the persistent link, while pppd(1M) and perhaps many
+ * whether it's persistent or not, is treated equally.  ifconfig(8) and
+ * its clones use the persistent link, while pppd(8) and perhaps many
  * other daemons may use non-persistent link.  When combined with some
  * ill_t states, linking and unlinking lower streams may be used as
  * indicators of dynamic re-plumbing events [see PSARC/1999/348].

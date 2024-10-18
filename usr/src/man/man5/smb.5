@@ -1,0 +1,451 @@
+.\" Copyright (c) 2009, Sun Microsystems, Inc. All Rights Reserved.
+.\" Copyright 2017, Nexenta Systems, Inc. All Rights Reserved.
+.\" Copyright 2022, RackTop Systems, Inc. All Rights Reserved.
+.\" Copyright 2022 Jason King
+.\" Copyright 2023 Bill Sommerfeld
+.\" The contents of this file are subject to the terms of the
+.\" Common Development and Distribution License (the "License").
+.\" You may not use this file except in compliance with the License.
+.\"
+.\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+.\" or http://www.opensolaris.org/os/licensing.
+.\" See the License for the specific language governing permissions
+.\" and limitations under the License.
+.\"
+.\" When distributing Covered Code, include this CDDL HEADER in each
+.\" file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+.\" If applicable, add the following below this CDDL HEADER, with the
+.\" fields enclosed by brackets "[]" replaced with your own identifying
+.\" information: Portions Copyright [yyyy] [name of copyright owner]
+.\"
+.Dd March 13, 2023
+.Dt SMB 5
+.Os
+.Sh NAME
+.Nm smb
+.Nd configuration properties for illumos CIFS server
+.Sh DESCRIPTION
+Behavior of the illumos CIFS server is defined by property values that are
+stored in the Service Management Facility,
+.Xr smf 7 .
+.Pp
+An authorized user can use the
+.Xr sharectl 8
+command to set global values
+for these properties in SMF.
+.Pp
+The following list describes the properties:
+.Bl -tag -width x
+.It Sy ads_site
+.Pp
+Specifies the site configured in DNS to look up Active Directory information.
+Sites provide a mechanism to partition or delegate administration and policy
+management, which are typically used in large or complex domains.
+.Pp
+The value should not be set if you do not have a local Active Directory site.
+By default, no value is set.
+.It Sy autohome_map
+.Pp
+Specifies the full path for the SMD autohome map file,
+.Pa smbautohome .
+The default path is
+.Pa /etc .
+.It Sy bypass_traverse_checking
+.Pp
+When set, allows the SMB server to bypass ACL
+.Dq traverse
+checks.
+The default value is
+.Ql true ,
+for Windows compatibility.
+If this parameter is
+.Ql false ,
+ACL checks require that
+.Dq traverse
+.Pq directory execute
+is granted on every directory
+above the directory the SMB client tries to access.
+Windows shares are normally setup with the higher level
+directories not specifically granting such access.
+.It Sy disposition
+.Pp
+A value that controls whether to disconnect the share or proceed if the map
+command fails.
+The disposition property only has meaning when the map property
+has been set.
+Otherwise it will have no effect.
+.Bd -literal -offset 2n
+disposition = [ continue | terminate ]
+.Ed
+.Bl -tag -width terminate
+.It Sy continue
+Proceed with share connection if the map command fails.
+This is the default in the event that disposition is not specified.
+.It Sy terminate
+Disconnect the share if the map command fails.
+.El
+.It Sy ddns_enable
+.Pp
+Enables or disables dynamic DNS updates.
+A value of
+.Ql true
+enables dynamic updates, while a value of
+.Ql false
+disables dynamic updates.
+By default, the value is
+.Ql false .
+.It Sy encrypt
+.Pp
+Controls SMB3 Encryption.
+For requests on a particular share, the server's
+behavior is controlled by the stricter of this option and the per-share
+.Dq encrypt
+option.
+.Pp
+When set to
+.Ql disabled ,
+the server will not ask clients to encrypt requests.
+Note that this setting does not actually disable encryption, but leaves the
+decision about whether to encrypt up to the client and/or the per-share options.
+When set to
+.Ql enabled ,
+the server will ask clients to encrypt requests,
+but will not require that they do so.
+Any message that can be encrypted will be encrypted.
+When set to
+.Ql required ,
+the server will deny access to or disconnect
+any client that does not support encryption or fails to encrypt requests
+that they should.
+.Pp
+In other words, the
+.Ql enabled
+behavior is that any message that
+.Em can
+be encrypted
+.Em should
+be encrypted, while the
+.Ql required
+behavior is that any message that
+.Em can
+be encrypted
+.Em must
+be encrypted.
+.It Sy encrypt_ciphers
+.Pp
+Specifies a list of enabled SMB 3.1.1 encryption ciphers.
+This property is only used when encryption is
+.Ql enabled
+.Po
+see
+.Sy encrypt
+property
+.Pc
+and negotiated SMB dialect is 3.1.1 or higher
+.Po
+see
+.Sy max_protocol
+property
+.Pc .
+Otherwise it is ignored.
+.Pp
+When the property is set, a list of comma separated ciphers should be specified,
+or the value
+.Ql all
+should be used instead to enable all supported ciphers.
+When the property is empty, it is equivalent to value
+.Ql all
+\(em all supported ciphers are enabled.
+.Pp
+The list of ciphers should contain these values:
+.Bl -tag -width "aes128-ccm"
+.It Sy aes128-ccm
+AES-128-CCM cipher is enabled.
+It is the only cipher used for SMB 3.0.2 dialect.
+.It Sy aes128-gcm
+AES-128-GCM cipher is enabled.
+.It Sy aes256-ccm
+AES-256-CCM cipher is enabled.
+.It Sy aes256-gcm
+AES-256-GCM cipher is enabled.
+.It Sy all
+All ciphers are enabled.
+.El
+.It Sy ipv6_enable
+.Pp
+Enables IPv6 Internet protocol support within the CIFS Service.
+Valid values are
+.Ql true
+and
+.Ql false .
+The default value is
+.Ql false .
+.It Sy keep_alive
+.Pp
+Specifies the number of seconds before an idle SMB connection is dropped by the
+illumos CIFS server.
+If set to
+.Ql 0 ,
+idle connections are not dropped.
+Valid values are
+.Ql 0
+and from
+.Ql 20
+seconds and above.
+The default value is
+.Ql 0 .
+.It Sy lmauth_level
+Specifies the LAN Manager (LM) authentication level.
+The LM compatibility level
+controls the type of user authentication to use in workgroup mode or domain
+mode.
+The default value is 4.
+.Pp
+The following describes the behavior at each level.
+.Bl -tag -width "1"
+.It Sy 2
+In Windows workgroup mode, the illumos CIFS server accepts LM, NTLM, LMv2, and
+NTLMv2 requests.
+In domain mode, the SMB redirector on the illumos CIFS server
+sends NTLM requests.
+.It Sy 3
+In Windows workgroup mode, the illumos CIFS server accepts LM, NTLM, LMv2, and
+NTLMv2 requests.
+In domain mode, the SMB redirector on the illumos CIFS server
+sends LMv2 and NTLMv2 requests.
+.It Sy 4
+In Windows workgroup mode, the illumos CIFS server accepts NTLM, LMv2, and
+NTLMv2 requests.
+In domain mode, the SMB redirector on the illumos CIFS server
+sends LMv2 and NTLMv2 requests.
+.It Sy 5
+In Windows workgroup mode, the illumos CIFS server accepts LMv2 and NTLMv2
+requests.
+In domain mode, the SMB redirector on the illumos CIFS server sends
+LMv2 and NTLMv2 requests.
+.El
+.It Sy map
+.Pp
+The value is a command to be executed when connecting to the share.
+The command
+can take the following arguments, which will be substituted when the command is
+exec'd as described below:
+.Bl -tag -width "xx"
+.It Sy % Ns Sy U
+Windows username.
+.It Sy % Ns Sy D
+Name of the domain or workgroup of
+.Sy % Ns Sy U .
+.It Sy %h
+The server hostname.
+.It Sy %M
+The client hostname, or
+.Dq ""
+if not available.
+.It Sy %L
+The server NetBIOS name.
+.It Sy %m
+The client NetBIOS name, or
+.Dq ""
+if not available.
+This option is only valid for NetBIOS connections (port 139).
+.It Sy % Ns Sy I
+The IP address of the client machine.
+.It Sy %i
+The local IP address to which the client is connected.
+.It Sy %S
+The name of the share.
+.It Sy % Ns Sy P
+The root directory of the share.
+.It Sy %u
+The UID of the Unix user.
+.El
+.It Sy max_protocol
+.Pp
+Specifies the maximum SMB protocol level that the SMB service
+should allow clients to negotiate.
+The default value is
+.Ql 3.11 .
+Valid settings include:
+.Ql 1 ,
+.Ql 2.1 ,
+.Ql 3.0 ,
+.Ql 3.02 ,
+.Ql 3.11 .
+.It Sy min_protocol
+.Pp
+Specifies the minimum SMB protocol level that the SMB service
+should allow clients to negotiate.
+The default value is
+.Ql 1 .
+Valid settings include:
+.Ql 1 ,
+.Ql 2.1 ,
+.Ql 3.0 .
+.It Sy max_workers
+.Pp
+Specifies the maximum number of worker threads that will be launched to process
+incoming CIFS requests.
+The SMB
+.Sy max_mpx
+value, which indicates to a
+client the maximum number of outstanding SMB requests that it may have pending
+on the server, is derived from the
+.Sy max_workers
+value.
+To ensure compatibility with older versions of Windows the lower 8-bits of
+.Sy max_mpx
+must not be zero.
+If the lower byte of
+.Sy max_workers
+is zero,
+.Ql 64
+is added to the value.
+Thus the minimum value is
+.Ql 64
+and the default value, which appears in
+.Xr sharectl 8
+as
+.Ql 1024 ,
+is
+.Ql 1088 .
+.It Sy netbios_scope
+.Pp
+Specifies the NetBIOS scope identifier, which identifies logical NetBIOS
+networks that are on the same physical network.
+When you specify a NetBIOS
+scope identifier, the server filters the number of machines that are listed in
+the browser display to make it easier to find other hosts.
+The value is a text string that represents a domain name.
+By default, no value is set.
+.It Sy oplock_enable
+.Pp
+Controls whether
+.Dq oplocks
+may be granted by the SMB server.
+The term
+.Dq oplock
+is short for
+.Dq opportunistic lock ,
+which is the legacy name for cache delegations in SMB.
+By default, oplocks are enabled.
+Note that if oplocks are disabled, file I/O performance may be severely reduced.
+.It Sy pdc
+.Pp
+Specifies the preferred IP address for the domain controller.
+This property is
+sometimes used when there are multiple domain controllers to indicate which one
+is preferred.
+If the specified domain controller responds, it is chosen even if
+the other domain controllers are also available.
+By default, no value is set.
+.It Sy restrict_anonymous
+.Pp
+Disables anonymous access to
+.Sy IPC$ ,
+which requires that the client be authenticated to get access to MSRPC
+services through
+.Sy IPC$ .
+A value of
+.Ql true
+disables anonymous access to
+.Sy IPC$ ,
+while a value of
+.Ql false
+enables anonymous access.
+.It Sy short_names
+.Pp
+Enables the use of
+.Dq short names
+by SMB clients.
+The default value is
+.Ql false
+because modern SMB clients do not need short names, and
+using short names has some performance cost while listing directories
+and opening or renaming files.
+.It Sy signing_enabled
+.Pp
+Enables SMB signing.
+When signing is enabled but not required it is possible
+for clients to connect regardless of whether or not the client supports SMB
+signing.
+If a packet has been signed, the signature will be verified.
+If a
+packet has not been signed it will be accepted without signature verification.
+Valid values are
+.Ql true
+and
+.Ql false .
+The default value is
+.Ql true .
+.It Sy signing_required
+.Pp
+When SMB signing is required, all packets must be signed or they will be
+rejected, and clients that do not support signing will be unable to connect to
+the server.
+The
+.Sy signing_required
+setting is only taken into account when
+.Sy signing_enabled
+is
+.Ql true .
+Valid values are
+.Ql true
+and
+.Ql false .
+The default value is
+.Ql true .
+.It Sy system_comment
+.Pp
+Specifies an optional description for the system, which is a text string.
+This
+property value might appear in various places, such as Network Neighborhood or
+Network Places on Windows clients.
+By default, no value is set.
+.It Sy traverse_mounts
+.Pp
+The
+.Sy traverse_mounts
+setting determines how the SMB server
+presents sub-mounts underneath an SMB share.
+When
+.Sy traverse_mounts
+is
+.Ql true
+(the default), sub-mounts are presented to SMB clients
+like any other subdirectory.
+When
+.Sy traverse_mounts
+is
+.Ql false ,
+sub-mounts are not shown to SMB clients.
+.It Sy unmap
+.Pp
+The value is a command to be executed when disconnecting the share.
+The command can take the same substitutions listed on the
+.Sy map
+property.
+.It Sy wins_exclude
+.Pp
+Specifies a comma-separated list of network interfaces that should not be
+registered with WINS.
+NetBIOS host announcements are made on excluded interfaces.
+By default, no value is set.
+.It Sy wins_server_1
+.Pp
+Specifies the IP address of the primary WINS server.
+By default, no value is set.
+.It Sy wins_server_2
+.Pp
+Specifies the IP address of the secondary WINS server.
+By default, no value is set.
+.El
+.Sh INTERFACE STABILITY
+Uncommitted
+.Sh SEE ALSO
+.Xr attributes 7 ,
+.Xr smf 7 ,
+.Xr sharectl 8 ,
+.Xr smbadm 8 ,
+.Xr smbd 8 ,
+.Xr smbstat 8

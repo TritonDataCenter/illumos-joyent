@@ -36,7 +36,6 @@ UTSBASE	= ../..
 #
 MODULE		= trill
 OBJECTS		= $(TRILL_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(TRILL_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_SOCK_DIR)/$(MODULE)
 
 #
@@ -53,14 +52,13 @@ SMOFF += all_func_returns
 #	Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
 #	Overrides.
 #
 CFLAGS		+= $(CCVERBOSE)
-LDFLAGS		+= -dy -Ndrv/bridge -Nmisc/mac -Nmisc/dls -Nfs/sockfs
+LDFLAGS		+= -Ndrv/bridge -Nmisc/mac -Nmisc/dls -Nfs/sockfs
 
 #
 #	Default build targets.
@@ -74,12 +72,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

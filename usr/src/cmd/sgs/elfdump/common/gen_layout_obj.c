@@ -61,3 +61,5 @@ struct utsname uts;
 prfdinfo_core_t ptfd;
 prsecflags_t psf;
 prlwpname_t psn;
+prupanic_t pru;
+prcwd_t cwd;

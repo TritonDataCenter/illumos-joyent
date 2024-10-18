@@ -24,8 +24,6 @@
  * All rights reserved.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * zmalloc	- use mmap(2) to allocate memory from /dev/zero.
  * zfree	- use munmap(2) to unmap (free) memory.
@@ -134,7 +132,7 @@ zfree(void* mbuf)
 	    return;
 
 	if (mbuf != NULL) {
-		if (size = delete_bm((caddr_t)mbuf)) {
+		if ((size = delete_bm((caddr_t)mbuf)) != 0) {
 			if (munmap((char *)mbuf, size) < 0)
 			    perror("zfree: munmap");
 		}

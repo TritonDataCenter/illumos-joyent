@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -42,7 +43,7 @@
 #include <sys/hotplug/pci/pcicfg.h>
 #include <sys/ndi_impldefs.h>
 #include <sys/pci_cfgacc.h>
-#include <sys/pcie_impl.h>
+#include <sys/pci_props.h>
 
 /*
  * ************************************************************************
@@ -85,7 +86,6 @@ static int pcicfg_slot_memsize = 32 * PCICFG_MEMGRAN; /* 32MB per slot */
 static int pcicfg_slot_pf_memsize = 32 * PCICFG_MEMGRAN; /* 32MB per slot */
 static int pcicfg_slot_iosize = 64 * PCICFG_IOGRAN; /* 64K per slot */
 static int pcicfg_sec_reset_delay = 3000000;
-static int pcicfg_do_legacy_props = 1;	/* create legacy compatible prop */
 
 typedef struct hole hole_t;
 
@@ -264,7 +264,6 @@ static int pcicfg_device_type(dev_info_t *, ddi_acc_handle_t *);
 static void pcicfg_update_phdl(dev_info_t *, uint8_t, uint8_t);
 static int pcicfg_get_cap(ddi_acc_handle_t, uint8_t);
 static uint8_t pcicfg_get_nslots(dev_info_t *, ddi_acc_handle_t);
-static int pcicfg_pcie_dev(dev_info_t *, ddi_acc_handle_t);
 static int pcicfg_pcie_device_type(dev_info_t *, ddi_acc_handle_t);
 static int pcicfg_pcie_port_type(dev_info_t *, ddi_acc_handle_t);
 static int pcicfg_probe_bridge(dev_info_t *, ddi_acc_handle_t, uint_t,
@@ -557,7 +556,6 @@ pcicfg_configure(dev_info_t *devi, uint_t device, uint_t function,
 	dev_info_t *attach_point;
 	pci_bus_range_t pci_bus_range;
 	int rv;
-	int circ;
 	uint_t highest_bus, visited = 0;
 	int ari_mode = B_FALSE;
 	int max_function = PCI_MAX_FUNCTIONS;
@@ -585,7 +583,17 @@ pcicfg_configure(dev_info_t *devi, uint_t device, uint_t function,
 
 	is_pcie = is_pcie_fabric(devi);
 
-	ndi_devi_enter(devi, &circ);
+	/*
+	 * This code may be racing against other code walking the device info
+	 * tree, such as `di_copytree` et al.  To avoid deadlock, we must ensure
+	 * a strict hierarchical ordering of `ndi_devi_enter` calls that mirrors
+	 * the structure of the tree, working from the root towards leaves.
+	 * `pcie_fabric_setup`, if called, will call `ddi_walk_devs` which
+	 * requires that the parent is locked; therefore, to obey the lock
+	 * ordering, we must lock the parent here.
+	 */
+	ndi_devi_enter(ddi_get_parent(devi));
+	ndi_devi_enter(devi);
 	for (func = 0; func < max_function; ) {
 
 		if ((function != PCICFG_ALL_FUNC) && (function != func))
@@ -716,7 +724,20 @@ next:
 		DEBUG1("Next Function - %x\n", func);
 	}
 
-	ndi_devi_exit(devi, circ);
+	/*
+	 * At this point we have set up the various dev_info nodes that we
+	 * expect to see in the tree and we must re-evaluate the general fabric
+	 * settings such as the overall max payload size or the tagging that is
+	 * enabled. However, as part the big theory statement in pcie.c, this
+	 * can only be performed on a root port; however, that determination
+	 * will be made by the fabric scanning logic.
+	 */
+	if (visited > 0 && is_pcie) {
+		pcie_fabric_setup(devi);
+	}
+
+	ndi_devi_exit(devi);
+	ndi_devi_exit(ddi_get_parent(devi));
 
 	if (visited == 0)
 		return (PCICFG_FAILURE);	/* probe failed */
@@ -760,7 +781,8 @@ cleanup:
 		 */
 		(void) ndi_devi_offline(new_device, NDI_DEVI_REMOVE);
 	}
-	ndi_devi_exit(devi, circ);
+	ndi_devi_exit(devi);
+	ndi_devi_exit(ddi_get_parent(devi));
 
 	/*
 	 * Use private return codes to help identify issues without debugging
@@ -1463,7 +1485,6 @@ pcicfg_unconfigure(dev_info_t *devi, uint_t device, uint_t function,
 	int func;
 	int i;
 	int max_function, trans_device;
-	int circ;
 	boolean_t is_pcie;
 
 	if (pcie_ari_is_enabled(devi) == PCIE_ARI_FORW_ENABLED)
@@ -1477,7 +1498,7 @@ pcicfg_unconfigure(dev_info_t *devi, uint_t device, uint_t function,
 	 */
 	is_pcie = is_pcie_fabric(devi);
 
-	ndi_devi_enter(devi, &circ);
+	ndi_devi_enter(devi);
 	for (func = 0; func < max_function; func++) {
 		if ((function != PCICFG_ALL_FUNC) && (function != func))
 			continue;
@@ -1572,11 +1593,11 @@ pcicfg_unconfigure(dev_info_t *devi, uint_t device, uint_t function,
 		(void) pcie_ari_disable(devi);
 	}
 
-	ndi_devi_exit(devi, circ);
+	ndi_devi_exit(devi);
 	return (PCICFG_SUCCESS);
 
 fail:
-	ndi_devi_exit(devi, circ);
+	ndi_devi_exit(devi);
 	return (PCICFG_FAILURE);
 }
 
@@ -1739,7 +1760,6 @@ pcicfg_bridge_assign(dev_info_t *dip, void *hdl)
 	int offset;
 	uint64_t mem_answer;
 	uint32_t io_answer;
-	int count;
 	uint8_t header_type;
 	ppb_ranges_t range[PCICFG_RANGE_LEN];
 	int bus_range[2];
@@ -1785,10 +1805,10 @@ pcicfg_bridge_assign(dev_info_t *dip, void *hdl)
 		range[2].child_low = range[2].parent_low =
 		    entry->pf_memory_last;
 
-		ndi_devi_enter(dip, &count);
+		ndi_devi_enter(dip);
 		ddi_walk_devs(ddi_get_child(dip),
 		    pcicfg_bridge_assign, (void *)entry);
-		ndi_devi_exit(dip, count);
+		ndi_devi_exit(dip);
 
 		(void) pcicfg_update_bridge(entry, handle);
 
@@ -2448,6 +2468,7 @@ pcicfg_get_pf_mem(pcicfg_phdl_t *entry, uint32_t length, uint64_t *ans)
 		    length, ddi_get_name(entry->dip));
 }
 
+#ifdef __sparc
 static int
 pcicfg_sum_resources(dev_info_t *dip, void *hdl)
 {
@@ -2580,6 +2601,7 @@ pcicfg_sum_resources(dev_info_t *dip, void *hdl)
 		return (DDI_WALK_CONTINUE);
 	}
 }
+#endif /* __sparc */
 
 static int
 pcicfg_free_bridge_resources(dev_info_t *dip)
@@ -2863,15 +2885,14 @@ static dev_info_t *
 pcicfg_devi_find(dev_info_t *dip, uint_t device, uint_t function)
 {
 	struct pcicfg_find_ctrl ctrl;
-	int count;
 
 	ctrl.device = device;
 	ctrl.function = function;
 	ctrl.dip = NULL;
 
-	ndi_devi_enter(dip, &count);
+	ndi_devi_enter(dip);
 	ddi_walk_devs(ddi_get_child(dip), pcicfg_match_dev, (void *)&ctrl);
-	ndi_devi_exit(dip, count);
+	ndi_devi_exit(dip);
 
 	return (ctrl.dip);
 }
@@ -3193,156 +3214,6 @@ pcicfg_device_off(ddi_acc_handle_t config_handle)
 	pci_config_put16(config_handle, PCI_CONF_COMM, 0x0);
 }
 
-/*
- * Setup the basic 1275 properties based on information found in the config
- * header of the PCI device
- */
-static int
-pcicfg_set_standard_props(dev_info_t *dip, ddi_acc_handle_t config_handle,
-    uint8_t pcie_dev)
-{
-	int ret;
-	uint16_t cap_id_loc, val;
-	uint32_t wordval;
-	uint8_t byteval;
-
-	/* These two exists only for non-bridges */
-	if (((pci_config_get8(config_handle, PCI_CONF_HEADER) &
-	    PCI_HEADER_TYPE_M) == PCI_HEADER_ZERO) && !pcie_dev) {
-		byteval = pci_config_get8(config_handle, PCI_CONF_MIN_G);
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "min-grant", byteval)) != DDI_SUCCESS) {
-			return (ret);
-		}
-
-		byteval = pci_config_get8(config_handle, PCI_CONF_MAX_L);
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "max-latency", byteval)) != DDI_SUCCESS) {
-			return (ret);
-		}
-	}
-
-	/*
-	 * These should always exist and have the value of the
-	 * corresponding register value
-	 */
-	val = pci_config_get16(config_handle, PCI_CONF_VENID);
-
-	if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip, "vendor-id", val))
-	    != DDI_SUCCESS) {
-		return (ret);
-	}
-	val = pci_config_get16(config_handle, PCI_CONF_DEVID);
-	if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip, "device-id", val))
-	    != DDI_SUCCESS) {
-		return (ret);
-	}
-	byteval = pci_config_get8(config_handle, PCI_CONF_REVID);
-	if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-	    "revision-id", byteval)) != DDI_SUCCESS) {
-		return (ret);
-	}
-
-	wordval = (pci_config_get16(config_handle, PCI_CONF_SUBCLASS)<< 8) |
-	    (pci_config_get8(config_handle, PCI_CONF_PROGCLASS));
-
-	if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-	    "class-code", wordval)) != DDI_SUCCESS) {
-		return (ret);
-	}
-	val = (pci_config_get16(config_handle, PCI_CONF_STAT) &
-	    PCI_STAT_DEVSELT);
-	if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-	    "devsel-speed", val)) != DDI_SUCCESS) {
-		return (ret);
-	}
-
-	/*
-	 * The next three are bits set in the status register.  The property is
-	 * present (but with no value other than its own existence) if the bit
-	 * is set, non-existent otherwise
-	 */
-	if ((!pcie_dev) &&
-	    (pci_config_get16(config_handle, PCI_CONF_STAT) & PCI_STAT_FBBC)) {
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "fast-back-to-back", 0)) != DDI_SUCCESS) {
-			return (ret);
-		}
-	}
-	if ((!pcie_dev) &&
-	    (pci_config_get16(config_handle, PCI_CONF_STAT) & PCI_STAT_66MHZ)) {
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "66mhz-capable", 0)) != DDI_SUCCESS) {
-			return (ret);
-		}
-	}
-	if (pci_config_get16(config_handle, PCI_CONF_STAT) & PCI_STAT_UDF) {
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "udf-supported", 0)) != DDI_SUCCESS) {
-			return (ret);
-		}
-	}
-
-	/*
-	 * These next three are optional and are not present
-	 * if the corresponding register is zero.  If the value
-	 * is non-zero then the property exists with the value
-	 * of the register.
-	 */
-	if ((val = pci_config_get16(config_handle, PCI_CONF_SUBVENID)) != 0) {
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "subsystem-vendor-id", val)) != DDI_SUCCESS) {
-			return (ret);
-		}
-	}
-	if ((val = pci_config_get16(config_handle, PCI_CONF_SUBSYSID)) != 0) {
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "subsystem-id", val)) != DDI_SUCCESS) {
-			return (ret);
-		}
-	}
-	if ((val = pci_config_get16(config_handle, PCI_CONF_CACHE_LINESZ))
-	    != 0) {
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "cache-line-size", val)) != DDI_SUCCESS) {
-			return (ret);
-		}
-	}
-
-	/*
-	 * If the Interrupt Pin register is non-zero then the
-	 * interrupts property exists
-	 */
-	if ((byteval = pci_config_get8(config_handle, PCI_CONF_IPIN)) != 0) {
-		/*
-		 * If interrupt pin is non-zero,
-		 * record the interrupt line used
-		 */
-		if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-		    "interrupts", byteval)) != DDI_SUCCESS) {
-			return (ret);
-		}
-	}
-	(void) PCI_CAP_LOCATE(config_handle, PCI_CAP_ID_PCI_E, &cap_id_loc);
-	if (pcie_dev && cap_id_loc != PCI_CAP_NEXT_PTR_NULL) {
-		val = pci_config_get16(config_handle, cap_id_loc + PCIE_PCIECAP)
-		    & PCIE_PCIECAP_SLOT_IMPL;
-		/* if slot implemented, get physical slot number */
-		if (val) {
-			wordval = pci_config_get32(config_handle, cap_id_loc +
-			    PCIE_SLOTCAP);
-			/* create the property only if slotnum set correctly? */
-			if ((ret = ndi_prop_update_int(DDI_DEV_T_NONE, dip,
-			    "physical-slot#", PCIE_SLOTCAP_PHY_SLOT_NUM(
-			    wordval))) != DDI_SUCCESS) {
-				return (ret);
-			}
-		}
-	}
-
-	return (PCICFG_SUCCESS);
-}
-
 static int
 pcicfg_set_busnode_props(dev_info_t *dip, uint8_t pcie_device_type)
 {
@@ -3367,164 +3238,6 @@ pcicfg_set_busnode_props(dev_info_t *dip, uint8_t pcie_device_type)
 		return (ret);
 	}
 	return (PCICFG_SUCCESS);
-}
-
-static int
-pcicfg_set_childnode_props(dev_info_t *dip, ddi_acc_handle_t config_handle,
-    uint8_t pcie_dev)
-{
-
-	int		ret;
-	char		*name;
-	char		buffer[64], pprefix[8], nprefix[8];
-	uint16_t	classcode;
-	uint8_t		revid, pif, pclass, psubclass;
-	char		*compat[24];
-	int		i;
-	int		n;
-	uint16_t		sub_vid, sub_sid, vid, did;
-	/* set the property prefix based on the device type */
-	if (pcie_dev) {
-		(void) sprintf(pprefix, "pciex");
-	} else
-		(void) sprintf(pprefix, "pci");
-
-	/* set the prefix right for name property */
-	/* x86 platforms need to go with pci for upgrade purposes */
-	(void) sprintf(nprefix, "pci");
-
-	/*
-	 * NOTE: These are for both a child and PCI-PCI bridge node
-	 */
-	sub_vid = pci_config_get16(config_handle, PCI_CONF_SUBVENID);
-	sub_sid = pci_config_get16(config_handle, PCI_CONF_SUBSYSID);
-	vid = pci_config_get16(config_handle, PCI_CONF_VENID);
-	did = pci_config_get16(config_handle, PCI_CONF_DEVID);
-	revid = pci_config_get8(config_handle, PCI_CONF_REVID);
-	pif = pci_config_get8(config_handle, PCI_CONF_PROGCLASS);
-	classcode = pci_config_get16(config_handle, PCI_CONF_SUBCLASS);
-	pclass = pci_config_get8(config_handle, PCI_CONF_BASCLASS);
-	psubclass = pci_config_get8(config_handle, PCI_CONF_SUBCLASS);
-
-	if (!sub_vid)
-		(void) sprintf(buffer, "%s%x,%x", nprefix, vid, did);
-	else
-		(void) sprintf(buffer, "%s%x,%x", nprefix, sub_vid, sub_sid);
-
-	/*
-	 * In some environments, trying to use "generic" 1275 names is
-	 * not the convention.  In those cases use the name as created
-	 * above.  In all the rest of the cases, check to see if there
-	 * is a generic name first.
-	 */
-#ifdef _DONT_USE_1275_GENERIC_NAMES
-	name = buffer;
-#else
-	if ((name = pcicfg_get_class_name(classcode)) == NULL) {
-		/*
-		 * Set name to the above fabricated name
-		 */
-		name = buffer;
-	}
-#endif
-
-	/*
-	 * The node name field needs to be filled in with the name
-	 */
-	if (ndi_devi_set_nodename(dip, name, 0) != NDI_SUCCESS) {
-		DEBUG0("Failed to set nodename for node\n");
-		return (PCICFG_FAILURE);
-	}
-
-	/*
-	 * Create the compatible property as an array of pointers
-	 * to strings.  Start with the buffer created above.
-	 */
-	n = 0;
-
-	/*
-	 * Setup 'compatible' as per the PCI2.1 bindings document.
-	 *	pci[ex]VVVV,DDDD.SSSS.ssss.RR
-	 *	pci[ex]VVVV,DDDD.SSSS.ssss
-	 *	pciSSSS.ssss  -> not created for PCIe as per PCIe bindings
-	 *	pci[ex]VVVV,DDDD.RR
-	 *	pci[ex]VVVV,DDDD
-	 *	pci[ex]class,CCSSPP
-	 *	pci[ex]class,CCSS
-	 * Add legacy entries for compatibility with legacy devices and OS
-	 * for x86.
-	 *	pciVVVV,DDDD.SSSS.ssss.RR
-	 *	pciVVVV,DDDD.SSSS.ssss
-	 *	pciSSSS.ssss
-	 *	pciVVVV,DDDD.RR
-	 *	pciVVVV,DDDD
-	 *	pciclass,CCSSPP
-	 *	pciclass,CCSS
-	 */
-
-	do {
-		if (sub_vid) {
-			/* pci[ex]VVVV,DDDD.SSSS.ssss.RR */
-			(void) sprintf(buffer, "%s%x,%x.%x.%x.%x", pprefix, vid,
-			    did, sub_vid, sub_sid, revid);
-			compat[n] = kmem_alloc(strlen(buffer) + 1, KM_SLEEP);
-			(void) strcpy(compat[n++], buffer);
-
-			/* pci[ex]VVVV,DDDD.SSSS.ssss */
-			(void) sprintf(buffer, "%s%x,%x.%x.%x", pprefix,  vid,
-			    did, sub_vid, sub_sid);
-			compat[n] = kmem_alloc(strlen(buffer) + 1, KM_SLEEP);
-			(void) strcpy(compat[n++], buffer);
-
-			/* pciSSSS.ssss  -> not created for PCIe as per PCIe */
-			/* binding to IEEE 1275 spec.			 */
-			if (!pcie_dev && pcicfg_do_legacy_props) {
-				(void) sprintf(buffer, "pci%x,%x", sub_vid,
-				    sub_sid);
-				compat[n] = kmem_alloc(strlen(buffer) + 1,
-				    KM_SLEEP);
-				(void) strcpy(compat[n++], buffer);
-			}
-		}
-
-		/* pci[ex]VVVV,DDDD.RR */
-		(void) sprintf(buffer, "%s%x,%x.%x", pprefix,  vid, did, revid);
-		compat[n] = kmem_alloc(strlen(buffer) + 1, KM_SLEEP);
-		(void) strcpy(compat[n++], buffer);
-
-		/* pci[ex]VVVV,DDDD */
-		(void) sprintf(buffer, "%s%x,%x", pprefix, vid, did);
-		compat[n] = kmem_alloc(strlen(buffer) + 1, KM_SLEEP);
-		(void) strcpy(compat[n++], buffer);
-
-		/* pci[ex]class,CCSSPP */
-		(void) sprintf(buffer, "%sclass,%02x%02x%02x", pprefix, pclass,
-		    psubclass, pif);
-		compat[n] = kmem_alloc(strlen(buffer) + 1, KM_SLEEP);
-		(void) strcpy(compat[n++], buffer);
-
-		/* pci[ex]class,CCSS */
-		(void) sprintf(buffer, "%sclass,%04x", pprefix, classcode);
-		compat[n] = kmem_alloc(strlen(buffer) + 1, KM_SLEEP);
-		(void) strcpy(compat[n++], buffer);
-
-		if (!pcie_dev)
-			break;
-
-		/* also add compatible names using "pci" prefix */
-		(void) sprintf(pprefix, "pci");
-		pcie_dev = 0;
-
-	} while (pcicfg_do_legacy_props);
-
-	ret = ndi_prop_update_string_array(DDI_DEV_T_NONE, dip, "compatible",
-	    (char **)compat, n);
-
-	for (i = 0; i < n; i++) {
-		kmem_free(compat[i], strlen(compat[i]) + 1);
-	}
-
-	return (ret);
 }
 
 /*
@@ -3689,8 +3402,9 @@ pcicfg_probe_children(dev_info_t *parent, uint_t bus, uint_t device,
 {
 	dev_info_t		*new_child;
 	ddi_acc_handle_t	config_handle;
-	uint8_t			header_type, pcie_dev = 0;
 	int			ret = PCICFG_FAILURE;
+	pci_prop_data_t		prop_data;
+	pci_prop_failure_t	prop_ret;
 
 	/*
 	 * This node will be put immediately below
@@ -3729,35 +3443,42 @@ pcicfg_probe_children(dev_info_t *parent, uint_t bus, uint_t device,
 	 */
 	(void) pcicfg_device_off(config_handle);
 
-	/* check if we are PCIe device */
-	if (pcicfg_pcie_dev(new_child, config_handle) == DDI_SUCCESS) {
-		DEBUG0("PCIe device detected\n");
-		pcie_dev = 1;
-	}
-
-	/*
-	 * Set 1275 properties common to all devices
-	 */
-	if (pcicfg_set_standard_props(new_child, config_handle, pcie_dev)
-	    != PCICFG_SUCCESS) {
-		DEBUG0("Failed to set standard properties\n");
+	prop_ret = pci_prop_data_fill(config_handle, bus, device, func,
+	    &prop_data);
+	if (prop_ret != PCI_PROP_OK) {
+		cmn_err(CE_WARN, "hotplug: failed to get basic PCI data for "
+		    "b/d/f 0x%x/0x%x/0x%x: 0x%x", bus, device, func, prop_ret);
 		goto failedchild;
 	}
 
-	/*
-	 * Child node properties  NOTE: Both for PCI-PCI bridge and child node
-	 */
-	if (pcicfg_set_childnode_props(new_child, config_handle, pcie_dev)
-	    != PCICFG_SUCCESS) {
+	prop_ret = pci_prop_name_node(new_child, &prop_data);
+	if (prop_ret != PCI_PROP_OK) {
+		cmn_err(CE_WARN, "hotplug: failed to set node name for b/d/f "
+		    "0x%x/0x%x/0x%x: 0x%x", bus,
+		    device, func, prop_ret);
 		goto failedchild;
 	}
 
-	header_type = pci_config_get8(config_handle, PCI_CONF_HEADER);
+	prop_ret = pci_prop_set_common_props(new_child, &prop_data);
+	if (prop_ret != PCI_PROP_OK) {
+		cmn_err(CE_WARN, "hotplug: failed to set properties for b/d/f "
+		    "0x%x/0x%x/0x%x: 0x%x", bus,
+		    device, func, prop_ret);
+		goto failedchild;
+	}
+
+	prop_ret = pci_prop_set_compatible(new_child, &prop_data);
+	if (prop_ret != PCI_PROP_OK) {
+		cmn_err(CE_WARN, "hotplug: failed to set compatible property "
+		    "for b/d/f 0x%x/0x%x/0x%x: 0x%x",
+		    bus, device, func, prop_ret);
+		goto failedchild;
+	}
 
 	/*
 	 * If this is not a multi-function card only probe function zero.
 	 */
-	if ((!(header_type & PCI_HEADER_MULTI)) && (func != 0)) {
+	if ((prop_data.ppd_flags & PCI_PROP_F_MULT_FUNC) == 0 && func != 0) {
 
 		ret = PCICFG_NODEVICE;
 		goto failedchild;
@@ -3770,7 +3491,7 @@ pcicfg_probe_children(dev_info_t *parent, uint_t bus, uint_t device,
 
 	DEVI_SET_PCI(new_child);
 
-	if ((header_type & PCI_HEADER_TYPE_M) == PCI_HEADER_PPB) {
+	if (prop_data.ppd_header == PCI_HEADER_PPB) {
 
 		DEBUG3("--Bridge found bus [0x%x] device[0x%x] func [0x%x]\n",
 		    bus, device, func);
@@ -4063,7 +3784,6 @@ pcicfg_probe_bridge(dev_info_t *new_child, ddi_acc_handle_t h, uint_t bus,
 	ppb_ranges_t range[PCICFG_RANGE_LEN];
 	int bus_range[2];
 	pcicfg_phdl_t phdl;
-	int count;
 	uint64_t pcibus_base, pcibus_alen;
 	uint64_t max_bus;
 	uint8_t pcie_device_type = 0;
@@ -4514,7 +4234,7 @@ pf_setup_end:
 	 * Probe all children devices
 	 */
 	DEBUG0("Bridge Programming Complete - probe children\n");
-	ndi_devi_enter(new_child, &count);
+	ndi_devi_enter(new_child);
 	for (i = 0; ((i < PCI_MAX_DEVICES) && (ari_mode == B_FALSE));
 	    i++) {
 		for (j = 0; j < max_function; ) {
@@ -4592,7 +4312,7 @@ next:
 		if (rval != PCICFG_NODEVICE)
 			break;
 	}
-	ndi_devi_exit(new_child, count);
+	ndi_devi_exit(new_child);
 
 	/*
 	 * Offline the bridge to allow reprogramming of resources.
@@ -4614,9 +4334,9 @@ next:
 	phdl.pf_memory_base = pf_mem_answer;
 	phdl.error = PCICFG_SUCCESS;	/* in case of empty child tree */
 
-	ndi_devi_enter(ddi_get_parent(new_child), &count);
+	ndi_devi_enter(ddi_get_parent(new_child));
 	ddi_walk_devs(new_child, pcicfg_find_resource_end, (void *)&phdl);
-	ndi_devi_exit(ddi_get_parent(new_child), count);
+	ndi_devi_exit(ddi_get_parent(new_child));
 
 	num_slots = pcicfg_get_nslots(new_child, h);
 	mem_end = PCICFG_ROUND_UP(phdl.memory_base, PCICFG_MEMGRAN);
@@ -4988,7 +4708,6 @@ pcicfg_find_resource_end(dev_info_t *dip, void *hdl)
 static void
 pcicfg_reparent_node(dev_info_t *child, dev_info_t *parent)
 {
-	int circ;
 	dev_info_t *opdip;
 
 	ASSERT(i_ddi_node_state(child) <= DS_LINKED);
@@ -4996,9 +4715,9 @@ pcicfg_reparent_node(dev_info_t *child, dev_info_t *parent)
 	 * Unlink node from tree before reparenting
 	 */
 	opdip = ddi_get_parent(child);
-	ndi_devi_enter(opdip, &circ);
+	ndi_devi_enter(opdip);
 	(void) i_ndi_unconfig_node(child, DS_PROTO, 0);
-	ndi_devi_exit(opdip, circ);
+	ndi_devi_exit(opdip);
 
 	DEVI(child)->devi_parent = DEVI(parent);
 	DEVI(child)->devi_bus_ctl = DEVI(parent);
@@ -5142,30 +4861,6 @@ pcicfg_get_nslots(dev_info_t *dip, ddi_acc_handle_t handle)
 	}
 	/* XXX - need to cover PCI-PCIe bridge with n slots */
 	return (num_slots);
-}
-
-/*ARGSUSED*/
-static int
-pcicfg_pcie_dev(dev_info_t *dip, ddi_acc_handle_t handle)
-{
-	/* get parent device's device_type property */
-	char *device_type;
-	int val;
-	dev_info_t *pdip = ddi_get_parent(dip);
-
-	if (ddi_prop_lookup_string(DDI_DEV_T_ANY, pdip, DDI_PROP_DONTPASS,
-	    "device_type", &device_type) != DDI_PROP_SUCCESS) {
-		DEBUG2("device_type property missing for %s#%d",
-		    ddi_get_name(pdip), ddi_get_instance(pdip));
-		return (DDI_FAILURE);
-	}
-	DEBUG1("device_type=<%s>\n", device_type);
-
-	val = DDI_FAILURE;
-	if (strcmp(device_type, "pciex") == 0)
-		val = DDI_SUCCESS;
-	ddi_prop_free(device_type);
-	return (val);
 }
 
 static int

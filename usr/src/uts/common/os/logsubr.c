@@ -23,7 +23,8 @@
  * Copyright 2020 Oxide Computer Company
  * Copyright (c) 2013 Gary Mills
  * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2020 Joyent, Inc.
+ * Copyright 2022 Joyent, Inc.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 #include <sys/types.h>
@@ -199,7 +200,7 @@ log_init(void)
 
 	/*
 	 * Create a backlog queue to consume console messages during periods
-	 * when there is no console reader (e.g. before syslogd(1M) starts).
+	 * when there is no console reader (e.g. before syslogd(8) starts).
 	 */
 	log_backlogq = log_consq = log_makeq(0, LOG_HIWAT, NULL);
 
@@ -217,7 +218,7 @@ log_init(void)
 	log_intrq = log_makeq(0, LOG_HIWAT, (void *)ipltospl(SPL8));
 
 	/*
-	 * Create a queue to hold the most recent 8K of console messages.
+	 * Create a queue to hold the most recent 64K of console messages.
 	 * Useful for debugging.  Required by the "$<msgbuf" adb macro.
 	 */
 	log_recentq = log_makeq(0, LOG_RECENTSIZE, NULL);
@@ -261,9 +262,10 @@ log_init(void)
 #ifdef	LEGACY_BANNER
 	printf("\rSunOS Release %s Version %s %u-bit\n",
 	    utsname.release, utsname.version, NBBY * (uint_t)sizeof (void *));
-	printf("Copyright 2010-2020 Joyent, Inc.\n");
+	/* NOTE: We might switch to BOOTBANNER after this. */
+	printf("Copyright 2022-2024 MNX Cloud, Inc.\n");
 #else
-	bootbanner_print(log_bootbanner_print, KM_SLEEP);
+	bootbanner_print(log_bootbanner_print);
 #endif
 #ifdef DEBUG
 	printf("DEBUG enabled\n");
@@ -681,7 +683,7 @@ log_sendmsg(mblk_t *mp, zoneid_t zoneid)
 				if (lp->log_q == log_consq) {
 					console_printf(log_overflow_msg,
 					    lp->log_minor,
-					    " -- is syslogd(1M) running?");
+					    " -- is syslogd(8) running?");
 				} else {
 					printf(log_overflow_msg,
 					    lp->log_minor, "");

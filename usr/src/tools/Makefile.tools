@@ -25,6 +25,7 @@
 # Definitions common to tool source.
 #
 include $(SRC)/Makefile.master
+include $(SRC)/Makefile.native
 
 FILEMODE=	0555
 
@@ -34,6 +35,7 @@ ROOTOPT=		$(TOOLS_PROTO)/opt
 ROOTONBLD=		$(ROOTOPT)/onbld
 ROOTONBLDBIN=		$(ROOTONBLD)/bin
 ROOTONBLDBINMACH=	$(ROOTONBLD)/bin/$(MACH)
+ROOTONBLDBINMACH64=	$(ROOTONBLD)/bin/$(MACH64)
 ROOTONBLDETC=		$(ROOTONBLD)/etc
 ROOTONBLDLIB=		$(ROOTONBLD)/lib
 ROOTONBLDLIBMACH=	$(ROOTONBLD)/lib/$(MACH)
@@ -47,24 +49,31 @@ ROOTONBLDETCABI=	$(ROOTONBLD)/etc/abi
 ROOTONBLDETCEXCEPT=	$(ROOTONBLD)/etc/exception_lists
 ROOTONBLDSHARE=		$(ROOTONBLD)/share
 
-CC =			$(NATIVECC)
-CCC =			$(NATIVECCC)
-CFLAGS =		$(NATIVE_CFLAGS)
 CPPFLAGS=		-D_TS_ERRNO
 ELFSIGN_O=		$(TRUE)
 LDLIBS=
-LDFLAGS=		$(MAPFILE.NES:%=-M%) $(MAPFILE.NED:%=-M%) \
-			    $(MAPFILE.PGA:%=-M%) \
-			    $(ZASSERTDEFLIB)=libc.so \
+LDFLAGS=		$(MAPFILE.NES:%=-Wl,-M%) $(MAPFILE.NED:%=-Wl,-M%) \
+			    $(MAPFILE.PGA:%=-Wl,-M%) \
 			    $(BDIRECT)
 
-# Unset CW_LINKER so we run the default.  We don't set LD here to avoid taking
-# the journey through LD_ALTEXEC unnecessarily.
-CW_LINKER=
+NATIVE_LIBS += libc.so
+
+# To work around a bootstrapping problem, we can't rely on cw(1) knowing how
+# to translate -shared as we may be using an older one to build the current
+# tools.
+GSHARED = -_gcc=-shared
+
+#
+# To work around a bootstrapping problem, we don't assume that the
+# compiler or environment are properly configured to make the stack
+# protector work. Disable it right now for the tools.
+#
+STACKPROTECT = none
 
 ROOTONBLDPROG=		$(PROG:%=$(ROOTONBLDBIN)/%)
 ROOTONBLDSCRIPTS=	$(SCRIPTS:%=$(ROOTONBLDBIN)/%)
 ROOTONBLDMACHPROG=	$(PROG:%=$(ROOTONBLDBINMACH)/%)
+ROOTONBLDMACH64PROG=	$(PROG:%=$(ROOTONBLDBINMACH64)/%)
 ROOTONBLDSHFILES=	$(SHFILES:%=$(ROOTONBLDBIN)/%)
 ROOTONBLDMAKEFILES=	$(MAKEFILES:%=$(ROOTONBLDBIN)/%)
 ROOTONBLDMACHSHFILES=	$(SHFILES:%=$(ROOTONBLDBINMACH)/%)
@@ -78,9 +87,6 @@ ROOTONBLDMAN1ONBLDFILES=$(MAN1ONBLDFILES:%=$(ROOTONBLDMAN1ONBLD)/%)
 ROOTONBLDABIAUDITFILES=	$(ABI_AUDITFILES:%=$(ROOTONBLDETCABI)/%)
 ROOTONBLDEXCEPTFILES=	$(EXCEPTFILES:%=$(ROOTONBLDETCEXCEPT)/%)
 
-# Break a chicken-and-egg dependency cycle for the tools build
-SCCSCHECK=@echo would sccscheck
-
 $(ROOTONBLDETCABI)/%: %
 	$(INS.file)
 
@@ -91,6 +97,9 @@ $(ROOTONBLDBIN)/%: %
 	$(INS.file)
 
 $(ROOTONBLDBINMACH)/%: %
+	$(INS.file)
+
+$(ROOTONBLDBINMACH64)/%: %
 	$(INS.file)
 
 $(ROOTONBLDETC)/%: %

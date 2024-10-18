@@ -181,7 +181,7 @@ static FILE *outfile;
  * the errdef become satisfied (in practice, this will occur when the access
  * counts go to zero).
  *
- * When the resulting errdef is activated using the th_manage(1M) user command
+ * When the resulting errdef is activated using the th_manage(8) user command
  * utility, the bofi driver will act upon the errdef by matching the number of
  * hardware accesses - specified in count, that are of the type specified in
  * acc_types, made by instance number instance - of the driver whose name is
@@ -2013,7 +2013,7 @@ main(int argc, char *argv[])
 	extern char *optarg;
 	extern int optind;
 
-	char	c;		/* for parsing getopts */
+	int	c;		/* for parsing getopts */
 	int	nopts = 0;	/* for backward compatibility */
 	int	err = 0;
 

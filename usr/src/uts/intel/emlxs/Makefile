@@ -28,7 +28,7 @@
 #
 # Path to the base of the uts directory tree (usually /usr/src/uts).
 #
-UTSBASE		= ../../
+UTSBASE		= ../..
 COMMON_BASE	= ../../../common
 
 #
@@ -59,7 +59,6 @@ EMLXS_CFLAGS            = $(EMLXS_FLAGS)
 EMLXS_LFLAGS            = $(EMLXS_FLAGS)
 CFLAGS	                += $(EMLXS_CFLAGS) -DEMLXS_ARCH=\"$(CLASS)\"
 
-
 #
 #	Overrides and depends_on
 #
@@ -76,7 +75,7 @@ INC_PATH	+= -I$(UTSBASE)/common/sys/fibre-channel/ulp
 #	misc/fctl required because #ifdef MODSYM_LOAD code
 #	triggered by -DS11; uses DDI calls to load FCA symbols
 #
-LDFLAGS		+= -dy -Nmisc/md5 -Nmisc/sha1
+LDFLAGS		+= -Nmisc/md5 -Nmisc/sha1
 LDFLAGS		+= -Nmisc/bignum -Nmisc/fctl
 
 CERRWARN	+= -_gcc=-Wno-parentheses

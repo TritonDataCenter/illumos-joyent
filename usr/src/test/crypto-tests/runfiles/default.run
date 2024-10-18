@@ -19,7 +19,12 @@
 pre =
 verbose = False
 quiet = False
-timeout = 60
+#
+# Unfortunately, if the tpm based PKCS11 library is present, libtspi will make
+# socket calls left and right that take a bit to timeout which induce latency
+# into every test case. Bump the timeout until this is no longer a problem.
+#
+timeout = 250
 post =
 outputdir = /var/tmp/test_results
 
@@ -61,3 +66,6 @@ pre = setup
 user = root
 tests = ['hmac_sha1_32', 'hmac_sha1_64']
 post = cleanup
+
+[/opt/crypto-tests/tests/longhash]
+tests = ['longhash_32', 'longhash_64']

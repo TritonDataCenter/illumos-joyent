@@ -23,6 +23,10 @@
  * Use is subject to license terms.
  */
 
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -182,7 +186,7 @@ ndi_prop_remove_all(dev_info_t *dip)
 /*ARGSUSED*/
 int
 ndi_post_event(dev_info_t *dip, dev_info_t *rdip,
-		ddi_eventcookie_t cookie, void *impl_data)
+    ddi_eventcookie_t cookie, void *impl_data)
 {
 	dev_info_t *ddip;
 
@@ -237,8 +241,8 @@ ndi_busop_remove_eventcall(dev_info_t *ddip, ddi_callback_id_t id)
 /*ARGSUSED*/
 int
 ndi_busop_add_eventcall(dev_info_t *dip, dev_info_t *rdip,
-		ddi_eventcookie_t cookie, void (*callback)(), void *arg,
-		ddi_callback_id_t *cb_id)
+    ddi_eventcookie_t cookie, void (*callback)(), void *arg,
+    ddi_callback_id_t *cb_id)
 {
 	dev_info_t *ddip = (dev_info_t *)NDI_EVENT_DDIP(cookie);
 
@@ -264,7 +268,7 @@ ndi_busop_add_eventcall(dev_info_t *dip, dev_info_t *rdip,
  */
 int
 ndi_busop_get_eventcookie(dev_info_t *dip, dev_info_t *rdip, char *name,
-		ddi_eventcookie_t *event_cookiep)
+    ddi_eventcookie_t *event_cookiep)
 {
 	dev_info_t *pdip = (dev_info_t *)DEVI(dip)->devi_parent;
 
@@ -454,7 +458,7 @@ ndi_dc_get_ap_data(struct devctl_iocdata *dcp)
  */
 int
 ndi_devctl_device_online(dev_info_t *dip, struct devctl_iocdata *dcp,
-	uint_t flags)
+    uint_t flags)
 {
 	int	rval;
 	char	*name;
@@ -499,7 +503,7 @@ ndi_devctl_device_online(dev_info_t *dip, struct devctl_iocdata *dcp,
  */
 int
 ndi_devctl_device_offline(dev_info_t *dip, struct devctl_iocdata *dcp,
-	uint_t flags)
+    uint_t flags)
 {
 	int	rval;
 	char	*name;
@@ -536,7 +540,7 @@ ndi_devctl_device_offline(dev_info_t *dip, struct devctl_iocdata *dcp,
  */
 int
 ndi_devctl_device_remove(dev_info_t *dip, struct devctl_iocdata *dcp,
-	uint_t flags)
+    uint_t flags)
 {
 	int	rval;
 	char	*name;
@@ -573,13 +577,12 @@ ndi_devctl_device_remove(dev_info_t *dip, struct devctl_iocdata *dcp,
  */
 int
 ndi_devctl_device_getstate(dev_info_t *parent, struct devctl_iocdata *dcp,
-	uint_t *state)
+    uint_t *state)
 {
 	dev_info_t *dip;
 	char *name, *addr;
 	char *devname;
 	int devnamelen;
-	int circ;
 
 	if (parent == NULL ||
 	    ((name = ndi_dc_getname(dcp)) == NULL) ||
@@ -594,13 +597,13 @@ ndi_devctl_device_getstate(dev_info_t *parent, struct devctl_iocdata *dcp,
 		(void) snprintf(devname, devnamelen, "%s", name);
 	}
 
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 
 	dip = ndi_devi_findchild(parent, devname);
 	kmem_free(devname, devnamelen);
 
 	if (dip == NULL) {
-		ndi_devi_exit(parent, circ);
+		ndi_devi_exit(parent);
 		return (NDI_FAILURE);
 	}
 
@@ -616,7 +619,7 @@ ndi_devctl_device_getstate(dev_info_t *parent, struct devctl_iocdata *dcp,
 	}
 
 	mutex_exit(&(DEVI(dip)->devi_lock));
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 
 	return (NDI_SUCCESS);
 }
@@ -632,14 +635,13 @@ ndi_dc_return_dev_state(dev_info_t *dip, struct devctl_iocdata *dcp)
 {
 	dev_info_t *pdip;
 	uint_t devstate = 0;
-	int circ;
 
 	if ((dip == NULL) || (dcp == NULL))
 		return (NDI_FAILURE);
 
 	pdip = ddi_get_parent(dip);
 
-	ndi_devi_enter(pdip, &circ);
+	ndi_devi_enter(pdip);
 	mutex_enter(&(DEVI(dip)->devi_lock));
 	if (DEVI_IS_DEVICE_OFFLINE(dip)) {
 		devstate = DEVICE_OFFLINE;
@@ -652,7 +654,7 @@ ndi_dc_return_dev_state(dev_info_t *dip, struct devctl_iocdata *dcp)
 	}
 
 	mutex_exit(&(DEVI(dip)->devi_lock));
-	ndi_devi_exit(pdip, circ);
+	ndi_devi_exit(pdip);
 
 	if (copyout(&devstate, dcp->cpyout_buf, sizeof (uint_t)) != 0)
 		return (NDI_FAULT);
@@ -666,7 +668,7 @@ ndi_dc_return_dev_state(dev_info_t *dip, struct devctl_iocdata *dcp)
  */
 int
 ndi_devctl_bus_getstate(dev_info_t *dip, struct devctl_iocdata *dcp,
-	uint_t *state)
+    uint_t *state)
 {
 	if ((dip == NULL) || (dcp == NULL))
 		return (NDI_FAILURE);
@@ -819,7 +821,7 @@ ndi_dc_devi_create(struct devctl_iocdata *dcp, dev_info_t *pdip, int flags,
     dev_info_t **rdip)
 {
 	dev_info_t *cdip;
-	int rv, circular = 0;
+	int rv;
 	char devnm[MAXNAMELEN];
 	int nmlen;
 
@@ -895,13 +897,13 @@ ndi_dc_devi_create(struct devctl_iocdata *dcp, dev_info_t *pdip, int flags,
 		 * add the node to the per-driver list and INITCHILD it
 		 * to give it a name.
 		 */
-		ndi_devi_enter(pdip, &circular);
+		ndi_devi_enter(pdip);
 		if ((rv = ddi_initchild(pdip, cdip)) != DDI_SUCCESS) {
 			(void) ndi_devi_offline(cdip, NDI_DEVI_REMOVE);
-			ndi_devi_exit(pdip, circular);
+			ndi_devi_exit(pdip);
 			return (EINVAL);
 		}
-		ndi_devi_exit(pdip, circular);
+		ndi_devi_exit(pdip);
 
 	} else {
 		/*
@@ -1203,7 +1205,7 @@ static int ndi_event_debug = 0;
  */
 int
 ndi_event_alloc_hdl(dev_info_t *dip, ddi_iblock_cookie_t cookie,
-	ndi_event_hdl_t *handle, uint_t flag)
+    ndi_event_hdl_t *handle, uint_t flag)
 {
 	struct ndi_event_hdl *ndi_event_hdl;
 
@@ -1284,8 +1286,8 @@ ndi_event_free_hdl(ndi_event_hdl_t handle)
  */
 int
 ndi_event_bind_set(ndi_event_hdl_t handle,
-	ndi_event_set_t		*ndi_events,
-	uint_t			flag)
+    ndi_event_set_t		*ndi_events,
+    uint_t			flag)
 {
 	struct ndi_event_hdl	*ndi_event_hdl;
 	ndi_event_cookie_t	*next, *prev, *new_cookie;
@@ -1596,10 +1598,10 @@ done:
  */
 int
 ndi_event_retrieve_cookie(ndi_event_hdl_t handle,
-	dev_info_t		*rdip,
-	char			*eventname,
-	ddi_eventcookie_t	*cookiep,
-	uint_t			flag)
+    dev_info_t		*rdip,
+    char		*eventname,
+    ddi_eventcookie_t	*cookiep,
+    uint_t		flag)
 {
 	struct ndi_event_hdl *ndi_event_hdl = (struct ndi_event_hdl *)handle;
 	int		len;
@@ -1643,7 +1645,7 @@ ndi_event_retrieve_cookie(ndi_event_hdl_t handle,
  */
 static int
 ndi_event_is_defined(ndi_event_hdl_t handle,
-	ddi_eventcookie_t cookie, int *attributes)
+    ddi_eventcookie_t cookie, int *attributes)
 {
 
 	struct ndi_event_hdl *ndi_event_hdl = (struct ndi_event_hdl *)handle;
@@ -1681,12 +1683,11 @@ ndi_event_is_defined(ndi_event_hdl_t handle,
  */
 int
 ndi_event_add_callback(ndi_event_hdl_t handle, dev_info_t *child_dip,
-	ddi_eventcookie_t cookie,
-	void		(*event_callback)(dev_info_t *,
-			ddi_eventcookie_t, void *arg, void *impldata),
-	void		*arg,
-	uint_t		flag,
-	ddi_callback_id_t *cb_id)
+    ddi_eventcookie_t	cookie,
+    ddi_event_cb_f	event_callback,
+    void		*arg,
+    uint_t		flag,
+    ddi_callback_id_t *cb_id)
 {
 	struct ndi_event_hdl *ndi_event_hdl = (struct ndi_event_hdl *)handle;
 	int km_flag = ((flag & NDI_NOSLEEP) ? KM_NOSLEEP : KM_SLEEP);
@@ -1826,7 +1827,7 @@ do_ndi_event_remove_callback(struct ndi_event_hdl *ndi_event_hdl,
  */
 int
 ndi_event_run_callbacks(ndi_event_hdl_t handle, dev_info_t *child_dip,
-	ddi_eventcookie_t cookie, void *bus_impldata)
+    ddi_eventcookie_t cookie, void *bus_impldata)
 {
 	struct ndi_event_hdl *ndi_event_hdl = (struct ndi_event_hdl *)handle;
 	ndi_event_callbacks_t *next, *cb;
@@ -1913,7 +1914,7 @@ ndi_event_run_callbacks(ndi_event_hdl_t handle, dev_info_t *child_dip,
  */
 int
 ndi_event_do_callback(ndi_event_hdl_t handle, dev_info_t *child_dip,
-	ddi_eventcookie_t cookie, void *bus_impldata)
+    ddi_eventcookie_t cookie, void *bus_impldata)
 {
 	struct ndi_event_hdl *ndi_event_hdl = (struct ndi_event_hdl *)handle;
 	ndi_event_callbacks_t *next, *cb;
@@ -2388,9 +2389,9 @@ i_ddi_fault_logger(dev_info_t *rdip, struct ddi_fault_event_data *fedp)
  * a fault event reaches rootnex.
  */
 void (*plat_fault_handler)(dev_info_t *, struct ddi_fault_event_data *) =
-	i_ddi_fault_handler;
+    i_ddi_fault_handler;
 void (*plat_fault_logger)(dev_info_t *, struct ddi_fault_event_data *) =
-	i_ddi_fault_logger;
+    i_ddi_fault_logger;
 
 /*
  * Rootnex event definitions ...
@@ -2436,7 +2437,7 @@ i_ddi_rootnex_init_events(dev_info_t *dip)
 /*ARGSUSED*/
 int
 i_ddi_rootnex_get_eventcookie(dev_info_t *dip, dev_info_t *rdip,
-	char *eventname, ddi_eventcookie_t *cookiep)
+    char *eventname, ddi_eventcookie_t *cookiep)
 {
 	if (rootnex_event_hdl == NULL)
 		return (NDI_FAILURE);
@@ -2447,9 +2448,8 @@ i_ddi_rootnex_get_eventcookie(dev_info_t *dip, dev_info_t *rdip,
 /*ARGSUSED*/
 int
 i_ddi_rootnex_add_eventcall(dev_info_t *dip, dev_info_t *rdip,
-	ddi_eventcookie_t eventid, void (*handler)(dev_info_t *dip,
-	ddi_eventcookie_t event, void *arg, void *impl_data), void *arg,
-	ddi_callback_id_t *cb_id)
+    ddi_eventcookie_t eventid, ddi_event_cb_f handler, void *arg,
+    ddi_callback_id_t *cb_id)
 {
 	if (rootnex_event_hdl == NULL)
 		return (NDI_FAILURE);
@@ -2470,7 +2470,7 @@ i_ddi_rootnex_remove_eventcall(dev_info_t *dip, ddi_callback_id_t cb_id)
 /*ARGSUSED*/
 int
 i_ddi_rootnex_post_event(dev_info_t *dip, dev_info_t *rdip,
-	ddi_eventcookie_t eventid, void *impl_data)
+    ddi_eventcookie_t eventid, void *impl_data)
 {
 	int tag;
 

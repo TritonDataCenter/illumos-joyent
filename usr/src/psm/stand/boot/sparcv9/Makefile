@@ -43,7 +43,6 @@ all install clean clobber lint: $(SUBDIRS)
 FRC:
 
 $(SUBDIRS): FRC
-	@cd $@; pwd; $(MAKE) $(MFLAGS) $(TARGET)
+	@cd $@; pwd; $(MAKE) $(TARGET)
 
-cscope.out tags: FRC
-	$(XREF) -x $@
+include ../../../../Makefile.xref

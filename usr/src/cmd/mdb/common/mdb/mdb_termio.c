@@ -45,7 +45,7 @@
  * response to editing commands.
  *
  * The terminal backend is also responsible for maintaining and manipulating
- * the settings (see stty(1) and termio(7I)) associated with the terminal.
+ * the settings (see stty(1) and termio(4I)) associated with the terminal.
  * The debugger makes use of four distinct sets of terminal attributes:
  *
  * (1) the settings used by the debugger's parent process (tio_ptios),
@@ -317,17 +317,17 @@ extern int tigetflag(const char *);
 extern int tigetnum(const char *);
 
 static const mdb_io_ops_t termio_ops = {
-	termio_read,
-	termio_write,
-	termio_seek,
-	termio_ctl,
-	termio_close,
-	termio_name,
-	termio_link,
-	termio_unlink,
-	termio_setattr,
-	termio_suspend,
-	termio_resume
+	.io_read = termio_read,
+	.io_write = termio_write,
+	.io_seek = termio_seek,
+	.io_ctl = termio_ctl,
+	.io_close = termio_close,
+	.io_name = termio_name,
+	.io_link = termio_link,
+	.io_unlink = termio_unlink,
+	.io_setattr = termio_setattr,
+	.io_suspend = termio_suspend,
+	.io_resume = termio_resume,
 };
 
 static termio_info_t termio_info;
@@ -591,8 +591,8 @@ termio_close(mdb_io_t *io)
 {
 	termio_data_t *td = io->io_data;
 
-	(void) mdb_signal_sethandler(SIGWINCH, SIG_DFL, NULL);
-	(void) mdb_signal_sethandler(SIGTSTP, SIG_DFL, NULL);
+	(void) mdb_signal_sethandler(SIGWINCH, MDB_SIG_DFL, NULL);
+	(void) mdb_signal_sethandler(SIGTSTP, MDB_SIG_DFL, NULL);
 
 	termio_suspend_tty(td, &td->tio_ptios);
 
@@ -725,9 +725,9 @@ termio_suspend_tty(termio_data_t *td, struct termios *iosp)
 
 	if (td->tio_opgid > 0 && td->tio_opgid != mdb.m_pgid) {
 		mdb_dprintf(MDB_DBG_CMDBUF, "fg pgid=%d\n", (int)td->tio_opgid);
-		(void) mdb_signal_sethandler(SIGTTOU, SIG_IGN, NULL);
+		(void) mdb_signal_sethandler(SIGTTOU, MDB_SIG_IGN, NULL);
 		(void) termio_ctl(td->tio_io, TIOCSPGRP, &td->tio_opgid);
-		(void) mdb_signal_sethandler(SIGTTOU, SIG_DFL, NULL);
+		(void) mdb_signal_sethandler(SIGTTOU, MDB_SIG_DFL, NULL);
 	}
 }
 
@@ -753,7 +753,9 @@ termio_resume_tty(termio_data_t *td, struct termios *iosp)
 	static const uint_t baud[] = {
 		0, 50, 75, 110, 134, 150, 200, 300, 600, 1200,
 		1800, 2400, 4800, 9600, 19200, 38400, 57600,
-		76800, 115200, 153600, 230400, 307200, 460800, 921600
+		76800, 115200, 153600, 230400, 307200, 460800, 921600,
+		1000000, 1152000, 1500000, 2000000, 2500000, 3000000,
+		3500000, 4000000
 	};
 
 	struct termios *ntios;
@@ -775,9 +777,9 @@ termio_resume_tty(termio_data_t *td, struct termios *iosp)
 	 * We temporarily ignore TTOU because TIOCSPGRP could trigger it.
 	 */
 	if (td->tio_opgid != mdb.m_pgid) {
-		(void) mdb_signal_sethandler(SIGTTOU, SIG_IGN, NULL);
+		(void) mdb_signal_sethandler(SIGTTOU, MDB_SIG_IGN, NULL);
 		(void) termio_ctl(td->tio_io, TIOCSPGRP, &mdb.m_pgid);
-		(void) mdb_signal_sethandler(SIGTTOU, SIG_DFL, NULL);
+		(void) mdb_signal_sethandler(SIGTTOU, MDB_SIG_DFL, NULL);
 		mdb_dprintf(MDB_DBG_CMDBUF, "fg pgid=%d\n", (int)mdb.m_pgid);
 	}
 
@@ -832,7 +834,7 @@ termio_resume_tty(termio_data_t *td, struct termios *iosp)
 		warn("failed to reset terminal attributes");
 
 	/*
-	 * Compute the terminal speed as described in termio(7I), and then
+	 * Compute the terminal speed as described in termio(4I), and then
 	 * look up the corresponding microseconds-per-char in our table.
 	 */
 	if (ntios->c_cflag & CBAUDEXT)
@@ -924,7 +926,7 @@ termio_delay(termio_data_t *td, uint_t usec)
 }
 
 /*
- * Parse the terminfo(4) padding sequence "$<...>" and delay for the specified
+ * Parse the terminfo(5) padding sequence "$<...>" and delay for the specified
  * amount of time by sending pad characters to the terminal.
  */
 static const char *
@@ -1018,7 +1020,7 @@ termio_puts(termio_data_t *td, const char *s, uint_t lines)
 /*
  * Print a padded escape sequence string to the terminal.  The caller specifies
  * the string 's' and a count of the affected lines.  If the string contains an
- * embedded delay sequence delimited by "$<>" (see terminfo(4)), appropriate
+ * embedded delay sequence delimited by "$<>" (see terminfo(5)), appropriate
  * padding will be included in the output.  We determine whether or not padding
  * is required during initialization, and set tio_putp to the proper subroutine.
  */
@@ -1474,7 +1476,7 @@ termio_setup_attrs(termio_data_t *td, const char *name)
 	 * While "xenl" doesn't dictate our TIO_AUTOWRAP setting, it does have
 	 * a subtle impact on the way we process input:  in addition to its
 	 * eponymous behavior of eating newlines, "xenl" denotes a second,
-	 * entirely orthogonal idiosyncracy.  As terminfo(4) tells it: "Those
+	 * entirely orthogonal idiosyncracy.  As terminfo(5) tells it: "Those
 	 * terminals whose cursor remains on the right-most column until
 	 * another character has been received, rather than wrapping
 	 * immediately upon receiving the right- most character, such as the
@@ -2054,13 +2056,13 @@ termio_quit(termio_data_t *td, int c)
 static const char *
 termio_susp(termio_data_t *td, int c)
 {
-	(void) mdb_signal_sethandler(SIGWINCH, SIG_IGN, NULL);
-	(void) mdb_signal_sethandler(SIGTSTP, SIG_IGN, NULL);
+	(void) mdb_signal_sethandler(SIGWINCH, MDB_SIG_IGN, NULL);
+	(void) mdb_signal_sethandler(SIGTSTP, MDB_SIG_IGN, NULL);
 
 	termio_suspend_tty(td, &td->tio_ptios);
 	mdb_iob_nl(td->tio_out);
 
-	(void) mdb_signal_sethandler(SIGTSTP, SIG_DFL, NULL);
+	(void) mdb_signal_sethandler(SIGTSTP, MDB_SIG_DFL, NULL);
 	(void) mdb_signal_pgrp(SIGTSTP);
 
 	/*
@@ -2068,7 +2070,7 @@ termio_susp(termio_data_t *td, int c)
 	 * debugger process group to be stopped by the kernel.  Once we return
 	 * from that call, we assume we are resuming from a subsequent SIGCONT.
 	 */
-	(void) mdb_signal_sethandler(SIGTSTP, SIG_IGN, NULL);
+	(void) mdb_signal_sethandler(SIGTSTP, MDB_SIG_IGN, NULL);
 	termio_resume_tty(td, &td->tio_ptios);
 
 	(void) mdb_signal_sethandler(SIGWINCH, termio_winch, td);

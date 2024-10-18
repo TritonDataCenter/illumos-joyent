@@ -27,7 +27,8 @@
 /*	  All Rights Reserved	*/
 
 /* Copyright (c) 2013, OmniTI Computer Consulting, Inc. All rights reserved. */
-/* Copyright 2017 Joyent, Inc. */
+/* Copyright 2020 Joyent, Inc. */
+/* Copyright 2021 OmniOS Community Edition (OmniOSce) Association. */
 
 #ifndef _SYS_FILE_H
 #define	_SYS_FILE_H
@@ -119,13 +120,19 @@ typedef struct fpollinfo {
 
 #define	FCLOEXEC	0x800000	/* O_CLOEXEC = 0x800000 */
 #define	FDIRECTORY	0x1000000	/* O_DIRECTORY = 0x1000000 */
+#define	FDIRECT		0x2000000	/* O_DIRECT = 0x2000000 */
+#define	FCLOFORK	0x4000000	/* O_CLOFORK = 0x4000000 */
+/*
+ * Private interface for lx O_PATH|O_NOFOLLOW emulation for symlinks.
+ */
+#define	__FLXPATH	0x80000000
+/*
+ * Private interface for lx fstatat(AT_NO_AUTOMOUNT) emulation.
+ * Since usage is disjoint, the __FLXPATH bit is re-used.
+ */
+#define	__FLXNOAUTO	0x80000000
 
 #if defined(_KERNEL) || defined(_FAKE_KERNEL)
-
-/*
- * This is a flag that is set on f_flag2, but is never user-visible
- */
-#define	FEPOLLED	0x8000
 
 /*
  * Fake flags for driver ioctl calls to inform them of the originating
@@ -220,7 +227,7 @@ extern void setf(int, file_t *);
 extern int f_getfd_error(int, int *);
 extern char f_getfd(int);
 extern int f_setfd_error(int, int);
-extern void f_setfd(int, char);
+extern void f_setfd_or(int, short);
 extern int f_getfl(int, int *);
 extern int f_badfd(int, int *, int);
 extern int fassign(struct vnode **, int, int *);

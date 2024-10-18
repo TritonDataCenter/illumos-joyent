@@ -43,12 +43,12 @@
 .\" Copyright 1989 AT&T
 .\" Portions Copyright (c) 1994, X/Open Company Limited.  All Rights Reserved.
 .\" Copyright (c) 2008, Sun Microsystems, Inc.  All Rights Reserved.
+.\" Copyright 2024 Oxide Computer Company
 .\"
-.TH FORK 2 "Aug 18, 2019"
+.TH FORK 2 "June 21, 2024"
 .SH NAME
 fork, fork1, forkall, forkx, forkallx \- create a new process
 .SH SYNOPSIS
-.LP
 .nf
 #include <sys/types.h>
 #include <unistd.h>
@@ -79,7 +79,6 @@ fork, fork1, forkall, forkx, forkallx \- create a new process
 .fi
 
 .SH DESCRIPTION
-.LP
 The \fBfork()\fR, \fBfork1()\fR, \fBforkall()\fR, \fBforkx()\fR, and
 \fBforkallx()\fR functions create a new process. The address space of the new
 process (child process) is an exact copy of the address space of the calling
@@ -101,7 +100,7 @@ environment
 .TP
 .ie t \(bu
 .el o
-open file descriptors
+open file descriptors (except those marked close-on-fork, see discussion below)
 .RE
 .RS +4
 .TP
@@ -240,7 +239,7 @@ process flags (see \fBgetpflags\fR(2))
 .TP
 .ie t \(bu
 .el o
-active contract templates (see \fBcontract\fR(4))
+active contract templates (see \fBcontract\fR(5))
 .RE
 .sp
 .LP
@@ -248,7 +247,7 @@ Scheduling priority and any per-process scheduling parameters that are specific
 to a given scheduling class might or might not be inherited according to the
 policy of that particular class (see \fBpriocntl\fR(2)). The child process
 might or might not be in the same process contract as the parent (see
-\fBprocess\fR(4)). The child process differs from the parent process in the
+\fBprocess\fR(5)). The child process differs from the parent process in the
 following ways:
 .RS +4
 .TP
@@ -270,7 +269,10 @@ The child process has a different parent process \fBID\fR (that is, the process
 .el o
 The child process has its own copy of the parent's file descriptors and
 directory streams. Each of the child's file descriptors shares a common file
-pointer with the corresponding file descriptor of the parent.
+pointer with the corresponding file descriptor of the parent. In addition, any
+file descriptors that were marked with the close-on-fork flag, \fBFD_CLOFORK\fR
+(see \fBfcntl\fR(2) and \fBO_CLOFORK\fR in \fBopen\fR(2)), will not be present
+in the child process, but remain open in the parent.
 .RE
 .RS +4
 .TP
@@ -339,7 +341,7 @@ inherited by the child.
 .TP
 .ie t \(bu
 .el o
-The child process holds no contracts (see \fBcontract\fR(4)).
+The child process holds no contracts (see \fBcontract\fR(5)).
 .RE
 .sp
 .LP
@@ -353,7 +355,6 @@ descriptor is open in the child. If a descriptor is closed in the parent,
 attempts to operate on the door descriptor will fail even if it is still open
 in the child.
 .SS "Threads"
-.LP
 A call to \fBforkall()\fR or \fBforkallx()\fR replicates in the child process
 all of the threads (see \fBthr_create\fR(3C) and \fBpthread_create\fR(3C)) in
 the parent process. A call to \fBfork1()\fR or \fBforkx()\fR replicates only
@@ -379,7 +380,6 @@ provides all threading support for both sets of application programming
 interfaces.  Applications that require replicate-all fork semantics must call
 \fBforkall()\fR or \fBforkallx()\fR.
 .SS "Fork Extensions"
-.LP
 The \fBforkx()\fR and \fBforkallx()\fR functions accept a \fIflags\fR argument
 consisting of a bitwise inclusive-OR of zero or more of the following flags,
 which are defined in the header \fB<sys/fork.h>\fR:
@@ -417,7 +417,6 @@ exits.
 If the \fIflags\fR argument is 0 \fBforkx()\fR is identical to \fBfork()\fR and
 \fBforkallx()\fR is identical to \fBforkall()\fR.
 .SS "\fBfork()\fR Safety"
-.LP
 If a multithreaded application calls \fBfork()\fR, \fBfork1()\fR, or
 \fBforkx()\fR, and the child does more than simply call one of the
 \fBexec\fR(2) functions, there is a possibility of deadlock occurring in the
@@ -425,7 +424,7 @@ child. The application should use \fBpthread_atfork\fR(3C) to ensure safety
 with respect to this deadlock. Should there be any outstanding mutexes
 throughout the process, the application should call \fBpthread_atfork()\fR to
 wait for and acquire those mutexes prior to calling \fBfork()\fR,
-\fBfork1()\fR, or \fBforkx()\fR. See  "MT-Level" on the \fBattributes\fR(5)
+\fBfork1()\fR, or \fBforkx()\fR. See  "MT-Level" on the \fBattributes\fR(7)
 manual page.
 .sp
 .LP
@@ -435,8 +434,8 @@ interfaces provided by \fBlibc\fR are safe to use in a child process following
 a \fBfork()\fR, except when \fBfork()\fR is executed within a signal handler.
 .sp
 .LP
-The POSIX standard (see \fBstandards\fR(5)) requires fork to be
-Async-Signal-Safe (see \fBattributes\fR(5)). This cannot be made to happen with
+The POSIX standard (see \fBstandards\fR(7)) requires fork to be
+Async-Signal-Safe (see \fBattributes\fR(7)). This cannot be made to happen with
 fork handlers in place, because they acquire locks. To be in nominal
 compliance, no fork handlers are called when \fBfork()\fR is executed within a
 signal context.  This leaves the child process in a questionable state with
@@ -447,14 +446,12 @@ specification: "To avoid errors, the child process may only execute
 Async-Signal-Safe operations until such time as one of the \fBexec\fR(2)
 functions is called."
 .SH RETURN VALUES
-.LP
 Upon successful completion, \fBfork()\fR, \fBfork1()\fR, \fBforkall()\fR,
 \fBforkx()\fR, and \fBforkallx()\fR return \fB0\fR to the child process and
 return the process \fBID\fR of the child process to the parent process.
 Otherwise, \fB(pid_t)\(mi1\fR is returned to the parent process, no child
 process is created, and \fBerrno\fR is set to indicate the error.
 .SH ERRORS
-.LP
 The \fBfork()\fR, \fBfork1()\fR, \fBforkall()\fR, \fBforkx()\fR, and
 \fBforkallx()\fR functions will fail if:
 .sp
@@ -501,8 +498,7 @@ The \fIflags\fR argument is invalid.
 .RE
 
 .SH ATTRIBUTES
-.LP
-See \fBattributes\fR(5) for descriptions of the following attributes:
+See \fBattributes\fR(7) for descriptions of the following attributes:
 .sp
 
 .sp
@@ -521,19 +517,22 @@ Standard	See below.
 
 .sp
 .LP
-For \fBfork()\fR, see \fBstandards\fR(5).
+For \fBfork()\fR, see \fBstandards\fR(7).
 .SH SEE ALSO
-.LP
 \fBalarm\fR(2), \fBexec\fR(2), \fBexit\fR(2), \fBfcntl\fR(2),
 \fBgetitimer\fR(2), \fBgetrlimit\fR(2), \fBmemcntl\fR(2), \fBmmap\fR(2),
 \fBnice\fR(2), \fBpriocntl\fR(2), \fBsemop\fR(2), \fBshmop\fR(2),
 \fBtimes\fR(2), \fBumask\fR(2), \fBwaitid\fR(2), \fBdoor_create\fR(3C),
 \fBexit\fR(3C), \fBplock\fR(3C), \fBpthread_atfork\fR(3C),
 \fBpthread_create\fR(3C), \fBsignal\fR(3C), \fBsystem\fR(3C),
-\fBthr_create\fR(3C) \fBtimer_create\fR(3C), \fBwait\fR(3C), \fBcontract\fR(4),
-\fBprocess\fR(4), \fBattributes\fR(5), \fBprivileges\fR(5), \fBstandards\fR(5)
+\fBthr_create\fR(3C) \fBtimer_create\fR(3C),
+.BR wait (3C),
+.BR contract (5),
+.BR process (5),
+.BR attributes (7),
+.BR privileges (7),
+.BR standards (7)
 .SH NOTES
-.LP
 An application should call \fB_exit()\fR rather than \fBexit\fR(3C) if it
 cannot \fBexecve()\fR, since \fBexit()\fR will flush and close standard I/O
 channels and thereby corrupt the parent process's standard I/O data structures.

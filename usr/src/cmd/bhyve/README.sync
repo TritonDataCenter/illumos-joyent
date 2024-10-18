@@ -1,0 +1,39 @@
+Git commit hashes in this file refer to the official FreeBSD distributed
+public Git repository at https://git.freebsd.org/src.git
+
+The bhyve userland code in this directory, and its associated libraries and
+parts of the kernel module have been updated to the latest upstream FreeBSD
+sources as of:
+
+    commit a305f44d1404fbf386bb2b50ab7233ce9eabe0bb
+    Author: Ed Maste <emaste@FreeBSD.org>
+    Date:   Thu Sep 19 14:57:42 2024 -0400
+
+        bhyve: validate corb->wp to avoid infinite loop
+
+Divergence Notes:
+
+The kernel component of bhyve has diverged from the FreeBSD sources and
+will continue to evolve away from the initial compatibility interfaces towards
+native illumos ones. The vmmapi library abstracts those interfaces wherever
+possible so that the bhyve userspace can remain close to upstream.
+
+The source code for the following components is present and included in
+syncs from FreeBSD, but currently disabled. See the comments in 'Makefile'
+for more details:
+
+	kernemu_dev
+	virtio-scsi
+	audio backend
+	virtio_input
+
+The draft Save/Restore functionality, added in FreeBSD commit
+483d953a86a2507355f8287c5107dc827a0ff516, has not been synced into illumos bhyve
+yet.  It is not built by default in FreeBSD, so we're not interested in taking
+it until it successfully endures more in-depth testing.
+
+The stub usr/src/compat/bhyve/stdatomic.h file only includes enough glue
+to satisfy the use of <stdatomic.h> in usr/src/cmd/bhyve/rfb.c, and in
+particular assumes that atomic variables are sized as an int. If other bhyve
+pieces start using stdatomic.h, this will need enhancing.
+

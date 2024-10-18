@@ -29,6 +29,7 @@
 
 #include "lint.h"
 #include "thr_uberdata.h"
+#include "libc.h"
 #include <stdarg.h>
 #include <poll.h>
 #include <stropts.h>
@@ -527,7 +528,7 @@ write(int fd, const void *buf, size_t size)
 
 int
 getmsg(int fd, struct strbuf *ctlptr, struct strbuf *dataptr,
-	int *flagsp)
+    int *flagsp)
 {
 	extern int __getmsg(int, struct strbuf *, struct strbuf *, int *);
 	int rv;
@@ -537,7 +538,7 @@ getmsg(int fd, struct strbuf *ctlptr, struct strbuf *dataptr,
 
 int
 getpmsg(int fd, struct strbuf *ctlptr, struct strbuf *dataptr,
-	int *bandp, int *flagsp)
+    int *bandp, int *flagsp)
 {
 	extern int __getpmsg(int, struct strbuf *, struct strbuf *,
 	    int *, int *);
@@ -548,7 +549,7 @@ getpmsg(int fd, struct strbuf *ctlptr, struct strbuf *dataptr,
 
 int
 putmsg(int fd, const struct strbuf *ctlptr,
-	const struct strbuf *dataptr, int flags)
+    const struct strbuf *dataptr, int flags)
 {
 	extern int __putmsg(int, const struct strbuf *,
 	    const struct strbuf *, int);
@@ -559,7 +560,7 @@ putmsg(int fd, const struct strbuf *ctlptr,
 
 int
 __xpg4_putmsg(int fd, const struct strbuf *ctlptr,
-	const struct strbuf *dataptr, int flags)
+    const struct strbuf *dataptr, int flags)
 {
 	extern int __putmsg(int, const struct strbuf *,
 	    const struct strbuf *, int);
@@ -570,7 +571,7 @@ __xpg4_putmsg(int fd, const struct strbuf *ctlptr,
 
 int
 putpmsg(int fd, const struct strbuf *ctlptr,
-	const struct strbuf *dataptr, int band, int flags)
+    const struct strbuf *dataptr, int band, int flags)
 {
 	extern int __putpmsg(int, const struct strbuf *,
 	    const struct strbuf *, int, int);
@@ -581,7 +582,7 @@ putpmsg(int fd, const struct strbuf *ctlptr,
 
 int
 __xpg4_putpmsg(int fd, const struct strbuf *ctlptr,
-	const struct strbuf *dataptr, int band, int flags)
+    const struct strbuf *dataptr, int band, int flags)
 {
 	extern int __putpmsg(int, const struct strbuf *,
 	    const struct strbuf *, int, int);
@@ -607,7 +608,7 @@ nanosleep(const timespec_t *rqtp, timespec_t *rmtp)
 
 int
 clock_nanosleep(clockid_t clock_id, int flags,
-	const timespec_t *rqtp, timespec_t *rmtp)
+    const timespec_t *rqtp, timespec_t *rmtp)
 {
 	timespec_t reltime;
 	hrtime_t start;
@@ -741,34 +742,48 @@ int
 fcntl(int fildes, int cmd, ...)
 {
 	extern int __fcntl(int, int, ...);
-	intptr_t arg;
+	intptr_t arg, arg1 = 0;
 	int rv;
 	va_list ap;
 
 	va_start(ap, cmd);
-	arg = va_arg(ap, intptr_t);
+	switch (cmd) {
+	case F_DUP3FD:
+		arg = va_arg(ap, int);
+		arg1 = va_arg(ap, int);
+		break;
+	default:
+		arg = va_arg(ap, intptr_t);
+		break;
+	}
 	va_end(ap);
 	if (cmd != F_SETLKW)
-		return (__fcntl(fildes, cmd, arg));
+		return (__fcntl(fildes, cmd, arg, arg1));
 	PERFORM(__fcntl(fildes, cmd, arg))
 }
 
 int
 fdatasync(int fildes)
 {
-	extern int __fdsync(int, int);
 	int rv;
 
-	PERFORM(__fdsync(fildes, FDSYNC))
+	PERFORM(__fdsync(fildes, FDSYNC_DATA))
 }
 
 int
 fsync(int fildes)
 {
-	extern int __fdsync(int, int);
 	int rv;
 
-	PERFORM(__fdsync(fildes, FSYNC))
+	PERFORM(__fdsync(fildes, FDSYNC_FILE))
+}
+
+int
+syncfs(int fildes)
+{
+	int rv;
+
+	PERFORM(__fdsync(fildes, FDSYNC_FS))
 }
 
 int
@@ -810,7 +825,7 @@ msgsnd(int msqid, const void *msgp, size_t msgsz, int msgflg)
 }
 
 int
-msync(caddr_t addr, size_t len, int flags)
+msync(void *addr, size_t len, int flags)
 {
 	extern int __msync(caddr_t, size_t, int);
 	int rv;
@@ -1007,7 +1022,7 @@ sigsuspend(const sigset_t *set)
 
 int
 _pollsys(struct pollfd *fds, nfds_t nfd, const timespec_t *timeout,
-	const sigset_t *sigmask)
+    const sigset_t *sigmask)
 {
 	extern int __pollsys(struct pollfd *, nfds_t, const timespec_t *,
 	    const sigset_t *);

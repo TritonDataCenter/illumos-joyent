@@ -5,7 +5,7 @@
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License. You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.
 .\"  See the License for the specific language governing permissions and limitations under the License. When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with
 .\" the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH INTRO 3 "Aug 19, 2019"
+.TH INTRO 3 "Sep 12, 2021"
 .SH NAME
 Intro, intro \- introduction to functions and libraries
 .SH DESCRIPTION
@@ -71,11 +71,11 @@ The standard C library is implemented as a shared object, \fBlibc.so\fR. See
 \fBlibc\fR(3LIB) and the "C Compilation System" chapter of the \fIANSI C
 Programmer's Guide\fR for a discussion. Some functions behave differently in
 standard-conforming environments. This behavior is noted on the individual
-manual pages. See \fBstandards\fR(5).
+manual pages. See \fBstandards\fR(7).
 .sp
 The \fBlibpthread\fR and \fBlibthread\fR libraries are filter libraries on
 \fBlibc\fR that are used for building multithreaded applications:
-\fBlibpthread\fR implements the POSIX (see \fBstandards\fR(5)) threads
+\fBlibpthread\fR implements the POSIX (see \fBstandards\fR(7)) threads
 interface, whereas \fBlibthread\fR implements the Solaris threads interface.
 See \fBMULTITHREADED APPLICATIONS\fR, below.
 .RE
@@ -296,13 +296,13 @@ X/Open CAE Specification, Networking Services, Issue 4 (September, 1994). This
 library is implemented as a shared object, \fBlibxnet.so\fR, but is not
 automatically linked by the C compilation system. Specify \fB-lxnet\fR on the
 \fBcc\fR command line to link with this library. See \fBlibxnet\fR(3LIB) and
-\fBstandards\fR(5) for compilation information.
+\fBstandards\fR(7) for compilation information.
 .RE
 
 .sp
 .LP
 Under all circumstances, the use of the Sockets API is recommended over the XTI
-and TLI APIs. If portability to other XPGV4v2 (see \fBstandards\fR(5)) systems
+and TLI APIs. If portability to other XPGV4v2 (see \fBstandards\fR(7)) systems
 is a requirement, the application must use the \fBlibxnet\fR interfaces. If
 portability is not required, the sockets interfaces in \fBlibsocket\fR and
 \fBlibnsl\fR are recommended over those in \fBlibxnet\fR. Between the XTI and
@@ -903,22 +903,6 @@ See \fBlibtecla\fR(3LIB).
 .sp
 .ne 2
 .na
-\fB(3TNF)\fR
-.ad
-.sp .6
-.RS 4n
-These functions constitute the TNF libraries, \fBlibtnf\fR, \fBlibtnfctl\fR,
-and \fBlibtnfprobe\fR. These libraries are implemented as shared objects,
-\fBlibtnf.so\fR, \fBlibtnfctl.so\fR, and \fBlibtnfprobe.so\fR, respectively,
-but are not automatically linked by the C compilation system. Specify
-\fB-ltnf\fR, \fB-ltnfctl\fR, or \fB-ltnfprobe\fR on the \fBcc\fR command line
-to link with these libraries. See \fBlibtnfctl\fR(3TNF) and
-\fBlibtnfctl\fR(3LIB).
-.RE
-
-.sp
-.ne 2
-.na
 \fB(3TSOL)\fR
 .ad
 .sp .6
@@ -1034,7 +1018,7 @@ application's safety.
 .sp
 .LP
 MT-Safe interfaces are denoted in the \fBATTRIBUTES\fR section of the functions
-and libraries manual pages (see \fBattributes\fR(5)). If a manual page does not
+and libraries manual pages (see \fBattributes\fR(7)). If a manual page does not
 state explicitly that an interface is MT-Safe, the user should assume that the
 interface is unsafe.
 .SH REALTIME APPLICATIONS
@@ -1097,8 +1081,12 @@ http://www.opengroup.org/unix/online.html\&.
 .LP
 This notice shall appear on any product containing this material.
 .SH SEE ALSO
-\fBar\fR(1), \fBld\fR(1), \fBfork\fR(2), \fBstdio\fR(3C), \fBattributes\fR(5),
-\fBstandards\fR(5)
+.BR ar (1),
+.BR ld (1),
+.BR fork (2),
+.BR stdio (3C),
+.BR attributes (7),
+.BR standards (7)
 .sp
 .LP
 \fILinker and Libraries Guide\fR

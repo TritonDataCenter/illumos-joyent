@@ -23,6 +23,7 @@
 # Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
 #
 # Copyright 2019 Joyent, Inc.
+# Copyright 2023 Oxide Computer Company
 #
 
 #	This Makefile defines file modules in the directory uts/i86xpv
@@ -77,7 +78,6 @@ CORE_OBJS +=			\
 	md_clear.o		\
 	mem_config_stubs.o	\
 	memnode.o		\
-	microcode.o		\
 	mlsetup.o		\
 	mp_call.o		\
 	mp_implfuncs.o		\
@@ -95,7 +95,8 @@ CORE_OBJS +=			\
 	pci_orion.o		\
 	pmem.o			\
 	ppage.o			\
-	smt.o			\
+	prom_reboot.o		\
+	prom_panic.o		\
 	startup.o		\
 	ssp.o			\
 	xpv_timestamp.o		\
@@ -194,6 +195,7 @@ IOAT_OBJS += ioat.o ioat_rs.o ioat_ioctl.o ioat_chan.o
 ISANEXUS_OBJS += isa.o dma_engine.o i8237A.o
 PCI_E_NEXUS_OBJS += npe.o npe_misc.o
 PCI_E_NEXUS_OBJS += pci_common.o pci_kstats.o pci_tools.o
+PCI_PRD_OBJS += pci_prd_i86pc.o pci_memlist.o
 PCINEXUS_OBJS += pci.o pci_common.o pci_kstats.o pci_tools.o
 PRIVCMD_OBJS += seg_mf.o privcmd.o privcmd_hcall.o
 ROOTNEX_OBJS += rootnex.o
@@ -224,10 +226,7 @@ INC_PATH	+= -I$(UTSBASE)/i86xpv -I$(UTSBASE)/i86pc -I$(SRC)/common \
 
 #
 # Since the assym files are derived, the dependencies must be explicit for
-# all files including this file. (This is only actually required in the
-# instance when the .nse_depinfo file does not exist.) It may seem that
-# the lint targets should also have a similar dependency, but they don't
-# since only C headers are included when #defined(__lint) is true.
+# all files including this file.
 #
 
 ASSYM_DEPS      +=		\

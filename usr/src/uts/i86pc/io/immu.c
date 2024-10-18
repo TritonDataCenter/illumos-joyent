@@ -28,6 +28,10 @@
  */
 
 /*
+ * Copyright 2023 Oxide Computer Company
+ */
+
+/*
  * Intel IOMMU implementation
  * This file contains Intel IOMMU code exported
  * to the rest of the system and code that deals
@@ -321,11 +325,9 @@ check_gfx(dev_info_t *dip, void *arg)
 static void
 walk_tree(int (*f)(dev_info_t *, void *), void *arg)
 {
-	int count;
-
-	ndi_devi_enter(root_devinfo, &count);
+	ndi_devi_enter(root_devinfo);
 	ddi_walk_devs(ddi_get_child(root_devinfo), f, arg);
-	ndi_devi_exit(root_devinfo, count);
+	ndi_devi_exit(root_devinfo);
 }
 
 static int
@@ -387,7 +389,7 @@ get_conf_str(char *bopt, char **val)
 
 /*
  * get_conf_opt()
- * 	get a rootnex.conf setting  (always a boolean)
+ *	get a rootnex.conf setting  (always a boolean)
  */
 static void
 get_conf_opt(char *bopt, boolean_t *kvar)
@@ -417,7 +419,7 @@ get_conf_opt(char *bopt, boolean_t *kvar)
 
 /*
  * get_bootopt()
- * 	check a boot option  (always a boolean)
+ *	check a boot option  (always a boolean)
  */
 static int
 get_boot_str(char *bopt, char **val)
@@ -921,7 +923,7 @@ immu_subsystems_setup(void)
 
 /*
  * immu_subsystems_startup()
- * 	startup all units that were setup
+ *	startup all units that were setup
  */
 static void
 immu_subsystems_startup(void)
@@ -1152,8 +1154,8 @@ immu_init(void)
 
 /*
  * immu_startup()
- * 	called directly by boot code to startup
- *      all units of the IOMMU
+ *	called directly by boot code to startup
+ *	all units of the IOMMU
  */
 void
 immu_startup(void)
@@ -1209,7 +1211,7 @@ immu_physmem_update(uint64_t addr, uint64_t size)
 
 /*
  * immu_quiesce()
- * 	quiesce all units that are running
+ *	quiesce all units that are running
  */
 int
 immu_quiesce(void)
@@ -1267,7 +1269,7 @@ immu_quiesce(void)
 
 /*
  * immu_unquiesce()
- * 	unquiesce all units
+ *	unquiesce all units
  */
 int
 immu_unquiesce(void)

@@ -23,6 +23,8 @@
  * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2013 by Delphix. All rights reserved.
+ * Copyright 2022 Garrett D'Amore
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 #include <mdb/mdb_param.h>
@@ -90,7 +92,6 @@
 #include "log.h"
 #include "mdi.h"
 #include "memory.h"
-#include "mmd.h"
 #include "modhash.h"
 #include "ndievents.h"
 #include "net.h"
@@ -2463,7 +2464,7 @@ kgrep_subr(kgrep_cb_func *cb, void *cbdata)
 
 	if (mdb_get_state() == MDB_STATE_RUNNING) {
 		mdb_warn("kgrep can only be run on a system "
-		    "dump or under kmdb; see dumpadm(1M)\n");
+		    "dump or under kmdb; see dumpadm(8)\n");
 		return (DCMD_ERR);
 	}
 
@@ -2995,7 +2996,7 @@ cpu_walk_init(mdb_walk_state_t *wsp)
 	int max_ncpus, i = 0;
 	uintptr_t current, first;
 	cpu_t cpu, panic_cpu;
-	uintptr_t panicstr, addr;
+	uintptr_t panicstr, addr = 0;
 	GElf_Sym sym;
 
 	cw = mdb_zalloc(sizeof (cpu_walk_t), UM_SLEEP | UM_GC);
@@ -3160,7 +3161,7 @@ cpuinfo_walk_cpu(uintptr_t addr, const cpu_t *cpu, cpuinfo_data_t *cid)
 	kthread_t t;
 	disp_t disp;
 	mdb_cpuinfo_proc_t p;
-	uintptr_t pinned;
+	uintptr_t pinned = 0;
 	char **flagbuf;
 	int nflaglines = 0, flagline = 0, bspl, rval = WALK_NEXT;
 
@@ -4021,7 +4022,7 @@ panicinfo(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 
 	if (!mdb_prop_postmortem) {
 		mdb_warn("panicinfo can only be run on a system "
-		    "dump; see dumpadm(1M)\n");
+		    "dump; see dumpadm(8)\n");
 		return (DCMD_ERR);
 	}
 
@@ -4303,7 +4304,8 @@ static const mdb_dcmd_t dcmds[] = {
 	{ "lgrp_set", "", "display bitmask of lgroups as a list", lgrp_set},
 
 	/* from log.c */
-	{ "msgbuf", "?[-v]", "print most recent console messages", msgbuf },
+	{ "msgbuf", "?[-tTv]", "print most recent console messages", msgbuf,
+		msgbuf_help },
 
 	/* from mdi.c */
 	{ "mdipi", NULL, "given a path, dump mdi_pathinfo "
@@ -4335,19 +4337,6 @@ static const mdb_dcmd_t dcmds[] = {
 	{ "seg", ":", "print address space segment", seg },
 	{ "swapinfo", "?", "display a struct swapinfo", swapinfof },
 	{ "vnode2smap", ":[offset]", "translate vnode to smap", vnode2smap },
-
-	/* from mmd.c */
-	{ "multidata", ":[-sv]", "display a summarized multidata_t",
-		multidata },
-	{ "pattbl", ":", "display a summarized multidata attribute table",
-		pattbl },
-	{ "pattr2multidata", ":", "print multidata pointer from pattr_t",
-		pattr2multidata },
-	{ "pdesc2slab", ":", "print pdesc slab pointer from pdesc_t",
-		pdesc2slab },
-	{ "pdesc_verify", ":", "verify integrity of a pdesc_t", pdesc_verify },
-	{ "slab2multidata", ":", "print multidata pointer from pdesc_slab_t",
-		slab2multidata },
 
 	/* from modhash.c */
 	{ "modhash", "?[-ceht] [-k key] [-v val] [-i index]",
@@ -4744,14 +4733,6 @@ static const mdb_walker_t walkers[] = {
 		segvn_pages_walk_fini, SEGVN_PAGES_ALL },
 	{ "swapinfo", "walk swapinfo structures",
 		swap_walk_init, swap_walk_step, NULL },
-
-	/* from mmd.c */
-	{ "pattr", "walk pattr_t structures", pattr_walk_init,
-		mmdq_walk_step, mmdq_walk_fini },
-	{ "pdesc", "walk pdesc_t structures",
-		pdesc_walk_init, mmdq_walk_step, mmdq_walk_fini },
-	{ "pdesc_slab", "walk pdesc_slab_t structures",
-		pdesc_slab_walk_init, mmdq_walk_step, mmdq_walk_fini },
 
 	/* from modhash.c */
 	{ "modhash", "walk list of mod_hash structures", modhash_walk_init,

@@ -12,6 +12,7 @@
 #
 # Copyright 2011, Richard Lowe
 # Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
+# Copyright 2023 Peter Tribble
 #
 
 include		$(SRC)/Makefile.master
@@ -20,7 +21,6 @@ MANSECT=	3ext
 
 MANFILES=	NOTE.3ext			\
 		SUNW_C_GetMechSession.3ext	\
-		auto_ef.3ext			\
 		crypt.3ext			\
 		demangle.3ext			\
 		ecb_crypt.3ext			\
@@ -36,7 +36,6 @@ MANFILES=	NOTE.3ext			\
 		sha1.3ext			\
 		sha2.3ext			\
 		stdarg.3ext			\
-		tsalarm_get.3ext		\
 		varargs.3ext
 
 MANLINKS=	DES_FAILED.3ext			\
@@ -63,11 +62,6 @@ MANLINKS=	DES_FAILED.3ext			\
 		SHA512Update.3ext		\
 		SUNW_C_KeyToObject.3ext		\
 		_NOTE.3ext			\
-		auto_ef_file.3ext		\
-		auto_ef_free.3ext		\
-		auto_ef_get_encoding.3ext	\
-		auto_ef_get_score.3ext		\
-		auto_ef_str.3ext		\
 		cbc_crypt.3ext			\
 		cplus_demangle.3ext		\
 		crypt_close.3ext		\
@@ -125,18 +119,11 @@ MANLINKS=	DES_FAILED.3ext			\
 		run_crypt.3ext			\
 		run_setkey.3ext			\
 		setkey.3ext			\
-		tsalarm_set.3ext		\
 		write_vtoc.3ext
 
 _NOTE.3ext			:= LINKSRC = NOTE.3ext
 
 SUNW_C_KeyToObject.3ext		:= LINKSRC = SUNW_C_GetMechSession.3ext
-
-auto_ef_file.3ext		:= LINKSRC = auto_ef.3ext
-auto_ef_free.3ext		:= LINKSRC = auto_ef.3ext
-auto_ef_get_encoding.3ext	:= LINKSRC = auto_ef.3ext
-auto_ef_get_score.3ext		:= LINKSRC = auto_ef.3ext
-auto_ef_str.3ext		:= LINKSRC = auto_ef.3ext
 
 crypt_close.3ext		:= LINKSRC = crypt.3ext
 des_crypt.3ext			:= LINKSRC = crypt.3ext
@@ -229,8 +216,6 @@ SHA384Update.3ext		:= LINKSRC = sha2.3ext
 SHA512Final.3ext		:= LINKSRC = sha2.3ext
 SHA512Init.3ext			:= LINKSRC = sha2.3ext
 SHA512Update.3ext		:= LINKSRC = sha2.3ext
-
-tsalarm_set.3ext		:= LINKSRC = tsalarm_get.3ext
 
 .KEEP_STATE:
 

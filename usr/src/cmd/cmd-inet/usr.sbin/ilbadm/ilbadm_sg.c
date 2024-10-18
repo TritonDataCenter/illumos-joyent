@@ -215,7 +215,7 @@ ilbadm_list_sg_srv(ilb_handle_t h, ilb_server_data_t *sd, const char *sgname,
 		(void) sprintf(port_str, ":%d", h_minport);
 
 	(void) printf("%s: id:%s %s%s\n", sgname,
-	    sd->sd_srvID?sd->sd_srvID:"(null)", ip_str, port_str);
+	    sd->sd_srvID, ip_str, port_str);
 	return (ILB_STATUS_OK);
 }
 
@@ -467,7 +467,7 @@ ilbadm_create_servergroup(int argc, char *argv[])
 	if (optind >= argc) {
 		ilbadm_err(gettext("missing mandatory arguments - please refer"
 		    " to 'create-servergroup' subcommand"
-		    "  description in ilbadm(1M)"));
+		    "  description in ilbadm(8)"));
 		rc = ILBADM_LIBERR;
 		goto out;
 	}
@@ -546,7 +546,7 @@ ilbadm_add_server_to_group(int argc, char **argv)
 
 	if (optind >= argc) {
 		ilbadm_err(gettext("missing mandatory arguments - please refer"
-		    " to 'add-server' subcommand description in ilbadm(1M)"));
+		    " to 'add-server' subcommand description in ilbadm(8)"));
 		rc = ILBADM_LIBERR;
 		goto out;
 	}

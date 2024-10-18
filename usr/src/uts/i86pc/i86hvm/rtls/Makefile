@@ -26,7 +26,7 @@
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 #
 
-UTSBASE=	$(SRC)/uts
+UTSBASE=	../../..
 
 MODULE=		rtls
 OBJECTS=	$(PV_RTLS_OBJS:%=$(OBJS_DIR)/%)
@@ -36,8 +36,6 @@ include		$(UTSBASE)/i86pc/i86hvm/Makefile.i86hvm
 
 ALL_TARGET=	$(BINARY)
 INSTALL_TARGET=	$(BINARY) $(ROOTMODULE)
-
-LDFLAGS +=	-dy
 
 .KEEP_STATE:
 

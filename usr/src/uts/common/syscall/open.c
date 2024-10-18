@@ -24,10 +24,11 @@
  */
 
 /*	Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 /*
  * Copyright (c) 2013, OmniTI Computer Consulting, Inc. All rights reserved.
+ * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  */
 /*
  * Portions of this source code were derived from Berkeley 4.3 BSD
@@ -116,11 +117,11 @@ copen(int startfd, char *fname, int filemode, int createmode)
 	if (filemode & FXATTRDIROPEN) {
 		if (auditing && startvp != NULL)
 			audit_setfsat_path(1);
-		if (error = lookupnameat(fname, seg, FOLLOW,
-		    NULLVPP, &vp, startvp))
-			return (set_errno(error));
+		error = lookupnameat(fname, seg, FOLLOW, NULLVPP, &vp, startvp);
 		if (startvp != NULL)
 			VN_RELE(startvp);
+		if (error != 0)
+			return (set_errno(error));
 
 		startvp = vp;
 	}
@@ -230,7 +231,11 @@ noxattr:
 					 */
 					setf(fd, fp);
 					if ((filemode & FCLOEXEC) != 0) {
-						f_setfd(fd, FD_CLOEXEC);
+						f_setfd_or(fd, FD_CLOEXEC);
+					}
+
+					if ((filemode & FCLOFORK) != 0) {
+						f_setfd_or(fd, FD_CLOFORK);
 					}
 					return (fd);
 				} else {
@@ -259,7 +264,11 @@ noxattr:
 					mutex_exit(&fp->f_tlock);
 					setf(fd, fp);
 					if ((filemode & FCLOEXEC) != 0) {
-						f_setfd(fd, FD_CLOEXEC);
+						f_setfd_or(fd, FD_CLOEXEC);
+					}
+
+					if ((filemode & FCLOFORK) != 0) {
+						f_setfd_or(fd, FD_CLOFORK);
 					}
 					releasef(dupfd);
 				}

@@ -62,8 +62,5 @@ $(LIBPROG):	$(OBJS)
 %.o:	$(TOPDIR)/%.c
 	$(COMPILE.c) $<
 
-
-lint:	lint_SRCS
-
-clean:     
+clean:
 	$(RM) $(FSSNAPOBJS) $(TOPOBJS)

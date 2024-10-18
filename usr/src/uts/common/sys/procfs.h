@@ -27,6 +27,7 @@
  * Copyright 2012 DEY Storage Systems, Inc.  All rights reserved.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #ifndef _SYS_PROCFS_H
@@ -677,6 +678,32 @@ typedef struct prheader {
 #define	prismember(sp, flag) \
 	(((unsigned)((flag)-1) < 32*sizeof (*(sp))/sizeof (uint32_t)) && \
 	    (((uint32_t *)(sp))[((flag)-1)/32] & (1U<<(((flag)-1)%32))))
+
+/*
+ * Core file upanic NT_UPANIC structure.
+ */
+#define	PRUPANIC_VERSION_1		1
+#define	PRUPANIC_VERSION_CURRENT	PRUPANIC_VERSION_1
+#define	PRUPANIC_FLAG_MSG_VALID	0x01
+#define	PRUPANIC_FLAG_MSG_ERROR	0x02
+#define	PRUPANIC_FLAG_MSG_TRUNC	0x04
+#define	PRUPANIC_BUFLEN		1024
+typedef struct prupanic {
+	uint32_t pru_version;
+	uint32_t pru_flags;
+	uint8_t pru_data[PRUPANIC_BUFLEN];
+} prupanic_t;
+
+/*
+ * Core file NT_CWD structure.
+ */
+typedef struct {
+	uint64_t prcwd_fsid;
+	char prcwd_fsname[_ST_FSTYPSZ];
+	char prcwd_mntpt[MAXPATHLEN];
+	char prcwd_mntspec[MAXPATHLEN];
+	char prcwd_cwd[MAXPATHLEN];
+} prcwd_t;
 
 #if defined(_SYSCALL32)
 

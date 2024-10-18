@@ -11,6 +11,7 @@
 
 #
 # Copyright (c) 2018, Joyent, Inc.
+# Copyright 2022 Garrett D'Amore
 #
 
 #
@@ -23,7 +24,6 @@ UTSBASE	= ../..
 #
 MODULE		= usbgem
 OBJECTS		= $(USBGEM_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(USBGEM_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_MISC_DIR)/$(MODULE)
 
 #
@@ -36,10 +36,7 @@ include $(UTSBASE)/intel/Makefile.intel
 #	these pre-processor macros to define the set we care about.
 #
 CPPFLAGS	+= \
-		-DUSBGEM_CONFIG_GLDv3 \
 		-DMODULE \
-		-DGEN_CONFIG_FMA \
-		-DUSBGEM_CONFIG_MAC_PROP \
 		-DVERSION=\"1.6\"
 
 CERRWARN	+= $(CNOWARN_UNINIT)
@@ -52,22 +49,13 @@ CERRWARN	+= -_gcc=-Wno-unused-function
 # needs work
 SMOFF += all_func_returns
 
-LINTTAGS	+= -erroff=E_FUNC_VAR_UNUSED
-LINTTAGS	+= -erroff=E_FUNC_ARG_UNUSED
-LINTTAGS	+= -erroff=E_STATIC_UNUSED
-LINTTAGS	+= -erroff=E_FUNC_SET_NOT_USED
-LINTTAGS	+= -erroff=E_FUNC_RET_MAYBE_IGNORED2
-LINTTAGS	+= -erroff=E_FUNC_RET_ALWAYS_IGNOR2
-LINTTAGS	+= -erroff=E_BAD_FORMAT_ARG_TYPE2
-LINTTAGS	+= -erroff=E_ASSIGN_NARROW_CONV
 
-LDFLAGS		+= -dy -N misc/mac -N drv/ip -N misc/usba
+LDFLAGS		+= -N misc/mac -N drv/ip -N misc/usba
 
 #
 #	Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
@@ -82,12 +70,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

@@ -24,6 +24,7 @@
  * Copyright (c) 2013 by Delphix. All rights reserved.
  * Copyright (c) 2017 Joyent Inc
  * Copyright 2019 Nexenta by DDN, Inc.
+ * Copyright 2021 Racktop Systems, Inc.
  */
 
 /*
@@ -115,6 +116,13 @@ krwlock_t	nfssrv_globals_rwl;
 kmem_cache_t *nfs_xuio_cache;
 int nfs_loaned_buffers = 0;
 
+/* array of paths passed-in from nfsd command-line; stored in nvlist */
+char		**rfs4_dss_newpaths;
+uint_t		rfs4_dss_numnewpaths;
+
+/* nvlists of all DSS paths: current, and before last warmstart */
+nvlist_t *rfs4_dss_paths, *rfs4_dss_oldpaths;
+
 int
 _init(void)
 {
@@ -192,7 +200,6 @@ static	int	checkauth(struct exportinfo *, struct svc_req *, cred_t *, int,
 		bool_t, bool_t *);
 static char	*client_name(struct svc_req *req);
 static char	*client_addr(struct svc_req *req, char *buf);
-extern	int	sec_svc_getcred(struct svc_req *, cred_t *cr, char **, int *);
 extern	bool_t	sec_svc_inrootlist(int, caddr_t, int, caddr_t *);
 static void	*nfs_server_zone_init(zoneid_t);
 static void	nfs_server_zone_fini(zoneid_t, void *);
@@ -254,7 +261,6 @@ static SVC_CALLOUT_TABLE nfs_sct_rdma = {
  */
 nvlist_t *rfs4_dss_paths, *rfs4_dss_oldpaths;
 
-int rfs4_dispatch(struct rpcdisp *, struct svc_req *, SVCXPRT *, char *);
 bool_t rfs4_minorvers_mismatch(struct svc_req *, SVCXPRT *, void *);
 
 /*
@@ -436,10 +442,6 @@ nfs_svc(struct nfs_svc_args *arg, model_t model)
 	struct netbuf addrmask;
 	SVC_CALLOUT_TABLE *sctp = NULL;
 
-#ifdef lint
-	model = model;		/* STRUCT macros don't always refer to it */
-#endif
-
 	ng = nfs_srv_getzg();
 	STRUCT_SET_HANDLE(uap, model, arg);
 
@@ -478,26 +480,30 @@ nfs_svc(struct nfs_svc_args *arg, model_t model)
 		return (error);
 	}
 
-	ng->nfs_versmin = STRUCT_FGET(uap, versmin);
-	ng->nfs_versmax = STRUCT_FGET(uap, versmax);
+	ng->nfs_versmin = STRUCT_FGET(uap, nfs_versmin);
+	ng->nfs_versmax = STRUCT_FGET(uap, nfs_versmax);
 
 	/* Double check the vers min/max ranges */
 	if ((ng->nfs_versmin > ng->nfs_versmax) ||
-	    (ng->nfs_versmin < NFS_VERSMIN) ||
-	    (ng->nfs_versmax > NFS_VERSMAX)) {
-		ng->nfs_versmin = NFS_VERSMIN_DEFAULT;
-		ng->nfs_versmax = NFS_VERSMAX_DEFAULT;
+	    (ng->nfs_versmin < NFS_SRV_VERS_MIN) ||
+	    (ng->nfs_versmax > NFS_SRV_VERS_MAX)) {
+		cmn_err(CE_NOTE, "%s: bad min (%u) or max (%u) version number",
+		    "NFS", ng->nfs_versmin, ng->nfs_versmax);
+		ng->nfs_versmin = NFS_SRV_VERSMIN_DEFAULT;
+		ng->nfs_versmax = NFS_SRV_VERSMAX_DEFAULT;
 	}
 
-	if (error = nfs_srv_set_sc_versions(fp, &sctp, ng->nfs_versmin,
-	    ng->nfs_versmax)) {
+	error = nfs_srv_set_sc_versions(fp, &sctp,
+	    NFS_PROT_VERSION(ng->nfs_versmin),
+	    NFS_PROT_VERSION(ng->nfs_versmax));
+	if (error != 0) {
 		releasef(STRUCT_FGET(uap, fd));
 		kmem_free(addrmask.buf, addrmask.maxlen);
 		return (error);
 	}
 
 	/* Initialize nfsv4 server */
-	if (ng->nfs_versmax == (rpcvers_t)NFS_V4)
+	if (NFS_PROT_VERSION(ng->nfs_versmax) == NFS_V4)
 		rfs4_server_start(ng, STRUCT_FGET(uap, delegation));
 
 	/* Create a transport handle. */
@@ -519,6 +525,10 @@ nfs_svc(struct nfs_svc_args *arg, model_t model)
 static void
 rfs4_server_start(nfs_globals_t *ng, int nfs4_srv_delegation)
 {
+	nfs4_minor_t nfs4_minor_max;
+
+	nfs4_minor_max = NFS_PROT_V4_MINORVERSION(ng->nfs_versmax);
+
 	/*
 	 * Determine if the server has previously been "started" and
 	 * if not, do the per instance initialization
@@ -539,7 +549,7 @@ rfs4_server_start(nfs_globals_t *ng, int nfs4_srv_delegation)
 			    SVCPSET_SHUTDOWN_PROC, (void *)&nfs_srv_stop_all);
 
 			rfs4_do_server_start(ng->nfs_server_upordown,
-			    nfs4_srv_delegation,
+			    nfs4_srv_delegation, nfs4_minor_max,
 			    cluster_bootflags & CLUSTER_BOOTED);
 
 			ng->nfs_server_upordown = NFS_SERVER_RUNNING;
@@ -564,10 +574,10 @@ rdma_start(struct rdma_svc_args *rsa)
 
 	/* Double check the vers min/max ranges */
 	if ((rsa->nfs_versmin > rsa->nfs_versmax) ||
-	    (rsa->nfs_versmin < NFS_VERSMIN) ||
-	    (rsa->nfs_versmax > NFS_VERSMAX)) {
-		rsa->nfs_versmin = NFS_VERSMIN_DEFAULT;
-		rsa->nfs_versmax = NFS_VERSMAX_DEFAULT;
+	    (rsa->nfs_versmin < NFS_SRV_VERS_MIN) ||
+	    (rsa->nfs_versmax > NFS_SRV_VERS_MAX)) {
+		rsa->nfs_versmin = NFS_SRV_VERSMIN_DEFAULT;
+		rsa->nfs_versmax = NFS_SRV_VERSMAX_DEFAULT;
 	}
 
 	ng = nfs_srv_getzg();
@@ -575,17 +585,15 @@ rdma_start(struct rdma_svc_args *rsa)
 	ng->nfs_versmax = rsa->nfs_versmax;
 
 	/* Set the versions in the callout table */
-	__nfs_sc_rdma[0].sc_versmin = rsa->nfs_versmin;
-	__nfs_sc_rdma[0].sc_versmax = rsa->nfs_versmax;
+	__nfs_sc_rdma[0].sc_versmin = NFS_PROT_VERSION(rsa->nfs_versmin);
+	__nfs_sc_rdma[0].sc_versmax = NFS_PROT_VERSION(rsa->nfs_versmax);
 	/* For the NFS_ACL program, check the max version */
-	__nfs_sc_rdma[1].sc_versmin = rsa->nfs_versmin;
-	if (rsa->nfs_versmax > NFS_ACL_VERSMAX)
-		__nfs_sc_rdma[1].sc_versmax = NFS_ACL_VERSMAX;
-	else
-		__nfs_sc_rdma[1].sc_versmax = rsa->nfs_versmax;
+	__nfs_sc_rdma[1].sc_versmin = NFS_PROT_VERSION(rsa->nfs_versmin);
+	__nfs_sc_rdma[1].sc_versmax =
+	    MIN(NFS_PROT_VERSION(rsa->nfs_versmax), NFS_ACL_VERSMAX);
 
 	/* Initialize nfsv4 server */
-	if (rsa->nfs_versmax == (rpcvers_t)NFS_V4)
+	if (NFS_PROT_VERSION(rsa->nfs_versmax) == NFS_V4)
 		rfs4_server_start(ng, rsa->delegation);
 
 	started_rdma_xprts.rtg_count = 0;
@@ -1049,16 +1057,32 @@ static struct rpcdisp rfsdisptab_v4[] = {
 	 */
 
 	/* RFS_NULL = 0 */
-	{rpc_null,
-	    xdr_void, NULL_xdrproc_t, 0,
-	    xdr_void, NULL_xdrproc_t, 0,
-	    nullfree, RPC_IDEMPOTENT, 0},
+	[NFSPROC4_NULL] = {
+	    .dis_proc = NULL,
+	    .dis_xdrargs = xdr_void,
+	    .dis_fastxdrargs = NULL_xdrproc_t,
+	    .dis_argsz = 0,
+	    .dis_xdrres = xdr_void,
+	    .dis_fastxdrres = NULL_xdrproc_t,
+	    .dis_ressz = 0,
+	    .dis_resfree = nullfree,
+	    .dis_flags = RPC_IDEMPOTENT,
+	    .dis_getfh = NULL
+	},
 
 	/* RFS4_compound = 1 */
-	{rfs4_compound,
-	    xdr_COMPOUND4args_srv, NULL_xdrproc_t, sizeof (COMPOUND4args),
-	    xdr_COMPOUND4res_srv, NULL_xdrproc_t, sizeof (COMPOUND4res),
-	    rfs4_compound_free, 0, 0},
+	[NFSPROC4_COMPOUND] = {
+	    .dis_proc = NULL,
+	    .dis_xdrargs = xdr_COMPOUND4args_srv,
+	    .dis_fastxdrargs = NULL_xdrproc_t,
+	    .dis_argsz = sizeof (COMPOUND4args),
+	    .dis_xdrres = xdr_COMPOUND4res_srv,
+	    .dis_fastxdrres = NULL_xdrproc_t,
+	    .dis_ressz = sizeof (COMPOUND4res),
+	    .dis_resfree = rfs4_compound_free,
+	    .dis_flags = 0,
+	    .dis_getfh = NULL
+	},
 };
 
 union rfs_args {
@@ -1356,11 +1380,6 @@ static struct rpc_disptable rfs_disptable[] = {
 static int nfs_portmon = 0;
 
 #ifdef DEBUG
-static int cred_hits = 0;
-static int cred_misses = 0;
-#endif
-
-#ifdef DEBUG
 /*
  * Debug code to allow disabling of rfs_dispatch() use of
  * fastxdrargs() and fastxdrres() calls for testing purposes.
@@ -1628,25 +1647,7 @@ common_dispatch(struct svc_req *req, SVCXPRT *xprt, rpcvers_t min_vers,
 		else
 			anon_ok = 0;
 
-		cr = xprt->xp_cred;
-		ASSERT(cr != NULL);
-#ifdef DEBUG
-		{
-			if (crgetref(cr) != 1) {
-				crfree(cr);
-				cr = crget();
-				xprt->xp_cred = cr;
-				cred_misses++;
-			} else
-				cred_hits++;
-		}
-#else
-		if (crgetref(cr) != 1) {
-			crfree(cr);
-			cr = crget();
-			xprt->xp_cred = cr;
-		}
-#endif
+		cr = svc_xprt_cred(xprt);
 
 		exi = checkexport(fsid, xfid);
 
@@ -2129,7 +2130,8 @@ checkauth(struct exportinfo *exi, struct svc_req *req, cred_t *cr, int anon_ok,
 		break;
 
 	case AUTH_UNIX:
-		if (!stat || crgetuid(cr) == 0 && !(access & NFSAUTH_UIDMAP)) {
+		if (!stat || (crgetuid(cr) == 0 &&
+		    !(access & NFSAUTH_UIDMAP))) {
 			anon_res = crsetugid(cr, exi->exi_export.ex_anon,
 			    exi->exi_export.ex_anon);
 			(void) crsetgroups(cr, 0, NULL);
@@ -2641,8 +2643,8 @@ nfs_server_zone_init(zoneid_t zoneid)
 
 	ng = kmem_zalloc(sizeof (*ng), KM_SLEEP);
 
-	ng->nfs_versmin = NFS_VERSMIN_DEFAULT;
-	ng->nfs_versmax = NFS_VERSMAX_DEFAULT;
+	ng->nfs_versmin = NFS_SRV_VERSMIN_DEFAULT;
+	ng->nfs_versmax = NFS_SRV_VERSMAX_DEFAULT;
 
 	/* Init the stuff to control start/stop */
 	ng->nfs_server_upordown = NFS_SERVER_STOPPED;
@@ -2906,7 +2908,8 @@ rfs_publicfh_mclookup(char *p, vnode_t *dvp, cred_t *cr, vnode_t **vpp,
 	 * access to this new export then it will get an access error when it
 	 * tries to use the filehandle
 	 */
-	if (error = nfs_check_vpexi(mc_dvp, *vpp, kcred, exi)) {
+	error = nfs_check_vpexi(mc_dvp, *vpp, kcred, exi);
+	if (error != 0) {
 		VN_RELE(*vpp);
 		goto publicfh_done;
 	}
@@ -2960,7 +2963,8 @@ rfs_publicfh_mclookup(char *p, vnode_t *dvp, cred_t *cr, vnode_t **vpp,
 			exi_rele(*exi);
 			*exi = NULL;
 
-			if (error = nfs_check_vpexi(mc_dvp, *vpp, kcred, exi)) {
+			error = nfs_check_vpexi(mc_dvp, *vpp, kcred, exi);
+			if (error != 0) {
 				VN_RELE(*vpp);
 				goto publicfh_done;
 			}
@@ -3029,7 +3033,8 @@ rfs_pathname(
 		/*
 		 * This thread used a pathname > TYPICALMAXPATHLEN bytes long.
 		 */
-		if (error = pn_get(path, UIO_SYSSPACE, &pn))
+		error = pn_get(path, UIO_SYSSPACE, &pn);
+		if (error != 0)
 			return (error);
 		if (pn.pn_pathlen != 0 && pathflag == URLPATH) {
 			URLparse(pn.pn_path);

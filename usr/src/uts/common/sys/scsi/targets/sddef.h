@@ -25,6 +25,8 @@
  * Copyright 2011 cyril.galibern@opensvc.com
  * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2022 RackTop Systems, Inc.
+ * Copyright 2022 Garrett D'Amore
  */
 
 #ifndef	_SYS_SCSI_TARGETS_SDDEF_H
@@ -346,11 +348,6 @@ struct sd_lun {
 	uchar_t	un_last_pkt_reason;	/* used to suppress multiple msgs */
 	int	un_tagflags;		/* Pkt Flags for Tagged Queueing  */
 	short	un_resvd_status;	/* Reservation Status */
-	ulong_t	un_detach_count;	/* !0 if executing detach routine */
-	ulong_t	un_layer_count;		/* Current total # of layered opens */
-	ulong_t un_opens_in_progress;	/* Current # of threads in sdopen */
-
-	ksema_t	un_semoclose;		/* serialize opens/closes */
 
 	/*
 	 * Control & status info for command throttling
@@ -471,8 +468,6 @@ struct sd_lun {
 						/* device is attached */
 	    un_f_log_sense_supported	:1,	/* support log sense */
 	    un_f_pm_supported		:1, 	/* support power-management */
-	    un_f_cfg_is_lsi		:1,	/* Is LSI device, */
-						/* default to NO */
 	    un_f_wcc_inprog		:1,	/* write cache change in */
 						/* progress */
 	    un_f_ejecting		:1,	/* media is ejecting */
@@ -498,7 +493,7 @@ struct sd_lun {
 	    un_f_enable_rmw		:1,	/* Force RMW in sd driver */
 	    un_f_expnevent		:1,
 	    un_f_cache_mode_changeable	:1,	/* can change cache mode */
-	    un_f_reserved		:1;
+	    un_f_reserved		:2;
 
 	/* Ptr to table of strings for ASC/ASCQ error message printing */
 	struct scsi_asq_key_strings	*un_additional_codes;
@@ -559,13 +554,6 @@ struct sd_lun {
 
 	hrtime_t	un_pm_idle_time;
 	timeout_id_t	un_pm_idle_timeid;
-
-	/*
-	 * Count to determine if a Sonoma controller is in the process of
-	 * failing over, and how many I/O's are failed with the 05/94/01
-	 * sense code.
-	 */
-	uint_t		un_sonoma_failure_count;
 
 	/*
 	 * Support for failfast operation.
@@ -794,15 +782,6 @@ _NOTE(MUTEX_PROTECTS_DATA(sd_lun::un_fi_mutex,
 #define	ISCD(un)		((un)->un_ctype == CTYPE_CDROM)
 #define	ISROD(un)		((un)->un_ctype == CTYPE_ROD)
 #define	ISPXRE(un)		((un)->un_ctype == CTYPE_PXRE)
-
-/*
- * This macro checks the vendor of the device to see if it is LSI. Because
- * LSI has some devices out there that return 'Symbios' or 'SYMBIOS', we
- * need to check for those also.
- *
- * This is used in some vendor specific checks.
- */
-#define	SD_IS_LSI(un)	((un)->un_f_cfg_is_lsi == TRUE)
 
 /*
  * Macros for non-512 byte writes to removable devices.
@@ -1769,14 +1748,9 @@ struct sd_fm_internal {
 #define	SD_RMW_MSG_PRINT_TIMEOUT	(drv_usectohz((clock_t)10000000))
 
 /*
- * 100 msec. is what we'll wait for certain retries for fibre channel
- * targets, 0 msec for parallel SCSI.
+ * 0 msec. is what we'll wait for certain retries.
  */
-#if defined(__fibre)
-#define	SD_RETRY_DELAY			(drv_usectohz(100000))
-#else
 #define	SD_RETRY_DELAY			((clock_t)0)
-#endif
 
 /*
  * Number of times we'll retry a normal operation.
@@ -1785,11 +1759,7 @@ struct sd_fm_internal {
  * (need to distinguish between Target and Transport failure)
  *
  */
-#if defined(__fibre)
-#define	SD_RETRY_COUNT			3
-#else
 #define	SD_RETRY_COUNT			5
-#endif
 
 /*
  * Number of times we will retry for unit attention.
@@ -1927,126 +1897,76 @@ struct sd_fm_internal {
  * Bit flag telling driver to set the controller type from sd.conf
  * sd-config-list and driver table.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_CTYPE		1
-#elif defined(__fibre)
-#define	SD_CONF_SET_CTYPE		5
-#else
-#define	SD_CONF_SET_CTYPE		1
-#endif
 #define	SD_CONF_BSET_CTYPE		(1 << SD_CONF_SET_CTYPE)
 
 /*
  * Bit flag telling driver to set the not ready retry count for a device from
  * sd.conf sd-config-list and driver table.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_NOTREADY_RETRIES	10
-#elif defined(__fibre)
-#define	SD_CONF_SET_NOTREADY_RETRIES	1
-#else
-#define	SD_CONF_SET_NOTREADY_RETRIES	2
-#endif
 #define	SD_CONF_BSET_NRR_COUNT		(1 << SD_CONF_SET_NOTREADY_RETRIES)
 
 /*
  * Bit flag telling driver to set SCSI status BUSY Retries from sd.conf
  * sd-config-list and driver table.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_BUSY_RETRIES 	11
-#elif defined(__fibre)
-#define	SD_CONF_SET_BUSY_RETRIES 	2
-#else
-#define	SD_CONF_SET_BUSY_RETRIES 	5
-#endif
 #define	SD_CONF_BSET_BSY_RETRY_COUNT	(1 << SD_CONF_SET_BUSY_RETRIES)
 
 /*
  * Bit flag telling driver that device does not have a valid/unique serial
  * number.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_FAB_DEVID		2
-#else
-#define	SD_CONF_SET_FAB_DEVID		3
-#endif
 #define	SD_CONF_BSET_FAB_DEVID   	(1 << SD_CONF_SET_FAB_DEVID)
 
 /*
  * Bit flag telling driver to disable all caching for disk device.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_NOCACHE		3
-#else
-#define	SD_CONF_SET_NOCACHE		4
-#endif
 #define	SD_CONF_BSET_NOCACHE		(1 << SD_CONF_SET_NOCACHE)
 
 /*
  * Bit flag telling driver that the PLAY AUDIO command requires parms in BCD
  * format rather than binary.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_PLAYMSF_BCD		4
-#else
-#define	SD_CONF_SET_PLAYMSF_BCD		6
-#endif
 #define	SD_CONF_BSET_PLAYMSF_BCD    	(1 << SD_CONF_SET_PLAYMSF_BCD)
 
 /*
  * Bit flag telling driver that the response from the READ SUBCHANNEL command
  * has BCD fields rather than binary.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_READSUB_BCD		5
-#else
-#define	SD_CONF_SET_READSUB_BCD		7
-#endif
 #define	SD_CONF_BSET_READSUB_BCD	(1 << SD_CONF_SET_READSUB_BCD)
 
 /*
  * Bit in flags telling driver that the track number fields in the READ TOC
  * request and respone are in BCD rather than binary.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_READ_TOC_TRK_BCD	6
-#else
-#define	SD_CONF_SET_READ_TOC_TRK_BCD	8
-#endif
 #define	SD_CONF_BSET_READ_TOC_TRK_BCD	(1 << SD_CONF_SET_READ_TOC_TRK_BCD)
 
 /*
  * Bit flag telling driver that the address fields in the READ TOC request and
  * respone are in BCD rather than binary.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_READ_TOC_ADDR_BCD	7
-#else
-#define	SD_CONF_SET_READ_TOC_ADDR_BCD	9
-#endif
 #define	SD_CONF_BSET_READ_TOC_ADDR_BCD	(1 << SD_CONF_SET_READ_TOC_ADDR_BCD)
 
 /*
  * Bit flag telling the driver that the device doesn't support the READ HEADER
  * command.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_NO_READ_HEADER	8
-#else
-#define	SD_CONF_SET_NO_READ_HEADER	10
-#endif
 #define	SD_CONF_BSET_NO_READ_HEADER 	(1 << SD_CONF_SET_NO_READ_HEADER)
 
 /*
  * Bit flag telling the driver that for the READ CD command the device uses
  * opcode 0xd4 rather than 0xbe.
  */
-#if defined(__i386) || defined(__amd64)
 #define	SD_CONF_SET_READ_CD_XD4		9
-#else
-#define	SD_CONF_SET_READ_CD_XD4 	11
-#endif
 #define	SD_CONF_BSET_READ_CD_XD4	(1 << SD_CONF_SET_READ_CD_XD4)
 
 /*

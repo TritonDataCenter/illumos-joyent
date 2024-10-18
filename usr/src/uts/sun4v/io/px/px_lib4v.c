@@ -22,6 +22,10 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  */
 
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 #include <sys/types.h>
 #include <sys/sysmacros.h>
 #include <sys/ddi.h>
@@ -636,7 +640,7 @@ px_lib_ro_bypass(dev_info_t *dip, io_attributes_t attr, uint64_t ioaddr)
 /*ARGSUSED*/
 int
 px_lib_dma_sync(dev_info_t *dip, dev_info_t *rdip, ddi_dma_handle_t handle,
-	off_t off, size_t len, uint_t cache_flags)
+    off_t off, size_t len, uint_t cache_flags)
 {
 	ddi_dma_impl_t *mp = (ddi_dma_impl_t *)handle;
 	uint64_t sync_dir;
@@ -1322,7 +1326,7 @@ px_pci_config_get(ddi_acc_impl_t *handle, uint32_t *addr, int size)
 
 static void
 px_pci_config_put(ddi_acc_impl_t *handle, uint32_t *addr,
-		int size, pci_cfg_data_t wdata)
+    int size, pci_cfg_data_t wdata)
 {
 	px_config_acc_pvt_t *px_pvt = (px_config_acc_pvt_t *)
 	    handle->ahi_common.ah_bus_private;
@@ -1406,7 +1410,7 @@ px_pci_config_put64(ddi_acc_impl_t *handle, uint64_t *addr, uint64_t data)
 
 static void
 px_pci_config_rep_get8(ddi_acc_impl_t *handle, uint8_t *host_addr,
-			uint8_t *dev_addr, size_t repcount, uint_t flags)
+    uint8_t *dev_addr, size_t repcount, uint_t flags)
 {
 	if (flags == DDI_DEV_AUTOINCR)
 		for (; repcount; repcount--)
@@ -1422,7 +1426,7 @@ px_pci_config_rep_get8(ddi_acc_impl_t *handle, uint8_t *host_addr,
  */
 static void
 px_pci_config_rep_get16(ddi_acc_impl_t *handle, uint16_t *host_addr,
-			uint16_t *dev_addr, size_t repcount, uint_t flags)
+    uint16_t *dev_addr, size_t repcount, uint_t flags)
 {
 	if (flags == DDI_DEV_AUTOINCR)
 		for (; repcount; repcount--)
@@ -1438,7 +1442,7 @@ px_pci_config_rep_get16(ddi_acc_impl_t *handle, uint16_t *host_addr,
  */
 static void
 px_pci_config_rep_get32(ddi_acc_impl_t *handle, uint32_t *host_addr,
-			uint32_t *dev_addr, size_t repcount, uint_t flags)
+    uint32_t *dev_addr, size_t repcount, uint_t flags)
 {
 	if (flags == DDI_DEV_AUTOINCR)
 		for (; repcount; repcount--)
@@ -1454,7 +1458,7 @@ px_pci_config_rep_get32(ddi_acc_impl_t *handle, uint32_t *host_addr,
  */
 static void
 px_pci_config_rep_get64(ddi_acc_impl_t *handle, uint64_t *host_addr,
-			uint64_t *dev_addr, size_t repcount, uint_t flags)
+    uint64_t *dev_addr, size_t repcount, uint_t flags)
 {
 	if (flags == DDI_DEV_AUTOINCR)
 		for (; repcount; repcount--)
@@ -1470,7 +1474,7 @@ px_pci_config_rep_get64(ddi_acc_impl_t *handle, uint64_t *host_addr,
  */
 static void
 px_pci_config_rep_put8(ddi_acc_impl_t *handle, uint8_t *host_addr,
-			uint8_t *dev_addr, size_t repcount, uint_t flags)
+    uint8_t *dev_addr, size_t repcount, uint_t flags)
 {
 	if (flags == DDI_DEV_AUTOINCR)
 		for (; repcount; repcount--)
@@ -1486,7 +1490,7 @@ px_pci_config_rep_put8(ddi_acc_impl_t *handle, uint8_t *host_addr,
  */
 static void
 px_pci_config_rep_put16(ddi_acc_impl_t *handle, uint16_t *host_addr,
-			uint16_t *dev_addr, size_t repcount, uint_t flags)
+    uint16_t *dev_addr, size_t repcount, uint_t flags)
 {
 	if (flags == DDI_DEV_AUTOINCR)
 		for (; repcount; repcount--)
@@ -1502,7 +1506,7 @@ px_pci_config_rep_put16(ddi_acc_impl_t *handle, uint16_t *host_addr,
  */
 static void
 px_pci_config_rep_put32(ddi_acc_impl_t *handle, uint32_t *host_addr,
-			uint32_t *dev_addr, size_t repcount, uint_t flags)
+    uint32_t *dev_addr, size_t repcount, uint_t flags)
 {
 	if (flags == DDI_DEV_AUTOINCR)
 		for (; repcount; repcount--)
@@ -1518,7 +1522,7 @@ px_pci_config_rep_put32(ddi_acc_impl_t *handle, uint32_t *host_addr,
  */
 static void
 px_pci_config_rep_put64(ddi_acc_impl_t *handle, uint64_t *host_addr,
-			uint64_t *dev_addr, size_t repcount, uint_t flags)
+    uint64_t *dev_addr, size_t repcount, uint_t flags)
 {
 	if (flags == DDI_DEV_AUTOINCR)
 		for (; repcount; repcount--)
@@ -1539,8 +1543,8 @@ px_pci_config_rep_put64(ddi_acc_impl_t *handle, uint64_t *host_addr,
 /*ARGSUSED*/
 int
 px_lib_map_vconfig(dev_info_t *dip,
-	ddi_map_req_t *mp, pci_config_offset_t off,
-	pci_regspec_t *rp, caddr_t *addrp)
+    ddi_map_req_t *mp, pci_config_offset_t off,
+    pci_regspec_t *rp, caddr_t *addrp)
 {
 	int fmcap;
 	ndi_err_t *errp;
@@ -1686,7 +1690,7 @@ px_lib_log_safeacc_err(px_t *px_p, ddi_acc_handle_t handle, int fme_flag,
 		}
 	}
 
-	(void) px_rp_en_q(px_p, bdf, addr, NULL);
+	(void) px_rp_en_q(px_p, bdf, addr, 0);
 	(void) px_scan_fabric(px_p, px_p->px_dip, &derr);
 	px_fm_exit(px_p);
 }
@@ -2206,7 +2210,6 @@ px_lib_do_count_waiting_dev(dev_info_t *dip, void *arg)
 static int
 px_lib_count_waiting_dev(dev_info_t *dip)
 {
-	int circular_count;
 	int count = 0;
 
 	/* No need to continue if this system is not SDIO capable */
@@ -2217,9 +2220,9 @@ px_lib_count_waiting_dev(dev_info_t *dip)
 	(void) px_lib_do_count_waiting_dev(dip, &count);
 
 	/* scan dev under this px */
-	ndi_devi_enter(dip, &circular_count);
+	ndi_devi_enter(dip);
 	ddi_walk_devs(ddi_get_child(dip), px_lib_do_count_waiting_dev, &count);
-	ndi_devi_exit(dip, circular_count);
+	ndi_devi_exit(dip);
 	return (count);
 }
 

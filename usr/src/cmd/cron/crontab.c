@@ -26,7 +26,8 @@
 /*	  All Rights Reserved	*/
 
 /*
- * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2022 Sebastian Wiedenroth
  */
 
 #include <sys/types.h>
@@ -72,10 +73,9 @@
 #define	WARNSHELL	"warning: commands will be executed using /usr/bin/sh\n"
 #define	BADUSAGE	\
 	"usage:\n"			\
-	"\tcrontab [file]\n"		\
-	"\tcrontab -e [username]\n"	\
-	"\tcrontab -l [-g] [username]\n"	\
-	"\tcrontab -r [username]"
+	"\tcrontab [-u username] [file]\n"		\
+	"\tcrontab [-u username] { -e | -g | -l | -r }\n"	\
+	"\tcrontab { -e | -g | -l | -r } [username]"
 #define	INVALIDUSER	"you are not a valid user (no entry in /etc/passwd)."
 #define	NOTALLOWED	"you are not authorized to use cron.  Sorry."
 #define	NOTROOT		\
@@ -97,6 +97,7 @@
 #define	BAD_TZ	"Timezone unrecognized in: %s"
 #define	BAD_SHELL	"Invalid shell specified: %s"
 #define	BAD_HOME	"Unable to access directory: %s\t%s\n"
+#define	BAD_RAND_DELAY	"Invalid delay: %s"
 
 extern int	per_errno;
 
@@ -104,7 +105,7 @@ extern int	audit_crontab_modify(char *, char *, int);
 extern int	audit_crontab_delete(char *, int);
 extern int	audit_crontab_not_allowed(uid_t, char *);
 
-int		err;
+static int	err;
 int		cursor;
 char		*cf;
 char		*tnam;
@@ -137,6 +138,7 @@ main(int argc, char **argv)
 	int stat_loc;
 	int ret;
 	char real_login[UNAMESIZE];
+	char *user = NULL;
 	int tmpfd = -1;
 	pam_handle_t *pamh;
 	int pam_error;
@@ -145,7 +147,7 @@ main(int argc, char **argv)
 
 	(void) setlocale(LC_ALL, "");
 #if !defined(TEXT_DOMAIN)	/* Should be defined by cc -D */
-#define	TEXT_DOMAIN "SYS_TEST"	/* Use this only if it weren't */
+#define	TEXT_DOMAIN "SYS_TEST"	/* Use this only if it wasn't */
 #endif
 	(void) textdomain(TEXT_DOMAIN);
 
@@ -155,7 +157,7 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	while ((c = getopt(argc, argv, "eglr")) != EOF)
+	while ((c = getopt(argc, argv, "eglru:")) != EOF) {
 		switch (c) {
 			case 'e':
 				eflag++;
@@ -169,10 +171,17 @@ main(int argc, char **argv)
 			case 'r':
 				rflag++;
 				break;
+			case 'u':
+				user = optarg;
+				break;
 			case '?':
 				errflg++;
 				break;
 		}
+	}
+
+	argc -= optind;
+	argv += optind;
 
 	if (eflag + lflag + rflag > 1)
 		errflg++;
@@ -180,8 +189,13 @@ main(int argc, char **argv)
 	if (gflag && !lflag)
 		errflg++;
 
-	argc -= optind;
-	argv += optind;
+	if ((eflag || lflag || rflag) && argc > 0) {
+		if (user != NULL)
+			errflg++;
+		else
+			user = *argv;
+	}
+
 	if (errflg || argc > 1)
 		crabort(BADUSAGE);
 
@@ -190,11 +204,12 @@ main(int argc, char **argv)
 		crabort(INVALIDUSER);
 
 	if (strlcpy(real_login, pwp->pw_name, sizeof (real_login))
-	    >= sizeof (real_login))
+	    >= sizeof (real_login)) {
 		crabort(NAMETOOLONG);
+	}
 
-	if ((eflag || lflag || rflag) && argc == 1) {
-		if ((pwp = getpwnam(*argv)) == NULL)
+	if (user != NULL) {
+		if ((pwp = getpwnam(user)) == NULL)
 			crabort(INVALIDUSER);
 
 		if (!cron_admin(real_login)) {
@@ -202,8 +217,9 @@ main(int argc, char **argv)
 				crabort(NOTROOT);
 			else
 				pp = getuser(ruid);
-		} else
-			pp = *argv++;
+		} else {
+			pp = user;
+		}
 	} else {
 		pp = getuser(ruid);
 	}
@@ -436,6 +452,7 @@ copycron(FILE *fp)
 	char pid[6], *tnam_end;
 	int t;
 	char buf[LINE_MAX];
+	const char *errstr;
 	cferror_t cferr;
 
 	sprintf(pid, "%-5d", getpid());
@@ -468,7 +485,7 @@ copycron(FILE *fp)
 		if (strncmp(&line[cursor], ENV_TZ, strlen(ENV_TZ)) == 0) {
 			char *x;
 
-			strncpy(buf, &line[cursor + strlen(ENV_TZ)],
+			(void) strncpy(buf, &line[cursor + strlen(ENV_TZ)],
 			    sizeof (buf));
 			if ((x = strchr(buf, '\n')) != NULL)
 				*x = '\0';
@@ -484,7 +501,7 @@ copycron(FILE *fp)
 		    strlen(ENV_SHELL)) == 0) {
 			char *x;
 
-			strncpy(buf, &line[cursor + strlen(ENV_SHELL)],
+			(void) strncpy(buf, &line[cursor + strlen(ENV_SHELL)],
 			    sizeof (buf));
 			if ((x = strchr(buf, '\n')) != NULL)
 				*x = '\0';
@@ -500,7 +517,7 @@ copycron(FILE *fp)
 		    strlen(ENV_HOME)) == 0) {
 			char *x;
 
-			strncpy(buf, &line[cursor + strlen(ENV_HOME)],
+			(void) strncpy(buf, &line[cursor + strlen(ENV_HOME)],
 			    sizeof (buf));
 			if ((x = strchr(buf, '\n')) != NULL)
 				*x = '\0';
@@ -510,6 +527,25 @@ copycron(FILE *fp)
 				err = 1;
 				fprintf(stderr, BAD_HOME, &line[cursor],
 				    strerror(errno));
+				continue;
+			}
+		} else if (strncmp(&line[cursor], ENV_RANDOM_DELAY,
+		    strlen(ENV_RANDOM_DELAY)) == 0) {
+			char *x;
+
+			(void) strncpy(buf,
+			    &line[cursor + strlen(ENV_RANDOM_DELAY)],
+			    sizeof (buf));
+			if ((x = strchr(buf, '\n')) != NULL)
+				*x = '\0';
+
+			(void) strtonum(buf, 0, UINT32_MAX / 60, &errstr);
+			if (errstr == NULL) {
+				goto cont;
+			} else {
+				err = 1;
+				fprintf(stderr, BAD_RAND_DELAY,
+				    &line[cursor], strerror(errno));
 				continue;
 			}
 		}

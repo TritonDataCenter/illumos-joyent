@@ -10,7 +10,8 @@
  */
 
 /*
- * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
+ * Copyright 2021 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2021-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -72,7 +73,10 @@ int smb_oplock_timeout_ack = 30000; /* mSec. */
 int smb_oplock_timeout_def = 45000; /* mSec. */
 
 static void smb_oplock_async_break(void *);
-static void smb_oplock_hdl_clear(smb_ofile_t *);
+static void smb_oplock_hdl_update(smb_request_t *sr);
+static void smb_oplock_hdl_moved(smb_ofile_t *);
+static void smb_oplock_hdl_closed(smb_ofile_t *);
+static void smb_oplock_wait_break_cancel(smb_request_t *sr);
 
 
 /*
@@ -148,7 +152,7 @@ static void smb_oplock_hdl_clear(smb_ofile_t *);
  * This is mostly the same as smb_oplock_ind_break() except:
  * - The only CompletionStatus possible is STATUS_CANT_GRANT.
  * - Instead of taskq_dispatch this appends the new SR to
- *   the "post work" queue on the current SR.
+ *   the "post work" queue on the current SR (if possible).
  *
  * Note called with the node ofile list rwlock held and
  * the oplock mutex entered.
@@ -157,7 +161,14 @@ void
 smb_oplock_ind_break_in_ack(smb_request_t *ack_sr, smb_ofile_t *ofile,
     uint32_t NewLevel, boolean_t AckRequired)
 {
-	smb_request_t *new_sr;
+	smb_server_t *sv = ofile->f_server;
+	smb_node_t *node = ofile->f_node;
+	smb_request_t *sr = NULL;
+	taskqid_t tqid;
+	boolean_t use_postwork = B_TRUE;
+
+	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
+	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
 
 	/*
 	 * This should happen only with SMB2 or later,
@@ -180,42 +191,72 @@ smb_oplock_ind_break_in_ack(smb_request_t *ack_sr, smb_ofile_t *ofile,
 
 	/*
 	 * When called from Ack processing, we want to use a
-	 * request on the session doing the ack.  If we can't
+	 * request on the session doing the ack, so we can
+	 * append "post work" to that session.  If we can't
 	 * allocate a request on that session (because it's
-	 * now disconnecting) just fall-back to the normal
-	 * oplock break code path which deals with that.
-	 * Once we have a request on the ack session, that
-	 * session won't go away until the request is done.
+	 * now disconnecting) use a request from the server
+	 * session like smb_oplock_ind_break does, and then
+	 * use taskq_dispatch instead of postwork.
 	 */
-	new_sr = smb_request_alloc(ack_sr->session, 0);
-	if (new_sr == NULL) {
-		smb_oplock_ind_break(ofile, NewLevel,
-		    AckRequired, STATUS_CANT_GRANT);
-		smb_ofile_release(ofile);
+	sr = smb_request_alloc(ack_sr->session, 0);
+	if (sr == NULL) {
+		use_postwork = B_FALSE;
+		sr = smb_request_alloc(sv->sv_session, 0);
+	}
+	if (sr == NULL) {
+		/*
+		 * Server must be shutting down.  We took a
+		 * hold on the ofile that must be released,
+		 * but we can't release here because we're
+		 * called with the node ofile list entered.
+		 * See smb_ofile_release_LL.
+		 */
+		smb_llist_post(&node->n_ofile_list, ofile,
+		    smb_ofile_release_LL);
 		return;
 	}
 
-	new_sr->sr_state = SMB_REQ_STATE_SUBMITTED;
-	new_sr->smb2_async = B_TRUE;
-	new_sr->user_cr = zone_kcred();
-	new_sr->fid_ofile = ofile;
+	sr->sr_state = SMB_REQ_STATE_SUBMITTED;
+	sr->smb2_async = B_TRUE;
+	sr->user_cr = zone_kcred();
+	sr->fid_ofile = ofile;
 	if (ofile->f_tree != NULL) {
-		new_sr->tid_tree = ofile->f_tree;
-		smb_tree_hold_internal(ofile->f_tree);
+		sr->tid_tree = ofile->f_tree;
+		smb_tree_hold_internal(sr->tid_tree);
 	}
 	if (ofile->f_user != NULL) {
-		new_sr->uid_user = ofile->f_user;
-		smb_user_hold_internal(ofile->f_user);
+		sr->uid_user = ofile->f_user;
+		smb_user_hold_internal(sr->uid_user);
 	}
-	new_sr->arg.olbrk.NewLevel = NewLevel;
-	new_sr->arg.olbrk.AckRequired = AckRequired;
+	if (ofile->f_lease != NULL)
+		NewLevel |= OPLOCK_LEVEL_GRANULAR;
+
+	sr->arg.olbrk.NewLevel = NewLevel;
+	sr->arg.olbrk.AckRequired = AckRequired;
 
 	/*
-	 * Using smb2_cmd_code to indicate what to call.
-	 * work func. will call smb_oplock_send_brk
+	 * Could do this in _hdl_update but this way it's
+	 * visible in the dtrace fbt entry probe.
 	 */
-	new_sr->smb2_cmd_code = SMB2_OPLOCK_BREAK;
-	smb2sr_append_postwork(ack_sr, new_sr);
+	sr->arg.olbrk.OldLevel = ofile->f_oplock.og_breakto;
+
+	smb_oplock_hdl_update(sr);
+
+	if (use_postwork) {
+		/*
+		 * Using smb2_cmd_code to indicate what to call.
+		 * work func. will call smb_oplock_send_brk
+		 */
+		sr->smb2_cmd_code = SMB2_OPLOCK_BREAK;
+		smb2sr_append_postwork(ack_sr, sr);
+		return;
+	}
+
+	/* Will call smb_oplock_send_break */
+	sr->smb2_status = STATUS_CANT_GRANT;
+	tqid = taskq_dispatch(sv->sv_notify_pool,
+	    smb_oplock_async_break, sr, TQ_SLEEP);
+	VERIFY(tqid != TASKQID_INVALID);
 }
 
 /*
@@ -227,6 +268,8 @@ smb_oplock_ind_break_in_ack(smb_request_t *ack_sr, smb_ofile_t *ofile,
  * Schedule a request & taskq job to do oplock break work
  * as requested by the FS-level code (smb_cmn_oplock.c).
  *
+ * See also: smb_oplock_ind_break_in_ack
+ *
  * Note called with the node ofile list rwlock held and
  * the oplock mutex entered.
  */
@@ -235,7 +278,12 @@ smb_oplock_ind_break(smb_ofile_t *ofile, uint32_t NewLevel,
     boolean_t AckRequired, uint32_t CompletionStatus)
 {
 	smb_server_t *sv = ofile->f_server;
+	smb_node_t *node = ofile->f_node;
 	smb_request_t *sr = NULL;
+	taskqid_t tqid;
+
+	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
+	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
 
 	/*
 	 * See notes at smb_oplock_async_break re. CompletionStatus
@@ -251,8 +299,11 @@ smb_oplock_ind_break(smb_ofile_t *ofile, uint32_t NewLevel,
 		break;
 
 	case STATUS_NEW_HANDLE:
+		smb_oplock_hdl_moved(ofile);
+		return;
+
 	case NT_STATUS_OPLOCK_HANDLE_CLOSED:
-		smb_oplock_hdl_clear(ofile);
+		smb_oplock_hdl_closed(ofile);
 		return;
 
 	default:
@@ -287,6 +338,18 @@ smb_oplock_ind_break(smb_ofile_t *ofile, uint32_t NewLevel,
 		sr = smb_request_alloc(ofile->f_session, 0);
 	if (sr == NULL)
 		sr = smb_request_alloc(sv->sv_session, 0);
+	if (sr == NULL) {
+		/*
+		 * Server must be shutting down.  We took a
+		 * hold on the ofile that must be released,
+		 * but we can't release here because we're
+		 * called with the node ofile list entered.
+		 * See smb_ofile_release_LL.
+		 */
+		smb_llist_post(&node->n_ofile_list, ofile,
+		    smb_ofile_release_LL);
+		return;
+	}
 
 	sr->sr_state = SMB_REQ_STATE_SUBMITTED;
 	sr->smb2_async = B_TRUE;
@@ -300,13 +363,25 @@ smb_oplock_ind_break(smb_ofile_t *ofile, uint32_t NewLevel,
 		sr->uid_user = ofile->f_user;
 		smb_user_hold_internal(sr->uid_user);
 	}
+	if (ofile->f_lease != NULL)
+		NewLevel |= OPLOCK_LEVEL_GRANULAR;
+
 	sr->arg.olbrk.NewLevel = NewLevel;
 	sr->arg.olbrk.AckRequired = AckRequired;
 	sr->smb2_status = CompletionStatus;
 
-	(void) taskq_dispatch(
-	    sv->sv_worker_pool,
+	/*
+	 * Could do this in _hdl_update but this way it's
+	 * visible in the dtrace fbt entry probe.
+	 */
+	sr->arg.olbrk.OldLevel = ofile->f_oplock.og_breakto;
+
+	smb_oplock_hdl_update(sr);
+
+	/* Will call smb_oplock_send_break */
+	tqid = taskq_dispatch(sv->sv_notify_pool,
 	    smb_oplock_async_break, sr, TQ_SLEEP);
+	VERIFY(tqid != TASKQID_INVALID);
 }
 
 /*
@@ -316,16 +391,7 @@ smb_oplock_ind_break(smb_ofile_t *ofile, uint32_t NewLevel,
  * We have a hold on the ofile, which will be released in
  * smb_request_free (via sr->fid_ofile)
  *
- * Note we have: sr->uid_user == NULL, sr->tid_tree == NULL.
- * Nothing called here needs those.
- *
- * Note that NewLevel as provided by the FS up-call does NOT
- * include the GRANULAR flag.  The SMB level is expected to
- * keep track of how each oplock was acquired (by lease or
- * traditional oplock request) and put the GRANULAR flag
- * back into the oplock state when calling down to the
- * FS-level code.  Also note that the lease break message
- * carries only the cache flags, not the GRANULAR flag.
+ * Note we may have: sr->uid_user == NULL, sr->tid_tree == NULL.
  */
 static void
 smb_oplock_async_break(void *arg)
@@ -352,7 +418,7 @@ smb_oplock_async_break(void *arg)
 
 	case STATUS_CANT_GRANT:
 	case NT_STATUS_SUCCESS:
-		smb_oplock_send_brk(sr);
+		smb_oplock_send_break(sr);
 		break;
 
 	default:
@@ -370,269 +436,362 @@ smb_oplock_async_break(void *arg)
 	smb_request_free(sr);
 }
 
-#ifdef DEBUG
-int smb_oplock_debug_wait = 0;
-#endif
-
 /*
- * Send an oplock break over the wire, or if we can't,
- * then process the oplock break locally.
+ * Send an oplock (or lease) break to the client.
+ * If we can't, then do a local break.
  *
- * Note that we have sr->fid_ofile here but all the other
- * normal sr members may be NULL:  uid_user, tid_tree.
- * Also sr->session may or may not be the same session as
- * the ofile came from (ofile->f_session) depending on
- * whether this is a "live" open or an orphaned DH,
- * where ofile->f_session will be NULL.
+ * This is called either from smb_oplock_async_break via a
+ * taskq job scheduled in smb_oplock_ind_break, or from the
+ * smb2sr_append_postwork() mechanism when we're doing a
+ * "break in ack", via smb_oplock_ind_break_in_ack.
  *
- * Given that we don't always have a session, we determine
- * the oplock type (lease etc) from f_oplock.og_dialect.
+ * We don't always have an sr->session here, so
+ * determine the oplock type (lease etc) from
+ * f_lease and f_oplock.og_dialect etc.
  */
 void
-smb_oplock_send_brk(smb_request_t *sr)
+smb_oplock_send_break(smb_request_t *sr)
 {
-	smb_ofile_t	*ofile;
-	smb_lease_t	*lease;
-	uint32_t	NewLevel;
-	boolean_t	AckReq;
-	uint32_t	status;
-	int		rc;
+	smb_ofile_t	*ofile = sr->fid_ofile;
 
-	ofile = sr->fid_ofile;
-	NewLevel = sr->arg.olbrk.NewLevel;
-	AckReq = sr->arg.olbrk.AckRequired;
-	lease = ofile->f_lease;
-
-	/*
-	 * Build the break message in sr->reply.
-	 * It's free'd in smb_request_free().
-	 * Also updates the lease and NewLevel.
-	 */
-	sr->reply.max_bytes = MLEN;
-	if (ofile->f_oplock.og_dialect >= SMB_VERS_2_BASE) {
-		if (lease != NULL) {
-			/*
-			 * Oplock state has changed, so
-			 * update the epoch.
-			 */
-			mutex_enter(&lease->ls_mutex);
-			lease->ls_epoch++;
-			mutex_exit(&lease->ls_mutex);
-
-			/* Note, needs "old" state in og_state */
-			smb2_lease_break_notification(sr,
-			    (NewLevel & CACHE_RWH), AckReq);
-			NewLevel |= OPLOCK_LEVEL_GRANULAR;
-		} else {
-			smb2_oplock_break_notification(sr, NewLevel);
-		}
-	} else {
-		/*
-		 * SMB1 clients should only get Level II oplocks if they
-		 * set the capability indicating they know about them.
-		 */
-		if (NewLevel == OPLOCK_LEVEL_TWO &&
-		    ofile->f_oplock.og_dialect < NT_LM_0_12)
-			NewLevel = OPLOCK_LEVEL_NONE;
-		smb1_oplock_break_notification(sr, NewLevel);
-	}
-
-	/*
-	 * Keep track of what we last sent to the client,
-	 * preserving the GRANULAR flag (if a lease).
-	 * If we're expecting an ACK, set og_breaking
-	 * (and maybe lease->ls_breaking) so we can
-	 * later find the ofile with breaks pending.
-	 */
-	if (AckReq) {
-		uint32_t BreakTo;
-
-		if (lease != NULL) {
-			BreakTo = (NewLevel & CACHE_RWH) << BREAK_SHIFT;
-			if (BreakTo == 0)
-				BreakTo = BREAK_TO_NO_CACHING;
-			lease->ls_breaking = BreakTo;
-		} else {
-			if ((NewLevel & LEVEL_TWO_OPLOCK) != 0)
-				BreakTo = BREAK_TO_TWO;
-			else
-				BreakTo = BREAK_TO_NONE;
-		}
-		/* Will update og_state in ack. */
-		ofile->f_oplock.og_breaking = BreakTo;
-	} else {
-		if (lease != NULL)
-			lease->ls_state = NewLevel & CACHE_RWH;
-		ofile->f_oplock.og_state = NewLevel;
-
-		if (ofile->dh_persist) {
-			smb2_dh_update_oplock(sr, ofile);
-		}
-	}
-
-	/*
-	 * Try to send the break message to the client.
-	 * When we get to multi-channel, this is supposed to
-	 * try to send on every channel before giving up.
-	 */
-	if (sr->session == ofile->f_session)
-		rc = smb_session_send(sr->session, 0, &sr->reply);
+	if (ofile->f_lease != NULL)
+		smb2_lease_send_break(sr);
+	else if (ofile->f_oplock.og_dialect >= SMB_VERS_2_BASE)
+		smb2_oplock_send_break(sr);
 	else
-		rc = ENOTCONN;
-
-	if (rc == 0) {
-		/*
-		 * OK, we were able to send the break message.
-		 * If no ack. required, we're done.
-		 */
-		if (!AckReq)
-			return;
-
-		/*
-		 * We're expecting an ACK.  Wait in this thread
-		 * so we can log clients that don't respond.
-		 *
-		 * If debugging, may want to break after a
-		 * short wait to look into why we might be
-		 * holding up progress.  (i.e. locks?)
-		 */
-#ifdef DEBUG
-		if (smb_oplock_debug_wait > 0) {
-			status = smb_oplock_wait_break(ofile->f_node,
-			    smb_oplock_debug_wait);
-			if (status == 0)
-				return;
-			cmn_err(CE_NOTE, "clnt %s oplock break wait debug",
-			    sr->session->ip_addr_str);
-			debug_enter("oplock_wait");
-		}
-#endif
-		status = smb_oplock_wait_break(ofile->f_node,
-		    smb_oplock_timeout_ack);
-		if (status == 0)
-			return;
-
-		cmn_err(CE_NOTE, "clnt %s oplock break timeout",
-		    sr->session->ip_addr_str);
-		DTRACE_PROBE1(break_timeout, smb_ofile_t, ofile);
-
-		/*
-		 * Will do local ack below.  Note, after timeout,
-		 * do a break to none or "no caching" regardless
-		 * of what the passed in cache level was.
-		 * That means: clear all except GRANULAR.
-		 */
-		NewLevel &= OPLOCK_LEVEL_GRANULAR;
-	} else {
-		/*
-		 * We were unable to send the oplock break request.
-		 * Generally, that means we have no connection to this
-		 * client right now, and this ofile will have state
-		 * SMB_OFILE_STATE_ORPHANED.  We either close the handle
-		 * or break the oplock locally, in which case the client
-		 * gets the updated oplock state when they reconnect.
-		 * Decide whether to keep or close.
-		 *
-		 * Relevant [MS-SMB2] sections:
-		 *
-		 * 3.3.4.6 Object Store Indicates an Oplock Break
-		 * If Open.Connection is NULL, Open.IsResilient is FALSE,
-		 * Open.IsDurable is FALSE and Open.IsPersistent is FALSE,
-		 * the server SHOULD close the Open as specified in...
-		 *
-		 * 3.3.4.7 Object Store Indicates a Lease Break
-		 * If Open.Connection is NULL, the server MUST close the
-		 * Open as specified in ... for the following cases:
-		 * - Open.IsResilient is FALSE, Open.IsDurable is FALSE,
-		 *   and Open.IsPersistent is FALSE.
-		 * - Lease.BreakToLeaseState does not contain
-		 *   ...HANDLE_CACHING and Open.IsDurable is TRUE.
-		 * If Lease.LeaseOpens is empty, (... local ack to "none").
-		 */
-
-		/*
-		 * See similar logic in smb_dh_should_save
-		 */
-		switch (ofile->dh_vers) {
-		case SMB2_RESILIENT:
-			break;			/* keep DH */
-
-		case SMB2_DURABLE_V2:
-			if (ofile->dh_persist)
-				break;		/* keep DH */
-			/* FALLTHROUGH */
-		case SMB2_DURABLE_V1:
-			/* IS durable (v1 or v2) */
-			if ((NewLevel & (OPLOCK_LEVEL_BATCH |
-			    OPLOCK_LEVEL_CACHE_HANDLE)) != 0)
-				break;		/* keep DH */
-			/* FALLTHROUGH */
-		case SMB2_NOT_DURABLE:
-		default:
-			smb_ofile_close(ofile, 0);
-			return;
-		}
-		/* Keep this ofile (durable handle). */
-
-		if (!AckReq) {
-			/* Nothing more to do. */
-			return;
-		}
-	}
-
-	/*
-	 * We get here after either an oplock break ack timeout,
-	 * or a send failure for a durable handle type that we
-	 * preserve rather than just close.  Do local ack.
-	 */
-	ofile->f_oplock.og_breaking = 0;
-	if (lease != NULL)
-		lease->ls_breaking = 0;
-
-	status = smb_oplock_ack_break(sr, ofile, &NewLevel);
-	if (status == NT_STATUS_OPLOCK_BREAK_IN_PROGRESS) {
-		/* Not expecting this status return. */
-		cmn_err(CE_NOTE, "clnt local oplock ack wait?");
-		(void) smb_oplock_wait_break(ofile->f_node,
-		    smb_oplock_timeout_ack);
-		status = 0;
-	}
-	if (status != 0) {
-		cmn_err(CE_NOTE, "clnt local oplock ack, "
-		    "status=0x%x", status);
-	}
-
-	/* Update og_state as if we heard from the client. */
-	ofile->f_oplock.og_state = NewLevel;
-	if (lease != NULL) {
-		lease->ls_state = NewLevel & CACHE_RWH;
-	}
-
-	if (ofile->dh_persist) {
-		smb2_dh_update_oplock(sr, ofile);
-	}
+		smb1_oplock_send_break(sr);
 }
 
 /*
- * See: NT_STATUS_OPLOCK_HANDLE_CLOSED above,
- * and: STATUS_NEW_HANDLE
+ * Called by smb_oplock_ind_break for the case STATUS_NEW_HANDLE,
+ * which is an alias for NT_STATUS_OPLOCK_SWITCHED_TO_NEW_HANDLE.
+ *
+ * The FS-level oplock layer calls this to update the SMB-level state
+ * when the oplock for some lease is about to move to a different
+ * ofile on the lease.
+ *
+ * To avoid later confusion, clear og_state on this ofile now.
+ * Without this, smb_oplock_move() may issue debug complaints
+ * about moving oplock state onto a non-empty oplock.
+ */
+static const smb_ofile_t invalid_ofile;
+static void
+smb_oplock_hdl_moved(smb_ofile_t *ofile)
+{
+	smb_lease_t *ls = ofile->f_lease;
+
+	ASSERT(ls != NULL);
+	if (ls != NULL && ls->ls_oplock_ofile == ofile)
+		ls->ls_oplock_ofile = (smb_ofile_t *)&invalid_ofile;
+
+	ofile->f_oplock.og_state = 0;
+	ofile->f_oplock.og_breakto = 0;
+	ofile->f_oplock.og_breaking = B_FALSE;
+}
+
+/*
+ * See: NT_STATUS_OPLOCK_HANDLE_CLOSED above and
+ * smb_ofile_close, smb_oplock_break_CLOSE.
  *
  * The FS-level oplock layer calls this to update the
  * SMB-level state when a handle loses its oplock.
  */
 static void
-smb_oplock_hdl_clear(smb_ofile_t *ofile)
+smb_oplock_hdl_closed(smb_ofile_t *ofile)
 {
 	smb_lease_t *lease = ofile->f_lease;
 
 	if (lease != NULL) {
 		if (lease->ls_oplock_ofile == ofile) {
-			/* Last close on the lease. */
+			/*
+			 * smb2_lease_ofile_close should have
+			 * moved the oplock to another ofile.
+			 */
+			ASSERT(0);
 			lease->ls_oplock_ofile = NULL;
 		}
 	}
 	ofile->f_oplock.og_state = 0;
-	ofile->f_oplock.og_breaking = 0;
+	ofile->f_oplock.og_breakto = 0;
+	ofile->f_oplock.og_breaking = B_FALSE;
+}
+
+/*
+ * smb_oplock_hdl_update
+ *
+ * Called by smb_oplock_ind_break (and ...in_ack) just before we
+ * schedule smb_oplock_async_break / mb_oplock_send_break taskq job,
+ * so we can make any state changes that should happen immediately.
+ *
+ * Here, keep track of what we will send to the client.
+ * Saves old state in arg.olbck.OldLevel
+ *
+ * Note that because we may be in the midst of processing an
+ * smb_oplock_ack_break call here, the _breaking flag will be
+ * temporarily false, and is set true again if this ack causes
+ * another break.  This makes it tricky to know when to update
+ * the epoch, which is not supposed to increment when there's
+ * already an unacknowledged break out to the client.
+ * We can recognize that by comparing ls_state vs ls_breakto.
+ * If no unacknowledged break, ls_state == ls_breakto.
+ */
+static void
+smb_oplock_hdl_update(smb_request_t *sr)
+{
+	smb_ofile_t	*ofile = sr->fid_ofile;
+	smb_lease_t	*lease = ofile->f_lease;
+	uint32_t	NewLevel = sr->arg.olbrk.NewLevel;
+	boolean_t	AckReq = sr->arg.olbrk.AckRequired;
+
+#ifdef	DEBUG
+	smb_node_t *node = ofile->f_node;
+	ASSERT(RW_READ_HELD(&node->n_ofile_list.ll_lock));
+	ASSERT(MUTEX_HELD(&node->n_oplock.ol_mutex));
+#endif
+
+	/* Caller sets arg.olbrk.OldLevel */
+	ofile->f_oplock.og_breakto = NewLevel;
+	ofile->f_oplock.og_breaking = B_TRUE;
+	if (lease != NULL) {
+		// If no unacknowledged break, update epoch.
+		if (lease->ls_breakto == lease->ls_state)
+			lease->ls_epoch++;
+
+		lease->ls_breakto = NewLevel;
+		lease->ls_breaking = B_TRUE;
+	}
+
+	if (!AckReq) {
+		/*
+		 * Not expecting an Ack from the client.
+		 * Update state immediately.
+		 */
+		ofile->f_oplock.og_state = NewLevel;
+		ofile->f_oplock.og_breaking = B_FALSE;
+		if (lease != NULL) {
+			lease->ls_state = NewLevel;
+			lease->ls_breaking = B_FALSE;
+		}
+		if (ofile->dh_persist) {
+			smb2_dh_update_oplock(sr, ofile);
+		}
+	}
+}
+
+/*
+ * Helper for smb_ofile_close
+ *
+ * Note that a client may close an ofile in response to an
+ * oplock break or lease break intead of doing an Ack break,
+ * so this must wake anything that might be waiting on an ack.
+ */
+void
+smb_oplock_close(smb_ofile_t *ofile)
+{
+	smb_node_t *node = ofile->f_node;
+
+	smb_llist_enter(&node->n_ofile_list, RW_READER);
+	mutex_enter(&node->n_oplock.ol_mutex);
+
+	if (ofile->f_oplock_closing == B_FALSE) {
+		ofile->f_oplock_closing = B_TRUE;
+
+		if (ofile->f_lease != NULL)
+			smb2_lease_ofile_close(ofile);
+
+		smb_oplock_break_CLOSE(node, ofile);
+
+		ofile->f_oplock.og_state = 0;
+		ofile->f_oplock.og_breakto = 0;
+		ofile->f_oplock.og_breaking = B_FALSE;
+		cv_broadcast(&ofile->f_oplock.og_ack_cv);
+	}
+
+	mutex_exit(&node->n_oplock.ol_mutex);
+	smb_llist_exit(&node->n_ofile_list);
+}
+
+/*
+ * Called by smb_request_cancel() via sr->cancel_method
+ * Arg is the smb_node_t with the breaking oplock.
+ */
+static void
+smb_oplock_wait_ack_cancel(smb_request_t *sr)
+{
+	kcondvar_t	*cvp = sr->cancel_arg2;
+	smb_ofile_t	*ofile = sr->fid_ofile;
+	smb_node_t	*node = ofile->f_node;
+
+	mutex_enter(&node->n_oplock.ol_mutex);
+	cv_broadcast(cvp);
+	mutex_exit(&node->n_oplock.ol_mutex);
+}
+
+/*
+ * Wait for an oplock break ACK to arrive.  This is called after
+ * we've sent an oplock break or lease break to the client where
+ * an "Ack break" is expected back.  If we get an Ack, that will
+ * wake us up via smb2_oplock_break_ack or smb2_lease_break_ack.
+ *
+ * Wait until state reduced to NewLevel (or less).
+ * Note that in multi-break cases, we might wait here for just
+ * one ack when another has become pending, in which case the
+ * og_breakto might be a subset of NewLevel.  Wait until the
+ * state field is no longer a superset of NewLevel.
+ */
+uint32_t
+smb_oplock_wait_ack(smb_request_t *sr, uint32_t NewLevel)
+{
+	smb_ofile_t	*ofile = sr->fid_ofile;
+	smb_lease_t	*lease = ofile->f_lease;
+	smb_node_t	*node = ofile->f_node;
+	smb_oplock_t	*ol = &node->n_oplock;
+	uint32_t	*state_p;
+	kcondvar_t	*cv_p;
+	clock_t		time, rv;
+	uint32_t	status = 0;
+	smb_req_state_t  srstate;
+	uint32_t	wait_mask;
+
+	time = ddi_get_lbolt() +
+	    MSEC_TO_TICK(smb_oplock_timeout_ack);
+
+	/*
+	 * Wait on either lease state or oplock state
+	 */
+	if (lease != NULL) {
+		state_p = &lease->ls_state;
+		cv_p = &lease->ls_ack_cv;
+	} else {
+		state_p = &ofile->f_oplock.og_state;
+		cv_p = &ofile->f_oplock.og_ack_cv;
+	}
+
+	/*
+	 * These are all the bits that we wait to be cleared.
+	 */
+	wait_mask = ~NewLevel & (CACHE_RWH |
+	    LEVEL_TWO | LEVEL_ONE | LEVEL_BATCH);
+
+	/*
+	 * Setup cancellation callback
+	 */
+	mutex_enter(&sr->sr_mutex);
+	if (sr->sr_state != SMB_REQ_STATE_ACTIVE) {
+		mutex_exit(&sr->sr_mutex);
+		return (NT_STATUS_CANCELLED);
+	}
+	sr->sr_state = SMB_REQ_STATE_WAITING_OLBRK;
+	sr->cancel_method = smb_oplock_wait_ack_cancel;
+	sr->cancel_arg2 = cv_p;
+	mutex_exit(&sr->sr_mutex);
+
+	/*
+	 * Enter the wait loop
+	 */
+	mutex_enter(&ol->ol_mutex);
+
+	while ((*state_p & wait_mask) != 0) {
+		rv = cv_timedwait(cv_p, &ol->ol_mutex, time);
+		if (rv < 0) {
+			/* cv_timewait timeout */
+			char *fname;
+			char *opname;
+			int rc;
+
+			/*
+			 * Get the path name of the open file
+			 */
+			fname = smb_srm_zalloc(sr, MAXPATHLEN);
+			rc = smb_node_getpath(node, NULL, fname, MAXPATHLEN);
+			if (rc != 0) {
+				/* Not expected. Just show last part. */
+				(void) snprintf(fname, MAXPATHLEN, "(?)/%s",
+				    node->od_name);
+			}
+
+			/*
+			 * Get an operation name reflecting which kind of
+			 * lease or oplock break got us here, so the log
+			 * message will say "lease break" or whatever.
+			 */
+			if (lease != NULL) {
+				opname = "lease";
+			} else if (ofile->f_oplock.og_dialect >=
+			    SMB_VERS_2_BASE) {
+				opname = "oplock2";
+			} else {
+				opname = "oplock1";
+			}
+
+			cmn_err(CE_NOTE, "!client %s %s break timeout for %s",
+			    sr->session->ip_addr_str, opname, fname);
+
+			status = NT_STATUS_CANNOT_BREAK_OPLOCK;
+			break;
+		}
+
+		/*
+		 * Check if we were woken by smb_request_cancel,
+		 * which sets state SMB_REQ_STATE_CANCEL_PENDING
+		 * and signals the CV.  The mutex enter/exit is
+		 * just to ensure cache visibility of sr_state
+		 * that was updated in smb_request_cancel.
+		 */
+		mutex_enter(&sr->sr_mutex);
+		srstate = sr->sr_state;
+		mutex_exit(&sr->sr_mutex);
+		if (srstate != SMB_REQ_STATE_WAITING_OLBRK) {
+			break;
+		}
+	}
+	mutex_exit(&ol->ol_mutex);
+
+	/*
+	 * See if it completed or if it was cancelled.
+	 */
+	mutex_enter(&sr->sr_mutex);
+switch_state:
+	switch (sr->sr_state) {
+	case SMB_REQ_STATE_WAITING_OLBRK:
+		/* Normal wakeup.  Keep status from above. */
+		sr->sr_state = SMB_REQ_STATE_ACTIVE;
+		/* status from above */
+		break;
+	case SMB_REQ_STATE_CANCEL_PENDING:
+		/* cancel_method running. wait. */
+		cv_wait(&sr->sr_st_cv, &sr->sr_mutex);
+		goto switch_state;
+	case SMB_REQ_STATE_CANCELLED:
+		status = NT_STATUS_CANCELLED;
+		break;
+	default:
+		status = NT_STATUS_INTERNAL_ERROR;
+		break;
+	}
+	sr->cancel_method = NULL;
+	sr->cancel_arg2 = NULL;
+	mutex_exit(&sr->sr_mutex);
+
+	return (status);
+}
+
+/*
+ * Called by smb_request_cancel() via sr->cancel_method
+ * Arg is the smb_node_t with the breaking oplock.
+ */
+static void
+smb_oplock_wait_break_cancel(smb_request_t *sr)
+{
+	smb_node_t   *node = sr->cancel_arg2;
+	smb_oplock_t *ol;
+
+	SMB_NODE_VALID(node);
+	ol = &node->n_oplock;
+
+	mutex_enter(&ol->ol_mutex);
+	cv_broadcast(&ol->WaitingOpenCV);
+	mutex_exit(&ol->ol_mutex);
 }
 
 /*
@@ -651,7 +810,95 @@ smb_oplock_hdl_clear(smb_ofile_t *ofile)
  * we're about to do something that invalidates some cache.
  */
 uint32_t
-smb_oplock_wait_break(smb_node_t *node, int timeout)  /* mSec. */
+smb_oplock_wait_break(smb_request_t *sr, smb_node_t *node, int timeout)
+{
+	smb_oplock_t	*ol;
+	clock_t		time, rv;
+	uint32_t	status = 0;
+	smb_req_state_t  srstate;
+
+	SMB_NODE_VALID(node);
+	ol = &node->n_oplock;
+
+	if (timeout == 0)
+		timeout = smb_oplock_timeout_def;
+	time = MSEC_TO_TICK(timeout) + ddi_get_lbolt();
+
+	/*
+	 * Setup cancellation callback
+	 */
+	mutex_enter(&sr->sr_mutex);
+	if (sr->sr_state != SMB_REQ_STATE_ACTIVE) {
+		mutex_exit(&sr->sr_mutex);
+		return (NT_STATUS_CANCELLED);
+	}
+	sr->sr_state = SMB_REQ_STATE_WAITING_OLBRK;
+	sr->cancel_method = smb_oplock_wait_break_cancel;
+	sr->cancel_arg2 = node;
+	mutex_exit(&sr->sr_mutex);
+
+	mutex_enter(&ol->ol_mutex);
+	while ((ol->ol_state & BREAK_ANY) != 0) {
+		ol->waiters++;
+		rv = cv_timedwait(&ol->WaitingOpenCV,
+		    &ol->ol_mutex, time);
+		ol->waiters--;
+		if (rv < 0) {
+			/* cv_timewait timeout */
+			status = NT_STATUS_CANNOT_BREAK_OPLOCK;
+			break;
+		}
+
+		/*
+		 * Check if we were woken by smb_request_cancel,
+		 * which sets state SMB_REQ_STATE_CANCEL_PENDING
+		 * and signals the CV.  The mutex enter/exit is
+		 * just to ensure cache visibility of sr_state
+		 * that was updated in smb_request_cancel.
+		 */
+		mutex_enter(&sr->sr_mutex);
+		srstate = sr->sr_state;
+		mutex_exit(&sr->sr_mutex);
+		if (srstate != SMB_REQ_STATE_WAITING_OLBRK) {
+			break;
+		}
+	}
+	mutex_exit(&ol->ol_mutex);
+
+	/*
+	 * Check whether it completed or was cancelled.
+	 */
+	mutex_enter(&sr->sr_mutex);
+switch_state:
+	switch (sr->sr_state) {
+	case SMB_REQ_STATE_WAITING_OLBRK:
+		/* Normal wakeup.  Keep status from above. */
+		sr->sr_state = SMB_REQ_STATE_ACTIVE;
+		break;
+	case SMB_REQ_STATE_CANCEL_PENDING:
+		/* cancel_method running. wait. */
+		cv_wait(&sr->sr_st_cv, &sr->sr_mutex);
+		goto switch_state;
+	case SMB_REQ_STATE_CANCELLED:
+		status = NT_STATUS_CANCELLED;
+		break;
+	default:
+		status = NT_STATUS_INTERNAL_ERROR;
+		break;
+	}
+	sr->cancel_method = NULL;
+	sr->cancel_arg2 = NULL;
+	mutex_exit(&sr->sr_mutex);
+
+	return (status);
+}
+
+/*
+ * Simplified version used in smb_fem.c, like above,
+ * but no smb_request_cancel stuff.
+ */
+uint32_t
+smb_oplock_wait_break_fem(smb_node_t *node, int timeout)  /* mSec. */
 {
 	smb_oplock_t	*ol;
 	clock_t		time, rv;

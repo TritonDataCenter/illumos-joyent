@@ -74,7 +74,6 @@ clone:rge 0666 root sys
 fcsm:* 0600 root sys
 bge:* 0666 root sys
 clone:bge 0666 root sys
-winlock:* 0666 root sys
 fp:* 0600 root sys
 fm:* 0644 root sys
 ipf:* 0666 root sys
@@ -161,7 +160,6 @@ ipnet:lo0 0666 root sys
 ipsecah:ipsecah 0666 root sys
 ipsecesp:ipsecesp 0666 root sys
 keysock:keysock 0666 root sys
-kssl:* 0666 root sys
 clone:llc1 0666 root sys
 lofi:* 0600 root sys
 lofi:ctl 0644 root sys

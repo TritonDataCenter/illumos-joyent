@@ -60,6 +60,12 @@ LINKTEST_OBJ = objs/linktest_stand.o
 CLOBBERFILES_standalone = $(LINKTEST_OBJ)
 CLOBBERFILES += $(CLOBBERFILES_$(CURTYPE))
 
+#
+# The standalone environment currently does not support the stack
+# protector.
+#
+$(STANDLIBRARY) := STACKPROTECT = none
+
 LIBS_standalone	= $(STANDLIBRARY)
 LIBS_library = $(DYNLIB)
 LIBS = $(LIBS_$(CURTYPE))
@@ -73,7 +79,7 @@ LDFLAGS = $(LDFLAGS_$(CURTYPE))
 
 ASFLAGS_standalone = -DDIS_STANDALONE
 ASFLAGS_library =
-ASFLAGS += -P $(ASFLAGS_$(CURTYPE)) -D_ASM
+ASFLAGS += $(ASFLAGS_$(CURTYPE)) -D_ASM
 
 
 # We want the thread-specific errno in the library, but we don't want it in

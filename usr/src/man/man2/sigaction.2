@@ -4,11 +4,10 @@
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH SIGACTION 2 "Mar 23, 2005"
+.TH SIGACTION 2 "March 7, 2024"
 .SH NAME
 sigaction \- detailed signal management
 .SH SYNOPSIS
-.LP
 .nf
 #include <signal.h>
 
@@ -17,8 +16,6 @@ sigaction \- detailed signal management
 .fi
 
 .SH DESCRIPTION
-.sp
-.LP
 The \fBsigaction()\fR function allows the calling process to examine or specify
 the action to be taken on delivery of a specific signal. See
 \fBsignal.h\fR(3HEAD) for an explanation of general signal concepts.
@@ -40,7 +37,7 @@ The \fBsigaction\fR structure includes the following members:
 .sp
 .in +2
 .nf
-void      (*sa_handler)(\|);
+void      (*sa_handler)(int);
 void      (*sa_sigaction)(int, siginfo_t *, void *);
 sigset_t  sa_mask;
 int       sa_flags;
@@ -50,7 +47,7 @@ int       sa_flags;
 .sp
 .LP
 The storage occupied by \fBsa_handler\fR and \fBsa_sigaction\fR may overlap,
-and a standard-conforming application (see \fBstandards\fR(5)) must not use
+and a standard-conforming application (see \fBstandards\fR(7)) must not use
 both simultaneously.
 .sp
 .LP
@@ -167,14 +164,10 @@ the calling process when its child processes stop or continue.
 .RE
 
 .SH RETURN VALUES
-.sp
-.LP
 Upon successful completion, \fB0\fR is returned. Otherwise, \fB\(mi1\fR is
 returned, \fBerrno\fR is set to indicate the error, and no new signal handler
 is installed.
 .SH ERRORS
-.sp
-.LP
 The \fBsigaction()\fR function will fail if:
 .sp
 .ne 2
@@ -188,9 +181,7 @@ is equal to \fBSIGWAITING\fR, \fBSIGCANCEL\fR, or \fBSIGLWP\fR.
 .RE
 
 .SH ATTRIBUTES
-.sp
-.LP
-See \fBattributes\fR(5) for descriptions of the following attributes:
+See \fBattributes\fR(7) for descriptions of the following attributes:
 .sp
 
 .sp
@@ -204,27 +195,42 @@ Interface Stability	Committed
 _
 MT-Level	Async-Signal-Safe
 _
-Standard	See \fBstandards\fR(5).
+Standard	See \fBstandards\fR(7).
 .TE
 
 .SH SEE ALSO
-.sp
-.LP
-\fBkill\fR(1), \fBIntro\fR(2), \fBexit\fR(2), \fBfcntl\fR(2), \fBgetmsg\fR(2),
-\fBioctl\fR(2), \fBkill\fR(2), \fBpause\fR(2), \fBputmsg\fR(2), \fBread\fR(2),
-\fBsigaltstack\fR(2), \fBsigprocmask\fR(2), \fBsigsend\fR(2),
-\fBsigsuspend\fR(2), \fBwaitid\fR(2), \fBwrite\fR(2), \fBrecv\fR(3SOCKET),
-\fBsend\fR(3SOCKET), \fBsiginfo.h\fR(3HEAD), \fBsignal\fR(3C),
-\fBsignal.h\fR(3HEAD), \fBsigsetops\fR(3C), \fBucontext.h\fR(3HEAD),
-\fBwait\fR(3C), \fBattributes\fR(5), \fBstandards\fR(5)
+.BR kill (1),
+.BR Intro (2),
+.BR exit (2),
+.BR fcntl (2),
+.BR getmsg (2),
+.BR ioctl (2),
+.BR kill (2),
+.BR pause (2),
+.BR putmsg (2),
+.BR read (2),
+.BR sigaltstack (2),
+.BR sigprocmask (2),
+.BR sigsend (2),
+.BR sigsuspend (2),
+.BR waitid (2),
+.BR write (2),
+.BR signal (3C),
+.BR sigsetops (3C),
+.BR wait (3C),
+.BR siginfo.h (3HEAD),
+.BR signal.h (3HEAD),
+.BR ucontext.h (3HEAD),
+.BR recv (3SOCKET),
+.BR send (3SOCKET),
+.BR attributes (7),
+.BR standards (7)
 .SH NOTES
-.sp
-.LP
 The handler routine can be declared:
 .sp
 .in +2
 .nf
-void handler (int \fIsig\fR, siginfo_t *\fIsip\fR, ucontext_t *\fIucp\fR);
+void handler (int \fIsig\fR, siginfo_t *\fIsip\fR, void *\fIarg\fR);
 .fi
 .in -2
 
@@ -232,8 +238,8 @@ void handler (int \fIsig\fR, siginfo_t *\fIsip\fR, ucontext_t *\fIucp\fR);
 .LP
 The \fIsig\fR argument is the signal number. The \fIsip\fR argument is a
 pointer (to space on the stack) to a \fBsiginfo_t\fR structure, which provides
-additional detail about the delivery of the signal. The \fIucp\fR argument is a
+additional detail about the delivery of the signal. The \fIarg\fR argument is a
 pointer (again to space on the stack) to a \fBucontext_t\fR structure (defined
 in <\fBsys/ucontext.h\fR>) which contains the context from before the signal.
-It is not recommended that \fIucp\fR be used by the handler to restore the
+It is not recommended that \fIarg\fR be used by the handler to restore the
 context from before the signal delivery.

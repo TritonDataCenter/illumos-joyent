@@ -23,6 +23,7 @@
  * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2020 Joyent, Inc.
  * Copyright (c) 2015, 2016 by Delphix. All rights reserved.
+ * Copyright 2023 Michael Zeller.
  */
 
 /*
@@ -89,7 +90,7 @@
 #define	LEGACY_UNKNOWN	"unknown"
 
 /*
- * Per proc(4) when pr_nlwp, pr_nzomb, and pr_lwp.pr_lwpid are all 0,
+ * Per proc(5) when pr_nlwp, pr_nzomb, and pr_lwp.pr_lwpid are all 0,
  * the process is a zombie.
  */
 #define	IS_ZOMBIE(_psip) \
@@ -1824,7 +1825,7 @@ description_of_column(int c)
 
 	switch (c) {
 	case 0:
-		s = gettext("contract ID for service (see contract(4))");
+		s = gettext("contract ID for service (see contract(5))");
 		break;
 	case 1:
 		s = gettext("human-readable description of the service");
@@ -1921,7 +1922,7 @@ print_help(const char *progname)
 	"\t-z  from global zone, show services in a specified zone\n"
 	"\t-Z  from global zone, show services in all zones\n"
 	"\n\t"
-	"Services can be specified using an FMRI, abbreviation, or fnmatch(5)\n"
+	"Services can be specified using an FMRI, abbreviation, or fnmatch(7)\n"
 	"\tpattern, as shown in these examples for svc:/network/smtp:sendmail\n"
 	"\n"
 	"\t%1$s [opts] svc:/network/smtp:sendmail\n"
@@ -3121,16 +3122,25 @@ list_svc_or_inst_fmri(void *complain, scf_walkinfo_t *wip)
 	char *fmri;
 	const char *svc_name, *inst_name, *pg_name, *save;
 	scf_iter_t *iter;
-	int ret;
+	int type, ret;
 
 	fmri = safe_strdup(wip->fmri);
 
-	if (scf_parse_svc_fmri(fmri, NULL, &svc_name, &inst_name, &pg_name,
+	if (scf_parse_fmri(fmri, &type, NULL, &svc_name, &inst_name, &pg_name,
 	    NULL) != SCF_SUCCESS) {
 		if (complain)
 			uu_warn(gettext("FMRI \"%s\" is invalid.\n"),
 			    wip->fmri);
 		exit_status = UU_EXIT_FATAL;
+		free(fmri);
+		return (0);
+	}
+
+	/*
+	 * Skip over file dependencies as there is no state we can report on
+	 * them.
+	 */
+	if (type == SCF_FMRI_TYPE_FILE) {
 		free(fmri);
 		return (0);
 	}
@@ -3485,8 +3495,8 @@ errignore(const char *str, ...)
 int
 main(int argc, char **argv)
 {
-	char opt, opt_mode;
-	int i, n;
+	char opt_mode;
+	int opt, i, n;
 	char *columns_str = NULL;
 	char *cp;
 	const char *progname;
@@ -3742,8 +3752,10 @@ again:
 		if (scf_value_set_astring(zone, g_zonename) != SCF_SUCCESS)
 			scfdie();
 
-		if (scf_handle_decorate(h, "zone", zone) != SCF_SUCCESS)
-			uu_die(gettext("invalid zone '%s'\n"), g_zonename);
+		if (scf_handle_decorate(h, "zone", zone) != SCF_SUCCESS) {
+			uu_die(gettext("zone '%s': %s\n"),
+			    g_zonename, scf_strerror(scf_error()));
+		}
 
 		scf_value_destroy(zone);
 

@@ -291,7 +291,7 @@ retry:
  * Return the next anonymous port in the privileged port range for
  * bind checking.  It starts at IPPORT_RESERVED - 1 and goes
  * downwards.  This is the same behavior as documented in the userland
- * library call rresvport(3N).
+ * library call rresvport(3SOCKET).
  *
  * TS note: skip multilevel ports.
  */
@@ -1006,11 +1006,10 @@ tcp_rg_t *
 tcp_rg_init(tcp_t *tcp)
 {
 	tcp_rg_t *rg;
-	rg = kmem_alloc(sizeof (tcp_rg_t), KM_NOSLEEP|KM_NORMALPRI);
+	rg = kmem_alloc(sizeof (tcp_rg_t), KM_NOSLEEP_LAZY);
 	if (rg == NULL)
 		return (NULL);
-	rg->tcprg_members = kmem_zalloc(2 * sizeof (tcp_t *),
-	    KM_NOSLEEP|KM_NORMALPRI);
+	rg->tcprg_members = kmem_zalloc(2 * sizeof (tcp_t *), KM_NOSLEEP_LAZY);
 	if (rg->tcprg_members == NULL) {
 		kmem_free(rg, sizeof (tcp_rg_t));
 		return (NULL);
@@ -1063,7 +1062,7 @@ tcp_rg_insert(tcp_rg_t *rg, tcp_t *tcp)
 			return (EINVAL);
 		}
 		newmembers = kmem_zalloc(newsize * sizeof (tcp_t *),
-		    KM_NOSLEEP|KM_NORMALPRI);
+		    KM_NOSLEEP_LAZY);
 		if (newmembers == NULL) {
 			mutex_exit(&rg->tcprg_lock);
 			return (ENOMEM);

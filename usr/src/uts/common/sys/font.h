@@ -84,9 +84,11 @@ typedef	struct  bitmap_data {
 } bitmap_data_t;
 
 typedef enum {
-	FONT_AUTO,
-	FONT_MANUAL,
-	FONT_BOOT
+	FONT_AUTO,	/* This font is loaded by software */
+	FONT_MANUAL,	/* This font is loaded manually by user */
+	FONT_BOOT,	/* This font was passed to kernel by bootloader */
+	FONT_BUILTIN,	/* This font was built in at compile time */
+	FONT_RELOAD	/* This font is marked to be re-read from file */
 } FONT_FLAGS;
 
 struct fontlist {
@@ -126,9 +128,9 @@ extern bitmap_data_t font_data_8x16;
 void reset_font_flags(void);
 bitmap_data_t *set_font(short *, short *, short, short);
 const uint8_t *font_lookup(const struct font *, uint32_t);
-void font_bit_to_pix4(struct font *, uint8_t *, uint32_t, uint8_t, uint8_t);
-void font_bit_to_pix8(struct font *, uint8_t *, uint32_t, uint8_t, uint8_t);
-void font_bit_to_pix16(struct font *, uint16_t *, uint32_t, uint16_t, uint16_t);
+void font_bit_to_pix4(struct font *, uint8_t *, uint32_t, uint32_t, uint32_t);
+void font_bit_to_pix8(struct font *, uint8_t *, uint32_t, uint32_t, uint32_t);
+void font_bit_to_pix16(struct font *, uint16_t *, uint32_t, uint32_t, uint32_t);
 void font_bit_to_pix24(struct font *, uint8_t *, uint32_t, uint32_t, uint32_t);
 void font_bit_to_pix32(struct font *, uint32_t *, uint32_t, uint32_t, uint32_t);
 

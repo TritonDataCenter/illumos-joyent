@@ -48,7 +48,7 @@
 
 
 extern int	data_lineno;
-extern char	*space2str();
+extern char	*space2str(uint_t);
 
 /*
  * This variable is used to determine whether a token is present in the pipe
@@ -194,7 +194,7 @@ clean_token(char *cleantoken, char *token)
  * This routine checks if a token is already present on the input line
  */
 int
-istokenpresent()
+istokenpresent(void)
 {
 	return (token_present);
 }
@@ -205,7 +205,7 @@ istokenpresent()
  * may have already been swallowed by the last gettoken.
  */
 static void
-flushline()
+flushline(void)
 {
 	if (token_present) {
 		/*
@@ -367,7 +367,8 @@ getbn(char *str, diskaddr_t *iptr)
 	if (geti(buf, &cyl, &wild))
 		return (-1);
 	if ((cyl < 0) || (cyl >= (ncyl + acyl))) {
-		err_print("`%d' is out of range.\n", cyl);
+		err_print("`%d' is out of range [0-%u].\n", cyl,
+		    ncyl + acyl - 1);
 		return (-1);
 	}
 	/*
@@ -378,7 +379,7 @@ getbn(char *str, diskaddr_t *iptr)
 	if (geti(buf, &head, &wild))
 		return (-1);
 	if ((head < 0) || (head >= nhead)) {
-		err_print("`%d' is out of range.\n", head);
+		err_print("`%d' is out of range [0-%u].\n", head, nhead - 1);
 		return (-1);
 	}
 	/*
@@ -389,7 +390,8 @@ getbn(char *str, diskaddr_t *iptr)
 	if (geti(buf, &sect, &wild))
 		return (-1);
 	if ((sect < 0) || (sect >= sectors(head))) {
-		err_print("`%d' is out of range.\n", sect);
+		err_print("`%d' is out of range [0-%u].\n", sect,
+		    sectors(head) - 1);
 		return (-1);
 	}
 	/*
@@ -497,7 +499,7 @@ reprompt:
 			 * the first item in the list.
 			 */
 			s = find_string(param->io_slist, *deflt);
-			if (s == (char *)NULL) {
+			if (s == NULL) {
 				s = (param->io_slist)->str;
 			}
 			fmt_print("[%s]", s);
@@ -701,10 +703,10 @@ reprompt:
 				 */
 				s = find_string(param->io_slist, *deflt);
 				if ((cur_label == L_TYPE_EFI) &&
-				    (s == (char *)NULL)) {
+				    (s == NULL)) {
 					return (*deflt);
 				}
-				if (s == (char *)NULL) {
+				if (s == NULL) {
 					return ((param->io_slist)->value);
 				} else {
 					return (*deflt);
@@ -772,8 +774,7 @@ reprompt:
 		 * Convert token to a disk block number.
 		 */
 		if (cur_label == L_TYPE_EFI) {
-			if (geti64(cleantoken, (uint64_t *)&bn64,
-			    (uint64_t *)NULL))
+			if (geti64(cleantoken, (uint64_t *)&bn64, NULL))
 				break;
 		} else {
 			if (getbn(cleantoken, &bn64))
@@ -785,7 +786,8 @@ reprompt:
 		if ((bn64 < bounds->lower) || (bn64 > bounds->upper)) {
 			err_print("`");
 			pr_dblock(err_print, bn64);
-			err_print("' is out of range.\n");
+			err_print("' is out of range [%llu-%llu].\n",
+			    bounds->lower, bounds->upper);
 			break;
 		}
 		/*
@@ -812,13 +814,14 @@ reprompt:
 		/*
 		 * Convert the token into an integer.
 		 */
-		if (geti(cleantoken, (int *)&bn, (int *)NULL))
+		if (geti(cleantoken, (int *)&bn, NULL))
 			break;
 		/*
 		 * Check to be sure it is within the legal bounds.
 		 */
 		if ((bn < bounds->lower) || (bn > bounds->upper)) {
-			err_print("`%lu' is out of range.\n", bn);
+			err_print("`%lu' is out of range [%llu-%llu].\n", bn,
+			    bounds->lower, bounds->upper);
 			break;
 		}
 		/*
@@ -842,14 +845,15 @@ reprompt:
 		/*
 		 * Convert the token into an integer.
 		 */
-		if (geti64(cleantoken, (uint64_t *)&bn64, (uint64_t *)NULL)) {
+		if (geti64(cleantoken, (uint64_t *)&bn64, NULL)) {
 			break;
 		}
 		/*
 		 * Check to be sure it is within the legal bounds.
 		 */
 		if ((bn64 < bounds->lower) || (bn64 > bounds->upper)) {
-			err_print("`%llu' is out of range.\n", bn64);
+			err_print("`%llu' is out of range [%llu-%llu].\n",
+			    bn64, bounds->lower, bounds->upper);
 			break;
 		}
 		/*
@@ -876,13 +880,14 @@ reprompt:
 		/*
 		 * Convert the token into an integer.
 		 */
-		if (geti(cleantoken, (int *)&bn, (int *)NULL))
+		if (geti(cleantoken, (int *)&bn, NULL))
 			break;
 		/*
 		 * Check to be sure it is within the legal bounds.
 		 */
 		if ((bn < bounds->lower) || (bn > bounds->upper)) {
-			err_print("`%lu' is out of range.\n", bn);
+			err_print("`%lu' is out of range [%llu-%llu].\n", bn,
+			    bounds->lower, bounds->upper);
 			break;
 		}
 		/*
@@ -1151,8 +1156,9 @@ reprompt:
 			/*
 			 * Check the bounds - cyls is number of cylinders
 			 */
-			if (cyls > (bounds->upper/spc())) {
-				err_print("`%dc' is out of range\n", cyls);
+			if (cyls > (bounds->upper / spc())) {
+				err_print("`%dc' is out of range [0-%llu]\n",
+				    cyls, bounds->upper / spc());
 				break;
 			}
 			/*
@@ -1172,7 +1178,8 @@ reprompt:
 			 * Check the bounds
 			 */
 			if (nmegs > bn2mb(bounds->upper)) {
-				err_print("`%1.2fmb' is out of range\n", nmegs);
+				err_print("`%1.2fmb' is out of range "
+				    "[0-%1.2f]\n", nmegs, bn2mb(bounds->upper));
 				break;
 			}
 			/*
@@ -1198,7 +1205,8 @@ reprompt:
 			 * Check the bounds
 			 */
 			if (ngigs > bn2gb(bounds->upper)) {
-				err_print("`%1.2fgb' is out of range\n", ngigs);
+				err_print("`%1.2fgb' is out of range "
+				    "[0-%1.2f]\n", ngigs, bn2gb(bounds->upper));
 				break;
 			}
 			/*
@@ -1335,7 +1343,7 @@ or g(gigabytes)\n");
 			 */
 
 			/* convert token to integer */
-			if (geti(cleantoken, &cylno, (int *)NULL)) {
+			if (geti(cleantoken, &cylno, NULL)) {
 				break;
 			}
 
@@ -1385,8 +1393,9 @@ or g(gigabytes)\n");
 			 * Check the bounds - cyls is number of
 			 * cylinders
 			 */
-			if (cyls > (bounds->upper/spc())) {
-				err_print("`%dc' is out of range\n", cyls);
+			if (cyls > (bounds->upper / spc())) {
+				err_print("`%dc' is out of range [0-%llu]\n",
+				    cyls, bounds->upper / spc());
 				break;
 			}
 
@@ -1411,7 +1420,8 @@ or g(gigabytes)\n");
 			 * Check the bounds
 			 */
 			if (nmegs > bn2mb(bounds->upper)) {
-				err_print("`%1.2fmb' is out of range\n", nmegs);
+				err_print("`%1.2fmb' is out of range "
+				    "[0-%1.2f]\n", nmegs, bn2mb(bounds->upper));
 				break;
 			}
 
@@ -1442,7 +1452,8 @@ or g(gigabytes)\n");
 			 * Check the bounds
 			 */
 			if (ngigs > bn2gb(bounds->upper)) {
-				err_print("`%1.2fgb' is out of range\n", ngigs);
+				err_print("`%1.2fgb' is out of range "
+				    "[0-%1.2f]\n", ngigs, bn2gb(bounds->upper));
 				break;
 			}
 
@@ -1548,7 +1559,7 @@ or g(gigabytes)\n");
 			/*
 			 * Token is number of blocks
 			 */
-			if (geti64(cleantoken, &blokno, (uint64_t *)NULL)) {
+			if (geti64(cleantoken, &blokno, NULL)) {
 				break;
 			}
 			if (blokno > bounds->upper) {
@@ -1564,7 +1575,7 @@ or g(gigabytes)\n");
 			 */
 
 			/* convert token to integer */
-			if (geti64(cleantoken, &blokno, (uint64_t *)NULL)) {
+			if (geti64(cleantoken, &blokno, NULL)) {
 				break;
 			}
 
@@ -1609,7 +1620,9 @@ or g(gigabytes)\n");
 			 * Check the bounds
 			 */
 			if (nmegs > bn2mb(bounds->upper - bounds->lower)) {
-				err_print("`%1.2fmb' is out of range\n", nmegs);
+				err_print("`%1.2fmb' is out of range "
+				    "[0-%1.2f]\n", nmegs,
+				    bn2mb(bounds->upper - bounds->lower));
 				break;
 			}
 
@@ -1622,7 +1635,9 @@ or g(gigabytes)\n");
 				break;
 			}
 			if (nmegs > bn2gb(bounds->upper - bounds->lower)) {
-				err_print("`%1.2fgb' is out of range\n", nmegs);
+				err_print("`%1.2fgb' is out of range "
+				    "[0-%1.2f]\n", nmegs,
+				    bn2gb(bounds->upper - bounds->lower));
 				break;
 			}
 
@@ -1635,7 +1650,9 @@ or g(gigabytes)\n");
 				break;
 			}
 			if (nmegs > bn2tb(bounds->upper - bounds->lower)) {
-				err_print("`%1.2ftb' is out of range\n", nmegs);
+				err_print("`%1.2ftb' is out of range "
+				    "[0-%1.2f]\n", nmegs,
+				    bn2tb(bounds->upper - bounds->lower));
 				break;
 			}
 			return (uint64_t)((float)nmegs * 1024.0 *

@@ -11,21 +11,23 @@
 .\"
 .\" Copyright 2015 Joyent, Inc.
 .\"
-.Dd May 11, 2016
+.Dd July 30, 2024
 .Dt PR_FCNTL 3PROC
 .Os
 .Sh NAME
 .Nm pr_fcntl
 .Nd inject fcntl system call into victim process
-.Sh SYNOPSIS
+.Sh LIBRARY
 .Lb libproc
+.Sh SYNOPSIS
 .In libproc.h
 .Ft int
 .Fo pr_fcntl
 .Fa "struct ps_prochandle *P"
 .Fa "int fd"
 .Fa "int cmd"
-.Fa "void *argp"
+.Fa "void *argp0"
+.Fa "void *argp1"
 .Fc
 .Sh DESCRIPTION
 The
@@ -44,16 +46,33 @@ then this is equivalent to calling
 on the currently running process.
 .Pp
 The arguments
-.Fa fd ,
-.Fa cmd ,
+.Fa fd
 and
-.Fa argp
+.Fa cmd
 have the same meaning as in
 .Xr fcntl 2 .
+The value of
+.Fa cmd
+determines how many arguments are passed.
+A command that takes no arguments, like
+.Dv F_GETFD ,
+should pass both
+.Fa argp0
+and
+.Fa argp1
+as
+.Dv NULL .
+A command that takes integer arguments, like
+.Dv F_SETFL
+or
+.Dv F_DUP3FD ,
+should cast the integer arguments to a
+.Fa "void *"
+and pass unused arguments as
+.Dv NULL .
 See
 .Xr fcntl 2
 for the full description and purpose of the
-.Sy fcntl
 system call and its arguments.
 .Pp
 The
@@ -101,4 +120,4 @@ in
 .Sh SEE ALSO
 .Xr fcntl 2 ,
 .Xr libproc 3LIB ,
-.Xr proc 4
+.Xr proc 5

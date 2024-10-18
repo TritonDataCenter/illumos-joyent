@@ -24,8 +24,6 @@
  * All rights reserved.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * String I/O Backend
  *
@@ -110,17 +108,17 @@ strio_name(mdb_io_t *io)
 }
 
 static const mdb_io_ops_t strio_ops = {
-	strio_read,
-	no_io_write,
-	strio_seek,
-	no_io_ctl,
-	strio_close,
-	strio_name,
-	no_io_link,
-	no_io_unlink,
-	no_io_setattr,
-	no_io_suspend,
-	no_io_resume
+	.io_read = strio_read,
+	.io_write = no_io_write,
+	.io_seek = strio_seek,
+	.io_ctl = no_io_ctl,
+	.io_close = strio_close,
+	.io_name = strio_name,
+	.io_link = no_io_link,
+	.io_unlink = no_io_unlink,
+	.io_setattr = no_io_setattr,
+	.io_suspend = no_io_suspend,
+	.io_resume = no_io_resume,
 };
 
 mdb_io_t *

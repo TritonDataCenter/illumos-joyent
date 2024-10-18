@@ -20,6 +20,7 @@
  */
 
 /*
+ * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2020 Oxide Computer Company
  * Copyright (c) 2013 Gary Mills
  *
@@ -28,7 +29,7 @@
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 /*
  * University Copyright- Copyright (c) 1982, 1986, 1988
@@ -41,8 +42,8 @@
  */
 
 /*
- * init(1M) is the general process spawning program.  Its primary job is to
- * start and restart svc.startd for smf(5).  For backwards-compatibility it also
+ * init(8) is the general process spawning program.  Its primary job is to
+ * start and restart svc.startd for smf(7).  For backwards-compatibility it also
  * spawns and respawns processes according to /etc/inittab and the current
  * run-level.  It reads /etc/default/inittab for general configuration.
  *
@@ -58,35 +59,35 @@
  * which each inittab entry is valid.
  *
  * State File and Restartability
- *   Premature exit by init(1M) is handled as a special case by the kernel:
- *   init(1M) will be immediately re-executed, retaining its original PID.  (PID
+ *   Premature exit by init(8) is handled as a special case by the kernel:
+ *   init(8) will be immediately re-executed, retaining its original PID.  (PID
  *   1 in the global zone.)  To track the processes it has previously spawned,
- *   as well as other mutable state, init(1M) regularly updates a state file
+ *   as well as other mutable state, init(8) regularly updates a state file
  *   such that its subsequent invocations have knowledge of its various
  *   dependent processes and duties.
  *
  * Process Contracts
- *   We start svc.startd(1M) in a contract and transfer inherited contracts when
+ *   We start svc.startd(8) in a contract and transfer inherited contracts when
  *   restarting it.  Everything else is started using the legacy contract
  *   template, and the created contracts are abandoned when they become empty.
  *
  * utmpx Entry Handling
- *   Because init(1M) no longer governs the startup process, its knowledge of
+ *   Because init(8) no longer governs the startup process, its knowledge of
  *   when utmpx becomes writable is indirect.  However, spawned processes
  *   expect to be constructed with valid utmpx entries.  As a result, attempts
  *   to write normal entries will be retried until successful.
  *
  * Maintenance Mode
- *   In certain failure scenarios, init(1M) will enter a maintenance mode, in
- *   which it invokes sulogin(1M) to allow the operator an opportunity to
+ *   In certain failure scenarios, init(8) will enter a maintenance mode, in
+ *   which it invokes sulogin(8) to allow the operator an opportunity to
  *   repair the system.  Normally, this operation is performed as a
  *   fork(2)-exec(2)-waitpid(3C) sequence with the parent waiting for repair or
  *   diagnosis to be completed.  In the cases that fork(2) requests themselves
- *   fail, init(1M) will directly execute sulogin(1M), and allow the kernel to
- *   restart init(1M) on exit from the operator session.
+ *   fail, init(8) will directly execute sulogin(8), and allow the kernel to
+ *   restart init(8) on exit from the operator session.
  *
- *   One scenario where init(1M) enters its maintenance mode is when
- *   svc.startd(1M) begins to fail rapidly, defined as when the average time
+ *   One scenario where init(8) enters its maintenance mode is when
+ *   svc.startd(8) begins to fail rapidly, defined as when the average time
  *   between recent failures drops below a given threshold.
  */
 
@@ -109,6 +110,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <definit.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -242,14 +244,14 @@ static lvl_t lvls[] = {
 	{ LVLQ,		0,	'Q', 0					},
 	{ LVLQ,		0,	'q', 0					},
 	{ LVL0,		MASK0,	'0', LSEL_RUNLEVEL			},
-	{ LVL1, 	MASK1,	'1', LSEL_RUNLEVEL			},
-	{ LVL2, 	MASK2,	'2', LSEL_RUNLEVEL			},
-	{ LVL3, 	MASK3,	'3', LSEL_RUNLEVEL			},
-	{ LVL4, 	MASK4,	'4', LSEL_RUNLEVEL			},
-	{ LVL5, 	MASK5,	'5', LSEL_RUNLEVEL			},
-	{ LVL6, 	MASK6, 	'6', LSEL_RUNLEVEL			},
-	{ SINGLE_USER, 	MASKSU, 'S', LSEL_RUNLEVEL			},
-	{ SINGLE_USER, 	MASKSU, 's', LSEL_RUNLEVEL			},
+	{ LVL1,		MASK1,	'1', LSEL_RUNLEVEL			},
+	{ LVL2,		MASK2,	'2', LSEL_RUNLEVEL			},
+	{ LVL3,		MASK3,	'3', LSEL_RUNLEVEL			},
+	{ LVL4,		MASK4,	'4', LSEL_RUNLEVEL			},
+	{ LVL5,		MASK5,	'5', LSEL_RUNLEVEL			},
+	{ LVL6,		MASK6,	'6', LSEL_RUNLEVEL			},
+	{ SINGLE_USER,	MASKSU, 'S', LSEL_RUNLEVEL			},
+	{ SINGLE_USER,	MASKSU, 's', LSEL_RUNLEVEL			},
 	{ LVLa,		MASKa,	'a', 0					},
 	{ LVLb,		MASKb,	'b', 0					},
 	{ LVLc,		MASKc,	'c', 0					}
@@ -489,7 +491,7 @@ static char *INITTAB	 = "/etc/inittab";	/* Script file for "init" */
 static char *SYSTTY	 = "/dev/systty";	/* System Console */
 static char *SYSCON	 = "/dev/syscon";	/* Virtual System console */
 static char *IOCTLSYSCON = "/etc/ioctl.syscon";	/* Last syscon modes */
-static char *ENVFILE	 = "/etc/default/init";	/* Default env. */
+static char *ENVFILE	 = DEFINIT_DEFAULT_FILE; /* Default env. */
 static char *SU	= "/etc/sulogin";	/* Super-user program for single user */
 static char *SH	= "/sbin/sh";		/* Standard shell */
 
@@ -548,7 +550,7 @@ static char	startd_svc_aux[SVC_AUX_SIZE];
 static char	startd_cline[256] = "";	/* svc.startd's command line */
 static int	do_restart_startd = 1;	/* Whether to restart svc.startd. */
 static char	*smf_options = NULL;	/* Options to give to startd. */
-static int	smf_debug = 0;		/* Messages for debugging smf(5) */
+static int	smf_debug = 0;		/* Messages for debugging smf(7) */
 static time_t	init_boot_time;		/* Substitute for kernel boot time. */
 
 #define	NSTARTD_FAILURE_TIMES	3		/* trigger after 3 failures */
@@ -587,7 +589,7 @@ static void	remv();
 static void	write_ioctl_syscon();
 static void	spawn(struct PROC_TABLE *, struct CMD_LINE *);
 static void	setimer(int);
-static void	siglvl(int, siginfo_t *, ucontext_t *);
+static void	siglvl(int, siginfo_t *, void *);
 static void	sigpoll(int);
 static void	enter_maintenance(void);
 static void	timer(int);
@@ -702,7 +704,7 @@ main(int argc, char *argv[])
 		    un.sysname, un.release, un.version, bits);
 		console(B_FALSE, "Copyright 2010-2020 Joyent, Inc.\r\n");
 #else
-		bootbanner_print(init_bootbanner_print, 0);
+		bootbanner_print(init_bootbanner_print);
 #endif
 	}
 
@@ -941,8 +943,8 @@ update_boot_archive(int new_state)
 
 /*
  * void enter_maintenance()
- *   A simple invocation of sulogin(1M), with no baggage, in the case that we
- *   are unable to activate svc.startd(1M).  We fork; the child runs sulogin;
+ *   A simple invocation of sulogin(8), with no baggage, in the case that we
+ *   are unable to activate svc.startd(8).  We fork; the child runs sulogin;
  *   we wait for it to exit.
  */
 static void
@@ -1530,7 +1532,7 @@ getcmd(struct CMD_LINE *cmd, char *shcmd)
 {
 	char	*ptr;
 	int	c, lastc, state;
-	char 	*ptr1;
+	char	*ptr1;
 	int	answer, i, proceed;
 	struct	stat	sbuf;
 	static char *actions[] = {
@@ -1933,16 +1935,14 @@ killproc(pid_t pid)
 /*
  * Set up the default environment for all procs to be forked from init.
  * Read the values from the /etc/default/init file, except for PATH.  If
- * there's not enough room in the environment array, the environment
- * lines that don't fit are silently discarded.
+ * there is not enough room in the environment array, the environment
+ * lines that don't fit are discarded and a message is written to the console.
  */
 void
 init_env()
 {
-	char	line[MAXCMDL];
-	FILE	*fp;
-	int	inquotes, length, wslength;
-	char	*tokp, *cp1, *cp2;
+	void		*dstate;
+	const char	*tokp;
 
 	glob_envp[0] = malloc((unsigned)(strlen(DEF_PATH)+2));
 	(void) strcpy(glob_envp[0], DEF_PATH);
@@ -1960,95 +1960,47 @@ init_env()
 		++glob_envn;
 	}
 
-	if ((fp = fopen(ENVFILE, "r")) == NULL) {
+	if (definit_open(ENVFILE, &dstate) != 0) {
 		console(B_TRUE,
 		    "Cannot open %s. Environment not initialized.\n",
 		    ENVFILE);
-	} else {
-		while (fgets(line, MAXCMDL - 1, fp) != NULL &&
-		    glob_envn < MAXENVENT - 2) {
-			/*
-			 * Toss newline
-			 */
-			length = strlen(line);
-			if (line[length - 1] == '\n')
-				line[length - 1] = '\0';
-
-			/*
-			 * Ignore blank or comment lines.
-			 */
-			if (line[0] == '#' || line[0] == '\0' ||
-			    (wslength = strspn(line, " \t\n")) ==
-			    strlen(line) ||
-			    strchr(line, '#') == line + wslength)
-				continue;
-
-			/*
-			 * First make a pass through the line and change
-			 * any non-quoted semi-colons to blanks so they
-			 * will be treated as token separators below.
-			 */
-			inquotes = 0;
-			for (cp1 = line; *cp1 != '\0'; cp1++) {
-				if (*cp1 == '"') {
-					if (inquotes == 0)
-						inquotes = 1;
-					else
-						inquotes = 0;
-				} else if (*cp1 == ';') {
-					if (inquotes == 0)
-						*cp1 = ' ';
-				}
-			}
-
-			/*
-			 * Tokens within the line are separated by blanks
-			 *  and tabs.  For each token in the line which
-			 * contains a '=' we strip out any quotes and then
-			 * stick the token in the environment array.
-			 */
-			if ((tokp = strtok(line, " \t")) == NULL)
-				continue;
-			do {
-				if (strchr(tokp, '=') == NULL)
-					continue;
-				length = strlen(tokp);
-				while ((cp1 = strpbrk(tokp, "\"\'")) != NULL) {
-					for (cp2 = cp1;
-					    cp2 < &tokp[length]; cp2++)
-						*cp2 = *(cp2 + 1);
-					length--;
-				}
-
-				if (strncmp(tokp, "CMASK=",
-				    sizeof ("CMASK=") - 1) == 0) {
-					long t;
-
-					/* We know there's an = */
-					t = strtol(strchr(tokp, '=') + 1, NULL,
-					    8);
-
-					/* Sanity */
-					if (t <= 077 && t >= 0)
-						cmask = (int)t;
-					(void) umask(cmask);
-					continue;
-				}
-				glob_envp[glob_envn] =
-				    malloc((unsigned)(length + 1));
-				(void) strcpy(glob_envp[glob_envn], tokp);
-				if (++glob_envn >= MAXENVENT - 1)
-					break;
-			} while ((tokp = strtok(NULL, " \t")) != NULL);
-		}
-
-		/*
-		 * Append a null pointer to the environment array
-		 * to mark its end.
-		 */
-		glob_envp[glob_envn] = NULL;
-		(void) fclose(fp);
+		return;
 	}
+
+	while ((tokp = definit_token(dstate)) != NULL &&
+	    glob_envn < MAXENVENT - 2) {
+
+		if (strncmp(tokp, "CMASK=", sizeof ("CMASK=") - 1) == 0) {
+			long t;
+
+			/* We know there's an = */
+			t = strtol(strchr(tokp, '=') + 1, NULL, 8);
+
+			/* Sanity */
+			if (t >= DEFINIT_MIN_UMASK && t <= DEFINIT_MAX_UMASK)
+				cmask = (int)t;
+			(void) umask(cmask);
+			continue;
+		}
+		glob_envp[glob_envn] = strdup(tokp);
+		if (glob_envp[glob_envn] == NULL) {
+			console(B_TRUE, "Out of memory building environment, "
+			    "truncated.\n");
+			break;
+		}
+		if (++glob_envn >= MAXENVENT - 1) {
+			console(B_TRUE, "Too many variables in %s; "
+			    "environment not fully initialized.\n", ENVFILE);
+			break;
+		}
+	}
+
+	/*
+	 * Append a null pointer to the environment array to mark its end.
+	 */
+	glob_envp[glob_envn] = NULL;
+
+	definit_close(dstate);
 }
 
 /*
@@ -2072,7 +2024,7 @@ boot_init()
 	(void) strcpy(glob_envp[0], INIT_PATH);
 
 	/*
-	 * Scan inittab(4) and process the special svc.startd entry, initdefault
+	 * Scan inittab(5) and process the special svc.startd entry, initdefault
 	 * and sysinit entries.
 	 */
 	while (getcmd(&cmd, &line[0]) == TRUE) {
@@ -2155,7 +2107,7 @@ boot_init()
 		write_ioctl_syscon();
 
 	/*
-	 * Start svc.startd(1M), which does most of the work.
+	 * Start svc.startd(8), which does most of the work.
 	 */
 	if (startd_cline[0] != '\0' && startd_tmpl >= 0) {
 		/* Start svc.startd. */
@@ -2190,7 +2142,7 @@ init_signals(void)
 	 * Handle all level-changing signals using siglvl() and set sa_mask so
 	 * that all level-changing signals are blocked while in siglvl().
 	 */
-	act.sa_handler = siglvl;
+	act.sa_sigaction = siglvl;
 	act.sa_flags = SA_SIGINFO;
 	(void) sigemptyset(&act.sa_mask);
 
@@ -2274,17 +2226,18 @@ setup_pipe()
 }
 
 /*
- * siglvl - handle an asynchronous signal from init(1M) telling us that we
+ * siglvl - handle an asynchronous signal from init(8) telling us that we
  * should change the current run level.  We set new_state accordingly.
  */
 void
-siglvl(int sig, siginfo_t *sip, ucontext_t *ucp)
+siglvl(int sig, siginfo_t *sip, void *arg)
 {
+	ucontext_t *ucp = arg;
 	struct PROC_TABLE *process;
 	struct sigaction act;
 
 	/*
-	 * If the signal was from the kernel (rather than init(1M)) then init
+	 * If the signal was from the kernel (rather than init(8)) then init
 	 * itself tripped the signal.  That is, we might have a bug and tripped
 	 * a real SIGSEGV instead of receiving it as an alias for SIGLVLa.  In
 	 * such a case we reset the disposition to SIG_DFL, block all signals
@@ -3121,7 +3074,7 @@ get_scope:
 
 		case SCF_ERROR_NOT_FOUND:
 			(void) fputs(gettext(
-			    "smf(5) repository missing local scope.\n"),
+			    "smf(7) repository missing local scope.\n"),
 			    stderr);
 			exit(1);
 			/* NOTREACHED */
@@ -3313,12 +3266,12 @@ scferr(void)
 
 	case SCF_ERROR_CONNECTION_BROKEN:
 		console(B_TRUE, gettext(
-		    "Connection to smf(5) repository server broken.\n"));
+		    "Connection to smf(7) repository server broken.\n"));
 		break;
 
 	case SCF_ERROR_NO_RESOURCES:
 		console(B_TRUE, gettext(
-		    "smf(5) repository server is out of memory.\n"));
+		    "smf(7) repository server is out of memory.\n"));
 		break;
 
 	case SCF_ERROR_PERMISSION_DENIED:
@@ -3353,7 +3306,7 @@ lscf_set_runlevel(char rl)
 		switch (scf_error()) {
 		case SCF_ERROR_NO_SERVER:
 			console(B_TRUE,
-			    gettext("smf(5) repository server not running.\n"));
+			    gettext("smf(7) repository server not running.\n"));
 			goto bail;
 
 		default:
@@ -3943,7 +3896,7 @@ st_init()
 	do {
 		/*
 		 * If we can exclusively create the file, then we're the
-		 * initial invocation of init(1M).
+		 * initial invocation of init(8).
 		 */
 		st_fd = open(init_state_file, O_RDWR | O_CREAT | O_EXCL,
 		    S_IRUSR | S_IWUSR);
@@ -4213,7 +4166,7 @@ contracts_init()
 	if (legacy_tmpl < 0 && startd_tmpl < 0) {
 		/* The creation errors have already been reported. */
 		console(B_TRUE,
-		    "Ignoring contract events.  Core smf(5) services will not "
+		    "Ignoring contract events.  Core smf(7) services will not "
 		    "be restarted.\n");
 		return;
 	}
@@ -4227,7 +4180,7 @@ contracts_init()
 		;
 	if (fd < 0) {
 		console(B_TRUE,
-		    "Couldn't open process pbundle: %s.  Core smf(5) services "
+		    "Couldn't open process pbundle: %s.  Core smf(7) services "
 		    "will not be restarted.\n", strerror(errno));
 		return;
 	}
@@ -4393,11 +4346,11 @@ contract_event(struct pollfd *poll)
 }
 
 /*
- * svc.startd(1M) Management
+ * svc.startd(8) Management
  */
 
 /*
- * (Re)start svc.startd(1M).  old_ctid should be the contract ID of the old
+ * (Re)start svc.startd(8).  old_ctid should be the contract ID of the old
  * contract, or 0 if we're starting it for the first time.  If wait is true
  * we'll wait for and return the exit value of the child.
  */

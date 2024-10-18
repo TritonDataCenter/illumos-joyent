@@ -23,9 +23,10 @@
  *
  * Copyright 2013 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2016 Andrey Sokolov
- * Copyright 2016 Toomas Soome <tsoome@me.com>
  * Copyright 2019 Joyent, Inc.
  * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2021 Toomas Soome <tsoome@me.com>
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -126,7 +127,7 @@
  *
  * Encryption:
  *	Each lofi device can have its own symmetric key and cipher.
- *	They are passed to us by lofiadm(1m) in the correct format for use
+ *	They are passed to us by lofiadm(8) in the correct format for use
  *	with the misc/kcf crypto_* routines.
  *
  *	Each block has its own IV, that is calculated in lofi_blk_mech(), based
@@ -158,6 +159,7 @@
 #include <sys/disp.h>
 #include <vm/seg_map.h>
 #include <sys/ddi.h>
+#include <sys/dkioc_free_util.h>
 #include <sys/sunddi.h>
 #include <sys/zmod.h>
 #include <sys/id_space.h>
@@ -170,7 +172,6 @@
 #include <sys/scsi/impl/uscsi.h>
 #include <sys/sysevent/dev.h>
 #include <sys/efi_partition.h>
-#include <sys/note.h>
 #include <LzmaDec.h>
 
 #define	NBLOCKS_PROP_NAME	"Nblocks"
@@ -257,16 +258,19 @@ struct cmlb_tg_ops lofi_tg_ops = {
 	lofi_tg_getinfo
 };
 
-/*ARGSUSED*/
+typedef enum {
+	RDWR_RAW,
+	RDWR_BCOPY
+} lofi_rdrw_method_t;
+
 static void
-*SzAlloc(void *p, size_t size)
+*SzAlloc(void *p __unused, size_t size)
 {
 	return (kmem_alloc(size, KM_SLEEP));
 }
 
-/*ARGSUSED*/
 static void
-SzFree(void *p, void *address, size_t size)
+SzFree(void *p __unused, void *address, size_t size)
 {
 	kmem_free(address, size);
 }
@@ -361,10 +365,9 @@ lofi_free_crypto(struct lofi_state *lsp)
 	}
 }
 
-/* ARGSUSED */
 static int
 lofi_tg_rdwr(dev_info_t *dip, uchar_t cmd, void *bufaddr, diskaddr_t start,
-    size_t length, void *tg_cookie)
+    size_t length, void *tg_cookie __unused)
 {
 	struct lofi_state *lsp;
 	buf_t	*bp;
@@ -443,13 +446,12 @@ lofi_tg_rdwr(dev_info_t *dip, uchar_t cmd, void *bufaddr, diskaddr_t start,
  *    NOTE: label can be MBR, MBR+SMI, GPT
  */
 static int
-lofi_tg_getinfo(dev_info_t *dip, int cmd, void *arg, void *tg_cookie)
+lofi_tg_getinfo(dev_info_t *dip, int cmd, void *arg, void *tg_cookie __unused)
 {
 	struct lofi_state *lsp;
 	int instance;
 	int ashift;
 
-	_NOTE(ARGUNUSED(tg_cookie));
 	instance = ddi_get_instance(dip);
 	if (instance == 0)		/* control device has no storage */
 		return (ENXIO);
@@ -524,6 +526,23 @@ lofi_tg_getinfo(dev_info_t *dip, int cmd, void *arg, void *tg_cookie)
 }
 
 static void
+lofi_teardown_task(void *arg)
+{
+	struct lofi_state *lsp = arg;
+	int id = LOFI_MINOR2ID(getminor(lsp->ls_dev));
+
+	mutex_enter(&lofi_lock);
+	while (ndi_devi_offline(lsp->ls_dip, NDI_DEVI_REMOVE) != NDI_SUCCESS) {
+		mutex_exit(&lofi_lock);
+		/* do a sleeping wait for one second */;
+		delay(drv_usectohz(MICROSEC));
+		mutex_enter(&lofi_lock);
+	}
+	id_free(lofi_id, id);
+	mutex_exit(&lofi_lock);
+}
+
+static void
 lofi_destroy(struct lofi_state *lsp, cred_t *credp)
 {
 	int id = LOFI_MINOR2ID(getminor(lsp->ls_dev));
@@ -595,8 +614,23 @@ lofi_destroy(struct lofi_state *lsp, cred_t *credp)
 	lsp->ls_vp_closereq = B_FALSE;
 
 	ASSERT(ddi_get_soft_state(lofi_statep, id) == lsp);
-	(void) ndi_devi_offline(lsp->ls_dip, NDI_DEVI_REMOVE);
-	id_free(lofi_id, id);
+	/*
+	 * Instance state is allocated in lofi_attach() and freed in
+	 * lofi_detach(). New instance is created when we create new mapping.
+	 * Instance removal is performed by unmap ioctl on lofi control
+	 * instance (0).
+	 *
+	 * If the unmap is performed with instance which is still in use,
+	 * we either cancel unmap with error or we can perform delayed unmap
+	 * by blocking all IO, waiting the consumers to close access to this
+	 * instance and once there are no more consumers, complete the unmap.
+	 *
+	 * Delayed unmap will trigger instance removal on last lofi_close(),
+	 * but we can not remove device instance while the instance is still
+	 * in use due to lofi_close() is running.
+	 * Spawn task to complete device instance offlining in separate thread.
+	 */
+	(void) taskq_dispatch(system_taskq, lofi_teardown_task, lsp, KM_SLEEP);
 }
 
 static void
@@ -614,9 +648,8 @@ lofi_free_dev(struct lofi_state *lsp)
 	ddi_remove_minor_node(lsp->ls_dip, NULL);
 }
 
-/*ARGSUSED*/
 static void
-lofi_zone_shutdown(zoneid_t zoneid, void *arg)
+lofi_zone_shutdown(zoneid_t zoneid, void *arg __unused)
 {
 	struct lofi_state *lsp;
 	struct lofi_state *next;
@@ -648,9 +681,8 @@ lofi_zone_shutdown(zoneid_t zoneid, void *arg)
 	mutex_exit(&lofi_lock);
 }
 
-/*ARGSUSED*/
 static int
-lofi_open(dev_t *devp, int flag, int otyp, struct cred *credp)
+lofi_open(dev_t *devp, int flag, int otyp, struct cred *credp __unused)
 {
 	int id;
 	minor_t	part;
@@ -759,9 +791,8 @@ lofi_open(dev_t *devp, int flag, int otyp, struct cred *credp)
 	return (0);
 }
 
-/*ARGSUSED*/
 static int
-lofi_close(dev_t dev, int flag, int otyp, struct cred *credp)
+lofi_close(dev_t dev, int flag __unused, int otyp, struct cred *credp)
 {
 	minor_t	part;
 	int id;
@@ -953,12 +984,10 @@ lofi_crypto(struct lofi_state *lsp, struct buf *bp, caddr_t plaintext,
 	return (ret);
 }
 
-#define	RDWR_RAW	1
-#define	RDWR_BCOPY	2
-
 static int
 lofi_rdwr(caddr_t bufaddr, offset_t offset, struct buf *bp,
-    struct lofi_state *lsp, size_t len, int method, caddr_t bcopy_locn)
+    struct lofi_state *lsp, size_t len, lofi_rdrw_method_t method,
+    caddr_t bcopy_locn)
 {
 	ssize_t resid;
 	int isread;
@@ -1244,11 +1273,9 @@ lofi_add_comp_data(struct lofi_state *lsp, uint64_t seg_index,
 	return (lc);
 }
 
-
-/*ARGSUSED*/
 static int
 gzip_decompress(void *src, size_t srclen, void *dst,
-    size_t *dstlen, int level)
+    size_t *dstlen, int level __unused)
 {
 	ASSERT(*dstlen >= srclen);
 
@@ -1258,10 +1285,9 @@ gzip_decompress(void *src, size_t srclen, void *dst,
 }
 
 #define	LZMA_HEADER_SIZE	(LZMA_PROPS_SIZE + 8)
-/*ARGSUSED*/
 static int
 lzma_decompress(void *src, size_t srclen, void *dst,
-    size_t *dstlen, int level)
+    size_t *dstlen, int level __unused)
 {
 	size_t insizepure;
 	void *actual_src;
@@ -1279,6 +1305,86 @@ lzma_decompress(void *src, size_t srclen, void *dst,
 	return (0);
 }
 
+static void
+lofi_trim_task(void *arg)
+{
+	struct buf *bp = (struct buf *)arg;
+	diskaddr_t p_lba = (diskaddr_t)(uintptr_t)bp->b_private;
+	struct lofi_state *lsp;
+	off64_t start, length;
+	int error;
+
+	lsp = ddi_get_soft_state(lofi_statep,
+	    LOFI_MINOR2ID(getminor(bp->b_edev)));
+
+	if (lsp == NULL) {
+		error = ENXIO;
+		goto errout;
+	}
+
+	if (lsp->ls_kstat != NULL) {
+		mutex_enter(lsp->ls_kstat->ks_lock);
+		kstat_waitq_to_runq(KSTAT_IO_PTR(lsp->ls_kstat));
+		mutex_exit(lsp->ls_kstat->ks_lock);
+	}
+
+	if (lsp->ls_vp == NULL || lsp->ls_vp_closereq) {
+		error = EIO;
+		goto errout;
+	}
+
+	mutex_enter(&lsp->ls_vp_lock);
+	lsp->ls_vp_iocount++;
+	mutex_exit(&lsp->ls_vp_lock);
+
+	start = (bp->b_lblkno + p_lba) << lsp->ls_lbshift;
+	length = bp->b_bcount;
+
+	if (lsp->ls_vp->v_type == VCHR || lsp->ls_vp->v_type == VBLK) {
+		int rv;
+		dkioc_free_list_t dfl = {
+			.dfl_num_exts = 1,
+			.dfl_offset = 0,
+			.dfl_flags = 0,
+			.dfl_exts = {
+				{
+					.dfle_start = start,
+					.dfle_length = length
+				}
+			}
+		};
+
+		error = VOP_IOCTL(lsp->ls_vp, DKIOCFREE, (intptr_t)&dfl,
+		    FKIOCTL, kcred, &rv, NULL);
+	} else {
+		struct flock64 flck = { 0 };
+
+		flck.l_start = start;
+		flck.l_len = length;
+		flck.l_type = F_FREESP;
+		flck.l_whence = 0;
+
+		error = VOP_SPACE(lsp->ls_vp, F_FREESP, &flck, 0, 0, kcred,
+		    NULL);
+	}
+
+	mutex_enter(&lsp->ls_vp_lock);
+	if (--lsp->ls_vp_iocount == 0)
+		cv_broadcast(&lsp->ls_vp_cv);
+	mutex_exit(&lsp->ls_vp_lock);
+
+errout:
+
+	if (lsp != NULL && lsp->ls_kstat != NULL) {
+		mutex_enter(lsp->ls_kstat->ks_lock);
+		kstat_runq_exit(KSTAT_IO_PTR(lsp->ls_kstat));
+		mutex_exit(lsp->ls_kstat->ks_lock);
+	}
+
+	bioerror(bp, error);
+	biodone(bp);
+}
+
 /*
  * This is basically what strategy used to be before we found we
  * needed task queues.
@@ -1287,6 +1393,7 @@ static void
 lofi_strategy_task(void *arg)
 {
 	struct buf *bp = (struct buf *)arg;
+	diskaddr_t p_lba = (diskaddr_t)(uintptr_t)bp->b_private;
 	int error;
 	int syncflag = 0;
 	struct lofi_state *lsp;
@@ -1315,8 +1422,8 @@ lofi_strategy_task(void *arg)
 
 	bp_mapin(bp);
 	bufaddr = bp->b_un.b_addr;
-	offset = (bp->b_lblkno + (diskaddr_t)(uintptr_t)bp->b_private)
-	    << lsp->ls_lbshift;	/* offset within file */
+	/* offset within file */
+	offset = (bp->b_lblkno + p_lba) << lsp->ls_lbshift;
 	if (lsp->ls_crypto_enabled) {
 		/* encrypted data really begins after crypto header */
 		offset += lsp->ls_crypto_offset;
@@ -1640,7 +1747,7 @@ errout:
 }
 
 static int
-lofi_strategy(struct buf *bp)
+lofi_strategy_backend(struct buf *bp, task_func_t taskfunc)
 {
 	struct lofi_state *lsp;
 	offset_t	offset;
@@ -1701,7 +1808,7 @@ lofi_strategy(struct buf *bp)
 		return (0);
 	}
 
-	offset = (bp->b_lblkno+p_lba) << shift;	/* offset within file */
+	offset = (bp->b_lblkno + p_lba) << shift; /* offset within file */
 
 	mutex_enter(&lsp->ls_vp_lock);
 	if (lsp->ls_crypto_enabled) {
@@ -1741,15 +1848,19 @@ lofi_strategy(struct buf *bp)
 		mutex_exit(lsp->ls_kstat->ks_lock);
 	}
 	bp->b_private = (void *)(uintptr_t)p_lba;	/* partition start */
-	(void) taskq_dispatch(lsp->ls_taskq, lofi_strategy_task, bp, KM_SLEEP);
+	(void) taskq_dispatch(lsp->ls_taskq, taskfunc, bp, KM_SLEEP);
 	return (0);
 }
 
 static int
-lofi_read(dev_t dev, struct uio *uio, struct cred *credp)
+lofi_strategy(struct buf *bp)
 {
-	_NOTE(ARGUNUSED(credp));
+	return (lofi_strategy_backend(bp, lofi_strategy_task));
+}
 
+static int
+lofi_read(dev_t dev, struct uio *uio, struct cred *credp __unused)
+{
 	if (getminor(dev) == 0)
 		return (EINVAL);
 	UIO_CHECK(uio);
@@ -1757,10 +1868,8 @@ lofi_read(dev_t dev, struct uio *uio, struct cred *credp)
 }
 
 static int
-lofi_write(dev_t dev, struct uio *uio, struct cred *credp)
+lofi_write(dev_t dev, struct uio *uio, struct cred *credp __unused)
 {
-	_NOTE(ARGUNUSED(credp));
-
 	if (getminor(dev) == 0)
 		return (EINVAL);
 	UIO_CHECK(uio);
@@ -1797,9 +1906,69 @@ lofi_urw(struct lofi_state *lsp, uint16_t fmode, diskaddr_t off, size_t size,
 	    lofi_write(lsp->ls_dev, &uio, credp));
 }
 
-/*ARGSUSED2*/
+typedef struct {
+	struct lofi_state *lcd_lsp;
+	dev_t lcd_dev;
+} lofi_cb_data_t;
+
 static int
-lofi_aread(dev_t dev, struct aio_req *aio, struct cred *credp)
+lofi_free_space_cb(dkioc_free_list_t *dfl, void *arg, int kmflag __unused)
+{
+	dkioc_free_list_ext_t *ext;
+	lofi_cb_data_t *cbd = arg;
+	struct lofi_state *lsp = cbd->lcd_lsp;
+	buf_t *bp = NULL;
+	int error = 0;
+
+	bp = getrbuf(KM_SLEEP);
+
+	ext = dfl->dfl_exts;
+	for (uint_t i = 0; i < dfl->dfl_num_exts; i++, ext++) {
+		uint64_t start = dfl->dfl_offset + ext->dfle_start;
+		uint64_t length = ext->dfle_length;
+
+		bp->b_edev = cbd->lcd_dev;
+		bp->b_flags = B_WRITE;
+		bp->b_un.b_addr = NULL;
+		bp->b_resid = 0;
+		bp->b_lblkno = start >> lsp->ls_lbshift;
+		bp->b_bcount = length;
+
+		DTRACE_PROBE2(trim__issued, uint64_t, start, uint64_t, length);
+
+		error = lofi_strategy_backend(bp, lofi_trim_task);
+		if (error != 0)
+			break;
+		(void) biowait(bp);
+	}
+
+	freerbuf(bp);
+	dfl_free(dfl);
+	return (error);
+}
+
+static int
+lofi_free_space(struct lofi_state *lsp, dkioc_free_list_t *dfl, dev_t dev)
+{
+	dkioc_free_info_t dfi = {
+		.dfi_bshift = lsp->ls_lbshift,
+		.dfi_align = 1U << lsp->ls_lbshift,
+		.dfi_max_bytes = 0,
+		.dfi_max_ext = 0,
+		.dfi_max_ext_bytes = 0
+	};
+
+	lofi_cb_data_t cbd = {
+		.lcd_lsp = lsp,
+		.lcd_dev = dev
+	};
+
+	return (dfl_iter(dfl, &dfi, lsp->ls_vp_size, lofi_free_space_cb,
+	    &cbd, KM_SLEEP));
+}
+
+static int
+lofi_aread(dev_t dev, struct aio_req *aio, struct cred *credp __unused)
 {
 	if (getminor(dev) == 0)
 		return (EINVAL);
@@ -1807,9 +1976,8 @@ lofi_aread(dev_t dev, struct aio_req *aio, struct cred *credp)
 	return (aphysio(lofi_strategy, anocancel, dev, B_READ, minphys, aio));
 }
 
-/*ARGSUSED2*/
 static int
-lofi_awrite(dev_t dev, struct aio_req *aio, struct cred *credp)
+lofi_awrite(dev_t dev, struct aio_req *aio, struct cred *credp __unused)
 {
 	if (getminor(dev) == 0)
 		return (EINVAL);
@@ -1817,9 +1985,9 @@ lofi_awrite(dev_t dev, struct aio_req *aio, struct cred *credp)
 	return (aphysio(lofi_strategy, anocancel, dev, B_WRITE, minphys, aio));
 }
 
-/*ARGSUSED*/
 static int
-lofi_info(dev_info_t *dip, ddi_info_cmd_t infocmd, void *arg, void **result)
+lofi_info(dev_info_t *dip __unused, ddi_info_cmd_t infocmd, void *arg,
+    void **result)
 {
 	struct lofi_state *lsp;
 	dev_t	dev = (dev_t)arg;
@@ -2243,7 +2411,7 @@ fake_disk_geometry(struct lofi_state *lsp)
 {
 	u_offset_t dsize = lsp->ls_vp_size - lsp->ls_crypto_offset;
 
-	/* dk_geom - see dkio(7I) */
+	/* dk_geom - see dkio(4I) */
 	/*
 	 * dkg_ncyl _could_ be set to one here (one big cylinder with gobs
 	 * of sectors), but that breaks programs like fdisk which want to
@@ -2273,7 +2441,7 @@ fake_disk_geometry(struct lofi_state *lsp)
 }
 
 /*
- * build vtoc - see dkio(7I)
+ * build vtoc - see dkio(4I)
  *
  * Fakes one big partition based on the size of the file. This is needed
  * because we allow newfs'ing the traditional lofi device and newfs will
@@ -2313,7 +2481,7 @@ fake_disk_vtoc(struct lofi_state *lsp, struct vtoc *vt)
 }
 
 /*
- * build dk_cinfo - see dkio(7I)
+ * build dk_cinfo - see dkio(4I)
  */
 static void
 fake_disk_info(dev_t dev, struct dk_cinfo *ci)
@@ -2425,7 +2593,6 @@ lofi_map_compressed_file(struct lofi_state *lsp, char *buf)
 
 	/* Skip the header, this is where the index really begins */
 	lsp->ls_comp_seg_index =
-	    /*LINTED*/
 	    (uint64_t *)(lsp->ls_comp_index_data + header_len);
 
 	/*
@@ -2697,7 +2864,7 @@ lofi_create_dev(struct lofi_ioctl *klip)
 	dev_info_t *parent, *child;
 	struct lofi_state *lsp = NULL;
 	char namebuf[MAXNAMELEN];
-	int error, circ;
+	int error;
 
 	/* get control device */
 	lsp = ddi_get_soft_state(lofi_statep, 0);
@@ -2709,9 +2876,9 @@ lofi_create_dev(struct lofi_ioctl *klip)
 	(void) snprintf(namebuf, sizeof (namebuf), LOFI_DRIVER_NAME "@%d",
 	    klip->li_id);
 
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 	child = ndi_devi_findchild(parent, namebuf);
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 
 	if (child == NULL) {
 		child = ddi_add_child(parent, LOFI_DRIVER_NAME,
@@ -2821,10 +2988,10 @@ lofi_map_file(dev_t dev, struct lofi_ioctl *ulip, int pickminor,
 	int	id = -1;
 	struct lofi_state *lsp = NULL;
 	struct lofi_ioctl *klip;
-	int	error;
+	int	error, canfree;
 	struct vnode *vp = NULL;
 	vattr_t	vattr;
-	int	flag;
+	int	flag = 0;
 	char	namebuf[MAXNAMELEN];
 
 	error = copy_in_lofi_ioctl(ulip, &klip, ioctl_flag);
@@ -2954,13 +3121,45 @@ lofi_map_file(dev_t dev, struct lofi_ioctl *ulip, int pickminor,
 		}
 	}
 
+	/* Determine if the underlying device supports TRIM/DISCARD */
+	if (lsp->ls_vp->v_type == VCHR || lsp->ls_vp->v_type == VBLK) {
+		if (VOP_IOCTL(lsp->ls_vp, DKIOC_CANFREE, (intptr_t)&canfree,
+		    FKIOCTL, kcred, &error, NULL) != 0) {
+			canfree = 0;
+		}
+	} else {
+		/*
+		 * We don't have a way to discover if a file supports
+		 * the FREESP fcntl cmd (other than trying it).
+		 * However, since zfs, ufs, tmpfs, and udfs all have
+		 * support, and NFSv4 also forwards these requests to
+		 * the server, we always enable it for file based
+		 * volumes. When it comes to executing the commands
+		 * they may silently fail.
+		 */
+		canfree = 1;
+	}
+
+	if (lsp->ls_readonly)
+		canfree = 0;
+
+	lsp->ls_canfree = (canfree != 0);
+
 	/*
-	 * Notify we are ready to rock.
+	 * Notify we are ready to rock. If we are a labeled device, we must now
+	 * ask cmlb to validate the label, which will finally create the right
+	 * minors for us. In particular, this is a challenge because before
+	 * ls_vp_ready was set, we couldn't even get the geometry count which
+	 * means that we'll have the wrong default label if we have a larger
+	 * device.
 	 */
 	mutex_enter(&lsp->ls_vp_lock);
 	lsp->ls_vp_ready = B_TRUE;
 	cv_broadcast(&lsp->ls_vp_cv);
 	mutex_exit(&lsp->ls_vp_lock);
+	if (lsp->ls_cmlbhandle != NULL) {
+		(void) cmlb_validate(lsp->ls_cmlbhandle, 0, 0);
+	}
 	mutex_exit(&lofi_lock);
 
 	lofi_copy_devpath(klip);
@@ -3084,10 +3283,9 @@ done:
  * get the filename given the minor number, or the minor number given
  * the name.
  */
-/*ARGSUSED*/
 static int
-lofi_get_info(dev_t dev, struct lofi_ioctl *ulip, int which,
-    struct cred *credp, int ioctl_flag)
+lofi_get_info(dev_t dev __unused, struct lofi_ioctl *ulip, int which,
+    struct cred *credp __unused, int ioctl_flag)
 {
 	struct lofi_ioctl *klip;
 	struct lofi_state *lsp;
@@ -3116,7 +3314,8 @@ lofi_get_info(dev_t dev, struct lofi_ioctl *ulip, int which,
 		 * This may fail if, for example, we're trying to look
 		 * up a zoned NFS path from the global zone.
 		 */
-		if (vnodetopath(NULL, lsp->ls_stacked_vp, klip->li_filename,
+		if (lsp->ls_stacked_vp == NULL ||
+		    vnodetopath(NULL, lsp->ls_stacked_vp, klip->li_filename,
 		    sizeof (klip->li_filename), CRED()) != 0) {
 			(void) strlcpy(klip->li_filename, "?",
 			    sizeof (klip->li_filename));
@@ -3340,7 +3539,14 @@ lofi_ioctl(dev_t dev, int cmd, intptr_t arg, int flag, cred_t *credp,
 
 		if (cmd == DKIOCGMEDIAINFOEXT) {
 			media_info.dki_pbsize = 1U << lsp->ls_pbshift;
-			size = sizeof (struct dk_minfo_ext);
+			switch (ddi_model_convert_from(flag & FMODELS)) {
+			case DDI_MODEL_ILP32:
+				size = sizeof (struct dk_minfo_ext32);
+				break;
+			default:
+				size = sizeof (struct dk_minfo_ext);
+				break;
+			}
 		} else {
 			size = sizeof (struct dk_minfo);
 		}
@@ -3509,6 +3715,32 @@ lofi_ioctl(dev_t dev, int cmd, intptr_t arg, int flag, cred_t *credp,
 		    user_efi.dki_lba * (1 << lsp->ls_lbshift),
 		    user_efi.dki_length, (intptr_t)user_efi.dki_data,
 		    flag, credp));
+
+	case DKIOC_CANFREE: {
+		int canfree = lsp->ls_canfree ? 1 : 0;
+
+		if (ddi_copyout(&canfree, (void *)arg, sizeof (canfree), flag))
+			return (EFAULT);
+
+		return (0);
+	}
+
+	case DKIOCFREE: {
+		dkioc_free_list_t *dfl;
+
+		if (!lsp->ls_canfree)
+			return (ENOTSUP);
+
+		error = dfl_copyin((void *)arg, &dfl, flag, KM_SLEEP);
+		if (error != 0)
+			return (error);
+
+		/*
+		 * lofi_free_space() calls dfl_iter() which consumes dfl;
+		 * there is no need to call dfl_free() here.
+		 */
+		return (lofi_free_space(lsp, dfl, dev));
+	}
 
 	default:
 #ifdef DEBUG

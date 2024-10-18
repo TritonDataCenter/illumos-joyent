@@ -128,7 +128,7 @@ static char *_unix_crypt_gensalt(char *gsbuffer, size_t gsbufflen,
  * This function encodes strings in a suitable for for secure storage
  * as passwords.  It generates the password hash given the plaintext and salt.
  *
- * If the first character of salt is "$" then we use crypt.conf(4) to
+ * If the first character of salt is "$" then we use crypt.conf(5) to
  * determine which plugin to use and run the crypt_genhash_impl(3c) function
  * from it.
  * Otherwise we use the old unix algorithm.
@@ -166,7 +166,7 @@ crypt(const char *plaintext, const char *salt)
 
 	/*
 	 * Find the algorithm name from the salt and look it up in
-	 * crypt.conf(4) to find out what shared object to use.
+	 * crypt.conf(5) to find out what shared object to use.
 	 * If we can't find it in crypt.conf then getalgbyname would
 	 * have returned with found = B_FALSE so we use the unix algorithm.
 	 * If alg is NULL but found = B_TRUE then there is a problem with
@@ -208,10 +208,10 @@ cleanup:
  * either still allowed or not deprecated.
  *
  * RETURN VALUES
- * 	Return a pointer to the new salt, the caller is responsible
- * 	for using free(3c) on the return value.
- * 	Returns NULL on error and sets errno to one of:
- * 		EINVAL, ELIBACC, ENOMEM
+ *	Return a pointer to the new salt, the caller is responsible
+ *	for using free(3c) on the return value.
+ *	Returns NULL on error and sets errno to one of:
+ *		EINVAL, ELIBACC, ENOMEM
  */
 char *
 crypt_gensalt(const char *oldsalt, const struct passwd *userinfo)
@@ -472,12 +472,12 @@ alg_valid(const char *algname, const struct crypt_policy_s *policy)
 }
 
 /*
- * getalgbyname - read crypt.conf(4) looking for algname
+ * getalgbyname - read crypt.conf(5) looking for algname
  *
  * RETURN VALUES
  *	On error NULL and errno is set
  *	On success the alg details including an open handle to the lib
- *	If crypt.conf(4) is okay but algname doesn't exist in it then
+ *	If crypt.conf(5) is okay but algname doesn't exist in it then
  *	return NULL the caller should then use the default algorithm
  *	as per the policy.
  */
@@ -570,7 +570,7 @@ getalgbyname(const char *algname, boolean_t *found)
 			*found = B_TRUE;
 		}
 	}
-	if (!found) {
+	if (!(*found)) {
 		errno = EINVAL;
 		goto cleanup;
 	}
@@ -731,7 +731,7 @@ free_crypt_policy(struct crypt_policy_s *policy)
 
 /*
  * isa_path - prepend the default dir or patch up the $ISA in path
- * 	Caller is responsible for calling free(3c) on the result.
+ *	Caller is responsible for calling free(3c) on the result.
  */
 static char *
 isa_path(const char *path)
@@ -775,13 +775,12 @@ isa_path(const char *path)
 }
 
 
-/*ARGSUSED*/
 static char *
 _unix_crypt_gensalt(char *gsbuffer,
-	    size_t gsbufflen,
-	    const char *oldpuresalt,
-	    const struct passwd *userinfo,
-	    const char *argv[])
+    size_t gsbufflen __unused,
+    const char *oldpuresalt __unused,
+    const struct passwd *userinfo __unused,
+    const char *argv[] __unused)
 {
 	static const char saltchars[] =
 	    "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -807,7 +806,7 @@ _unix_crypt_gensalt(char *gsbuffer,
 
 
 /*	Copyright (c) 1988 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 
 
@@ -1014,9 +1013,8 @@ static char f[32];
 
 static char preS[48];
 
-/*ARGSUSED*/
 static void
-unlocked_encrypt(char *block, int fake)
+unlocked_encrypt(char *block, int fake __unused)
 {
 	int	i;
 	int t, j, k;

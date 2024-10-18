@@ -45,7 +45,6 @@
 #include	"_rtld.h"
 #include	"_audit.h"
 #include	"_elf.h"
-#include	"_a.out.h"
 #include	"_inline_gen.h"
 #include	"msg.h"
 
@@ -1308,7 +1307,8 @@ file_open(int err, Lm_list *lml, Rt_map *clmp, uint_t flags, Fdesc *fdp,
 			}
 		}
 
-		if (nlmp = is_devinode_loaded(&status, lml, nname, flags)) {
+		nlmp = is_devinode_loaded(&status, lml, nname, flags);
+		if (nlmp != NULL) {
 			if (flags & FLG_RT_AUDIT) {
 				/*
 				 * If we've been requested to load an auditor,
@@ -1595,7 +1595,7 @@ find_file(Lm_list *lml, Rt_map *clmp, uint_t flags, Fdesc *fdp, Rej_desc *rej,
 	if ((olen + pdp->pd_plen + 1) >= PATH_MAX) {
 		eprintf(lml, ERR_FATAL, MSG_INTL(MSG_SYS_OPEN), oname,
 		    strerror(ENAMETOOLONG));
-			return (0);
+		return (0);
 	}
 	if ((fdp->fd_nname = (LM_GET_SO(clmp)(pdp->pd_pname, oname,
 	    pdp->pd_plen, olen))) == NULL)
@@ -1606,9 +1606,6 @@ find_file(Lm_list *lml, Rt_map *clmp, uint_t flags, Fdesc *fdp, Rej_desc *rej,
 
 static Fct	*Vector[] = {
 	&elf_fct,
-#ifdef	A_OUT
-	&aout_fct,
-#endif
 	0
 };
 
@@ -1781,12 +1778,6 @@ map_obj(Lm_list *lml, Fdesc *fdp, size_t fsize, const char *name, int fd,
 			fptr = elf_verify((mpp->mr_addr + mpp->mr_offset),
 			    mpp->mr_fsize, fdp, name, rej);
 		}
-#ifdef	A_OUT
-		if (flags == MR_HDR_AOUT) {
-			fptr = aout_verify((mpp->mr_addr + mpp->mr_offset),
-			    mpp->mr_fsize, fdp, name, rej);
-		}
-#endif
 		if (fptr) {
 			fdp->fd_mapn = mapnum;
 			fdp->fd_mapp = smpp;
@@ -1850,8 +1841,7 @@ load_file(Lm_list *lml, Aliste lmco, Rt_map *clmp, Fdesc *fdp, int *in_nfavl)
 			/* LINTED */
 			ehdr = (Ehdr *)(mpp->mr_addr + mpp->mr_offset);
 			hmpp = mpp;
-		} else if (flags == MR_HDR_AOUT)
-			hmpp = mpp;
+		}
 	}
 
 	/*
@@ -2530,8 +2520,8 @@ load_path(Lm_list *lml, Aliste lmco, Rt_map *clmp, int nmode, uint_t flags,
 		 * If it's a NOLOAD request - check to see if the object
 		 * has already been loaded.
 		 */
-		/* LINTED */
-		if (nlmp = is_so_loaded(lml, name, in_nfavl)) {
+		nlmp = is_so_loaded(lml, name, in_nfavl);
+		if (nlmp != NULL) {
 			if ((lml->lm_flags & LML_FLG_TRC_VERBOSE) &&
 			    ((FLAGS1(clmp) & FL1_RT_LDDSTUB) == 0)) {
 				(void) printf(MSG_INTL(MSG_LDD_FIL_FIND), name,
@@ -2881,7 +2871,8 @@ lookup_sym_direct(Slookup *slp, Sresult *srp, uint_t *binfo, Syminfo *sip,
 	    (sip->si_flags & SYMINFO_FLG_COPY)) {
 		slp->sl_imap = LIST(clmp)->lm_head;
 
-		if (ret = SYMINTP(clmp)(slp, srp, binfo, in_nfavl))
+		ret = SYMINTP(clmp)(slp, srp, binfo, in_nfavl);
+		if (ret != 0)
 			*binfo |= (DBG_BINFO_DIRECT | DBG_BINFO_COPYREF);
 		return (ret);
 	}
@@ -2905,7 +2896,8 @@ lookup_sym_direct(Slookup *slp, Sresult *srp, uint_t *binfo, Syminfo *sip,
 		 */
 		for (APLIST_TRAVERSE(CALLERS(clmp), idx1, bdp)) {
 			sl.sl_imap = lmp = bdp->b_caller;
-			if (ret = SYMINTP(lmp)(&sl, srp, binfo, in_nfavl))
+			ret = SYMINTP(lmp)(&sl, srp, binfo, in_nfavl);
+			if (ret != 0)
 				goto found;
 		}
 
@@ -2924,8 +2916,8 @@ lookup_sym_direct(Slookup *slp, Sresult *srp, uint_t *binfo, Syminfo *sip,
 				if ((gdp->gd_flags & GPD_PARENT) == 0)
 					continue;
 				sl.sl_imap = lmp = gdp->gd_depend;
-				if (ret = SYMINTP(lmp)(&sl, srp, binfo,
-				    in_nfavl))
+				ret = SYMINTP(lmp)(&sl, srp, binfo, in_nfavl);
+				if (ret != 0)
 					goto found;
 			}
 		}
@@ -3209,8 +3201,9 @@ _lookup_sym(Slookup *slp, Sresult *srp, uint_t *binfo, int *in_nfavl)
 
 			for (ALIST_TRAVERSE(lml->lm_lists, idx, lmc)) {
 				sl.sl_flags |= LKUP_NOFALLBACK;
-				if (ret = rescan_lazy_find_sym(lmc->lc_head,
-				    &sl, srp, binfo, in_nfavl))
+				ret = rescan_lazy_find_sym(lmc->lc_head,
+				    &sl, srp, binfo, in_nfavl);
+				if (ret != 0)
 					break;
 			}
 		}
@@ -3223,10 +3216,6 @@ _lookup_sym(Slookup *slp, Sresult *srp, uint_t *binfo, int *in_nfavl)
  * search.  If successful, return a pointer to the symbol table entry, a
  * pointer to the link map of the enclosing object, and information relating
  * to the type of binding.  Else return a null pointer.
- *
- * To improve ELF performance, we first compute the ELF hash value and pass
- * it to each _lookup_sym() routine.  The ELF function will use this value to
- * locate the symbol, the a.out function will simply ignore it.
  */
 int
 lookup_sym(Slookup *slp, Sresult *srp, uint_t *binfo, int *in_nfavl)

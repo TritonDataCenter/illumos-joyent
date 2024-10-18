@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2013-2021 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 #ifndef _SMBSRV_SMB_VOPS_H
@@ -128,6 +129,8 @@ void smb_vop_close(vnode_t *, int, cred_t *);
 int smb_vop_read(vnode_t *, uio_t *, int, cred_t *);
 int smb_vop_write(vnode_t *, uio_t *, int, uint32_t *, cred_t *);
 int smb_vop_ioctl(vnode_t *, int, void *, cred_t *);
+int smb_vop_reqzcbuf(vnode_t *, int, xuio_t *, cred_t *);
+int smb_vop_retzcbuf(vnode_t *, xuio_t *, cred_t *);
 int smb_vop_getattr(vnode_t *, vnode_t *, smb_attr_t *, int, cred_t *);
 int smb_vop_setattr(vnode_t *, vnode_t *, smb_attr_t *, int, cred_t *);
 int smb_vop_space(vnode_t *, int, flock64_t *, int, offset_t, cred_t *);
@@ -168,6 +171,8 @@ int smb_vop_other_opens(vnode_t *, int);
 
 void smb_vop_catia_v4tov5(char *, char *, int);
 char *smb_vop_catia_v5tov4(char *, char *, int);
+
+boolean_t smb_vop_priv_check(cred_t *, int, boolean_t, vnode_t *);
 
 #ifdef __cplusplus
 }

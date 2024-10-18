@@ -41,6 +41,7 @@ MANFILES=					\
 		Pcreate.3proc			\
 		Pcred.3proc			\
 		Pctlfd.3proc			\
+		Pcwd.3proc			\
 		Pdelbkpt.3proc			\
 		Pdelwapt.3proc			\
 		Pdestroy_agent.3proc		\
@@ -131,6 +132,7 @@ MANFILES=					\
 		proc_get_auxv.3proc		\
 		proc_get_cred.3proc		\
 		proc_get_fdinfo.3proc		\
+		proc_get_lwpsinfo.3proc		\
 		proc_get_priv.3proc		\
 		proc_get_psinfo.3proc		\
 		proc_get_status.3proc		\
@@ -161,6 +163,7 @@ MANFILES=					\
 		Psync.3proc			\
 		Psysentry.3proc			\
 		Puname.3proc			\
+		Pupanic.3proc			\
 		Pupdate_maps.3proc		\
 		Pupdate_syms.3proc		\
 		Pwrite.3proc			\
@@ -178,9 +181,15 @@ MANLINKS=					\
 		Lclearsig.3proc			\
 		Ldstop.3proc			\
 		Lgetareg.3proc			\
+		Lgetfpregs.3proc		\
+		Lgetregs.3proc			\
+		Lgetxregs.3proc			\
 		Lmain_stack.3proc		\
 		Lputareg.3proc			\
+		Lsetfpregs.3proc		\
+		Lsetregs.3proc			\
 		Lsetrun.3proc			\
+		Lsetxregs.3proc			\
 		Lstack.3proc			\
 		Lstop.3proc			\
 		Lsync.3proc			\
@@ -189,6 +198,7 @@ MANLINKS=					\
 		Lxecwapt.3proc			\
 		Paddr_to_text_map.3proc		\
 		Pcreate_callback.3proc		\
+		Pcwd_free.3proc			\
 		Pdstop.3proc			\
 		Pfgcore.3proc			\
 		Pfgrab_core.3proc		\
@@ -199,6 +209,7 @@ MANLINKS=					\
 		Plmid_to_map.3proc		\
 		Plookup_by_name.3proc		\
 		Plwp_alt_stack.3proc		\
+		Plwp_freexregs.3proc		\
 		Plwp_getfpregs.3proc		\
 		Plwp_iter_all.3proc		\
 		Plwp_main_stack.3proc		\
@@ -215,6 +226,7 @@ MANLINKS=					\
 		Pobjname_resolved.3proc		\
 		Ppriv_free.3proc		\
 		Pputareg.3proc			\
+		Psecflags_free.3proc		\
 		pr_fstat.3proc			\
 		pr_fstat64.3proc		\
 		pr_getrlimit64.3proc		\
@@ -231,6 +243,7 @@ MANLINKS=					\
 		proc_flushstdio.3proc		\
 		proc_free_priv.3proc		\
 		proc_get_ldt.3proc		\
+		proc_get_lwpstatus.3proc	\
 		proc_lwp_range_valid.3proc	\
 		proc_signame.3proc		\
 		proc_sigset2str.3proc		\
@@ -264,6 +277,7 @@ MANLINKS=					\
 		Psymbol_iter_by_lmid.3proc	\
 		Psymbol_iter_by_name.3proc	\
 		Psysexit.3proc			\
+		Pupanic_free.3proc		\
 		Punsetflags.3proc		\
 		Pwait.3proc			\
 		Pxcreate.3proc			\
@@ -300,6 +314,8 @@ ps_pcontinue.3proc		:= LINKSRC = ps_pstop.3proc
 
 Pxcreate.3proc			:= LINKSRC = Pcreate.3proc
 Pcreate_callback.3proc		:= LINKSRC = Pcreate.3proc
+
+Pcwd_free.3proc			:= LINKSRC = Pcwd.3proc
 
 Pfgrab_core.3proc		:= LINKSRC = Pgrab_core.3proc
 
@@ -351,6 +367,10 @@ Pxlookup_by_name.3proc		:= LINKSRC = Plookup_by_addr.3proc
 Plwp_setregs.3proc		:= LINKSRC = Plwp_getregs.3proc
 Plwp_getfpregs.3proc		:= LINKSRC = Plwp_getregs.3proc
 Plwp_setfpregs.3proc		:= LINKSRC = Plwp_getregs.3proc
+Lgetfpregs.3proc		:= LINKSRC = Plwp_getregs.3proc
+Lsetfpregs.3proc		:= LINKSRC = Plwp_getregs.3proc
+Lgetregs.3proc			:= LINKSRC = Plwp_getregs.3proc
+Lsetregs.3proc			:= LINKSRC = Plwp_getregs.3proc
 
 Plwp_alt_stack.3proc		:= LINKSRC = Plwp_stack.3proc
 Plwp_main_stack.3proc		:= LINKSRC = Plwp_stack.3proc
@@ -363,6 +383,8 @@ Pobjname_resolved.3proc		:= LINKSRC = Pobjname.3proc
 Ppriv_free.3proc		:= LINKSRC = Ppriv.3proc
 
 Pread_string.3proc		:= LINKSRC = Pread.3proc
+
+Psecflags_free.3proc		:= LINKSRC = Psecflags.3proc
 
 Punsetflags.3proc		:= LINKSRC = Psetflags.3proc
 
@@ -379,6 +401,8 @@ Lclearfault.3proc		:= LINKSRC = Pclearfault.3proc
 Lclearsig.3proc			:= LINKSRC = Pclearsig.3proc
 
 Lsetrun.3proc			:= LINKSRC = Psetrun.3proc
+
+Pupanic_free.3proc		:= LINKSRC = Pupanic.3proc
 
 Pzonepath.3proc			:= LINKSRC = Pzonename.3proc
 Pzoneroot.3proc			:= LINKSRC = Pzonename.3proc
@@ -413,6 +437,8 @@ proc_sysset2str.3proc		:= LINKSRC = proc_fltset2str.3proc
 
 proc_free_priv.3proc		:= LINKSRC = proc_get_priv.3proc
 
+proc_get_lwpstatus.3proc	:= LINKSRC = proc_get_lwpsinfo.3proc
+
 proc_lwp_range_valid.3proc	:= LINKSRC = proc_lwp_in_set.3proc
 
 proc_str2sig.3proc		:= LINKSRC = proc_str2flt.3proc
@@ -423,7 +449,10 @@ proc_str2sysset.3proc		:= LINKSRC = proc_str2fltset.3proc
 
 proc_get_ldt.3proc		:= LINKSRC = Pldt.3proc
 
+Plwp_freexregs.3proc		:= LINKSRC = Plwp_getxregs.3proc
 Plwp_setxregs.3proc		:= LINKSRC = Plwp_getxregs.3proc
+Lgetxregs.3proc			:= LINKSRC = Plwp_getxregs.3proc
+Lsetxregs.3proc			:= LINKSRC = Plwp_getxregs.3proc
 
 Plwp_setasrs.3proc		:= LINKSRC = Plwp_getasrs.3proc
 

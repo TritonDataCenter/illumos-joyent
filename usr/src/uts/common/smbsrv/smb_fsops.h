@@ -22,7 +22,7 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2013-2021 Tintri by DDN, Inc. All rights reserved.
  */
 
 #ifndef _SMBSRV_SMB_FSOPS_H
@@ -54,6 +54,10 @@ void smb_fsop_oplock_uninstall(smb_node_t *);
 int smb_fsop_create(smb_request_t *, cred_t *, smb_node_t *,
     char *, smb_attr_t *, smb_node_t **);
 
+int
+smb_fsop_create_stream(smb_request_t *, cred_t *, smb_node_t *, smb_node_t *,
+    char *, int, smb_attr_t *, smb_node_t **);
+
 int smb_fsop_mkdir(smb_request_t *, cred_t *, smb_node_t *,
     char *, smb_attr_t *, smb_node_t **);
 
@@ -83,6 +87,10 @@ int smb_fsop_read(smb_request_t *, cred_t *, smb_node_t *, smb_ofile_t *,
 int smb_fsop_write(smb_request_t *, cred_t *, smb_node_t *, smb_ofile_t *,
     uio_t *, uint32_t *, int);
 
+int smb_fsop_reqzcbuf(smb_node_t *, xuio_t *, int, cred_t *);
+
+int smb_fsop_retzcbuf(smb_node_t *, xuio_t *, cred_t *);
+
 int smb_fsop_next_alloc_range(cred_t *, smb_node_t *, off64_t *, off64_t *);
 
 int smb_fsop_statfs(cred_t *, smb_node_t *, struct statvfs64 *);
@@ -93,11 +101,17 @@ int smb_fsop_access(smb_request_t *, cred_t *, smb_node_t *, uint32_t);
 
 void smb_fsop_eaccess(smb_request_t *, cred_t *, smb_node_t *, uint32_t *);
 
+int smb_fsop_lookup_file(smb_request_t *, cred_t *, int,
+    smb_node_t *, smb_node_t *, char *, char **, smb_node_t **);
+
 int smb_fsop_lookup_name(smb_request_t *, cred_t *, int,
     smb_node_t *, smb_node_t *, char *, smb_node_t **);
 
 int smb_fsop_lookup(smb_request_t *, cred_t *, int,
     smb_node_t *, smb_node_t *, char *, smb_node_t **);
+
+int smb_fsop_lookup_stream(smb_request_t *, cred_t *, int, smb_node_t *,
+    smb_node_t *, char *, smb_node_t **);
 
 int smb_fsop_commit(smb_request_t *, cred_t *, smb_node_t *);
 

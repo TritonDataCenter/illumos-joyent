@@ -192,7 +192,7 @@ do_check_port(char *attr_val, boolean_t local, flow_desc_t *fdesc)
 static dladm_status_t
 flow_attrlist_check(dladm_arg_list_t *attrlist)
 {
-	int		i, j;
+	uint_t		i, j;
 	boolean_t	isset[DLADM_MAX_FLOWATTRS];
 	boolean_t	matched;
 
@@ -229,20 +229,20 @@ dladm_status_t
 dladm_flow_attrlist_extract(dladm_arg_list_t *attrlist, flow_desc_t *flowdesc)
 {
 	dladm_status_t	status = DLADM_STATUS_BADARG;
-	int		i;
+	uint_t		i;
 
 	for (i = 0; i < attrlist->al_count; i++) {
 		dladm_arg_info_t	*aip = &attrlist->al_info[i];
-		int			j;
+		uint_t			j;
+
+		if (aip->ai_val[0] == NULL)
+			return (DLADM_STATUS_BADARG);
 
 		for (j = 0; j < DLADM_MAX_FLOWATTRS; j++) {
 			fattr_desc_t	*adp = &attr_table[j];
 
 			if (strcasecmp(aip->ai_name, adp->ad_name) != 0)
 				continue;
-
-			if ((aip->ai_val == NULL) || (*aip->ai_val == NULL))
-				return (DLADM_STATUS_BADARG);
 
 			if (adp->ad_check != NULL)
 				status = adp->ad_check(*aip->ai_val, flowdesc);

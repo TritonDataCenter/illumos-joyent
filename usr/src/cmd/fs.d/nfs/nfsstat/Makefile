@@ -40,6 +40,8 @@ STAT_COMMON_SRCS = $(STAT_COMMON_OBJS:%.o=$(STATCOMMONDIR)/%.c)
 SRCS += $(STAT_COMMON_SRCS)
 OBJS += $(STAT_COMMON_OBJS)
 
+CSTD= $(CSTD_GNU99)
+
 CPPFLAGS += -I$(STATCOMMONDIR)
 CERRWARN += -_gcc=-Wno-parentheses
 
@@ -66,10 +68,7 @@ nfs_sec.o:	../lib/nfs_sec.c
 
 install:	all $(ROOTPROG)
 
-lint:
-	$(LINT.c) $(SRCS) $(LDLIBS)
-
-clean:     
+clean:
 	$(RM) $(OBJS)
 
 include ../../../Makefile.targ

@@ -22,7 +22,7 @@
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2021 Tintri by DDN, Inc. All rights reserved.
  */
 
 /*
@@ -89,6 +89,9 @@ smb_sd_len(smb_sd_t *sd, uint32_t secinfo)
  *
  * Return the security information mask for the specified security
  * descriptor.
+ *
+ * Note: This is used for 'create-with-sd'. 'set-security-info' provides the
+ * secinfo as part of the request, but create does not, so we must infer it.
  */
 uint32_t
 smb_sd_get_secinfo(smb_sd_t *sd)
@@ -104,10 +107,10 @@ smb_sd_get_secinfo(smb_sd_t *sd)
 	if (sd->sd_group)
 		sec_info |= SMB_GROUP_SECINFO;
 
-	if (sd->sd_dacl)
+	if ((sd->sd_control & SE_DACL_PRESENT) != 0)
 		sec_info |= SMB_DACL_SECINFO;
 
-	if (sd->sd_sacl)
+	if ((sd->sd_control & SE_SACL_PRESENT) != 0)
 		sec_info |= SMB_SACL_SECINFO;
 
 	return (sec_info);
@@ -243,28 +246,52 @@ smb_sd_tofs(smb_sd_t *sd, smb_fssd_t *fs_sd)
 		}
 	}
 
+	/*
+	 * In SMB, the 'secinfo' determines which parts of the SD the client
+	 * intends to change. Notably, this includes changing the DACL_PRESENT
+	 * and SACL_PRESENT control bits. The client can specify e.g.
+	 * SACL_SECINFO, but not SACL_PRESENT, and this means the client intends
+	 * to remove the SACL.
+	 *
+	 * Note that Windows behavior differs from that described in [MS-DTYP].
+	 * MS-DTYP states that the offset is nonzero if-and-only-if the PRESENT
+	 * bit is set. It also states that a DACL that is marked non-present
+	 * is equivalent to 'no security', but one that is marked present and
+	 * provides no ACEs is equivalent to 'no access'.
+	 *
+	 * Windows, on the other hand, allows the offset to be 0 even when
+	 * the PRESENT bit is set, and only provides security when the DACL
+	 * offset is non-zero. It will also convert an SD where the DACL is
+	 * marked not-present to one where the PRESENT bit is set and the
+	 * offset is 0.
+	 *
+	 * If the *_PRESENT bit isn't set, then the respective ACL will be NULL.
+	 * For the fssd, we allow the SACL to be NULL, but we MUST have a DACL.
+	 * If the DACL is NULL, that's equivalent to "everyone:full_set:allow".
+	 *
+	 * The IMPLY's should be enforced by smb_decode_sd().
+	 */
+
 	/* DACL */
 	if (fs_sd->sd_secinfo & SMB_DACL_SECINFO) {
-		if (sd->sd_control & SE_DACL_PRESENT) {
-			status = smb_acl_to_zfs(sd->sd_dacl, flags,
-			    SMB_DACL_SECINFO, &fs_sd->sd_zdacl);
-			if (status != NT_STATUS_SUCCESS)
-				return (status);
-		}
-		else
-			return (NT_STATUS_INVALID_ACL);
+		IMPLY(sd->sd_dacl != NULL,
+		    (sd->sd_control & SE_DACL_PRESENT) != 0);
+		status = smb_acl_to_zfs(sd->sd_dacl, flags,
+		    SMB_DACL_SECINFO, &fs_sd->sd_zdacl);
+		if (status != NT_STATUS_SUCCESS)
+			return (status);
 	}
 
 	/* SACL */
 	if (fs_sd->sd_secinfo & SMB_SACL_SECINFO) {
+		IMPLY(sd->sd_sacl != NULL,
+		    (sd->sd_control & SE_SACL_PRESENT) != 0);
 		if (sd->sd_control & SE_SACL_PRESENT) {
 			status = smb_acl_to_zfs(sd->sd_sacl, flags,
 			    SMB_SACL_SECINFO, &fs_sd->sd_zsacl);
 			if (status != NT_STATUS_SUCCESS) {
 				return (status);
 			}
-		} else {
-			return (NT_STATUS_INVALID_ACL);
 		}
 	}
 

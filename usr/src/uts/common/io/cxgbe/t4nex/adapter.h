@@ -28,6 +28,7 @@
 #include <sys/ethernet.h>
 #include <sys/queue.h>
 #include <sys/containerof.h>
+#include <sys/ddi_ufm.h>
 
 #include "offload.h"
 #include "firmware/t4fw_interface.h"
@@ -134,6 +135,7 @@ struct port_info {
 	u16 viid_mirror;
 	kstat_t *ksp_config;
 	kstat_t *ksp_info;
+	kstat_t *ksp_fec;
 
 	u8 vivld;
 	u8 vin;
@@ -346,6 +348,7 @@ struct sge_txq {
 	uint32_t pullup_early;	/* # of pullups before starting frame's SGL */
 	uint32_t pullup_late;	/* # of pullups while building frame's SGL */
 	uint32_t pullup_failed;	/* # of failed pullups */
+	uint32_t csum_failed;	/* # of csum reqs we failed to fulfill */
 };
 
 /* rxq: SGE ingress queue + SGE free list + miscellaneous items */
@@ -427,8 +430,10 @@ struct sge {
 	struct sge_ofld_rxq *ofld_rxq;	/* TOE rx queues */
 #endif
 
-	uint16_t iq_start;
-	int eq_start;
+	int iq_start; /* iq context id map start index */
+	int eq_start; /* eq context id map start index */
+	int iqmap_sz; /* size of iq context id map */
+	int eqmap_sz; /* size of eq context id map */
 	struct sge_iq **iqmap;	/* iq->cntxt_id to iq mapping */
 	struct sge_eq **eqmap;	/* eq->cntxt_id to eq mapping */
 
@@ -478,6 +483,10 @@ struct rss_header;
 typedef int (*cpl_handler_t)(struct sge_iq *, const struct rss_header *,
     mblk_t *);
 typedef int (*fw_msg_handler_t)(struct adapter *, const __be64 *);
+
+struct t4_mbox_list {
+	STAILQ_ENTRY(t4_mbox_list) link;
+};
 
 struct adapter {
 	SLIST_ENTRY(adapter) link;
@@ -559,6 +568,16 @@ struct adapter {
 	kmutex_t sfl_lock;	/* same cache-line as sc_lock? but that's ok */
 	TAILQ_HEAD(, sge_fl) sfl;
 	timeout_id_t sfl_timer;
+
+	/* Sensors */
+	id_t temp_sensor;
+	id_t volt_sensor;
+
+	ddi_ufm_handle_t *ufm_hdl;
+
+	/* support for single-threading access to adapter mailbox registers */
+	kmutex_t mbox_lock;
+	STAILQ_HEAD(, t4_mbox_list) mbox_list;
 };
 
 enum {
@@ -631,17 +650,38 @@ struct memwin {
 /* One for errors, one for firmware events */
 #define	T4_EXTRA_INTR 2
 
-/* Presently disabling locking around  mbox access
- * We may need to reenable it later
- */
-typedef int t4_os_lock_t;
+typedef kmutex_t t4_os_lock_t;
+
 static inline void t4_os_lock(t4_os_lock_t *lock)
 {
-
+	mutex_enter(lock);
 }
+
 static inline void t4_os_unlock(t4_os_lock_t *lock)
 {
+	mutex_exit(lock);
+}
 
+static inline void t4_mbox_list_add(struct adapter *adap,
+				    struct t4_mbox_list *entry)
+{
+	t4_os_lock(&adap->mbox_lock);
+	STAILQ_INSERT_TAIL(&adap->mbox_list, entry, link);
+	t4_os_unlock(&adap->mbox_lock);
+}
+
+static inline void t4_mbox_list_del(struct adapter *adap,
+				    struct t4_mbox_list *entry)
+{
+	t4_os_lock(&adap->mbox_lock);
+	STAILQ_REMOVE(&adap->mbox_list, entry, t4_mbox_list, link);
+	t4_os_unlock(&adap->mbox_lock);
+}
+
+static inline struct t4_mbox_list *
+t4_mbox_list_first_entry(struct adapter *adap)
+{
+	return STAILQ_FIRST(&adap->mbox_list);
 }
 
 static inline uint32_t
@@ -694,17 +734,21 @@ t4_os_pci_write_cfg4(struct adapter *sc, int reg, uint32_t val)
 	pci_config_put32(sc->pci_regh, reg, val);
 }
 
+static inline uint32_t
+t4_read_reg32(struct adapter *sc, uint32_t reg)
+{
+	return (ddi_get32(sc->regh, (uint32_t *)(sc->regp + reg)));
+}
+
 static inline uint64_t
 t4_read_reg64(struct adapter *sc, uint32_t reg)
 {
-	/* LINTED: E_BAD_PTR_CAST_ALIGN */
 	return (ddi_get64(sc->regh, (uint64_t *)(sc->regp + reg)));
 }
 
 static inline void
 t4_write_reg64(struct adapter *sc, uint32_t reg, uint64_t val)
 {
-	/* LINTED: E_BAD_PTR_CAST_ALIGN */
 	ddi_put64(sc->regh, (uint64_t *)(sc->regp + reg), val);
 }
 
@@ -745,6 +789,12 @@ is_40G_port(const struct port_info *pi)
 }
 
 static inline bool
+is_50G_port(const struct port_info *pi)
+{
+	return ((pi->link_cfg.pcaps & FW_PORT_CAP32_SPEED_50G) != 0);
+}
+
+static inline bool
 is_100G_port(const struct port_info *pi)
 {
 	return ((pi->link_cfg.pcaps & FW_PORT_CAP32_SPEED_100G) != 0);
@@ -754,25 +804,8 @@ static inline bool
 is_10XG_port(const struct port_info *pi)
 {
 	return (is_10G_port(pi) || is_40G_port(pi) ||
-		is_25G_port(pi) || is_100G_port(pi));
-}
-
-static inline char *
-print_port_speed(const struct port_info *pi)
-{
-	if (!pi)
-		return "-";
-
-	if (is_100G_port(pi))
-		return "100G";
-	else if (is_40G_port(pi))
-		return "40G";
-	else if (is_25G_port(pi))
-		return "25G";
-	else if (is_10G_port(pi))
-		return "10G";
-	else
-		return "1G";
+		is_25G_port(pi) || is_50G_port(pi) ||
+		is_100G_port(pi));
 }
 
 #ifdef TCP_OFFLOAD_ENABLE
@@ -848,7 +881,7 @@ static inline void t4_db_dropped(struct adapter *adap) {}
 
 /* t4_nexus.c */
 int t4_os_find_pci_capability(struct adapter *sc, int cap);
-void t4_os_portmod_changed(const struct adapter *sc, int idx);
+void t4_os_portmod_changed(struct adapter *sc, int idx);
 int adapter_full_init(struct adapter *sc);
 int adapter_full_uninit(struct adapter *sc);
 int port_full_init(struct port_info *pi);

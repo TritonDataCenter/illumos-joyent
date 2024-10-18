@@ -26,6 +26,7 @@
 # Copyright (c) 2016, Chris Fraire <cfraire@me.com>.
 # Copyright 2019 Joyent, Inc.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2021 Jason King
 #
 
 include ../Makefile.master
@@ -40,29 +41,32 @@ include ../Makefile.master
 # Anything built before 'install.bin' is present must override binary
 # installation rules in their makefiles. This includes the Makefile for
 # 'install.bin' itself.
-BOOT_SUBDIRS= \
-	smatch \
-	.WAIT \
-	cw \
-	.WAIT \
-	install.bin \
-	.WAIT \
-	ctf
+BOOT_SUBDIRS=		\
+	smatch		\
+	.WAIT		\
+	cw		\
+	.WAIT		\
+	install.bin	\
+	.WAIT		\
+	ctf		\
+	yacc
 
-COMMON_SUBDIRS= \
-	codesign \
-	cscope-fast \
-	env \
-	findunref \
-	lintdump \
-	make \
-	makesoftcore \
-	ndrgen \
-	onbld \
-	protocmp \
-	protolist \
-	scripts \
-	sgs
+COMMON_SUBDIRS=		\
+	codesign	\
+	cscope-fast	\
+	env		\
+	find_elf	\
+	findunref	\
+	lintdump	\
+	make		\
+	makesoftcore	\
+	ndrgen		\
+	onbld		\
+	protocmp	\
+	protolist	\
+	scripts		\
+	sgs		\
+	svc
 
 #
 #  special versions of commands for use only in build
@@ -74,6 +78,7 @@ UNSHIPPED_SUBDIRS = \
 	$(SGSLIBLDDBG) \
 	$(SGSLIBLD) \
 	$(SGSLD) \
+	geniconvtbl \
 	localedef \
 	man \
 	mandoc \
@@ -82,56 +87,43 @@ UNSHIPPED_SUBDIRS = \
 	vtfontcvt \
 	zic
 
-sparc_SUBDIRS= \
-	chk4ubin \
-	stabs \
-	tokenize
-
-i386_SUBDIRS=		\
-	aw		\
-	cpcgen		\
-	elfextract	\
-	mbh_patch	\
+i386_SUBDIRS=			\
+	cpcgen			\
+	elfextract		\
+	mbh_patch		\
 	btxld
 
-$(INTEL_BLD)sgs: aw
-
-SUBDIRS= \
-	$($(MACH)_SUBDIRS) \
-	$(COMMON_SUBDIRS) \
+SUBDIRS=			\
+	$($(MACH)_SUBDIRS)	\
+	$(COMMON_SUBDIRS)	\
 	$(UNSHIPPED_SUBDIRS)
 
 include Makefile.tools
 
-ROOTDIRS= \
-	$(ROOTOPT) \
-	$(ROOTONBLD) \
-	$(ROOTONBLD)/bin \
-	$(ROOTONBLD)/bin/$(MACH) \
-	$(ROOTONBLD)/lib \
-	$(ROOTONBLD)/lib/$(MACH) \
-	$(ROOTONBLD)/lib/$(MACH)/64 \
-	$(ROOTONBLD)/lib/perl \
-	$(ROOTONBLD)/env \
-	$(ROOTONBLD)/etc \
-	$(ROOTONBLD)/etc/exception_lists \
-	$(ROOTONBLD)/share \
-	$(ROOTONBLD)/man \
+ROOTDIRS=					\
+	$(ROOTOPT)				\
+	$(ROOTONBLD)				\
+	$(ROOTONBLD)/bin			\
+	$(ROOTONBLD)/bin/$(MACH)		\
+	$(ROOTONBLD)/bin/$(MACH64)		\
+	$(ROOTONBLD)/lib			\
+	$(ROOTONBLD)/lib/$(MACH)		\
+	$(ROOTONBLD)/lib/$(MACH)/64		\
+	$(ROOTONBLD)/lib/perl			\
+	$(ROOTONBLD)/env			\
+	$(ROOTONBLD)/etc			\
+	$(ROOTONBLD)/etc/exception_lists	\
+	$(ROOTONBLD)/share			\
+	$(ROOTONBLD)/man			\
 	$(ROOTONBLD)/man/man1onbld
 
-$(BUILDPY2TOOLS)ROOTDIRS += \
-	$(ROOTONBLD)/lib/python$(PYTHON_VERSION) \
-	$(ROOTONBLD)/lib/python$(PYTHON_VERSION)/onbld \
-	$(ROOTONBLD)/lib/python$(PYTHON_VERSION)/onbld/Checks \
-	$(ROOTONBLD)/lib/python$(PYTHON_VERSION)/onbld/Scm
-
-$(BUILDPY3TOOLS)ROOTDIRS += \
-	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION) \
-	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld \
-	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/__pycache__ \
-	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/Checks \
-	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/Checks/__pycache__ \
-	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/Scm \
+ROOTDIRS +=							\
+	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)				\
+	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld				\
+	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/__pycache__		\
+	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/Checks			\
+	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/Checks/__pycache__	\
+	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/Scm			\
 	$(ROOTONBLD)/lib/python$(PYTHON3_VERSION)/onbld/Scm/__pycache__
 
 all :=		TARGET= install
@@ -150,7 +142,6 @@ DOROOTDIRS= $(ROOTDIRS)
 clobber:= DOROOTDIRS=
 clean:= DOROOTDIRS=
 
-$(BUILDPY2TOOLS)DOROOTONBLDLIBPY= $(ROOTONBLDLIBPY)
 clobber:= DOROOTONBLDLIBPY=
 clean:= DOROOTONBLDLIBPY=
 
@@ -165,9 +156,9 @@ bootstrap: $(BOOT_SUBDIRS)
 
 _msg: $(MSGSUBDIRS)
 
-.PARALLEL: $(SUBDIRS) $(CLOSED_SUBDIRS)
+.PARALLEL: $(SUBDIRS)
 
-$(SUBDIRS) $(CLOSED_SUBDIRS): $(BOOT_SUBDIRS)
+$(SUBDIRS): $(BOOT_SUBDIRS)
 
 $(BOOT_SUBDIRS) $(SUBDIRS): $$(DOROOTDIRS) $$(DOROOTONBLDLIBPY) FRC
 	@cd $@; pwd; $(MAKE) $(TARGET)
@@ -177,6 +168,6 @@ $(ROOTDIRS):
 	$(MKDIR) -p -m $(DIRMODE) $@
 
 $(ROOTONBLDLIBPY): $(ROOTDIRS)
-	$(RM) -r $@; $(SYMLINK) python$(PYTHON_VERSION) $@
+	$(RM) -r $@; $(SYMLINK) python$(PYTHON3_VERSION) $@
 
 FRC:

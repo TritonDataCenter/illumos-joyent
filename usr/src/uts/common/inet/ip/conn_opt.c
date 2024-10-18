@@ -22,6 +22,8 @@
 /*
  * Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 /* Copyright (c) 1990 Mentat Inc. */
 
@@ -236,11 +238,22 @@ conn_recvancillary_size(conn_t *connp, crb_t recv_ancillary,
 	}
 
 	/*
+	 * If IP_RECVTOS is set allocate the appropriately sized buffer
+	 */
+	if (recv_ancillary.crb_recvtos &&
+	    (ira->ira_flags & IRAF_IS_IPV4)) {
+		ancil_size += sizeof (struct T_opthdr) +
+		    P2ROUNDUP(sizeof (uint8_t), __TPI_ALIGN_SIZE);
+		IP_STAT(ipst, conn_in_recvtos);
+	}
+
+	/*
 	 * If IP_RECVTTL is set allocate the appropriate sized buffer
 	 */
 	if (recv_ancillary.crb_recvttl &&
 	    (ira->ira_flags & IRAF_IS_IPV4)) {
-		ancil_size += sizeof (struct T_opthdr) + sizeof (uint8_t);
+		ancil_size += sizeof (struct T_opthdr) +
+		    P2ROUNDUP(sizeof (uint8_t), __TPI_ALIGN_SIZE);
 		IP_STAT(ipst, conn_in_recvttl);
 	}
 
@@ -550,14 +563,25 @@ conn_recvancillary_add(conn_t *connp, crb_t recv_ancillary,
 		ancil_size -= toh->len;
 	}
 
-	/*
-	 * CAUTION:
-	 * Due to aligment issues
-	 * Processing of IP_RECVTTL option
-	 * should always be the last. Adding
-	 * any option processing after this will
-	 * cause alignment panic.
-	 */
+	if (recv_ancillary.crb_recvtos &&
+	    (ira->ira_flags & IRAF_IS_IPV4)) {
+		struct	T_opthdr *toh;
+		uint8_t	*dstptr;
+
+		toh = (struct T_opthdr *)ancil_buf;
+		toh->level = IPPROTO_IP;
+		toh->name = IP_RECVTOS;
+		toh->len = sizeof (struct T_opthdr) +
+		    P2ROUNDUP(sizeof (uint8_t), __TPI_ALIGN_SIZE);
+		toh->status = 0;
+		ancil_buf += sizeof (struct T_opthdr);
+		dstptr = (uint8_t *)ancil_buf;
+		*dstptr = ipp->ipp_type_of_service;
+		ancil_buf = (uchar_t *)toh + toh->len;
+		ancil_size -= toh->len;
+		ASSERT(__TPI_TOPT_ISALIGNED(toh));
+	}
+
 	if (recv_ancillary.crb_recvttl &&
 	    (ira->ira_flags & IRAF_IS_IPV4)) {
 		struct	T_opthdr *toh;
@@ -566,13 +590,15 @@ conn_recvancillary_add(conn_t *connp, crb_t recv_ancillary,
 		toh = (struct T_opthdr *)ancil_buf;
 		toh->level = IPPROTO_IP;
 		toh->name = IP_RECVTTL;
-		toh->len = sizeof (struct T_opthdr) + sizeof (uint8_t);
+		toh->len = sizeof (struct T_opthdr) +
+		    P2ROUNDUP(sizeof (uint8_t), __TPI_ALIGN_SIZE);
 		toh->status = 0;
 		ancil_buf += sizeof (struct T_opthdr);
 		dstptr = (uint8_t *)ancil_buf;
 		*dstptr = ipp->ipp_hoplimit;
-		ancil_buf += sizeof (uint8_t);
+		ancil_buf = (uchar_t *)toh + toh->len;
 		ancil_size -= toh->len;
+		ASSERT(__TPI_TOPT_ISALIGNED(toh));
 	}
 
 	/* Consumed all of allocated space */
@@ -777,6 +803,9 @@ conn_opt_get(conn_opt_arg_t *coa, t_scalar_t level, t_scalar_t name,
 		case IP_RECVTTL:
 			*i1 = connp->conn_recv_ancillary.crb_recvttl;
 			break;	/* goto sizeof (int) option return */
+		case IP_RECVTOS:
+			*i1 = connp->conn_recv_ancillary.crb_recvtos;
+			break;	/* goto sizeof (int) option return */
 		case IP_ADD_MEMBERSHIP:
 		case IP_DROP_MEMBERSHIP:
 		case MCAST_JOIN_GROUP:
@@ -817,6 +846,9 @@ conn_opt_get(conn_opt_arg_t *coa, t_scalar_t level, t_scalar_t name,
 			else
 				*(uchar_t *)ptr = ipst->ips_ip_broadcast_ttl;
 			return (sizeof (uchar_t));
+		case IP_MINTTL:
+			*i1 = connp->conn_min_ttl;
+			return (sizeof (int));
 		default:
 			return (-1);
 		}
@@ -952,6 +984,9 @@ conn_opt_get(conn_opt_arg_t *coa, t_scalar_t level, t_scalar_t name,
 			break;
 		case IPV6_V6ONLY:
 			*i1 = connp->conn_ipv6_v6only;
+			return (sizeof (int));
+		case IPV6_MINHOPCOUNT:
+			*i1 = connp->conn_min_ttl;
 			return (sizeof (int));
 		default:
 			return (-1);
@@ -1213,7 +1248,7 @@ conn_opt_set_ip(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 	switch (name) {
 	case IP_TTL:
 		/* Don't allow zero */
-		if (*i1 < 1 || *i1 > 255)
+		if (*i1 < 1 || *i1 > MAXTTL)
 			return (EINVAL);
 		break;
 	case IP_MULTICAST_IF:
@@ -1293,6 +1328,10 @@ conn_opt_set_ip(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 		/* Just check it is ok. */
 		if (!ip_xmit_ifindex_valid(ifindex, zoneid, B_FALSE, ipst))
 			return (ENXIO);
+		break;
+	case IP_MINTTL:
+		if (*i1 < 0 || *i1 > MAXTTL)
+			return (EINVAL);
 		break;
 	}
 	if (checkonly)
@@ -1383,6 +1422,11 @@ conn_opt_set_ip(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 	case IP_RECVTTL:
 		mutex_enter(&connp->conn_lock);
 		connp->conn_recv_ancillary.crb_recvttl = onoff;
+		mutex_exit(&connp->conn_lock);
+		break;
+	case IP_RECVTOS:
+		mutex_enter(&connp->conn_lock);
+		connp->conn_recv_ancillary.crb_recvtos = onoff;
 		mutex_exit(&connp->conn_lock);
 		break;
 	case IP_PKTINFO: {
@@ -1507,7 +1551,11 @@ conn_opt_set_ip(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 			return (error);
 		}
 		return (0);
-
+	case IP_MINTTL:
+		mutex_enter(&connp->conn_lock);
+		connp->conn_min_ttl = *i1;
+		mutex_exit(&connp->conn_lock);
+		break;
 	}
 	return (0);
 }
@@ -1632,7 +1680,7 @@ conn_opt_set_ipv6(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 		if (inlen != 0 && inlen != sizeof (int))
 			return (EINVAL);
 		if (inlen == sizeof (int)) {
-			if (*i1 > 255 || *i1 < -1 || *i1 == 0)
+			if (*i1 > IPV6_MAX_HOPS || *i1 < -1 || *i1 == 0)
 				return (EINVAL);
 		}
 		break;
@@ -1699,6 +1747,10 @@ conn_opt_set_ipv6(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 		if (*i1 < 0 || *i1 > 1) {
 			return (EINVAL);
 		}
+		break;
+	case IPV6_MINHOPCOUNT:
+		if (*i1 < 0 || *i1 > IPV6_MAX_HOPS)
+			return (EINVAL);
 		break;
 	}
 	if (checkonly)
@@ -2010,6 +2062,11 @@ conn_opt_set_ipv6(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 	case IPV6_V6ONLY:
 		mutex_enter(&connp->conn_lock);
 		connp->conn_ipv6_v6only = onoff;
+		mutex_exit(&connp->conn_lock);
+		break;
+	case IPV6_MINHOPCOUNT:
+		mutex_enter(&connp->conn_lock);
+		connp->conn_min_ttl = *i1;
 		mutex_exit(&connp->conn_lock);
 		break;
 	}
@@ -2895,6 +2952,7 @@ conn_inherit_parent(conn_t *lconnp, conn_t *econnp)
 	econnp->conn_flowinfo = lconnp->conn_flowinfo;
 
 	econnp->conn_default_ttl = lconnp->conn_default_ttl;
+	econnp->conn_min_ttl = lconnp->conn_min_ttl;
 
 	/*
 	 * TSOL: tsol_input_proc() needs the eager's cred before the

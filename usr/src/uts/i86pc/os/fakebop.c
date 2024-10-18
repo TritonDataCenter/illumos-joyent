@@ -27,6 +27,7 @@
  * All rights reserved.
  *
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -130,8 +131,8 @@ static char *curr_page = NULL;		/* ptr to avail bprop memory */
 static int curr_space = 0;		/* amount of memory at curr_page */
 
 #ifdef __xpv
-start_info_t *xen_info;
-shared_info_t *HYPERVISOR_shared_info;
+extern start_info_t *xen_info;
+extern shared_info_t *HYPERVISOR_shared_info;
 #endif
 
 /*
@@ -658,7 +659,7 @@ boot_prop_display(char *buffer)
 
 /*
  * 2nd part of building the table of boot properties. This includes:
- * - values from /boot/solaris/bootenv.rc (ie. eeprom(1m) values)
+ * - values from /boot/solaris/bootenv.rc (ie. eeprom(8) values)
  *
  * lines look like one of:
  * ^$
@@ -911,7 +912,7 @@ bop_panic(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	bop_printf(NULL, fmt, ap);
+	vbop_printf(NULL, fmt, ap);
 	va_end(ap);
 
 	bop_printf(NULL, "\nPress any key to reboot.\n");
@@ -967,12 +968,16 @@ do_bsys_doint(bootops_t *bop, int intnum, struct bop_regs *rp)
 	br.ds = rp->ds;
 	br.es = rp->es;
 
-	DBG_MSG("Doing BIOS call...");
+	DBG_MSG("Doing BIOS call...\n");
 	DBG(br.ax);
 	DBG(br.bx);
 	DBG(br.dx);
 	rp->eflags = bios_func(intnum, &br);
 	DBG_MSG("done\n");
+	DBG(rp->eflags);
+	DBG(br.ax);
+	DBG(br.bx);
+	DBG(br.dx);
 
 	rp->eax.word.ax = br.ax;
 	rp->ebx.word.bx = br.bx;
@@ -1448,6 +1453,30 @@ process_boot_environment(struct boot_modules *benv)
 			continue;
 		}
 
+		/*
+		 * The loader allows multiple console devices to be specified
+		 * as a comma-separated list, but the kernel does not yet
+		 * support multiple console devices.  If a list is provided,
+		 * ignore all but the first entry:
+		 */
+		if (strcmp(name, "console") == 0) {
+			char propval[BP_MAX_STRLEN];
+
+			for (uint32_t i = 0; i < BP_MAX_STRLEN; i++) {
+				propval[i] = value[i];
+				if (value[i] == ' ' ||
+				    value[i] == ',' ||
+				    value[i] == '\0') {
+					propval[i] = '\0';
+					break;
+				}
+
+				if (i + 1 == BP_MAX_STRLEN)
+					propval[i] = '\0';
+			}
+			bsetprops(name, propval);
+			continue;
+		}
 		if (name_is_blacklisted(name) == B_TRUE)
 			continue;
 
@@ -1464,7 +1493,7 @@ process_boot_environment(struct boot_modules *benv)
  * 1st pass at building the table of boot properties. This includes:
  * - values set on the command line: -B a=x,b=y,c=z ....
  * - known values we just compute (ie. from xbp)
- * - values from /boot/solaris/bootenv.rc (ie. eeprom(1m) values)
+ * - values from /boot/solaris/bootenv.rc (ie. eeprom(8) values)
  *
  * the grub command line looked like:
  * kernel boot-file [-B prop=value[,prop=value]...] [boot-args]
@@ -2112,7 +2141,7 @@ _start(struct xboot_info *xbp)
 	if (find_boot_prop("kbm_debug") != NULL)
 		kbm_debug = 1;
 
-	DBG_MSG("\n\n*** Entered Solaris in _start() cmdline is: ");
+	DBG_MSG("\n\n*** Entered illumos in _start() cmdline is: ");
 	DBG_MSG((char *)xbp->bi_cmdline);
 	DBG_MSG("\n\n\n");
 
@@ -2922,7 +2951,8 @@ build_firmware_properties(struct xboot_info *xbp)
 	    find_fw_table(rsdp, ACPI_SIG_SRAT)) != NULL)
 		process_srat(srat_ptr);
 
-	if (slit_ptr = (ACPI_TABLE_SLIT *)find_fw_table(rsdp, ACPI_SIG_SLIT))
+	if ((slit_ptr = (ACPI_TABLE_SLIT *)find_fw_table(rsdp,
+	    ACPI_SIG_SLIT)) != NULL)
 		process_slit(slit_ptr);
 
 	tp = find_fw_table(rsdp, ACPI_SIG_MCFG);
@@ -2935,6 +2965,15 @@ build_firmware_properties(struct xboot_info *xbp)
 #endif /* __xpv */
 	if (tp != NULL)
 		process_mcfg((ACPI_TABLE_MCFG *)tp);
+
+	/*
+	 * Map the first HPET table (if it exists) and save the address.
+	 * If the HPET is required to calibrate the TSC, we require the
+	 * HPET table prior to being able to load modules, so we cannot use
+	 * the acpica module (and thus AcpiGetTable()) to locate it.
+	 */
+	if ((tp = find_fw_table(rsdp, ACPI_SIG_HPET)) != NULL)
+		bsetprop64("hpet-table", (uint64_t)(uintptr_t)tp);
 }
 
 /*

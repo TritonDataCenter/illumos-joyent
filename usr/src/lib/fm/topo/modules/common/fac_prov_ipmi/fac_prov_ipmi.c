@@ -24,7 +24,7 @@
  */
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2019 by Western Digital Corporation
+ * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
  */
 #include <unistd.h>
 #include <stdio.h>
@@ -432,7 +432,7 @@ ipmi_sensor_state(topo_mod_t *mod, tnode_t *node, topo_version_t vers,
 
 	if (topo_prop_get_string(node, TOPO_PGROUP_FACILITY, TOPO_SENSOR_CLASS,
 	    &sensor_class, &err) != 0) {
-		topo_mod_dprintf(mod, "Failed to lookup prop %s/%s on node %s ",
+		topo_mod_dprintf(mod, "Failed to lookup prop %s/%s on node %s "
 		    "(%s)", TOPO_PGROUP_FACILITY, TOPO_SENSOR_CLASS,
 		    topo_node_name(node), topo_strerror(err));
 		return (topo_mod_seterrno(mod, EMOD_UKNOWN_ENUM));
@@ -1519,8 +1519,9 @@ make_sensor_node(topo_mod_t *mod, tnode_t *pnode, struct sensor_data *sd,
 	    "entity_ref", TOPO_PROP_IMMUTABLE, (const char **)entity_refs, 1,
 	    &err) != 0) {
 		topo_mod_dprintf(mod, "%s: Failed to set entity_ref property "
-		    "on node: %s=%d (%s)\n", __func__, topo_node_name(fnode),
-		    topo_node_instance(fnode), topo_strerror(err));
+		    "on node: %s=%" PRIu64 " (%s)\n", __func__,
+		    topo_node_name(fnode), topo_node_instance(fnode),
+		    topo_strerror(err));
 		topo_mod_strfreev(mod, entity_refs, 1);
 		return (topo_mod_seterrno(mod, err));
 	}
@@ -1529,15 +1530,17 @@ make_sensor_node(topo_mod_t *mod, tnode_t *pnode, struct sensor_data *sd,
 	if (topo_prop_set_string(fnode, TOPO_PGROUP_FACILITY, TOPO_SENSOR_CLASS,
 	    TOPO_PROP_IMMUTABLE, sd->sd_class, &err) != 0) {
 		topo_mod_dprintf(mod, "Failed to set %s property on node: "
-		    "%s=%d (%s)\n", TOPO_SENSOR_CLASS, topo_node_name(fnode),
-		    topo_node_instance(fnode), topo_strerror(err));
+		    "%s=%" PRIu64 " (%s)\n", TOPO_SENSOR_CLASS,
+		    topo_node_name(fnode), topo_node_instance(fnode),
+		    topo_strerror(err));
 		return (topo_mod_seterrno(mod, err));
 	}
 	if (topo_prop_set_uint32(fnode, TOPO_PGROUP_FACILITY,
 	    TOPO_FACILITY_TYPE, TOPO_PROP_IMMUTABLE, sd->sd_stype, &err) != 0) {
 		topo_mod_dprintf(mod, "Failed to set %s property on node: "
-		    "%s=%d (%s)\n", TOPO_FACILITY_TYPE, topo_node_name(fnode),
-		    topo_node_instance(fnode), topo_strerror(err));
+		    "%s=%" PRIu64 " (%s)\n", TOPO_FACILITY_TYPE,
+		    topo_node_name(fnode), topo_node_instance(fnode),
+		    topo_strerror(err));
 		return (topo_mod_seterrno(mod, err));
 	}
 	if (topo_mod_nvalloc(mod, &arg_nvl, NV_UNIQUE_NAME) < 0) {
@@ -1606,6 +1609,15 @@ make_sensor_node(topo_mod_t *mod, tnode_t *pnode, struct sensor_data *sd,
 
 	if (ipmi_get_sensor_thresholds(hdl, &thresh,
 	    sd->sd_fs_sdr->is_fs_number) != 0) {
+		/*
+		 * Some sensors report supporting reading thresholds, but Get
+		 * Sensor Thresholds returns Invalid Command.  Do not consider
+		 * this an error so we could continue enumerating sensors for
+		 * the entity.
+		 */
+		if (ipmi_errno(hdl) == EIPMI_INVALID_COMMAND)
+			return (0);
+
 		topo_mod_dprintf(mod, "Failed to get sensor thresholds for "
 		    "node %s (%s)\n", topo_node_name(fnode), ipmi_errmsg(hdl));
 		return (topo_mod_seterrno(mod, EMOD_PARTIAL_ENUM));
@@ -1732,8 +1744,9 @@ get_entity_info(topo_mod_t *mod, tnode_t *node, ipmi_handle_t *hdl,
 	if (topo_prop_get_string_array(node, TOPO_PGROUP_IPMI,
 	    "entity_ref", &entity_refs, &nelems, &err) != 0) {
 		topo_mod_dprintf(mod, "%s: Failed to lookup entity_ref "
-		    "property on %s=%d (%s)\n", __func__, topo_node_name(node),
-		    topo_node_instance(node), topo_strerror(err));
+		    "property on %s=%" PRIu64 " (%s)\n", __func__,
+		    topo_node_name(node), topo_node_instance(node),
+		    topo_strerror(err));
 		topo_mod_ipmi_rele(mod);
 		return (topo_mod_seterrno(mod, EMOD_NVL_INVAL));
 	}
@@ -1777,7 +1790,7 @@ get_entity_info(topo_mod_t *mod, tnode_t *node, ipmi_handle_t *hdl,
 			break;
 		default:
 			topo_mod_dprintf(mod, "Failed to determine entity id "
-			    "and instance\n", ipmi_errmsg(hdl));
+			    "and instance: %s\n", ipmi_errmsg(hdl));
 			topo_mod_ipmi_rele(mod);
 			return (topo_mod_seterrno(mod, EMOD_NVL_INVAL));
 	}

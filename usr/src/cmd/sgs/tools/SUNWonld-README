@@ -1625,7 +1625,7 @@ Bugid   Risk Synopsis
 --------------------------------------------------------------------------------
 
 --------------
-Illumos
+illumos
 --------------
 Bugid   Risk Synopsis
 ================================================================================
@@ -1669,3 +1669,30 @@ Bugid   Risk Synopsis
 10581	ld(1) should know kernel modules are a thing
 11057	hidden undefined weak symbols should not leave relocations
 11067	debug statistics crash ld(1) when -z allextract
+13481	ld(1) should skip GCC local aliases when building symsort sections
+13684	ld aborts when input object has no file name
+13487	want mapfile-based assertions about symbol properties
+13487	want mapfile-based assertions about symbol properties (fix SPARC)
+14090	ld(1) could use a normal allocator
+14090	backout: turns over big rocks, discovers big bugs
+14152	ld(1) should be more careful about empty alists
+14127	ld(1) can double free when cleaning up
+14155	ld(1) string table merging could be much faster
+14157	ld(1) string table merging should follow gABI more closely
+14207	want updated ELF relocation definitions from the psABI
+14209	partial support for new relaxable relocations
+14250	ld should resolve discarded COMDAT symbols against their mates
+14283	ldd should not complain about non-executable shared objects
+14308	discard SHF_EXCLUDE sections when linking kernel modules
+14319	ld shouldn't warn about SHF_EXCLUDE unknown sections
+14401	elfdump should understand LLVM section types
+4795	/usr/bin/ld manpage and help should indicate '-soname' not '--soname'
+14090	ld(1) could use a normal allocator
+14722	ld should keep group members in separate output sections
+14770	ld(1) should be 64bit only
+14901	remove remaining a.out support from sgs
+14822	Need new word of hardware capabilities
+15361	ld doesn't fill out PT_DYNAMIC sufficiently for binutils 2.40
+15260	ld crashes if group members are stripped by -s
+15515	ld accepts nonsensical arguments
+15516	LD_ALTEXEC parsing is too restrictive

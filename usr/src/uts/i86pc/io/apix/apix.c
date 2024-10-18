@@ -186,18 +186,6 @@ static void *apix_hdlp;
 static int apix_is_enabled = 0;
 
 /*
- * Flag to indicate if APIX is to be enabled only for platforms
- * with specific hw feature(s).
- */
-int apix_hw_chk_enable = 1;
-
-/*
- * Hw features that are checked for enabling APIX support.
- */
-#define	APIX_SUPPORT_X2APIC	0x00000001
-uint_t apix_supported_hw = APIX_SUPPORT_X2APIC;
-
-/*
  * apix_lock is used for cpu selection and vector re-binding
  */
 lock_t apix_lock;
@@ -272,22 +260,10 @@ apix_probe()
 	if (get_hwenv() & HW_XEN_HVM)
 		return (PSM_FAILURE);
 
-	/* check for hw features if specified  */
-	if (apix_hw_chk_enable) {
-		/* check if x2APIC mode is supported */
-		if ((apix_supported_hw & APIX_SUPPORT_X2APIC) ==
-		    APIX_SUPPORT_X2APIC) {
-			if (apic_local_mode() == LOCAL_X2APIC) {
-				/* x2APIC mode activated by BIOS, switch ops */
-				apic_mode = LOCAL_X2APIC;
-				apic_change_ops();
-			} else if (!apic_detect_x2apic()) {
-				/* x2APIC mode is not supported in the hw */
-				apix_enable = 0;
-			}
-		}
-		if (apix_enable == 0)
-			return (PSM_FAILURE);
+	if (apic_local_mode() == LOCAL_X2APIC) {
+		/* x2APIC mode activated by BIOS, switch ops */
+		apic_mode = LOCAL_X2APIC;
+		apic_change_ops();
 	}
 
 	rval = apic_probe_common(apix_psm_info.p_mach_idstring);
@@ -380,11 +356,6 @@ apix_init()
 	psm_get_ioapicid = apic_get_ioapicid;
 
 	apix_softinit();
-
-#if !defined(__amd64)
-	if (cpuid_have_cr8access(CPU))
-		apic_have_32bit_cr8 = 1;
-#endif
 
 	apic_pir_vect = apix_get_ipivect(XC_CPUPOKE_PIL, -1);
 
@@ -1035,12 +1006,6 @@ apix_post_cpu_start()
 
 	splx(ipltospl(LOCK_LEVEL));
 	apix_init_intr();
-
-	/*
-	 * since some systems don't enable the internal cache on the non-boot
-	 * cpus, so we have to enable them here
-	 */
-	setcr0(getcr0() & ~(CR0_CD | CR0_NW));
 
 #ifdef	DEBUG
 	APIC_AV_PENDING_SET();

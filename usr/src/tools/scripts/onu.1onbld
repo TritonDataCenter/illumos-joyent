@@ -19,25 +19,24 @@
 .\" "
 .\" "Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
 .\" "Copyright 2010, Richard Lowe
+.\" "Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
 .\" "
 .TH ONU 1ONBLD "Aug 28, 2010"
 .SH NAME
 .I onu
 \- OS/Net Update
 .SH SYNOPSIS
-\fBonu [opts] [-s <beName>] -t <beName>\fP
+\fBonu [opts] [-s <beName>] -t <beName> [-- <pkg update args>]\fP
 .br
 \fBonu [opts] -r\fP
 .SH DESCRIPTION
-.LP
 .I onu
 is a replacement for
 .I bfu
 used to update a system with the latest set of IPS packages for the ON
-(OS/Net) consolidation of Solaris, using beadm(1M) to create a new Boot
+(OS/Net) consolidation of Solaris, using beadm(8) to create a new Boot
 Environment (BE) and pkg(1) to update the image.
 .SH OPTIONS
-.LP
 The following global options are supported:
 .TP 4
 .B \-c <consolidation>
@@ -78,13 +77,15 @@ is no default value.
 .B \-Z
 Do not update any installed zones.
 .LP
+Additional arguments to be passed verbatim to \fBpkg update\fP can be specified
+on the command line following a \fB--\fP delimiter.
+.LP
 The second form of onu takes the following option:
 .TP 4
 .B \-r
 In the current BE configure the requested publisher appropriately, without
 updating.
 .SH EXIT STATUS
-.LP
 The following exit values are returned:
 .TP 4
 .B 0
@@ -97,13 +98,12 @@ Incorrect usage.
 .B 2
 One of the commands used by the script failed.
 .SH NOTES
-.LP
 Former users of bfu should note the following ways in which onu behaves
 differently from bfu.  First, as noted above, onu creates a new BE, rather
 than updating an existing BE in-place.  Second, onu will not install packages
 that are older than what is already installed in the source BE.  Third,
 conflicts in system configuration files are automatically resolved according
-to the files' "preserve" attribute, as described in pkg(5).
+to the files' "preserve" attribute, as described in pkg(7).
 .LP
 If the
 .B -d
@@ -127,16 +127,11 @@ will attempt to update any ipkg-brand installed zones on the system; the
 .B -Z
 option may be used to disable this behavior.
 .SH EXAMPLES
-.LP
-\fBExample 1\fR Installing latest ON nightly build
-.LP
-# onu -t new-nightly-be
-.LP
-\fBExample 2\fR Installing an ON build from a directory
+\fBExample 1\fR Installing an ON build from a directory
 .LP
 # onu -d /path/to/my/ws/packages/`uname -p`/nightly -t new-nightly-be
 .LP
-\fBExample 3\fR Installing additional packages in the new BE
+\fBExample 2\fR Installing additional packages in the new BE
 .LP
 # onu -d /path/to/my/ws/packages/`uname -p`/nightly -t new-nightly-be
 .br
@@ -148,13 +143,12 @@ option may be used to disable this behavior.
 .br
 #
 .SH ENVIRONMENT
-.LP
 ONURI
 .IP
 If the -u option is not provided, and this variable is set, it will be used
-as the origin URI for the publisher packaging repository.  If -u is not
-provided and this variable is not set, http://ipkg.sfbay/on-nightly will
-be used.
+as the origin URI for the publisher packaging repository.  If this variable
+is not set, either the -u or the -d option must be used to specify a source
+for the packages.
 .LP
 ONPUB
 .IP
@@ -162,6 +156,6 @@ If the -U option is not provided, and this variable is set, it will be
 used as the publisher name for the packaging repository.  If -U is not
 provided and this variable is not set, on-nightly will be used.
 .SH SEE ALSO
-.BR beadm "(1M), "
-.BR pkg "(1), "
-.BR pkg "(5) "
+.BR beadm (8),
+.BR pkg (1),
+.BR pkg (7)

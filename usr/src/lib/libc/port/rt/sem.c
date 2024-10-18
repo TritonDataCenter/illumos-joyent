@@ -22,9 +22,8 @@
 /*
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ * Copyright 2024 Oxide Computer Company
  */
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #include "lint.h"
 #include "mtlib.h"
@@ -41,6 +40,7 @@
 #include <unistd.h>
 #include <thread.h>
 #include "pos4obj.h"
+#include "thr_uberdata.h"
 
 typedef	struct	semaddr {
 	struct	semaddr	*sad_next;	/* next in the link */
@@ -298,13 +298,37 @@ sem_wait(sem_t *sem)
 }
 
 int
-sem_timedwait(sem_t *sem, const timespec_t *abstime)
+sem_clockwait(sem_t *sem, clockid_t clock, const timespec_t *abstime)
 {
 	int	error;
 
 	if (sem_invalid(sem))
 		return (-1);
-	if ((error = sema_timedwait((sema_t *)sem, abstime)) != 0) {
+
+	if ((error = sema_clockwait((sema_t *)sem, clock, abstime)) != 0) {
+		if (error == ETIME)
+			error = ETIMEDOUT;
+		errno = error;
+		return (-1);
+	}
+	return (0);
+}
+
+int
+sem_timedwait(sem_t *sem, const timespec_t *abstime)
+{
+	return (sem_clockwait(sem, CLOCK_REALTIME, abstime));
+}
+
+int
+sem_relclockwait_np(sem_t *sem, clockid_t clock, const timespec_t *reltime)
+{
+	int	error;
+
+	if (sem_invalid(sem))
+		return (-1);
+
+	if ((error = sema_relclockwait((sema_t *)sem, clock, reltime)) != 0) {
 		if (error == ETIME)
 			error = ETIMEDOUT;
 		errno = error;
@@ -316,17 +340,7 @@ sem_timedwait(sem_t *sem, const timespec_t *abstime)
 int
 sem_reltimedwait_np(sem_t *sem, const timespec_t *reltime)
 {
-	int	error;
-
-	if (sem_invalid(sem))
-		return (-1);
-	if ((error = sema_reltimedwait((sema_t *)sem, reltime)) != 0) {
-		if (error == ETIME)
-			error = ETIMEDOUT;
-		errno = error;
-		return (-1);
-	}
-	return (0);
+	return (sem_relclockwait_np(sem, CLOCK_REALTIME, reltime));
 }
 
 int

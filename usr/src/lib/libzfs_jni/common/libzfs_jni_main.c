@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <priv.h>
 #include "libzfs_jni_main.h"
 #include "libzfs_jni_util.h"
@@ -511,7 +509,7 @@ mapping_cb(int prop, void *cb)
 	JNIEnv *env = map->env;
 	zjni_ArrayList_t *list = map->list;
 
-	if (zfs_prop_valid_for_type(prop, map->type)) {
+	if (zfs_prop_valid_for_type(prop, map->type, B_FALSE)) {
 		/* Add name of property to list */
 		jstring propName = (*env)->NewStringUTF(env,
 		    zfs_prop_to_name(prop));

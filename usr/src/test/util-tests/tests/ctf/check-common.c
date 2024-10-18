@@ -142,6 +142,12 @@ ctftest_check_numbers(ctf_file_t *fp, const check_number_t *tests)
 		ctf_id_t id;
 		ctf_encoding_t enc;
 
+		if (ctftest_skip(tests[i].cn_skips)) {
+			warnx("skipping check numbers test %s due to known "
+			    "compiler issue", tests[i].cn_tname);
+			continue;
+		}
+
 		id = ctftest_lookup_type(fp, tests[i].cn_tname);
 		if (id == CTF_ERR) {
 			warnx("failed to look up %s", tests[i].cn_tname);
@@ -221,8 +227,8 @@ ctftest_check_symbol_cb(const char *obj, ctf_id_t type, ulong_t idx, void *arg)
 		}
 
 		if (id != type) {
-			warnx("type mismatch for symbol %s, has type id %u, "
-			    "but specified type %s has id %u",
+			warnx("type mismatch for symbol %s, has type id %ld"
+			    ", but specified type %s has id %ld",
 			    tests[i].cs_symbol, type, tests[i].cs_type, id);
 			cb->csc_ret = B_FALSE;
 			return (0);
@@ -288,9 +294,9 @@ ctftest_check_descent(const char *symbol, ctf_file_t *fp,
 
 		if (tid != base) {
 			if (!quiet) {
-				warnx("type mismatch at layer %u: found id %u, "
-				    "but expecting type id %u for type %s, "
-				    "symbol %s", layer, base, tid,
+				warnx("type mismatch at layer %u: found "
+				    "id %ld, but expecting type id %ld for "
+				    "type %s, symbol %s", layer, base, tid,
 				    tests->cd_tname, symbol);
 			}
 			return (B_FALSE);
@@ -312,9 +318,10 @@ ctftest_check_descent(const char *symbol, ctf_file_t *fp,
 			if (ctf_array_info(fp, base, &ari) == CTF_ERR) {
 				if (!quiet) {
 					warnx("failed to lookup array info at "
-					    "layer %u for type %s, symbol "
-					    "%s: %s", base, tests->cd_tname,
-					    symbol, ctf_errmsg(ctf_errno(fp)));
+					    "layer %ld for type %s, "
+					    "symbol %s: %s", base,
+					    tests->cd_tname, symbol,
+					    ctf_errmsg(ctf_errno(fp)));
 				}
 				return (B_FALSE);
 			}
@@ -343,9 +350,9 @@ ctftest_check_descent(const char *symbol, ctf_file_t *fp,
 				if (!quiet) {
 					warnx("array contents mismatch at "
 					    "layer %u for type %s, symbol %s: "
-					    "found %u, expected %s/%u", layer,
-					    tests->cd_tname, symbol,
-					    ari.ctr_contents,
+					    "found %ld, expected %s/%ld",
+					    layer, tests->cd_tname,
+					    symbol, ari.ctr_contents,
 					    tests->cd_contents, tid);
 				}
 				return (B_FALSE);
@@ -363,7 +370,7 @@ ctftest_check_descent(const char *symbol, ctf_file_t *fp,
 
 	if (base != CTF_ERR) {
 		if (!quiet) {
-			warnx("found additional type %u in chain, "
+			warnx("found additional type %ld in chain, "
 			    "but expected no more", base);
 		}
 		return (B_FALSE);
@@ -483,7 +490,7 @@ ctftest_check_members_cb(const char *mname, ctf_id_t mtype, ulong_t bitoff,
 		}
 
 		if (ctf_type_name(fp, mtype, buf, sizeof (buf)) == NULL) {
-			warnx("failed to obtain type name for member %s",
+			warnx("failed to obtain type name for member %s: %s",
 			    mname, ctf_errmsg(ctf_errno(fp)));
 			bad = B_TRUE;
 		} else if (strcmp(buf, members[i].cm_type) != 0) {
@@ -522,7 +529,7 @@ ctftest_check_members(const char *type, ctf_file_t *fp, int kind,
 	}
 
 	if (size != ctf_type_size(fp, base)) {
-		warnx("%s has bad size, expected %lu, found %lu",
+		warnx("%s has bad size, expected %zu, found %zd",
 		    type, size, ctf_type_size(fp, base));
 		return (B_FALSE);
 	}
@@ -621,7 +628,7 @@ ctftest_check_function(const char *symbol, ctf_file_t *fp, const char *rtype,
 
 	for (i = 0; i < fi.ctc_argc; i++) {
 		if (ctf_type_name(fp, args[i], buf, sizeof (buf)) == NULL) {
-			warnx("failed to obtain type name for argument %u",
+			warnx("failed to obtain type name for argument %u: %s",
 			    i, ctf_errmsg(ctf_errno(fp)));
 			ret = B_FALSE;
 			break;
@@ -720,7 +727,7 @@ ctftest_check_fptr(const char *type, ctf_file_t *fp, const char *rtype,
 
 	for (i = 0; i < fi.ctc_argc; i++) {
 		if (ctf_type_name(fp, args[i], buf, sizeof (buf)) == NULL) {
-			warnx("failed to obtain type name for argument %u",
+			warnx("failed to obtain type name for argument %u: %s",
 			    i, ctf_errmsg(ctf_errno(fp)));
 			ret = B_FALSE;
 			break;
@@ -749,7 +756,7 @@ ctftest_check_size(const char *type, ctf_file_t *fp, size_t size)
 	}
 
 	if (size != ctf_type_size(fp, base)) {
-		warnx("%s has bad size, expected %lu, found %lu",
+		warnx("%s has bad size, expected %zu, found %zd",
 		    type, size, ctf_type_size(fp, base));
 		return (B_FALSE);
 	}
@@ -841,4 +848,24 @@ ctftest_duplicates(ctf_file_t *fp)
 	free(d.ctd_names);
 
 	return (d.ctd_ret);
+}
+
+boolean_t
+ctftest_skip(check_skip_t skip)
+{
+	const char *compiler;
+
+	if (skip == 0) {
+		return (B_FALSE);
+	}
+
+	compiler = getenv("ctf_cc_type");
+	if (compiler == NULL) {
+		return (B_FALSE);
+	}
+
+	if ((skip & SKIP_CLANG) != 0 && strcmp(compiler, "clang") == 0)
+		return (B_TRUE);
+
+	return (B_FALSE);
 }

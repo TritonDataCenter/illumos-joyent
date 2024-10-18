@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
@@ -53,7 +51,7 @@ AudioUnixfile::
 AudioUnixfile(
 	const char		*path,		// pathname
 	const FileAccess	acc):		// access mode
-	AudioStream(path), fd(-1), block(TRUE), mode(acc),
+	AudioStream(path), mode(acc), block(TRUE), fd(-1),
 	infostring(new char[1]), infolength(1)
 {
 	infostring[0] = '\0';
@@ -130,7 +128,7 @@ decode_filehdr()
 	ibuf = new char[infosize];
 	cnt = read(getfd(), ibuf, infosize);
 	if (cnt != infosize) {
-		delete ibuf;
+		delete[] ibuf;
 		return (RaiseError(AUDIO_UNIXERROR));
 	}
 	SetBlocking(saveblock);		// Restore the saved blocking i/o state
@@ -147,11 +145,11 @@ decode_filehdr()
 
 	err = SetHeader(hdr_local);
 	if (err != AUDIO_SUCCESS) {
-		delete ibuf;
+		delete[] ibuf;
 		return (RaiseError(err));
 	}
 	SetInfostring(ibuf, infosize);
-	delete ibuf;
+	delete[] ibuf;
 
 	// Only trust the file size for regular files
 	if (S_ISREG(st.st_mode)) {
@@ -262,7 +260,7 @@ SetBlocking(
 // Return a pointer to the info string
 // XXX - returns a pointer to the string stored in the object
 // XXX - assumes ASCII data
-char *const AudioUnixfile::
+char *AudioUnixfile::
 GetInfostring(
 	int&		len) const		// returned length of string
 {
@@ -534,7 +532,7 @@ seekread(
 	} while (icnt > 0);
 
 	SetBlocking(saveblock);		// Restore the saved blocking i/o state
-	delete bufp;			// Free the temporary buffer
+	delete[] bufp;			// Free the temporary buffer
 	return (RaiseError(err));
 }
 
@@ -599,6 +597,6 @@ seekwrite(
 	} while (ocnt > 0);
 
 	SetBlocking(saveblock);		// Restore the saved blocking i/o state
-	delete bufp;			// Free the temporary buffer
+	delete[] bufp;			// Free the temporary buffer
 	return (RaiseError(err));
 }

@@ -20,6 +20,7 @@
 #
 #
 # Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright 2024 Oxide Computer Co.
 #
 
 .KEEP_STATE:
@@ -34,12 +35,14 @@ ROOTPROG = $(ROOTUSRSBIN)/$(PROG)
 
 $(NOT_RELEASE_BUILD)CPPFLAGS += -DDEBUG
 CPPFLAGS += -I. -I../common -I../../include
-CFLAGS += $(CTF_FLAGS) $(CCVERBOSE) $(XSTRCONST)
+CFLAGS += $(CTF_FLAGS) $(CCVERBOSE)
 LDLIBS += -L$(ROOT)/usr/lib/fm -lfmd_log -lnvpair -ltopo -lfmd_msg
 LDFLAGS += -R/usr/lib/fm
 LINTFLAGS += -mnu
 CERRWARN += -_gcc=-Wno-parentheses
 CERRWARN += $(CNOWARN_UNINIT)
+
+CSTD =	$(CSTD_GNU99)
 
 .NO_PARALLEL:
 .PARALLEL: $(OBJS) $(LINTFILES)

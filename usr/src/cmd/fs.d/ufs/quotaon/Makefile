@@ -46,9 +46,7 @@ CERRWARN +=	-_gcc=-Wno-unused-function
 # not linted
 SMATCH=off
 
-lint:		lint_PROG
-
-$(ROOTLIBFSTYPE)/$(QUOTAOFF):	$(ROOTLIBFSTYPE)/$(LIBPROG) 
+$(ROOTLIBFSTYPE)/$(QUOTAOFF):	$(ROOTLIBFSTYPE)/$(LIBPROG)
 		-$(RM) $@; $(LN) $(ROOTLIBFSTYPE)/$(LIBPROG) $@
 
 $(ROOTUSRSBIN)/$(LIBPROG):

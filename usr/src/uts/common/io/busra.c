@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2012 Milan Jurik. All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #if defined(DEBUG)
@@ -77,7 +78,7 @@ kmutex_t ra_lock;
 struct ra_resource {
 	struct ra_resource *ra_next;
 	uint64_t	ra_base;
-	uint64_t 	ra_len;
+	uint64_t	ra_len;
 };
 
 /*
@@ -193,7 +194,6 @@ _fini()
 
 int
 _info(struct modinfo *modinfop)
-
 {
 	return (mod_info(&modlinkage, modinfop));
 }
@@ -246,7 +246,7 @@ ndi_ra_map_destroy(dev_info_t *dip, char *type)
 {
 	struct ra_dip_type	*dipmap;
 	struct ra_dip_type	**backdip;
-	struct ra_type_map  	**backtype, *typemap;
+	struct ra_type_map	**backtype, *typemap;
 	struct ra_resource	*range;
 
 	mutex_enter(&ra_lock);
@@ -489,7 +489,7 @@ isnot_pow2(uint64_t value)
 
 static  void
 adjust_link(struct ra_resource **backp, struct ra_resource *mapp,
-	    uint64_t base, uint64_t len)
+    uint64_t base, uint64_t len)
 {
 	struct ra_resource *newmap;
 	uint64_t newlen;
@@ -843,7 +843,7 @@ isa_resource_setup()
 	/* initialize the interrupt space */
 	(void) ndi_ra_free(usedpdip, 0, 16, NDI_RA_TYPE_INTR, 0);
 
-#if defined(__i386) || defined(__amd64)
+#if defined(__x86)
 	bzero(&req, sizeof (req));
 	req.ra_addr = 2;	/* 2 == 9 so never allow */
 	req.ra_len = 1;
@@ -940,7 +940,6 @@ pci_resource_setup(dev_info_t *dip)
 	char bus_type[16] = "(unknown)";
 	int len;
 	struct busnum_ctrl ctrl;
-	int circular_count;
 	int rval = NDI_SUCCESS;
 
 	/*
@@ -1118,10 +1117,10 @@ pci_resource_setup(dev_info_t *dip)
 				ctrl.rv = DDI_SUCCESS;
 				ctrl.dip = dip;
 				ctrl.range = &pci_bus_range;
-				ndi_devi_enter(dip, &circular_count);
+				ndi_devi_enter(dip);
 				ddi_walk_devs(ddi_get_child(dip),
 				    claim_pci_busnum, (void *)&ctrl);
-				ndi_devi_exit(dip, circular_count);
+				ndi_devi_exit(dip);
 				if (ctrl.rv != DDI_SUCCESS) {
 					/* failed to create the map */
 					(void) ndi_ra_map_destroy(dip,

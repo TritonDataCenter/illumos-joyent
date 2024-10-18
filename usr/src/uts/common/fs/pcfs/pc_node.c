@@ -21,9 +21,8 @@
 /*
  * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
- */
-/*
  * Copyright (c) 2017 by Delphix. All rights reserved.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 #include <sys/param.h>
@@ -95,7 +94,7 @@ pc_getnode(
 	pc_cluster32_t scluster;
 
 	ASSERT(fsp->pcfs_flags & PCFS_LOCKED);
-	if (ep == (struct pcdir *)0) {
+	if (ep == NULL) {
 		ep = &pcfs_rootdirentry;
 		scluster = 0;
 	} else {
@@ -667,7 +666,7 @@ pc_mark_irrecov(struct pcfs *fsp)
 		    "an irrecoverable error was encountered.\n"
 		    "File damage is possible.  To prevent further\n"
 		    "damage, this pcfs instance will now be frozen.\n"
-		    "Use umount(1M) to release the instance.\n");
+		    "Use umount(8) to release the instance.\n");
 		(void) pc_unlockfs(fsp);
 	}
 }
@@ -771,7 +770,7 @@ pc_diskchanged(struct pcfs *fsp)
 	}
 #endif
 	if (!(vfsp->vfs_flag & VFS_UNMOUNTED) &&
-	    fsp->pcfs_fatp != (uchar_t *)0) {
+	    fsp->pcfs_fatp != NULL) {
 		pc_invalfat(fsp);
 	} else {
 		binval(fsp->pcfs_xdev);

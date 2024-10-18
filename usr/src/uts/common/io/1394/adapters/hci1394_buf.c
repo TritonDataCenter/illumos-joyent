@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * hci1394_buf.c
  *   These routines handle IO mapped memory.  They include routines to alloc and
@@ -65,7 +63,7 @@ hci1394_buf_attr_get(ddi_dma_attr_t *dma_attr)
 	dma_attr->dma_attr_granular = 4;
 	dma_attr->dma_attr_flags = 0;
 
-#if defined(__i386) || defined(__amd64)
+#if defined(__x86)
 	/* XXX - Not sure why x86 wants the dma_attr_seg to be 0x7FFF?? */
 	dma_attr->dma_attr_seg = (uint64_t)0x7FFF;
 #endif
@@ -94,7 +92,6 @@ hci1394_buf_alloc(hci1394_drvinfo_t *drvinfo, hci1394_buf_parms_t *parms,
 	ASSERT(parms != NULL);
 	ASSERT(info != NULL);
 	ASSERT(handle != NULL);
-	TNF_PROBE_0_DEBUG(hci1394_buf_alloc_enter, HCI1394_TNF_HAL_STACK, "");
 
 	/* alloc the space to keep track of the buffer */
 	buf = kmem_alloc(sizeof (hci1394_buf_t), KM_SLEEP);
@@ -116,10 +113,6 @@ hci1394_buf_alloc(hci1394_drvinfo_t *drvinfo, hci1394_buf_parms_t *parms,
 	    DDI_DMA_SLEEP, NULL, &buf->bu_dma_handle);
 	if (status != DDI_SUCCESS) {
 		kmem_free(buf, sizeof (hci1394_buf_t));
-		TNF_PROBE_0(hci1394_buf_alloc_dah_fail, HCI1394_TNF_HAL_ERROR,
-		    "");
-		TNF_PROBE_0_DEBUG(hci1394_buf_alloc_exit, HCI1394_TNF_HAL_STACK,
-		    "");
 		return (DDI_FAILURE);
 	}
 
@@ -129,10 +122,6 @@ hci1394_buf_alloc(hci1394_drvinfo_t *drvinfo, hci1394_buf_parms_t *parms,
 	if (status != DDI_SUCCESS) {
 		ddi_dma_free_handle(&buf->bu_dma_handle);
 		kmem_free(buf, sizeof (hci1394_buf_t));
-		TNF_PROBE_0(hci1394_buf_alloc_dam_fail, HCI1394_TNF_HAL_ERROR,
-		    "");
-		TNF_PROBE_0_DEBUG(hci1394_buf_alloc_exit, HCI1394_TNF_HAL_STACK,
-		    "");
 		return (DDI_FAILURE);
 	}
 
@@ -144,10 +133,6 @@ hci1394_buf_alloc(hci1394_drvinfo_t *drvinfo, hci1394_buf_parms_t *parms,
 		ddi_dma_mem_free(&buf->bu_handle);
 		ddi_dma_free_handle(&buf->bu_dma_handle);
 		kmem_free(buf, sizeof (hci1394_buf_t));
-		TNF_PROBE_0(hci1394_buf_alloc_dbh_fail, HCI1394_TNF_HAL_ERROR,
-		    "");
-		TNF_PROBE_0_DEBUG(hci1394_buf_alloc_exit, HCI1394_TNF_HAL_STACK,
-		    "");
 		return (DDI_FAILURE);
 	}
 
@@ -155,8 +140,6 @@ hci1394_buf_alloc(hci1394_drvinfo_t *drvinfo, hci1394_buf_parms_t *parms,
 	info->bi_handle = buf->bu_handle;
 	info->bi_dma_handle = buf->bu_dma_handle;
 	info->bi_length = parms->bp_length;
-
-	TNF_PROBE_0_DEBUG(hci1394_buf_alloc_exit, HCI1394_TNF_HAL_STACK, "");
 
 	return (DDI_SUCCESS);
 }
@@ -173,7 +156,6 @@ hci1394_buf_free(hci1394_buf_handle_t *handle)
 	hci1394_buf_t *buf;
 
 	ASSERT(handle != NULL);
-	TNF_PROBE_0_DEBUG(hci1394_buf_free_enter, HCI1394_TNF_HAL_STACK, "");
 
 	buf = *handle;
 	(void) ddi_dma_unbind_handle(buf->bu_dma_handle);
@@ -185,6 +167,4 @@ hci1394_buf_free(hci1394_buf_handle_t *handle)
 
 	/* set the handle to NULL to help catch bugs */
 	*handle = NULL;
-
-	TNF_PROBE_0_DEBUG(hci1394_buf_free_exit, HCI1394_TNF_HAL_STACK, "");
 }

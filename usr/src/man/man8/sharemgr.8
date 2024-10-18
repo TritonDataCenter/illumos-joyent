@@ -1,0 +1,1288 @@
+.\" Copyright (c) 2008, Sun Microsystems, Inc. All Rights Reserved
+.\" Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
+.\" Copyright 2022 Jason King
+.\"
+.\" The contents of this file are subject to the terms of the
+.\" Common Development and Distribution License (the "License").
+.\" You may not use this file except in compliance with the License.
+.\"
+.\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+.\" or http://www.opensolaris.org/os/licensing.
+.\" See the License for the specific language governing permissions
+.\" and limitations under the License.
+.\"
+.\" When distributing Covered Code, include this CDDL HEADER in each
+.\" file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+.\" If applicable, add the following below this CDDL HEADER, with the
+.\" fields enclosed by brackets "[]" replaced with your own identifying
+.\" information: Portions Copyright [yyyy] [name of copyright owner]
+.\"
+.Dd October 10, 2022
+.Dt SHAREMGR 8
+.Os
+.Sh NAME
+.Nm sharemgr
+.Nd configure and manage file sharing
+.Sh SYNOPSIS
+.Nm Cm subcommand Op options
+.Nm Cm add-share \
+    Oo Fl nth Oc \
+    Oo Fl r Ar resource-name Oc \
+    Oo Fl d Ar \(dqdescription\0text\(dq Oc
+.Nm Cm create \
+    Oo Fl nvh Oc \
+    Oo Fl P Ar proto \
+        Oo Fl p Ar property Ns = Ns Ar value Oc \
+    Oc \
+    Ar group
+.Nm Cm delete \
+    Oo Fl nvh Oc \
+    Oo Fl P Ar proto Oc \
+    Oo Fl f Oc \
+    Ar group
+.Nm Cm disable \
+    Oo Fl nvh Oc \
+    Oo Fl a | Ar group Ns ... Oc
+.Nm Cm enable \
+    Oo Fl nvh Oc \
+    Oo Fl a | Ar group Ns ... Oc
+.Nm Cm list \
+    Oo Fl vh Oc \
+    Oo Fl P Ar proto Oc
+.Nm Cm move-share \
+    Oo Fl nv Oc \
+    Fl s Ar sharepath Ar destination-group
+.Nm Cm remove-share \
+    Oo Fl fnvh Oc \
+    Fl s Ar sharepath Ar group
+.Nm Cm set \
+    Oo Fl nvh Oc \
+    Fl P Ar proto \
+    Oo Fl p Ar property Ns = Ns Ar Value Oc Ns ... \
+    Oo Fl S Ar optionset Oc \
+    Oo Fl s Ar sharepath Oc \
+    Ar group
+.Nm Cm set-share \
+    Oo Fl nh Oc \
+    Oo Fl r Ar resource Oc \
+    Oo Fl d Ar \(dqdescription\0text\(dq Oc \
+    Fl s Ar sharepath \
+    Ar group
+.Nm Cm show \
+    Oo Fl pvxh Oc \
+    Oo Fl P Ar proto Oc \
+    Oo Ar group Ns ... Oc
+.Nm Cm unset \
+    Oo Fl nvh Oc \
+    Fl P Ar proto \
+    Oo Fl S Ar optionset Oc \
+    Oo Fl p Ar property Oc Ns ... \
+    Ar group
+.Nm Cm share \
+    Oo Fl F Ar fstype Oc \
+    Oo Fl p Oc \
+    Oo Fl o Ar optionlist Oc \
+    Oo Fl d Ar description Oc \
+    Oo Ar pathname Oo Ar resourcename Oc Oc
+.Nm Cm unshare \
+    Oo Fl F Ar fstype Oc \
+    Oo Fl p Oc \
+    Oo Fl o Ar optionlist Oc \
+    Ar sharepath
+.Sh DESCRIPTION
+The
+.Nm
+command configures share groups and the shares contained within them.
+.Pp
+A group name must conform to service management facility (SMF)
+.Po
+see
+.Xr smf 7
+.Pc
+service-naming conventions, thus is limited to starting with an
+alphabetic character, with the rest of the name consisting only of alphanumeric
+characters plus
+.Ql \(hy
+(hyphen) and
+.Ql \(ru
+(underbar).
+.Pp
+Subcommands that result in a configuration change support a dry-run option.
+When dry-run
+.Pq Fl n
+is specified, the syntax and validity of the command is
+tested but the configuration is not actually updated.
+.Pp
+For all subcommands, the
+.Fl h
+option lists usage and help information.
+.Pp
+For subcommands with the verbose
+.Pq Fl v
+option, additional information will be provided.
+For example, in conjunction with the
+.Fl n
+option, verbose mode will also indicate whether the current user has
+sufficient permissions to accomplish the operation.
+.Pp
+There are two groups that are created automatically.
+The
+.Sy default
+group always exists and covers legacy NFS shares only.
+The
+.Sy zfs
+group will be created when ZFS shares are enabled.
+.Pp
+The options shown in the
+.Sx SYNOPSIS
+section are described in the context of each subcommand.
+All subcommands except
+.Cm list
+and
+.Cm show
+require root privileges or that you assume the Primary Administrator role.
+.Ss "Subcommands"
+With no subcommand entered, a
+.Nm
+command with the
+.Fl h
+option displays a usage message for all subcommands.
+.Pp
+The following subcommands follow
+.Nm
+on a command line.
+Commands take the form:
+.Bd -literal -offset 2n
+% \fBsharemgr \fI<subcommand>\fR [\fIoptions\fR]\fR
+.Ed
+.Bl -tag -width "1"
+.It Cm create \
+    Oo Fl nvh Oc \
+    Oo Fl P Ar proto Oo \
+        Fl p Ar property Ns = Ns Ar value \
+    Oc Oc \
+    Ar group
+.Pp
+Create a new group with specified name.
+.Pp
+If
+.Fl n
+is specified, the command checks only the validity of the command
+and that the group does not already exist.
+.Pp
+If no protocol is specified, all known protocols are enabled for the specified
+group.
+If a protocol is specified, only that protocol is enabled.
+You can specify properties for a specified protocol.
+.Pp
+If
+.Ar group
+exists, use of
+.Fl P
+adds the specified protocol to that group.
+.Pp
+As an example of the
+.Cm create
+subcommand, the following command creates a new group with the name
+.Ar mygroup .
+.Bd -literal -offset 2n
+# \fBsharemgr create mygroup\fR
+.Ed
+.Pp
+Because no protocol was specified in the preceding command, all defined
+protocols will be enabled on the group.
+.It Cm delete \
+    Oo Fl nvh Oc \
+    Oo Fl P Ar proto Oc \
+    Oo Fl f Oc \
+    Ar group
+.Pp
+Delete the specified group.
+If the group is not empty, you can use the
+.Fl f
+option to force the deletion, which unshares and removes all shares from the
+group before removing the group itself.
+.Pp
+If you specify a protocol, rather than deleting the whole group, this
+subcommand deletes the protocol from the group.
+.Pp
+The
+.Fl n
+option can be used to test the syntax of the command.
+.Pp
+As an example, the following command removes the group
+.Ar mygroup
+from the configuration if it is empty.
+.Bd -literal -offset 2n
+# \fBsharemgr delete mygroup\fR
+.Ed
+.Pp
+The following command removes any existing shares prior to removing the group.
+.Bd -literal -offset 2n
+# \fBsharemgr delete -f mygroup\fR
+.Ed
+.Pp
+Note the use of the force
+.Pq Fl f
+option, above.
+.It Cm list \
+    Oo Fl vh Oc \
+    Oo Fl P Ar proto Oc
+.Pp
+List the defined groups.
+.Pp
+If a protocol is specified, list only those groups that have the specified
+protocol defined.
+.Pp
+If the verbose option is specified, the current state of the group and all
+protocols enabled on the group are listed as well.
+For example:
+.Bd -literal -offset 2n
+# \fBsharemgr list -v\fR
+mygroup    enabled    nfs
+rdonlygrp  disabled   nfs
+.Ed
+.It Cm show \
+    Oo Fl pvxh Oc \
+    Oo Fl P Ar proto Oc \
+    Oo Ar group Ns ... Oc
+.Pp
+Shows the contents of the specified group(s).
+.Pp
+If the verbose option is specified, the resource name and description of each
+share is displayed if they are defined.
+Otherwise, only the share paths are
+displayed.
+Also, when temporary shares are listed, they are prefixed with an asterisk
+.Pq Ql * .
+.Pp
+If the
+.Fl p
+option is specified, all options defined for the protocols of
+the group are displayed, in addition to the display without options.
+If the
+.Fl P
+option is used, the output is limited to those groups that have the
+specified protocol enabled.
+If the
+.Fl x
+option is specified, output is in XML format and the
+.Fl p
+and
+.Fl v
+options are ignored, because all information is included in the XML.
+.Pp
+The following example illustrates the use of the
+.Fl p
+option.
+.Bd -literal -offset 2n
+# \fBsharemgr show -p mygroup\fR
+default nfs=()
+    * /data/backup
+mygroup nfs=(nosuid=true)
+      /export/home/home0
+      /export/home/home1
+.Ed
+.Pp
+The following example illustrates the use of the
+.Fl v
+option.
+.Bd -literal -offset 2n
+# \fBsharemgr show -v mygroup\fR
+mygroup
+    HOME0=/export/home/home0    "Home directory set 0"
+    HOME1=/export/home/home1    "Home directory set 1"
+.Ed
+.Pp
+ZFS managed shares are handled in a way similar to the way NFS shares are
+handled.
+These shares appear as subgroups within the parent group
+.Sy zfs .
+The subgroups are always prefixed with
+.Sy zfs/
+and use the ZFS dataset name for the rest of the name.
+The mount point and any sub-mounts that inherit
+sharing are shown as the shares of the subgroup.
+For example:
+.Bd -literal -offset 2n
+# \fBsharemgr show -vp zfs\fR
+zfs        nfs=()
+    zfs/ztest
+          /ztest
+          /ztest/backups
+.Ed
+.It Cm set \
+    Oo Fl nvh Oc \
+    Fl P Ar proto \
+    Oo Fl S Ar optionset Oc \
+    Oo Fl p Ar property Ns = Ar value Oc Ns ... \
+    Oo Fl s Ar sharepath Oc \
+    Ar group
+.Pp
+Set protocol-specific properties on the specified group.
+.Pp
+The
+.Fl P
+option is required and must specify a valid protocol.
+.Pp
+Optionsets are protocol-specific sets of properties that can be negotiated by
+the protocol client.
+For NFS, optionsets are equivalent to security modes as defined in
+.Xr nfssec 7 .
+If
+.Fl S Ar optionset
+is specified, the properties are applied to the selected optionset.
+Otherwise they are applied to the general optionset.
+.Pp
+Together,
+.Fl P
+and
+.Fl S
+select a specific view of the group's options on which to work.
+.Pp
+Property values are strings.
+A specified property is set to a new value if the
+property already exists or is added to the protocol if it does not already
+exist.
+.Pp
+In the general case, at least one property must be set.
+If
+.Fl S
+is specified, properties can be omitted and the specified optionset is enabled
+for the protocol.
+.Pp
+The
+.Fl s
+option allows setting properties on a per-share basis.
+While this is supported, it should be limited to managing legacy shares and to
+the occasional need for an override of a group-level property or placing an
+additional property on one share within a group.
+.Pp
+An example of this subcommand:
+.Bd -literal -offset 2n
+# \fBsharemgr set -P nfs -p anon=1234 mygroup\fR
+.Ed
+.Pp
+The preceding command adds the property
+.Sy anon=1234
+to the
+.Sy nfs
+view of group
+.Ar mygroup .
+If
+.Ar mygroup
+has existing shares, they will all be reshared with the new property value(s).
+.It Cm unset \
+    Oo Fl nvh Oc \
+    Fl P Ar proto \
+    Oo Fl S Ar optionset Oc \
+    Oo Fl p Ar property Oc Ns ... \
+    Oo Fl s Ar sharepath Oc \
+    Ar group
+.Pp
+Unset the specified properties for the protocol or for the specified
+.Ar optionset
+of the protocol.
+.Pp
+In the general case, at least one property must be set.
+If
+.Fl S
+is specified, properties can be omitted and the specified optionset is removed
+from the protocol.
+.Pp
+The
+.Fl s
+option allows removing a share-specific property.
+.Pp
+An example of this subcommand:
+.Bd -literal -offset 2n
+# \fBsharemgr unset -P nfs -p anon mygroup\fR
+.Ed
+.Pp
+The preceding command removes the
+.Ar anon=
+property from the
+.Sy nfs
+view of group
+.Ar mygroup .
+If
+.Ar mygroup
+has existing shares, they will all be reshared with the new property value(s).
+.It Cm add-share \
+    Oo Fl nth Oc \
+    Oo Fl r Ar resource-name Oc \
+    Oo Fl d Ar \(dqdescription text\(dq Oc \
+    Fl s Ar sharepath \
+    Ar group
+.Pp
+Add a new share to the specified group.
+.Pp
+The
+.Fl s
+option is mandatory and takes a full directory path.
+.Pp
+If either or both of
+.Fl d
+and
+.Fl r
+are specified, they specify values associated with the share.
+.Fl d
+provides a description string to document the share and
+.Fl r
+provides a protocol-independent resource name.
+Resource names are not used by NFS at this time but can be specified.
+These names currently follow the same naming rules as group names.
+.Pp
+The temporary option
+.Pq Fl t
+results in the share being shared but not
+stored in the configuration repository.
+This option is intended for shares that
+should not survive a reboot or server restart, or for testing purposes.
+Temporary shares are indicated in the
+.Cm show
+subcommand output with an asterisk
+.Pq Ql *
+preceding the share.
+.Pp
+If
+.Ar sharepath
+is a ZFS path and that path is added to the
+.Ar zfs
+group,
+.Nm
+creates a new ZFS subgroup; the new share is added to that subgroup.
+Any ZFS sub-filesystems under the ZFS filesystem designated by
+.Ar sharepath
+will inherit the shared status of
+.Ar sharepath .
+.Pp
+The effect of the
+.Cm add-share
+subcommand on a ZFS dataset is determined by the values of the
+.Sy sharesmb
+and
+.Sy sharenfs
+properties of that dataset.
+.Pp
+See
+.Xr zfs 8
+for a description of the
+.Sy sharesmb
+and
+.Sy sharenfs
+properties.
+.Pp
+The following are examples of the
+.Cm add-share
+subcommand.
+.Bd -literal -offset 2n
+# \fBsharemgr add-share -s /export/home/home0 -d "home \e
+directory set 0" -r HOME0 mygroup\fR
+
+# \fBsharemgr add-share -s /export/home/home1 -d "home \e
+directory set 1" -r HOME1 mygroup\fR
+.Ed
+.Pp
+The preceding commands add
+.Pa /export/home/home0
+and
+.Pa /export/home/home1
+to the group
+.Ar mygroup .
+A descriptive comment and a resource name are included.
+.It Cm move-share \
+    Oo Fl nvh Oc \
+    Fl s Ar sharepath \
+    Ar destination-group
+.Pp
+Move the specified share from the group it is currently in to the specified
+destination group.
+The
+.Cm move-share
+subcommand does not create a group.
+A specified group must exist for the command to succeed.
+.Pp
+The following is an example of this subcommand.
+.Bd -literal -offset 2n
+# \fBsharemgr move-share -s /export/home/home1 newgroup\fR
+.Ed
+.Pp
+Assuming
+.Pa /export/home/home1
+is in the group
+.Ar mygroup ,
+the preceding command moves
+.Pa /export/home/home1
+to the group
+.Ar newgroup
+and unshares and then reshares the directory with the properties associated with
+.Ar newgroup .
+.It Cm remove-share \
+    Oo Fl fnvh Oc \
+    Fl s Ar sharepath \
+    Ar group
+.Pp
+Remove the specified share from the specified group.
+The force
+.Pq Fl f
+option forces the share to be removed even if it is busy.
+.Pp
+You must specify the full path for
+.Ar sharepath .
+For group, use the subgroup as displayed in the output of the
+.Nm Cm show
+command.
+Note that if
+there are subshares that were created by inheritance, these will be removed,
+along with the parent shares.
+.It Cm set-share \
+    Oo Fl nvh Oc \
+    Oo Fl r resource Oc \
+    Oo Fl d Ar \(dqdescription text\(dq Oc \
+    Fl s Ar sharepath \
+    Ar group
+.Pp
+Set or change the specified share's description and resource values.
+One use of
+.Cm set-share
+is to rename a resource.
+The syntax for this use of the subcommand is:
+.Bd -literal -offset 2n
+# \fBsharemgr set-share -r \fIcurrent_name\fR=\fInew_name\fR -s \fIsharepath\fR \fIgroup\fR\fR
+.Ed
+.It Cm enable \
+    Oo Fl nvh Oc \
+    Oo Ar group Ns ... | Fl a Oc
+.Pp
+Enable the specified group(s), or
+.Po
+with
+.Fl a
+.Pc
+all groups, and start sharing the contained shares.
+This state persists across reboots.
+.Pp
+An enabled group will be shared whenever the corresponding SMF service instance
+is enabled.
+.Nm
+will start the SMF service instance if it is not currently online.
+.It Cm disable \
+    Oo Fl nvh Oc \
+    Oo Ar group Ns ... | Fl a Oc
+.Pp
+Disable the specified group(s), or
+.Po
+with
+.Fl a
+.Pc
+all groups, and unshare the shares that they contain.
+This state persists across reboots.
+.Pp
+A disabled group will not be shared even if the corresponding SMF service
+instance is online.
+This feature is useful when you do not want a group of
+shares to be started at boot time.
+.It Cm start \
+    Oo Fl vh Oc \
+    Oo Fl P Ar proto Oc \
+    Oo Ar group Ns ... | Fl a Oc
+.Pp
+Start the specified group, or
+.Po
+with
+.Fl a
+.Pc
+all groups.
+The
+.Cm start
+subcommand is similar to
+.Cm enable
+in that all shares are started, but
+.Cm start
+works only on groups that are enabled.
+.Cm start
+is used by the SMF to start sharing at system boot.
+.Pp
+A group will not start sharing if it is in the
+.Nm sharemgr Em disabled
+state.
+However, the corresponding SMF service instance will be started.
+.Pp
+Note that the
+.Cm start
+subcommand is similar to the
+.Xr shareall 8
+command in that it starts up only the configured shares.
+That is, the enabled
+shares will start being shared, but the configuration state is left the same.
+The command:
+.Bd -literal -offset 2n
+# \fBsharemgr start -a\fR
+.Ed
+.Pp
+\&...is equivalent to:
+.Bd -literal -offset 2n
+# \fBshareall\fR
+.Ed
+.It Cm stop \
+    Oo Fl vh Oc \
+    Oo Fl P Ar proto Oc \
+    Oo Ar group Ns ... | Fl a Oc
+.Pp
+Stop the specified group, or
+.Po
+with
+.Fl a
+.Pc
+all groups.
+The
+.Cm stop
+subcommand is similar to
+.Cm disable
+in that all shares are no longer shared,
+but it works only on groups that are enabled.
+.Cm stop
+is used by the SMF to stop sharing at system shutdown.
+.Pp
+Note that the
+.Cm stop
+subcommand is similar to the
+.Xr unshareall 8
+command in that all active shares are unshared, but the configuration is left
+the same.
+That is, the shares are stopped but the service instances are left enabled.
+The command:
+.Bd -literal -offset 2n
+# \fBsharemgr stop -a\fR
+.Ed
+.Pp
+\&...is equivalent to:
+.Bd -literal -offset 2n
+# \fBunshareall\fR
+.Ed
+.It Cm share \
+    Oo Fl F Ar fstype Oc \
+    Oo Fl p Oc \
+    Oo Fl o Ar optionlist Oc \
+    Oo Fl d Ar descriptoion Oc \
+    Oo Ar pathname Oo Ar resoucename Oc Oc
+.Pp
+Shares the specified path in the
+.Ar default
+share group.
+This subcommand implements the
+.Xr share 8
+functionality.
+Shares that are shared in this manner will be transient shares.
+Use of the
+.Fl p
+option causes the shares to be persistent.
+.It Cm unshare \
+    Oo Fl F Ar fstype Oc \
+    Oo Fl p Oc \
+    Oo Fl o Ar optionlist Oc \
+    Ar sharepath
+.Pp
+Unshares the specified share.
+This subcommand implements the
+.Xr unshare 8
+functionality.
+By default, the
+.Cm unshare
+is temporary.
+The
+.Fl p
+option
+is provided to remove the share from the configuration in a way that persists
+across reboots.
+.El
+.Ss "Supported Properties"
+Properties are protocol-specific.
+Currently, only the NFS and SMB protocols are supported.
+Properties have the following characteristics:
+.Bl -bullet -offset indent
+.It
+Values of type
+.Sy boolean
+take either
+.Sy true
+or
+.Sy false .
+.It
+Values of type
+.Sy value
+take a numeric value.
+.It
+Values of type
+.Sy file
+take a file name and not a file path.
+.It
+Values of type
+.Sy access-list
+are described in detail following the descriptions of the NFS properties.
+.El
+.Pp
+The general properties supported for NFS are:
+.Bl -tag -width 1
+.It Cm abe Ns = Ns Ar boolean
+.Pp
+Set the access-based enumeration (ABE) policy for a share.
+When set to
+.Ql true ,
+ABE filtering is enabled on this share and directory entries to
+which the requesting user has no access will be omitted from directory listings
+returned to the client.
+When set to
+.Ql false
+or not defined, ABE filtering will not be performed on this share.
+This property is not defined by default.
+.Bl -tag -width disabled
+.It false
+Disable ABE for this share.
+.It true
+Enable ABE for this share.
+.El
+.It Cm aclok Ns = Ns Ar boolean
+.Pp
+Allows the NFS server to do access control for NFS Version 2 clients (running
+SunOS 2.4 or earlier).
+When
+.Cm aclok
+is set on the server, maximum access is given to all clients.
+For example, with
+.Cm aclok
+set, if anyone has read permissions, then everyone does.
+If
+.Cm aclok
+is not set, minimum access is given to all clients.
+.It Cm ad-container
+.Pp
+Specifies the AD container in which to publish shares.
+.Pp
+The AD container is specified as a comma-separated list of attribute name-value
+pairs using the LDAP distinguished name (DN) or relative distinguished name
+(RDN) format.
+The DN or RDN must be specified in LDAP format using the
+.Ar cn= ,
+.Ar ou= ,
+and
+.Ar dc=
+prefixes:
+.Bl -bullet -offset indent
+.It
+.Cm cn
+represents the common name
+.It
+.Cm ou
+represents the organizational unit
+.It
+.Cm dc
+represents the domain component
+.El
+.Pp
+.Cm cn= ,
+.Cm ou= ,
+and
+.Cm dc=
+are attribute types.
+The attribute type used
+to describe an object's RDN is called the naming attribute, which, for ADS,
+includes the following object classes:
+.Bl -bullet -offset indent
+.It
+.Cm cn
+for the
+.Sy user
+object class
+.It
+.Cm ou
+for the organizational unit
+.Pq Cm OU
+object class
+.It
+.Cm dc
+for the
+.Cm domainDns
+object class
+.El
+.It Cm anon Ns = Ns Ar uid
+.Pp
+Set
+.Ar uid
+to be the effective user ID of unknown users.
+By default, unknown users are given the effective user ID
+.Dv UID_NOBODY .
+If uid is set to
+.Sy -1 ,
+access is denied.
+.It Cm catia Ns = Ns Ar boolean
+.Pp
+CATIA V4 uses characters in file names that are considered to be invalid by
+Windows.
+CATIA V5 is available on Windows.
+A CATIA V4 file could be
+inaccessible to Windows clients if the file name contains any of the characters
+that are considered illegal in Windows.
+By default, CATIA character substitution is not performed.
+If the
+.Cm catia
+property is set to true, the following character
+substitution is applied to file names.
+.Bd -literal -offset 2n
+CATIA    CATIA
+V4 UNIX  V5 Windows
+  "      \e250   0x00a8  Dieresis
+  *      \e244   0x00a4  Currency Sign
+  /      \e370   0x00f8  Latin Small Letter O with Stroke
+  :      \e367   0x00f7  Division Sign
+  <      \e253   0x00ab  Left-Pointing Double Angle Quotation Mark
+  >      \e273   0x00bb  Right-Pointing Double Angle Quotation Mark
+  ?      \e277   0x00bf  Inverted Question Mark
+  \e      \e377   0x00ff  Latin Small Letter Y with Dieresis
+  |      \e246   0x00a6  Broken Bar
+.Ed
+.It Cm cksum Ns = Ns Ar cksumlist
+.Pp
+Set the share to attempt to use end-to-end checksums.
+The value
+.Ar cksumlist
+specifies the checksum algorithms that should be used.
+.It Cm csc Ns = Ns Ar value
+.Pp
+Set the client-side caching policy for a share.
+Client-side caching is a client
+feature and offline files are managed entirely by the clients.
+.Pp
+The following are valid values for the
+.Cm csc
+property:
+.Bl -tag -width disabled -offset indent
+.It Sy manual
+Clients are permitted to cache files from the specified
+share for offline use as requested by users.
+However, automatic file-by-file reintegration is not permitted.
+.Sy manual
+is the default value.
+.It Sy auto
+Clients are permitted to automatically cache files from the
+specified share for offline use and file-by-file reintegration is permitted.
+.It Sy vdo
+Clients are permitted to automatically cache files from the
+specified share for offline use, file-by-file reintegration is permitted, and
+clients are permitted to work from their local cache even while offline.
+.It Sy disabled
+Client-side caching is not permitted for this share.
+.El
+.It Cm guestok Ns = Ns Ar boolean
+.Pp
+Set the guest access policy for the share.
+When set to
+.Sy true
+guest access is allowed on this share.
+When set to
+.Sy false
+or not defined guest access is not allowed on this share.
+This property is not defined by default.
+.Pp
+An
+.Xr idmap 8
+name-based rule can be used to map
+.Sy guest
+to any local username, such as
+.Sy guest
+or
+.Sy nobody .
+If the local account has a password in
+.Pa /var/smb/smbpasswd
+the guest connection will be authenticated against that password.
+Any connection made using an account that maps to the
+local guest account will be treated as a guest connection.
+.Pp
+Example name-based rule:
+.Bd -literal -offset 2n
+# \fBidmap add winname:Guest unixuser:guest\fR
+.Ed
+.It Cm index Ns = Ns Ar file
+.Pp
+Load
+.Ar file
+rather than a listing of the directory containing this file
+when the directory is referenced by an NFS URL.
+.It Cm log Ns = Ns Ar tag
+.Pp
+Enables NFS server logging for the specified system.
+The optional tag determines the location of the related log files.
+The tag is defined in
+.Pa /etc/nfs/nfslog.conf .
+If no tag is specified, the default values
+associated with the global tag in
+.Pa /etc/nfs/nfslog.conf
+is used.
+Support of
+NFS server logging is available only for NFS Version 2 and Version 3 requests.
+.It Cm nosub Ns = Ns Ar boolean
+.Pp
+Prevents clients from mounting subdirectories of shared directories.
+For example, if
+.Pa /export
+is shared with the
+.Cm nosub
+option on server
+.Ql wool
+then an NFS client cannot do:
+.Bd -literal -offset 2n
+# \fBmount -F nfs wool:/export/home/mnt\fR
+.Ed
+.Pp
+NFS Version 4 does not use the MOUNT protocol.
+The
+.Cm nosub
+option applies only to NFS Version 2 and Version 3 requests.
+.It Cm nosuid Ns = Ns Ar boolean
+.Pp
+By default, clients are allowed to create files on a shared file system with
+the
+.Sy setuid
+or
+.Sy setgid
+mode enabled.
+Specifying
+.Sy nosuid
+causes the server file system to silently ignore any attempt to enable the
+.Sy setuid
+or
+.Sy setgid
+mode bits.
+.It Cm public Ns = Ns Ar boolean
+.Pp
+Moves the location of the public file handle from root
+.Pq /
+to the exported directory for WebNFS-enabled browsers and clients.
+This option does not enable WebNFS service; WebNFS is always on.
+Only one file system per server can have the
+.Sy public
+property.
+You can apply the
+.Sy public
+property only to a share and not to a group.
+.El
+.Pp
+NFS also supports negotiated optionsets for supported security modes.
+The security modes are documented in
+.Xr nfssec 7 .
+The properties supported for these optionsets are:
+.Bl -tag -width 1
+.It Cm charset Ns = Ns Ar access-list
+.Pp
+Where
+.Cm charset
+is one of:
+.Sy euc-cn ,
+.Sy euc-jp ,
+.Sy euc-jpms ,
+.Sy euc-kr ,
+.Sy euc-tw ,
+.Sy iso8859-1 ,
+.Sy iso8859-2 ,
+.Sy iso8859-5 ,
+.Sy iso8859-6 ,
+.Sy iso8859-7 ,
+.Sy iso8859-8 ,
+.Sy iso8859-9 ,
+.Sy iso8859-13 ,
+.Sy iso8859-15 ,
+.Sy koi8-r .
+.Pp
+Clients that match the
+.Ar access-list
+for one of these properties will be
+assumed to be using that character set and file and path names will be
+converted to UTF-8 for the server.
+.It Cm ro Ns = Ns Ar access-list
+.Pp
+Sharing is read-only to the clients listed in
+.Ar access-list ;
+overrides the
+.Cm rw
+suboption for the clients specified.
+See the description of
+.Ar access-list
+below.
+.It Cm rw Ns = Ns Ar access-list
+.Pp
+Sharing is read-write to the clients listed in
+.Ar access-list ;
+overrides the
+.Cm ro
+suboption for the clients specified.
+See the description of
+.Ar access-list
+below.
+.It Cm none Ns = Ns Ar access-list
+.Pp
+Access is not allowed to any client that matches the access list.
+The exception
+is when the access list is an asterisk
+.Pq Ql * ,
+in which case
+.Cm ro
+or
+.Cm rw
+can override
+.Cm none .
+.It Cm root Ns = Ns Ar access-list
+.Pp
+Only root users from the hosts specified in
+.Ar access-list
+have root access.
+See details on
+.Ar access-list
+below.
+By default, no host has root access, so
+root users are mapped to an anonymous user ID (see the
+.Cm anon Ns = Ns Ar uid
+option described above).
+Netgroups can be used if the file system shared is using UNIX
+authentication
+.Pq Dv AUTH_SYS .
+.It Cm root_mapping Ns = Ns Ar uid
+.Pp
+For a client that is allowed root access, map the root UID to the specified
+user id.
+.It Cm window Ns = Ns Ar value
+.Pp
+When sharing with
+.Cm sec Ns = Ns Sy dh
+.Po
+see
+.Xr nfssec 7
+.Pc ,
+set the maximum lifetime (in seconds) of the RPC request's credential
+(in the authentication header) that the NFS server allows.
+If a credential arrives with a lifetime larger than
+what is allowed, the NFS server rejects the request.
+The default value is 30000 seconds (8.3 hours).
+This property is ignored for security modes other than
+.Sy dh .
+.El
+.Pp
+The general properties supported for SMB are:
+.Bl -tag -width 1
+.It Cm encrypt Ns = Ns Ar string
+.Pp
+Controls SMB3 per-share encryption.
+This is similar to the global smbd/encrypt option.
+For requests on a particular share, the server's behavior is controlled
+by the stricter of this option and smbd/encrypt.
+.Pp
+When set to
+.Sy disabled ,
+the server will not ask clients to encrypt requests.
+When set to
+.Sy enabled ,
+the server will ask clients to encrypt requests,
+but will not require that they do so.
+Any message than can be encrypted will be encrypted.
+When set to
+.Sy required ,
+the server will deny access to or disconnect
+any client that does not support encryption or fails to encrypt requests
+that they should.
+.Pp
+In other words, the
+.Sy enabled
+behavior is that any message that CAN
+be encrypted SHOULD be encrypted, while the
+.Sy required
+behavior is that any message that CAN be encrypted MUST be encrypted.
+.Pp
+This property is not defined by default.
+.It Cm ro Ns = Ns Ar access-list
+.Pp
+Sharing is read-only to the clients listed in
+.Ar access-list ;
+overrides the
+.Cm rw
+suboption for the clients specified.
+See the description of
+.Ar access-list
+below.
+.It Cm rw Ns = Ns Ar access-list
+.Pp
+Sharing is read-write to the clients listed in
+.Ar access-list ;
+overrides the
+.Cm ro
+suboption for the clients specified.
+See the description of
+.Ar access-list
+below.
+.It Cm none Ns = Ns access-list
+.Pp
+Access is not allowed to any client that matches the access list.
+The exception is when the access list is an asterisk
+.Pq Ql * ,
+in which case
+.Cm ro
+or
+.Cm rw
+can override
+.Cm none .
+.El
+.Ss "Access List Argument"
+The
+.Ar access-list
+argument is either the string
+.Ql *
+to represent all hosts or a colon-separated list whose components can be any
+number of the following:
+.Bl -tag -width 1
+.It Ar hostname
+.Pp
+The name of a host.
+With a server configured for DNS or LDAP naming in the
+.Xr nsswitch.conf 5
+.Ql hosts
+entry, a hostname must be represented as a fully qualified DNS or LDAP name.
+.It Ar netgroup
+.Pp
+A
+.Ar netgroup
+contains a number of hostnames.
+With a server configured for DNS or LDAP naming in the
+.Xr nsswitch.conf 5
+.Ql hosts
+entry, any
+hostname in a netgroup must be represented as a fully qualified DNS or LDAP
+name.
+.It Ar domainname . Ns Ar suffix
+.Pp
+To use domain membership the server must use DNS or LDAP, rather than, for
+example, NIS, to resolve hostnames to IP addresses.
+That is, the
+.Sy hosts
+entry in the
+.Xr nsswitch.conf 5
+must specify
+.Ql dns
+or
+.Ql ldap
+ahead of
+.Ql nis ,
+because only DNS and LDAP return the full domain name of the host.
+Other name services, such as NIS,
+cannot be used to resolve hostnames on the server because, when mapping
+an IP address to a hostname, they do not return domain information.
+For example, for the IP address 172.16.45.9:
+.Bl -tag -width "DNS OR LDAP"
+.It Sy NIS
+Returns:
+.Sy myhost
+.It Sy DNS or LDAP
+Returns:
+.Sy myhost.mydomain.example.com
+.El
+.Pp
+The domain name suffix is distinguished from hostnames and netgroups by a
+prefixed dot.
+For example:
+.Bd -literal -offset 2n
+rw=.mydomain.example.com
+.Ed
+.Pp
+A single dot can be used to match a hostname with no suffix.
+For example, the
+specification:
+.Bd -literal -offset 2n
+rw=.
+.Ed
+.Pp
+\&...matches
+.Ql mydomain
+but not
+.Ql mydomain.example.com .
+This feature can be used to match hosts resolved through NIS rather than DNS and
+LDAP.
+.It Ar network
+.Pp
+The network or subnet component is preceded by an at-sign
+.Pq Ql @ .
+It can be either a name or a dotted address.
+If a name, it is converted to a dotted address by
+.Xr getnetbyname 3SOCKET .
+For example:
+.Bd -literal -offset 2n
+=@mynet
+.Ed
+.Pp
+\&...is equivalent to:
+.Bd -literal -offset 2n
+=@172.16 or =@172.16.0.0
+.Ed
+.Pp
+The network prefix assumes an octet-aligned netmask determined from the zeroth
+octet in the low-order part of the address up to and including the high-order
+octet, if you want to specify a single IP address.
+In the case where network
+prefixes are not byte-aligned, the syntax allows a mask length to be specified
+explicitly following a slash
+.Pq Ql /
+delimiter.
+For example:
+.Bd -literal -offset 2n
+=@theothernet/17 or =@172.16.132/22
+.Ed
+.Pp
+\&...where the mask is the number of leftmost contiguous significant bits in
+the corresponding IP address.
+.El
+.Pp
+A prefixed minus sign
+.Pq Ql -
+denies access to a component of
+.Ar access-list .
+The list is searched sequentially until a match is found
+that either grants or denies access, or until the end of the list is reached.
+For example, if host
+.Ql terra
+is in the netgroup
+.Ql engineering ,
+then:
+.Bd -literal -offset 2n
+rw=-terra:engineering
+.Ed
+.Pp
+\&...denies access to
+.Ql terra ,
+but:
+.Bd -literal -offset 2n
+rw=engineering:-terra
+.Ed
+.Pp
+\&...grants access to
+.Ql terra .
+.Sh FILES
+.Bl -tag -width Pa
+.It Pa /usr/include/libshare.h
+Error codes used for exit status.
+.El
+.Sh EXIT STATUS
+.Bl -tag -offset indent -width "other non-zero" -compact
+.It Er 0
+Successful completion.
+.It Er 98
+Service is offline and cannot be enabled (start only).
+.It Er other non-zero
+Command failed.
+.El
+.Sh INTERFACE STABILITY
+Committed
+.Sh SEE ALSO
+.Xr attributes 7 ,
+.Xr nfssec 7 ,
+.Xr smf 7 ,
+.Xr standards 7 ,
+.Xr idmap 8 ,
+.Xr sharectl 8 ,
+.Xr zfs 8

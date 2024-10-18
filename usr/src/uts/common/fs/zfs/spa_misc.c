@@ -29,6 +29,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2017, Intel Corporation.
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2022 Oxide Computer Company
  */
 
 #include <sys/zfs_context.h>
@@ -59,6 +60,7 @@
 #include <sys/arc.h>
 #include <sys/ddt.h>
 #include "zfs_prop.h"
+#include "zfs_fletcher.h"
 #include <sys/btree.h>
 #include <sys/zfeature.h>
 
@@ -315,6 +317,16 @@ uint64_t zfs_deadman_checktime_ms = 5000ULL;
  * deadman is enabled except on VMware and sparc deployments.
  */
 int zfs_deadman_enabled = -1;
+
+#if defined(__amd64__) || defined(__i386__)
+/*
+ * Should we allow the use of mechanisms that depend on saving and restoring
+ * the FPU state?  This was disabled initially due to stability issues in
+ * the kernel FPU routines; see bug 13717. As of the fixes for 13902 and
+ * 13915, it has once again been enabled.
+ */
+int zfs_fpu_enabled = 1;
+#endif
 
 /*
  * The worst case is single-sector max-parity RAID-Z blocks, in which
@@ -1374,7 +1386,7 @@ spa_vdev_state_exit(spa_t *spa, vdev_t *vd, int error)
 
 	/*
 	 * If anything changed, wait for it to sync.  This ensures that,
-	 * from the system administrator's perspective, zpool(1M) commands
+	 * from the system administrator's perspective, zpool(8) commands
 	 * are synchronous.  This is important for things like zpool offline:
 	 * when the command completes, you expect no further I/O from ZFS.
 	 */
@@ -2255,6 +2267,7 @@ spa_init(int mode)
 	vdev_cache_stat_init();
 	vdev_mirror_stat_init();
 	vdev_raidz_math_init();
+	fletcher_4_init();
 	zfs_prop_init();
 	zpool_prop_init();
 	zpool_feature_init();
@@ -2274,6 +2287,7 @@ spa_fini(void)
 	vdev_cache_stat_fini();
 	vdev_mirror_stat_fini();
 	vdev_raidz_math_fini();
+	fletcher_4_fini();
 	zil_fini();
 	dmu_fini();
 	zio_fini();
@@ -2587,4 +2601,45 @@ spa_suspend_async_destroy(spa_t *spa)
 		return (B_TRUE);
 
 	return (B_FALSE);
+}
+
+/*
+ * Generate a LUN expansion event.  This routine does not use
+ * ddi_log_sysevent() because that would require a dev_info_t, and we may not
+ * have one available.
+ */
+void
+zfs_post_dle_sysevent(const char *physpath)
+{
+#ifdef _KERNEL
+	sysevent_t *ev = sysevent_alloc(EC_DEV_STATUS, ESC_DEV_DLE,
+	    SUNW_KERN_PUB "zfs", SE_SLEEP);
+	sysevent_attr_list_t *attr = NULL;
+	sysevent_id_t eid;
+
+	VERIFY(ev != NULL);
+
+	/*
+	 * The only attribute is the /devices path of the expanding device:
+	 */
+	sysevent_value_t value = {
+		.value_type = SE_DATA_TYPE_STRING,
+		.value = {
+			.sv_string = (char *)physpath,
+		},
+	};
+	if (sysevent_add_attr(&attr, DEV_PHYS_PATH, &value, SE_SLEEP) != 0) {
+		sysevent_free(ev);
+		return;
+	}
+
+	if (sysevent_attach_attributes(ev, attr) != 0) {
+		sysevent_free_attr(attr);
+		sysevent_free(ev);
+		return;
+	}
+
+	(void) log_sysevent(ev, SE_SLEEP, &eid);
+	sysevent_free(ev);
+#endif
 }

@@ -12,6 +12,6 @@
 #
 
 #
-# Copyright 2020 <contributor>
+# Copyright 2024 <contributor>
 #
 

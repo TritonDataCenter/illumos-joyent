@@ -259,9 +259,7 @@ genconfig(Crle_desc *crle)
 	head->ch_cnflags |= RTC_HDR_64;
 #endif
 
-#ifndef	SGS_PRE_UNIFIED_PROCESS
 	head->ch_cnflags |= RTC_HDR_UPM;
-#endif
 	/*
 	 * If we have a hash table then there are directory and file entries
 	 * to process.
@@ -523,13 +521,11 @@ genconfig(Crle_desc *crle)
 	} else
 		head->ch_edlibpath = 0;
 
-	if (crle->c_adlibpath) {
-		head->ch_adlibpath = head->ch_str + (_strtbl - strtbl);
-
-		(void) strcpy(_strtbl, crle->c_adlibpath);
-		_strtbl += strlen((char *)crle->c_adlibpath) + 1;
-	} else
-		head->ch_adlibpath = 0;
+	/*
+	 * a.out is no longer supported, but remains in the crle file
+	 * format
+	 */
+	head->ch_adlibpath = 0;
 
 	if (crle->c_eslibpath) {
 		head->ch_eslibpath = head->ch_str + (_strtbl - strtbl);
@@ -539,13 +535,11 @@ genconfig(Crle_desc *crle)
 	} else
 		head->ch_eslibpath = 0;
 
-	if (crle->c_aslibpath) {
-		head->ch_aslibpath = head->ch_str + (_strtbl - strtbl);
-
-		(void) strcpy(_strtbl, crle->c_aslibpath);
-		_strtbl += strlen((char *)crle->c_aslibpath) + 1;
-	} else
-		head->ch_aslibpath = 0;
+	/*
+	 * a.out is no longer supported, but remains in the crle file
+	 * format
+	 */
+	head->ch_aslibpath = 0;
 
 	/*
 	 * Add any environment variable entries.

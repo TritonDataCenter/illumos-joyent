@@ -23,9 +23,7 @@
 # Copyright 2004 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-# uts/intel/FX_DPTBL/Makefile
-#
-#ident	"%Z%%M%	%I%	%E% SMI"
+
 #
 #	This makefile drives the production of the FX_DPTBL dispatch table
 #	kernel module.
@@ -43,7 +41,6 @@ UTSBASE	= ../..
 #
 MODULE		= FX_DPTBL
 OBJECTS		= $(FX_DPTBL_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(FX_DPTBL_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(USR_SCHED_DIR)/$(MODULE)
 
 #
@@ -55,15 +52,7 @@ include $(UTSBASE)/intel/Makefile.intel
 #	Define targets
 #
 ALL_TARGET	= $(BINARY)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
-
-#
-#	Overrides.
-#
-MODSTUBS_DIR	= $(OBJS_DIR)
-$(MODSTUBS_O)	:= AS_CPPFLAGS += -DFX_DPTBL_MODULE
-CLEANFILES	+= $(MODSTUBS_O)
 
 #
 #	Default build targets.
@@ -77,12 +66,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

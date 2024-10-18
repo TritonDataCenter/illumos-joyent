@@ -21,6 +21,7 @@
 
 /*
  * Copyright (c) 1995, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2022 Oxide Computer Company
  */
 
 /*
@@ -167,7 +168,7 @@ getaf(Cmd_info *cmd_info)
 	if (elf_kind(cmd_info->arf) != ELF_K_AR) {
 		(void) fprintf(stderr, MSG_INTL(MSG_NOT_ARCHIVE), arnam);
 		if (cmd_info->opt_flgs & (a_FLAG | b_FLAG))
-			(void) fprintf(stderr, MSG_INTL(MSG_USAGE_06),
+			(void) fprintf(stderr, MSG_INTL(MSG_USAGE_POSNAME),
 			    cmd_info->ponam);
 		exit(1);
 	}
@@ -474,7 +475,7 @@ mksymtab(const char *arname, ARFILEP **symlist, int *found_obj)
 {
 	ARFILE		*fptr;
 	size_t		mem_offset = 0;
-	Elf 		*elf;
+	Elf		*elf;
 	Elf_Scn		*scn;
 	GElf_Ehdr	ehdr;
 	int		newfd;
@@ -1026,7 +1027,7 @@ require64(size_t nsyms, int found_obj, size_t longnames)
 	 * Make a worst case estimate for the size of the resulting
 	 * archive by assuming full padding between members.
 	 */
-	size = 	SARMAG;
+	size = SARMAG;
 	if (longnames)
 		size += sizeof (struct ar_hdr) + long_strtbl.used + PADSZ;
 
@@ -1187,7 +1188,8 @@ writefile(Cmd_info *cmd_info)
 	ar_outfile.fd = open(ar_outfile.path, O_RDWR|O_CREAT|O_LARGEFILE, 0666);
 	if (ar_outfile.fd == -1) {
 		int err = errno;
-		(void) fprintf(stderr, MSG_INTL(MSG_SYS_OPEN),
+		(void) fprintf(stderr, new_archive ?
+		    MSG_INTL(MSG_BAD_CREATE) : MSG_INTL(MSG_SYS_OPEN),
 		    ar_outfile.path, strerror(err));
 		exit(1);
 	}
@@ -1416,7 +1418,7 @@ sputl64(uint64_t n, char *cp)
 
 static int
 search_sym_tab(const char *arname, ARFILE *fptr, Elf *elf, Elf_Scn *scn,
-	size_t *nsyms, ARFILEP **symlist, size_t *num_errs)
+    size_t *nsyms, ARFILEP **symlist, size_t *num_errs)
 {
 	Elf_Data *str_data, *sym_data; /* string table, symbol table */
 	Elf_Scn *str_scn;
@@ -1607,7 +1609,8 @@ sizeof_symtbl(size_t nsyms, int found_obj, size_t eltsize)
 }
 
 static void
-arwrite(const char *name, int nfd, const char *dst, size_t size) {
+arwrite(const char *name, int nfd, const char *dst, size_t size)
+{
 	if (write(nfd, dst, size) != size) {
 		int err = errno;
 		(void) fprintf(stderr, MSG_INTL(MSG_SYS_WRITE),
@@ -1617,7 +1620,8 @@ arwrite(const char *name, int nfd, const char *dst, size_t size) {
 }
 
 static const char *
-make_tmpname(const char *filename) {
+make_tmpname(const char *filename)
+{
 	char	*slash, *tmpname;
 	size_t	prefix_cnt = 0;
 

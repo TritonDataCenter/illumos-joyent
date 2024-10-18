@@ -47,6 +47,8 @@ typedef struct ether_spdx_s {
 } ether_spdx_t;
 
 static ether_spdx_t cap_spdx[] = {
+	{{400000, LINK_DUPLEX_FULL}, "cap_400gfdx"},
+	{{200000, LINK_DUPLEX_FULL}, "cap_200gfdx"},
 	{{100000, LINK_DUPLEX_FULL}, "cap_100gfdx"},
 	{{50000, LINK_DUPLEX_FULL}, "cap_50gfdx"},
 	{{40000, LINK_DUPLEX_FULL}, "cap_40gfdx"},
@@ -64,6 +66,8 @@ static ether_spdx_t cap_spdx[] = {
 };
 
 static ether_spdx_t adv_cap_spdx[] = {
+	{{400000, LINK_DUPLEX_FULL}, "adv_cap_400gfdx"},
+	{{200000, LINK_DUPLEX_FULL}, "adv_cap_200gfdx"},
 	{{100000, LINK_DUPLEX_FULL}, "adv_cap_100gfdx"},
 	{{50000, LINK_DUPLEX_FULL}, "adv_cap_50gfdx"},
 	{{40000, LINK_DUPLEX_FULL}, "adv_cap_40gfdx"},
@@ -81,6 +85,8 @@ static ether_spdx_t adv_cap_spdx[] = {
 };
 
 static ether_spdx_t lp_cap_spdx[] = {
+	{{400000, LINK_DUPLEX_FULL}, "lp_cap_400gfdx"},
+	{{200000, LINK_DUPLEX_FULL}, "lp_cap_200gfdx"},
 	{{100000, LINK_DUPLEX_FULL}, "lp_cap_100gfdx"},
 	{{50000, LINK_DUPLEX_FULL}, "lp_cap_50gfdx"},
 	{{40000, LINK_DUPLEX_FULL}, "lp_cap_40gfdx"},
@@ -221,7 +227,7 @@ extern char *
 dladm_ether_spdx2str(char *buf, size_t buflen, dladm_ether_info_t *eattr,
     int ptype)
 {
-	int		i, j;
+	uint_t		i, j;
 	boolean_t	is_full, is_half;
 	int		speed;
 	char		speed_unit;
@@ -375,6 +381,8 @@ dladm_ether_info_done(dladm_ether_info_t *eattr)
 {
 	int i;
 
-	for (i = CURRENT; i <= PEERADV; i++)
+	for (i = CURRENT; i <= PEERADV; i++) {
 		free(eattr->lei_attr[i].le_spdx);
+		eattr->lei_attr[i].le_spdx = NULL;
+	}
 }

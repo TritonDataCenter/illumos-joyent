@@ -62,13 +62,32 @@ const uint8_t solaris_color_to_pc_color[16] = {
 	pc_magenta,		/*  6 - magenta		*/
 	pc_brown,		/*  7 - brown		*/
 	pc_white,		/*  8 - white		*/
-	pc_grey,		/*  9 - gery		*/
+	pc_grey,		/*  9 - grey		*/
 	pc_brt_blue,		/* 10 - brt_blue	*/
 	pc_brt_green,		/* 11 - brt_green	*/
 	pc_brt_cyan,		/* 12 - brt_cyan	*/
 	pc_brt_red,		/* 13 - brt_red		*/
 	pc_brt_magenta,		/* 14 - brt_magenta	*/
 	pc_yellow		/* 15 - yellow		*/
+};
+
+const uint8_t pc_color_to_solaris_color[16] = {
+	sun_black,		/*  0 - black		*/
+	sun_blue,		/*  1 - blue		*/
+	sun_green,		/*  2 - green		*/
+	sun_cyan,		/*  3 - cyan		*/
+	sun_red,		/*  4 - red		*/
+	sun_magenta,		/*  5 - magenta		*/
+	sun_brown,		/*  6 - brown		*/
+	sun_white,		/*  7 - white		*/
+	sun_grey,		/*  8 - grey		*/
+	sun_brt_blue,		/*  9 - brt_blue	*/
+	sun_brt_green,		/* 10 - brt_green	*/
+	sun_brt_cyan,		/* 11 - brt_cyan	*/
+	sun_brt_red,		/* 12 - brt_red		*/
+	sun_brt_magenta,	/* 13 - brt_magenta	*/
+	sun_yellow,		/* 14 - yellow		*/
+	sun_brt_white		/* 15 - brt_white	*/
 };
 
 /* 4-bit to 24-bit color translation. */
@@ -87,34 +106,60 @@ const text_cmap_t cmap4_to_24 = {
 };
 /* END CSTYLED */
 
-static uint32_t
-rgb_to_color(const rgb_t *rgb, uint8_t r, uint8_t g, uint8_t b)
+/* RGB configuration from boot loader */
+rgb_t rgb_info = {
+	.red = { .size = 8, .pos = 16 },
+	.green = { .size = 8, .pos = 8 },
+	.blue = { .size = 8, .pos = 0 }
+};
+
+/*
+ * Map r, g, b to RGB value.
+ */
+uint32_t
+rgb_to_color(const rgb_t *rgb, uint32_t a, uint32_t r, uint32_t g, uint32_t b)
 {
 	uint32_t color;
 	int pos, size;
 
+	color = 0;
+	if (a != 0) {
+		if (rgb->red.pos != 0 &&
+		    rgb->green.pos != 0 &&
+		    rgb->blue.pos != 0) {
+			pos = 0;
+			size = MIN(rgb->red.pos,
+			    MIN(rgb->green.pos, rgb->blue.pos));
+		} else {
+			pos = 24;
+			size = (rgb->red.size + rgb->green.size +
+			    rgb->blue.size) / 3;
+		}
+		color = ((a * ((1 << size) - 1)) / 0xff) << pos;
+	}
+
 	pos = rgb->red.pos;
 	size = rgb->red.size;
-	color = ((r >> (8 - size)) & ((1 << size) - 1)) << pos;
+	color |= ((r * ((1 << size) - 1)) / 0xff) << pos;
 
 	pos = rgb->green.pos;
 	size = rgb->green.size;
-	color |= ((g >> (8 - size)) & ((1 << size) - 1)) << pos;
+	color |= (((g * ((1 << size) - 1)) / 0xff) << pos);
 
 	pos = rgb->blue.pos;
 	size = rgb->blue.size;
-	color |= ((b >> (8 - size)) & ((1 << size) - 1)) << pos;
+	color |= (((b * ((1 << size) - 1)) / 0xff) << pos);
 
 	return (color);
 }
 
 uint32_t
-rgb_color_map(const rgb_t *rgb, uint8_t index)
+rgb_color_map(const rgb_t *rgb, uint8_t index, uint8_t alpha)
 {
 	uint32_t color, code, gray, level;
 
 	if (index < 16) {
-		color = rgb_to_color(rgb, cmap4_to_24.red[index],
+		color = rgb_to_color(rgb, alpha, cmap4_to_24.red[index],
 		    cmap4_to_24.green[index], cmap4_to_24.blue[index]);
 		return (color);
 	}
@@ -133,8 +178,8 @@ rgb_color_map(const rgb_t *rgb, uint8_t index)
 					red = red ? (red * 40 + 55) : 0;
 					green = green ? (green * 40 + 55) : 0;
 					blue = blue ? (blue * 40 + 55) : 0;
-					color = rgb_to_color(rgb, red, green,
-					    blue);
+					color = rgb_to_color(rgb, alpha,
+					    red, green, blue);
 					return (color);
 				}
 			}
@@ -148,7 +193,7 @@ rgb_color_map(const rgb_t *rgb, uint8_t index)
 		if (code == index)
 			break;
 	}
-	return (rgb_to_color(rgb, level, level, level));
+	return (rgb_to_color(rgb, alpha, level, level, level));
 }
 /*
  * Fonts are statically linked with this module. At some point an
@@ -177,6 +222,12 @@ reset_font_flags(void)
 	}
 }
 
+__weak_symbol bitmap_data_t *
+gfx_get_font(void)
+{
+	return (NULL);
+}
+
 bitmap_data_t *
 set_font(short *rows, short *cols, short h, short w)
 {
@@ -202,6 +253,9 @@ set_font(short *rows, short *cols, short h, short w)
 		}
 	}
 
+	if (font == NULL)
+		font = gfx_get_font();
+
 	if (font != NULL) {
 		*rows = (height - BORDER_PIXELS) / font->height;
 		*cols = (width - BORDER_PIXELS) / font->width;
@@ -222,7 +276,8 @@ set_font(short *rows, short *cols, short h, short w)
 		font = fl->font_data;
 		if ((((*rows * font->height) + BORDER_PIXELS) <= height) &&
 		    (((*cols * font->width) + BORDER_PIXELS) <= width)) {
-			if (font->font == NULL) {
+			if (font->font == NULL ||
+			    fl->font_flags == FONT_RELOAD) {
 				if (fl->font_load != NULL &&
 				    fl->font_name != NULL) {
 					font = fl->font_load(fl->font_name);
@@ -336,8 +391,8 @@ font_bit_to_pix4(
     struct font *f,
     uint8_t *dest,
     uint32_t c,
-    uint8_t fg_color,
-    uint8_t bg_color)
+    uint32_t fg_color,
+    uint32_t bg_color)
 {
 	uint32_t row;
 	int	byte;
@@ -397,8 +452,8 @@ font_bit_to_pix8(
     struct font *f,
     uint8_t *dest,
     uint32_t c,
-    uint8_t fg_color,
-    uint8_t bg_color)
+    uint32_t fg_color,
+    uint32_t bg_color)
 {
 	uint32_t row;
 	int	byte;
@@ -460,8 +515,8 @@ font_bit_to_pix16(
     struct font *f,
     uint16_t *dest,
     uint32_t c,
-    uint16_t fg_color16,
-    uint16_t bg_color16)
+    uint32_t fg_color16,
+    uint32_t bg_color16)
 {
 	uint32_t row;
 	int	byte;

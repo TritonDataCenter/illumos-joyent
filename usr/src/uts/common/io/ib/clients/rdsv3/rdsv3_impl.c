@@ -66,6 +66,7 @@
 #include <sys/mac_provider.h>
 #include <sys/mac_client_priv.h>
 
+uint_t			rdsv3_one_sec_in_hz;
 ddi_taskq_t		*rdsv3_taskq = NULL;
 extern kmem_cache_t	*rdsv3_alloc_cache;
 
@@ -103,7 +104,8 @@ rdsv3_capable_interface(struct lifreq *lifrp)
 		return (B_TRUE);
 	}
 
-	return (ddi_parse(ifname, drv, &ppa) == DDI_SUCCESS &&
+	return (
+	    ddi_parse_dlen(ifname, drv, MAXLINKNAMELEN, &ppa) == DDI_SUCCESS &&
 	    rdsv3_if_lookup_by_name(drv));
 }
 
@@ -308,7 +310,8 @@ rdsv3_capable_interface_old(struct ifreq *ifrp)
 		return (B_TRUE);
 	}
 
-	return (ddi_parse(ifname, drv, &ppa) == DDI_SUCCESS &&
+	return (
+	    ddi_parse_dlen(ifname, drv, MAXLINKNAMELEN, &ppa) == DDI_SUCCESS &&
 	    rdsv3_if_lookup_by_name(drv));
 }
 

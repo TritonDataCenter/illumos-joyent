@@ -25,7 +25,7 @@
  */
 
 /*	Copyright (c) 1988 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 /*
  * University Copyright- Copyright (c) 1982, 1986, 1988
@@ -475,7 +475,7 @@ getutline(const struct utmp *entry)
  * to the /etc/utmp file.
  */
 
-#define	UTMP_UPDATE 	"/usr/lib/utmp_update"
+#define	UTMP_UPDATE	"/usr/lib/utmp_update"
 #define	STRSZ	64	/* Size of char buffer for argument strings */
 
 static struct utmpx *
@@ -877,7 +877,6 @@ updwtmpx(const char *filex, struct utmpx *utx)
 	utmpx_api2frec(utx, &futx);
 	(void) write(wfdx, &futx, sizeof (futx));
 
-done:
 	(void) close(wfdx);
 }
 
@@ -926,7 +925,7 @@ modutx(const struct utmpx *utp)
 	 */
 	(void) memcpy(&utmp, utp, sizeof (utmp));
 	setutxent();
-	while (fup = getutxent_frec()) {
+	while ((fup = getutxent_frec()) != NULL) {
 		if (idcmp(ucp->ut_id, fup->ut_id))
 			continue;
 
@@ -1054,7 +1053,7 @@ allocid(char *srcid, unsigned char *saveid)
 				 */
 				saveid[i] = 0;
 				while (!isalnum(saveid[i]))
-				saveid[i]++;
+					saveid[i]++;
 				copyid[i] = ++saveid[i];
 			}
 		}
@@ -1167,7 +1166,7 @@ makeutx(const struct utmpx *utmp)
 		 */
 		(void) memset(saveid, falphanum, IDLEN);
 
-		while (ut = getoneutx(&offset))
+		while ((ut = getoneutx(&offset)) != NULL)
 			if (idcmp(utmp->ut_id, ut->ut_id)) {
 				continue;
 			} else {

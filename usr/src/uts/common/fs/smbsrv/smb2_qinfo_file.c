@@ -10,7 +10,8 @@
  */
 
 /*
- * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
+ * Copyright 2022-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -24,13 +25,13 @@
 #include <smbsrv/smb_fsops.h>
 #include <smbsrv/ntifs.h>
 
-static uint32_t smb2_qif_all(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_basic(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_standard(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_internal(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_ea_size(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_access(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_name(smb_request_t *, smb_queryinfo_t *);
+static uint32_t smb2_qif_normalized_name(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_position(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_full_ea(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_mode(smb_request_t *, smb_queryinfo_t *);
@@ -44,7 +45,14 @@ static uint32_t smb2_qif_pipe_rem(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_compr(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_opens(smb_request_t *, smb_queryinfo_t *);
 static uint32_t smb2_qif_tags(smb_request_t *, smb_queryinfo_t *);
+static uint32_t smb2_qif_id_info(smb_request_t *, smb_queryinfo_t *);
 
+/*
+ * MS-SMB2 3.3.5.20.1 says (in a windows behavior note) that
+ * 2012R2 and older fill in the FileNameInformation.
+ * Default to the new behavior.
+ */
+boolean_t smb2_qif_all_get_name = B_FALSE;
 
 uint32_t
 smb2_qinfo_file(smb_request_t *sr, smb_queryinfo_t *qi)
@@ -72,10 +80,12 @@ smb2_qinfo_file(smb_request_t *sr, smb_queryinfo_t *qi)
 	case FileAllInformation:
 		mask = SMB_AT_ALL;
 		getstd = B_TRUE;
-		getname = B_TRUE;
+		if (smb2_qif_all_get_name)
+			getname = B_TRUE;
 		break;
 
 	case FileNameInformation:
+	case FileNormalizedNameInformation:
 		getname = B_TRUE;
 		break;
 
@@ -95,6 +105,11 @@ smb2_qinfo_file(smb_request_t *sr, smb_queryinfo_t *qi)
 
 	case FileNetworkOpenInformation:
 		mask = SMB_AT_BASIC | SMB_AT_STANDARD;
+		break;
+
+	case FileIdInformation:
+		mask = SMB_AT_NODEID;
+		break;
 
 	default:
 		break;
@@ -137,6 +152,9 @@ smb2_qinfo_file(smb_request_t *sr, smb_queryinfo_t *qi)
 	case FileNameInformation:
 		status = smb2_qif_name(sr, qi);
 		break;
+	case FileNormalizedNameInformation:
+		status = smb2_qif_normalized_name(sr, qi);
+		break;
 	case FilePositionInformation:
 		status = smb2_qif_position(sr, qi);
 		break;
@@ -176,6 +194,9 @@ smb2_qinfo_file(smb_request_t *sr, smb_queryinfo_t *qi)
 	case FileAttributeTagInformation:
 		status = smb2_qif_tags(sr, qi);
 		break;
+	case FileIdInformation:
+		status = smb2_qif_id_info(sr, qi);
+		break;
 	default:
 		status = NT_STATUS_INVALID_INFO_CLASS;
 		break;
@@ -192,10 +213,13 @@ smb2_qinfo_file(smb_request_t *sr, smb_queryinfo_t *qi)
  *	FileStandardInformation
  *	FileInternalInformation
  *	FileEaInformation
+ *	FileAccessInformation
  *	FilePositionInformation
  *	FileModeInformation
  *	FileAlignmentInformation
  *	FileNameInformation
+ *
+ * Note: FileNameInformation is all zero on Win2016 and later.
  */
 static uint32_t
 smb2_qif_all(smb_request_t *sr, smb_queryinfo_t *qi)
@@ -214,6 +238,9 @@ smb2_qif_all(smb_request_t *sr, smb_queryinfo_t *qi)
 	status = smb2_qif_ea_size(sr, qi);
 	if (status)
 		return (status);
+	status = smb2_qif_access(sr, qi);
+	if (status)
+		return (status);
 	status = smb2_qif_position(sr, qi);
 	if (status)
 		return (status);
@@ -223,11 +250,18 @@ smb2_qif_all(smb_request_t *sr, smb_queryinfo_t *qi)
 	status = smb2_qif_alignment(sr, qi);
 	if (status)
 		return (status);
-	status = smb2_qif_name(sr, qi);
-	if (status)
-		return (status);
 
-	return (0);
+	/* See smb2_qif_all_get_name */
+	if (qi->qi_namelen != 0) {
+		/* Win2012r2 and earlier fill it in. */
+		status = smb2_qif_name(sr, qi);
+	} else {
+		/* Win2016 and later just put zeros. */
+		int rc = smb_mbc_encodef(&sr->raw_data, "6.");
+		status = (rc == 0) ? 0 : NT_STATUS_BUFFER_OVERFLOW;
+	}
+
+	return (status);
 }
 
 /*
@@ -240,10 +274,11 @@ static uint32_t
 smb2_qif_basic(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	smb_attr_t *sa = &qi->qi_attr;
+	int rc;
 
 	ASSERT((sa->sa_mask & SMB_AT_BASIC) == SMB_AT_BASIC);
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "TTTTll",
 	    &sa->sa_crtime,		/* T */
 	    &sa->sa_vattr.va_atime,	/* T */
@@ -251,6 +286,8 @@ smb2_qif_basic(smb_request_t *sr, smb_queryinfo_t *qi)
 	    &sa->sa_vattr.va_ctime,	/* T */
 	    sa->sa_dosattr,		/* l */
 	    0); /* reserved */		/* l */
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -265,10 +302,11 @@ static uint32_t
 smb2_qif_standard(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	smb_attr_t *sa = &qi->qi_attr;
+	int rc;
 
 	ASSERT((sa->sa_mask & SMB_AT_STANDARD) == SMB_AT_STANDARD);
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "qqlbbw",
 	    sa->sa_allocsz,		/* q */
 	    sa->sa_vattr.va_size,	/* q */
@@ -276,6 +314,8 @@ smb2_qif_standard(smb_request_t *sr, smb_queryinfo_t *qi)
 	    qi->qi_delete_on_close,	/* b */
 	    qi->qi_isdir,		/* b */
 	    0); /* reserved */		/* w */
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -290,6 +330,7 @@ smb2_qif_internal(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	smb_attr_t *sa = &qi->qi_attr;
 	u_longlong_t nodeid;
+	int rc;
 
 	ASSERT((sa->sa_mask & SMB_AT_NODEID) == SMB_AT_NODEID);
 	nodeid = sa->sa_vattr.va_nodeid;
@@ -298,9 +339,11 @@ smb2_qif_internal(smb_request_t *sr, smb_queryinfo_t *qi)
 	    (sr->session->s_flags & SMB_SSN_AAPL_CCEXT) != 0)
 		nodeid = 0;
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "q",
 	    nodeid);	/* q */
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -315,9 +358,12 @@ static uint32_t
 smb2_qif_ea_size(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	_NOTE(ARGUNUSED(qi))
+	int rc;
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "l", 0);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -341,10 +387,13 @@ smb2_qif_access(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	_NOTE(ARGUNUSED(qi))
 	smb_ofile_t *of = sr->fid_ofile;
+	int rc;
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "l",
 	    of->f_granted_access);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -354,18 +403,57 @@ smb2_qif_access(smb_request_t *sr, smb_queryinfo_t *qi)
  * See also:
  *	SMB_QUERY_FILE_NAME_INFO
  *	SMB_FILE_NAME_INFORMATION
+ * MS-FSCC 2.1.7 FILE_NAME_INFORMATION
  */
 static uint32_t
 smb2_qif_name(smb_request_t *sr, smb_queryinfo_t *qi)
 {
+	char *name;
+	uint32_t nlen;
+	int rc;
 
-	ASSERT(qi->qi_namelen > 0);
+	/* SMB2 leaves off the leading / */
+	nlen = qi->qi_namelen;
+	name = qi->qi_name;
+	if (qi->qi_name[0] == '\\') {
+		name++;
+		nlen -= 2;
+	}
 
-	(void) smb_mbc_encodef(
-	    &sr->raw_data, "llU",
-	    0, /* FileIndex	 (l) */
-	    qi->qi_namelen,	/* l */
-	    qi->qi_name);	/* U */
+	rc = smb_mbc_encodef(
+	    &sr->raw_data, "lU",
+	    nlen,	/* l */
+	    name);	/* U */
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
+
+	return (0);
+}
+
+/*
+ * FileNormalizedNameInformation
+ */
+static uint32_t
+smb2_qif_normalized_name(smb_request_t *sr, smb_queryinfo_t *qi)
+{
+	char *name;
+	uint32_t nlen;
+	int rc;
+
+	/* SMB2 leaves off the leading / */
+	nlen = qi->qi_namelen;
+	name = qi->qi_name;
+	if (qi->qi_name[0] == '\\') {
+		name++;
+		nlen -= 2;
+	}
+
+	rc = smb_mbc_encodef(
+	    &sr->raw_data, "lU",
+	    nlen,	/* l */
+	    name);	/* U */
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -379,29 +467,53 @@ smb2_qif_position(smb_request_t *sr, smb_queryinfo_t *qi)
 	_NOTE(ARGUNUSED(qi))
 	smb_ofile_t *of = sr->fid_ofile;
 	uint64_t pos;
+	int rc;
 
 	mutex_enter(&of->f_mutex);
 	pos = of->f_seek_pos;
 	mutex_exit(&of->f_mutex);
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "q", pos);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
 
 /*
  * FileModeInformation [MS-FSA 2.4.24]
- * XXX: These mode flags are supposed to be on the open handle,
- * XXX: or I think so.  Not yet...  (just put zero for now)
  */
 static uint32_t
 smb2_qif_mode(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	_NOTE(ARGUNUSED(qi))
+	smb_ofile_t *of = sr->fid_ofile;
+	uint32_t mode;
+	int rc;
 
-	(void) smb_mbc_encodef(
-	    &sr->raw_data, "l", 0);
+	/*
+	 * See MS-FSA description of Open.Mode
+	 * For now, we have these in...
+	 */
+	mode = of->f_create_options &
+	    (FILE_WRITE_THROUGH | FILE_SEQUENTIAL_ONLY |
+	    FILE_NO_INTERMEDIATE_BUFFERING | FILE_DELETE_ON_CLOSE);
+
+	/*
+	 * The ofile level DoC flag is currently in of->f_flags
+	 * (SMB_OFLAGS_SET_DELETE_ON_CLOSE) though probably it
+	 * should be in f_create_options (and perhaps rename
+	 * that field to f_mode or something closer to the
+	 * Open.Mode terminology used in MS-FSA).
+	 */
+	if (of->f_flags & SMB_OFLAGS_SET_DELETE_ON_CLOSE)
+		mode |= FILE_DELETE_ON_CLOSE;
+
+	rc = smb_mbc_encodef(
+	    &sr->raw_data, "l", mode);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -413,9 +525,12 @@ static uint32_t
 smb2_qif_alignment(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	_NOTE(ARGUNUSED(qi))
+	int rc;
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "l", 0);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -430,6 +545,7 @@ static uint32_t
 smb2_qif_altname(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	smb_ofile_t *of = sr->fid_ofile;
+	int rc;
 
 	ASSERT(qi->qi_namelen > 0);
 	ASSERT(qi->qi_attr.sa_mask & SMB_AT_NODEID);
@@ -442,10 +558,12 @@ smb2_qif_altname(smb_request_t *sr, smb_queryinfo_t *qi)
 	/* fill in qi->qi_shortname */
 	smb_query_shortname(of->f_node, qi);
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "%lU", sr,
 	    smb_wcequiv_strlen(qi->qi_shortname),
 	    qi->qi_shortname);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -481,6 +599,7 @@ smb2_qif_pipe(smb_request_t *sr, smb_queryinfo_t *qi)
 	smb_ofile_t *of = sr->fid_ofile;
 	uint32_t	pipe_mode;
 	uint32_t	nonblock;
+	int		rc;
 
 	switch (of->f_ftype) {
 	case SMB_FTYPE_BYTE_PIPE:
@@ -496,9 +615,11 @@ smb2_qif_pipe(smb_request_t *sr, smb_queryinfo_t *qi)
 	}
 	nonblock = 0;	/* XXX todo: Get this from the pipe handle. */
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "ll",
 	    pipe_mode, nonblock);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -532,13 +653,16 @@ smb2_qif_compr(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	smb_attr_t *sa = &qi->qi_attr;
 	uint16_t CompressionFormat = 0;	/* COMPRESSION_FORMAT_NONE */
+	int rc;
 
 	ASSERT(sa->sa_mask & SMB_AT_SIZE);
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "qw6.",
 	    sa->sa_vattr.va_size,	/* q */
 	    CompressionFormat);		/* w */
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -550,8 +674,9 @@ static uint32_t
 smb2_qif_opens(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	smb_attr_t *sa = &qi->qi_attr;
+	int rc;
 
-	(void) smb_mbc_encodef(
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "TTTTqqll",
 	    &sa->sa_crtime,		/* T */
 	    &sa->sa_vattr.va_atime,	/* T */
@@ -561,6 +686,8 @@ smb2_qif_opens(smb_request_t *sr, smb_queryinfo_t *qi)
 	    sa->sa_vattr.va_size,	/* q */
 	    sa->sa_dosattr,		/* l */
 	    0); /* reserved */		/* l */
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
 
 	return (0);
 }
@@ -578,8 +705,55 @@ static uint32_t
 smb2_qif_tags(smb_request_t *sr, smb_queryinfo_t *qi)
 {
 	_NOTE(ARGUNUSED(qi))
-	(void) smb_mbc_encodef(
+	int rc;
+
+	rc = smb_mbc_encodef(
 	    &sr->raw_data, "ll", 0, 0);
+	if (rc != 0)
+		return (NT_STATUS_BUFFER_OVERFLOW);
+
+	return (0);
+}
+
+/*
+ * FileIdInformation
+ *
+ * Returns a A FILE_ID_INFORMATION
+ *	VolumeSerialNumber (8 bytes)
+ *	FileId (16 bytes)
+ *
+ * Take the volume serial from the share root,
+ * and compose the FileId from the nodeid and fsid
+ * of the file (in case we crossed mounts)
+ */
+static uint32_t
+smb2_qif_id_info(smb_request_t *sr, smb_queryinfo_t *qi)
+{
+	smb_attr_t *sa = &qi->qi_attr;
+	smb_ofile_t *of = sr->fid_ofile;
+	smb_tree_t *tree = sr->tid_tree;
+	vfs_t	*f_vfs;	// file
+	vfs_t	*s_vfs;	// share
+	uint64_t nodeid;
+	int rc;
+
+	ASSERT((sa->sa_mask & SMB_AT_NODEID) != 0);
+	if (of->f_ftype != SMB_FTYPE_DISK)
+		return (NT_STATUS_INVALID_INFO_CLASS);
+
+	s_vfs = SMB_NODE_VFS(tree->t_snode);
+	f_vfs = SMB_NODE_VFS(of->f_node);
+	nodeid = (uint64_t)sa->sa_vattr.va_nodeid;
+
+	rc = smb_mbc_encodef(
+	    &sr->raw_data, "llqll",
+	    s_vfs->vfs_fsid.val[0],	/* l */
+	    s_vfs->vfs_fsid.val[1],	/* l */
+	    nodeid,			/* q */
+	    f_vfs->vfs_fsid.val[0],	/* l */
+	    f_vfs->vfs_fsid.val[1]);	/* l */
+	if (rc != 0)
+		return (NT_STATUS_INFO_LENGTH_MISMATCH);
 
 	return (0);
 }

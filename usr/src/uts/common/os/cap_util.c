@@ -693,7 +693,7 @@ cu_cpc_program(cpu_t *cp, int *err)
 	 *
 	 * Context is marked with KCPC_CTX_INVALID_STOPPED when context is
 	 * unprogrammed and may be marked with KCPC_CTX_INVALID when
-	 * kcpc_invalidate_all() is called by cpustat(1M) and dtrace CPC to
+	 * kcpc_invalidate_all() is called by cpustat(8) and dtrace CPC to
 	 * invalidate all CPC contexts before they take over all the counters.
 	 *
 	 * This isn't necessary since these flags are only used for thread bound
@@ -1258,7 +1258,7 @@ cu_cpu_fini(cpu_t *cp)
 			ctx = cpu_ctx->ctx_ptr_array[i];
 			if (ctx == NULL)
 				continue;
-			kcpc_free(ctx, 0);
+			kcpc_free_cpu(ctx);
 		}
 
 		/*

@@ -1,0 +1,93 @@
+#
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+
+#
+# Copyright 2022 MNX Cloud, Inc.
+# Copyright 2023 Oxide Computer Company
+#
+
+[DEFAULT]
+pre =
+verbose = False
+quiet = False
+timeout = 60
+post =
+outputdir = /var/tmp/test_results
+
+[/opt/bhyve-tests/tests/vmm]
+user = root
+pre = vmm_drv_test_init
+tests = [
+	'auto_destruct',
+	'cpuid_ioctl',
+	'datarw_constraints',
+	'datarw_msrs',
+	'datarw_vcpu',
+	'default_capabs',
+	'drv_hold',
+	'fpu_getset',
+	'import_vlapic',
+	'interface_version',
+	'legacy_destruct',
+	'maxcpu',
+	'mem_devmem',
+	'mem_partial',
+	'mem_seg_map',
+	'npt_ops',
+	'pause_resume',
+	'self_destruct'
+	]
+post = vmm_drv_test_fini
+
+[/opt/bhyve-tests/tests/kdev]
+user = root
+tests = [
+	'vatpit_freq',
+	'vhpet_freq',
+	'vlapic_freq',
+	'vlapic_freq_periodic',
+	'vlapic_mmio_access',
+	'vlapic_msr_access',
+	'vpmtmr_freq',
+	'vrtc_ops',
+	'wrmsr_tsc',
+	'rdmsr_tsc'
+	]
+
+[/opt/bhyve-tests/tests/inst_emul]
+user = root
+tests = [
+	'cpuid',
+	'imul',
+	'rdmsr',
+	'wrmsr',
+	'triple_fault',
+	'exit_paging',
+	'page_dirty',
+	'exit_consistent',
+	'suspend_info',
+	'vcpu_barrier'
+	]
+
+[/opt/bhyve-tests/tests/viona]
+user = root
+tests = [
+	'interface_version'
+	]
+
+# Tests of userspace mevent system, built from cmd/bhyve
+[/opt/bhyve-tests/tests/mevent]
+tests = ['lists_delete', 'read_disable', 'read_pause', 'read_requeue',
+	'vnode_file']
+
+[/opt/bhyve-tests/tests/mevent/vnode_zvol]
+user = root
+

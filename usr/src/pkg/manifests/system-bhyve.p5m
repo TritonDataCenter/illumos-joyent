@@ -1,0 +1,150 @@
+#
+# CDDL HEADER START
+#
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+# CDDL HEADER END
+#
+
+#
+# Copyright 2018 Joyent, Inc.
+# Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2022 Oxide Computer Company
+#
+
+#
+# The default for payload-bearing actions in this package is to appear in the
+# global zone only.  See the include file for greater detail, as well as
+# information about overriding the defaults.
+#
+<include global_zone_only_component>
+set name=pkg.fmri value=pkg:/system/bhyve@$(PKGVERS)
+set name=pkg.summary value="BSD hypervisor"
+set name=pkg.description value="BSD hypervisor"
+set name=info.classification \
+    value=org.opensolaris.category.2008:System/Virtualization
+set name=variant.arch value=i386
+dir  path=kernel group=sys
+dir  path=kernel/kmdb group=sys
+dir  path=kernel/kmdb/$(ARCH64) group=sys
+file path=kernel/kmdb/$(ARCH64)/vmm group=sys mode=0555
+dir  path=usr group=sys
+dir  path=usr/kernel/drv group=sys
+dir  path=usr/kernel/drv/$(ARCH64) group=sys
+file path=usr/kernel/drv/$(ARCH64)/ppt
+file path=usr/kernel/drv/$(ARCH64)/viona
+file path=usr/kernel/drv/$(ARCH64)/vmm
+file path=usr/kernel/drv/ppt.conf
+file path=usr/kernel/drv/viona.conf
+file path=usr/kernel/drv/vmm.conf
+dir  path=usr/kernel/misc group=sys
+dir  path=usr/kernel/misc/$(ARCH64) group=sys
+file path=usr/kernel/misc/$(ARCH64)/vmm_vtd mode=0755
+dir  path=usr/lib/mdb group=sys
+dir  path=usr/lib/mdb/kvm group=sys
+dir  path=usr/lib/mdb/kvm/$(ARCH64) group=sys
+file path=usr/lib/mdb/kvm/$(ARCH64)/vmm.so group=sys mode=0555
+file path=usr/lib/rsrvrctl mode=0555
+dir  path=usr/sbin
+file path=usr/sbin/bhyve mode=0555
+file path=usr/sbin/bhyvectl mode=0555
+file path=usr/sbin/pptadm mode=0555
+dir  path=usr/share
+dir  path=usr/share/bhyve
+dir  path=usr/share/bhyve/kbdlayout
+file path=usr/share/bhyve/kbdlayout/am mode=0444
+file path=usr/share/bhyve/kbdlayout/be mode=0444
+file path=usr/share/bhyve/kbdlayout/be_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/bg_bds mode=0444
+file path=usr/share/bhyve/kbdlayout/bg_phonetic mode=0444
+file path=usr/share/bhyve/kbdlayout/br mode=0444
+file path=usr/share/bhyve/kbdlayout/br_noacc mode=0444
+file path=usr/share/bhyve/kbdlayout/centraleuropean mode=0444
+file path=usr/share/bhyve/kbdlayout/ch mode=0444
+file path=usr/share/bhyve/kbdlayout/ch-fr mode=0444
+file path=usr/share/bhyve/kbdlayout/ch-fr_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/ch_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/ch_macbook_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/cz mode=0444
+file path=usr/share/bhyve/kbdlayout/de mode=0444
+file path=usr/share/bhyve/kbdlayout/de_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/de_noacc mode=0444
+file path=usr/share/bhyve/kbdlayout/default mode=0444
+file path=usr/share/bhyve/kbdlayout/dk mode=0444
+file path=usr/share/bhyve/kbdlayout/dk_macbook mode=0444
+file path=usr/share/bhyve/kbdlayout/ee mode=0444
+file path=usr/share/bhyve/kbdlayout/es mode=0444
+file path=usr/share/bhyve/kbdlayout/es_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/es_dvorak mode=0444
+file path=usr/share/bhyve/kbdlayout/fi mode=0444
+file path=usr/share/bhyve/kbdlayout/fr mode=0444
+file path=usr/share/bhyve/kbdlayout/fr_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/fr_dvorak mode=0444
+file path=usr/share/bhyve/kbdlayout/fr_dvorak_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/fr_macbook mode=0444
+file path=usr/share/bhyve/kbdlayout/gr mode=0444
+file path=usr/share/bhyve/kbdlayout/gr_101_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/gr_elot_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/hr mode=0444
+file path=usr/share/bhyve/kbdlayout/hu_101 mode=0444
+file path=usr/share/bhyve/kbdlayout/hu_102 mode=0444
+file path=usr/share/bhyve/kbdlayout/is mode=0444
+file path=usr/share/bhyve/kbdlayout/is_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/it mode=0444
+file path=usr/share/bhyve/kbdlayout/jp mode=0444
+file path=usr/share/bhyve/kbdlayout/jp_capsctrl mode=0444
+file path=usr/share/bhyve/kbdlayout/kz_io mode=0444
+file path=usr/share/bhyve/kbdlayout/kz_kst mode=0444
+file path=usr/share/bhyve/kbdlayout/latinamerican mode=0444
+file path=usr/share/bhyve/kbdlayout/latinamerican_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/lt mode=0444
+file path=usr/share/bhyve/kbdlayout/nl mode=0444
+file path=usr/share/bhyve/kbdlayout/no mode=0444
+file path=usr/share/bhyve/kbdlayout/no_dvorak mode=0444
+file path=usr/share/bhyve/kbdlayout/nordic_asus-eee mode=0444
+file path=usr/share/bhyve/kbdlayout/pl_dvorak mode=0444
+file path=usr/share/bhyve/kbdlayout/pt mode=0444
+file path=usr/share/bhyve/kbdlayout/pt_acc mode=0444
+file path=usr/share/bhyve/kbdlayout/ru mode=0444
+file path=usr/share/bhyve/kbdlayout/ru_shift mode=0444
+file path=usr/share/bhyve/kbdlayout/ru_win mode=0444
+file path=usr/share/bhyve/kbdlayout/se mode=0444
+file path=usr/share/bhyve/kbdlayout/si mode=0444
+file path=usr/share/bhyve/kbdlayout/tr mode=0444
+file path=usr/share/bhyve/kbdlayout/tr_f mode=0444
+file path=usr/share/bhyve/kbdlayout/ua mode=0444
+file path=usr/share/bhyve/kbdlayout/ua_shift_alt mode=0444
+file path=usr/share/bhyve/kbdlayout/uk mode=0444
+file path=usr/share/bhyve/kbdlayout/uk_capsctrl mode=0444
+file path=usr/share/bhyve/kbdlayout/uk_dvorak mode=0444
+file path=usr/share/bhyve/kbdlayout/uk_macbook mode=0444
+file path=usr/share/bhyve/kbdlayout/us_dvorak mode=0444
+file path=usr/share/bhyve/kbdlayout/us_dvorakl mode=0444
+file path=usr/share/bhyve/kbdlayout/us_dvorakp mode=0444
+file path=usr/share/bhyve/kbdlayout/us_dvorakr mode=0444
+file path=usr/share/bhyve/kbdlayout/us_dvorakx mode=0444
+file path=usr/share/bhyve/kbdlayout/us_emacs mode=0444
+file path=usr/share/bhyve/kbdlayout/us_unix mode=0444
+dir  path=usr/share/man
+dir  path=usr/share/man/man5
+file path=usr/share/man/man5/bhyve_config.5
+dir  path=usr/share/man/man8
+file path=usr/share/man/man8/bhyve.8
+file path=usr/share/man/man8/bhyvectl.8
+file path=usr/share/man/man8/pptadm.8
+driver name=ppt
+driver name=viona
+driver name=vmm
+license lic_CDDL license=lic_CDDL
+license usr/src/uts/intel/io/vmm/THIRDPARTYLICENSE \
+    license=usr/src/uts/intel/io/vmm/THIRDPARTYLICENSE
+depend type=require fmri=developer/acpi
+depend type=require fmri=system/bhyve/firmware
+depend type=require fmri=system/library/bhyve

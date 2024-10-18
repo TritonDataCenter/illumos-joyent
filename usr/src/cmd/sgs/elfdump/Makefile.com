@@ -46,23 +46,17 @@ BLTOBJ =	msg.o
 OBJS=		$(BLTOBJ) $(COMOBJ) $(COMOBJ32) $(COMOBJ64) $(SGSCOMMONOBJ)
 
 MAPFILE=	$(MAPFILE.NGB)
-MAPOPT=		$(MAPFILE:%=-M%)
+MAPOPT=		$(MAPFILE:%=-Wl,-M%)
 
 CPPFLAGS=	-I. -I../common -I../../include -I../../include/$(MACH) \
 		-I$(SRC)/lib/libc/inc -I$(SRC)/uts/$(ARCH)/sys \
 		$(CPPFLAGS.master) -I$(ELFCAP)
-LLDFLAGS =	$(VAR_ELFDUMP_LLDFLAGS)
-LLDFLAGS64 =	$(VAR_ELFDUMP_LLDFLAGS64)
-LDFLAGS +=	$(VERSREF) $(MAPOPT) $(LLDFLAGS)
-LDLIBS +=	$(ELFLIBDIR) -lelf $(LDDBGLIBDIR) -llddbg \
-		    $(CONVLIBDIR) -lconv
 
-NATIVE_LDFLAGS = $(LDASSERTS) $(BDIRECT) $(ZASSERTDEFLIB)=libc.so
+LDFLAGS +=	$(VERSREF) $(MAPOPT) '-R$$ORIGIN/../../lib/$(MACH64)'
+LDLIBS +=	$(ELFLIBDIR64) -lelf $(LDDBGLIBDIR64) -llddbg \
+		    $(CONVLIBDIR64) -lconv
 
-CERRWARN +=	$(CNOWARN_UNINIT)
-
-# not linted
-SMATCH=off
+NATIVE_LDFLAGS = $(LDASSERTS) $(BDIRECT)
 
 BLTDEFS =	msg.h
 BLTDATA =	msg.c

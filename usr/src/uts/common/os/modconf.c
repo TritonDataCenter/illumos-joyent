@@ -25,6 +25,7 @@
 
 /*
  * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2021 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -73,7 +74,7 @@ extern struct modctl *mod_getctl(struct modlinkage *);
 extern int errsys(), nodev(), nulldev();
 
 extern int findmodbyname(char *);
-extern int mod_getsysnum(char *);
+extern int mod_getsysnum(const char *);
 
 extern struct execsw execsw[];
 
@@ -565,10 +566,8 @@ mod_installdrv(struct modldrv *modl, struct modlinkage *modlp)
 
 	/* Sanity check modname */
 	if ((major = ddi_name_to_major(modname)) == DDI_MAJOR_T_NONE) {
-#ifdef DEBUG
 		cmn_err(CE_WARN,
 		    "mod_installdrv: no major number for %s", modname);
-#endif
 		err = ENXIO;
 		goto done;
 	}

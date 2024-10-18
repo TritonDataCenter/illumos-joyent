@@ -24,8 +24,6 @@
  * All rights reserved.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdlib.h>
 #include <memory.h>
 #include "../include/AudioDebug.h"
@@ -39,7 +37,7 @@ AudioBuffer::
 AudioBuffer(
 	double		len,			// buffer length, in seconds
 	const char	*local_name):			// name
-	AudioStream(local_name), buflen(len), bufaddr(0), zflag(0), bufsize(0)
+	AudioStream(local_name), buflen(len), zflag(0), bufsize(0), bufaddr(0)
 {
 }
 
@@ -451,7 +449,8 @@ AppendData(
 	// If the ending offset is beyond end of buffer, extend it
 	local_length = pos + GetHeader().Bytes_to_Time(len);
 	if (local_length > GetSize()) {
-		if (err = SetSize(local_length))
+		err = SetSize(local_length);
+		if (err != AUDIO_SUCCESS)
 			return (err);
 	}
 	return (WriteData(buf, len, pos));

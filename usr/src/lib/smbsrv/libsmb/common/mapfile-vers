@@ -19,7 +19,8 @@
 #
 #
 # Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
-# Copyright 2019 Nexenta Systems, Inc.  All rights reserved.
+# Copyright 2020 Tintri by DDN, Inc. All rights reserved.
+# Copyright 2022 RackTop Systems, Inc.
 #
 
 #
@@ -98,13 +99,13 @@ SYMBOL_VERSION SUNWprivate {
 	smb_codepage_init;
 	smb_common_decode;
 	smb_common_encode;
-	smb_config_check_protocol;
 	smb_config_get;
 	smb_config_get_ads_enable;
 	smb_config_get_debug;
 	smb_config_get_execinfo;
 	smb_config_get_fg_flag;
 	smb_config_get_localsid;
+	smb_config_get_require;
 	smb_config_get_secmode;
 	smb_config_get_version;
 	smb_config_getbool;
@@ -124,6 +125,8 @@ SYMBOL_VERSION SUNWprivate {
 	smb_config_setnum;
 	smb_config_setstr;
 	smb_config_upgrade;
+	smb_convert_encrypt_ciphers;
+	smb_convert_version_str;
 	smb_crc_gen;
 	smb_ctxbuf_init;
 	smb_ctxbuf_len;
@@ -185,6 +188,7 @@ SYMBOL_VERSION SUNWprivate {
 	smb_gen_random_passwd;
 	smb_get_dcinfo;
 	smb_get_nameservers;
+	smb_get_netlogon_flags;
 	smb_get_txid;
 	smb_getdataset;
 	smb_getdomainname;
@@ -237,6 +241,7 @@ SYMBOL_VERSION SUNWprivate {
 	smb_kmod_setcfg;
 	smb_kmod_setgmtoff;
 	smb_kmod_share;
+	smb_kmod_shareaccess;
 	smb_kmod_shareinfo;
 	smb_kmod_start			{ FLAGS = NODIRECT };
 	smb_kmod_stop			{ FLAGS = NODIRECT };

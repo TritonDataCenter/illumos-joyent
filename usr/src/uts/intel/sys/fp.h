@@ -21,6 +21,7 @@
 /*
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  *
  * Copyright (c) 1992, 2010, Oracle and/or its affiliates. All rights reserved.
  */
@@ -134,8 +135,19 @@ extern "C" {
  * - round to nearest or even
  * - 64-bit double precision
  * - all exceptions masked
+ *
+ * The 4th ed. SVR4 ABI didn't discuss the value of reserved bits. The ISA
+ * defines bit 6 (0x40) as reserved, but also that it is set (rather than clear,
+ * like many other Reserved bits). We preserve that in our value here.
  */
-#define	FPU_CW_INIT	0x133f
+#define	FPU_CW_INIT	0x137f
+
+/*
+ * This is the Intel mandated form of the default value of the x87 control word.
+ * This is different from what we use and should only be used in the context of
+ * representing that default state (e.g. in /proc xregs).
+ */
+#define	FPU_CW_INIT_HW	0x037f
 
 /*
  * masks and flags for SSE/SSE2 MXCSR
@@ -230,11 +242,23 @@ struct fxsave_state {
 } __aligned(16);	/* 512 bytes */
 
 /*
+ * This structure represents the header portion of the data layout used by the
+ * 'xsave' instruction variants.  It is documented in section 13.4.2 of the
+ * Intel 64 and IA-32 Architectures Software Developer’s Manual, Volume 1
+ * (IASDv1).  Although "header" is somewhat of a misnomer, considering the data
+ * begins at offset 512 of the xsave area, its contents dictate which portions
+ * of the area are present and how they may be formatted.
+ */
+struct xsave_header {
+	uint64_t	xsh_xstate_bv;
+	uint64_t	xsh_xcomp_bv;
+	uint64_t	xsh_reserved[6];
+};
+
+/*
  * This structure is written to memory by one of the 'xsave' instruction
  * variants. The first 512 bytes are compatible with the format of the 'fxsave'
- * area. The header portion of the xsave layout is documented in section
- * 13.4.2 of the Intel 64 and IA-32 Architectures Software Developer’s Manual,
- * Volume 1 (IASDv1). The extended portion is documented in section 13.4.3.
+ * area.  The extended portion is documented in section 13.4.3.
  *
  * Our size is at least AVX_XSAVE_SIZE (832 bytes), which is asserted
  * statically.  Enabling additional xsave-related CPU features requires an
@@ -245,9 +269,10 @@ struct fxsave_state {
  * determined dynamically by querying the CPU. See the xsave_info structure in
  * cpuid.c.
  *
- * xsave component usage is tracked using bits in the xs_xstate_bv field. The
- * components are documented in section 13.1 of IASDv1. For easy reference,
- * this is a summary of the currently defined component bit definitions:
+ * xsave component usage is tracked using bits in the xstate_bv field of the
+ * header. The components are documented in section 13.1 of IASDv1. For easy
+ * reference, this is a summary of the currently defined component bit
+ * definitions:
  *	x87			0x0001
  *	SSE			0x0002
  *	AVX			0x0004
@@ -259,19 +284,26 @@ struct fxsave_state {
  *	PT			0x0100
  *	PKRU			0x0200
  * When xsaveopt_ctxt is being used to save into the xsave_state area, the
- * xs_xstate_bv field is updated by the xsaveopt instruction to indicate which
+ * xstate_bv field is updated by the xsaveopt instruction to indicate which
  * elements of the xsave area are active.
  *
- * xs_xcomp_bv should always be 0, since we do not currently use the compressed
- * form of xsave (xsavec).
+ * The xcomp_bv field should always be 0, since we do not currently use the
+ * compressed form of xsave (xsavec).
  */
 struct xsave_state {
 	struct fxsave_state	xs_fxsave;	/* 0-511 legacy region */
-	uint64_t		xs_xstate_bv;	/* 512-519 start xsave header */
-	uint64_t		xs_xcomp_bv;	/* 520-527 */
-	uint64_t		xs_reserved[6];	/* 528-575 end xsave header */
+	struct xsave_header	xs_header;	/* 512-575 XSAVE header */
 	upad128_t		xs_ymm[16];	/* 576 AVX component */
 } __aligned(64);
+
+/*
+ * While AVX_XSTATE_SIZE is the smallest the kernel will allocate for FPU
+ * state-saving, other consumers may constrain themselves to the minimum
+ * possible xsave state structure, which features only the legacy area and the
+ * bare xsave header.
+ */
+#define	MIN_XSAVE_SIZE	(sizeof (struct fxsave_state) + \
+			    sizeof (struct xsave_header))
 
 /*
  * Kernel's FPU save area
@@ -280,18 +312,17 @@ typedef struct {
 	union _kfpu_u {
 		void *kfpu_generic;
 		struct fxsave_state *kfpu_fx;
-#if defined(__i386)
-		struct fnsave_state *kfpu_fn;
-#endif
 		struct xsave_state *kfpu_xs;
 	} kfpu_u;
 	uint32_t kfpu_status;		/* saved at #mf exception */
 	uint32_t kfpu_xstatus;		/* saved at #xm exception */
 } kfpu_t;
 
-extern int fp_kind;		/* kind of fp support			*/
-extern int fp_save_mech;	/* fp save/restore mechanism		*/
-extern int fpu_exists;		/* FPU hw exists			*/
+extern int fp_kind;		/* kind of fp support */
+extern int fp_save_mech;	/* fp save/restore mechanism */
+extern int fpu_exists;		/* FPU hw exists */
+extern int fp_elf;		/* FP elf type */
+extern uint64_t xsave_bv_all;	/* Set of enabed xcr0 values */
 
 #ifdef _KERNEL
 
@@ -304,6 +335,7 @@ extern void fpu_probe(void);
 extern uint_t fpu_initial_probe(void);
 
 extern void fpu_auxv_info(int *, size_t *);
+extern boolean_t fpu_xsave_enabled(void);
 
 extern void fpnsave_ctxt(void *);
 extern void fpxsave_ctxt(void *);
@@ -320,8 +352,6 @@ extern void xrestore_ctxt(void *);
 extern void (*fprestore_ctxt)(void *);
 
 extern void fxsave_insn(struct fxsave_state *);
-extern void fpsave(struct fnsave_state *);
-extern void fprestore(struct fnsave_state *);
 extern void fpxsave(struct fxsave_state *);
 extern void fpxrestore(struct fxsave_state *);
 extern void xsave(struct xsave_state *, uint64_t);
@@ -351,6 +381,22 @@ extern void fp_lwp_dup(struct _klwp *);
 
 extern const struct fxsave_state sse_initial;
 extern const struct xsave_state avx_initial;
+
+struct proc;
+struct ucontext;
+extern void fpu_proc_xregs_info(struct proc *, uint32_t *, uint32_t *,
+    uint32_t *);
+extern size_t fpu_proc_xregs_max_size(void);
+extern void fpu_proc_xregs_get(struct _klwp *, void *);
+extern int fpu_proc_xregs_set(struct _klwp *, void *);
+extern int fpu_signal_copyin(struct _klwp *, struct ucontext *);
+typedef int (*fpu_copyout_f)(const void *, void *, size_t);
+extern int fpu_signal_copyout(struct _klwp *, uintptr_t, fpu_copyout_f);
+extern void fpu_set_xsave(struct _klwp *, const void *);
+extern size_t fpu_signal_size(struct _klwp *);
+
+extern void fpu_get_fpregset(struct _klwp *, fpregset_t *);
+extern void fpu_set_fpregset(struct _klwp *, const fpregset_t *);
 
 #endif	/* _KERNEL */
 

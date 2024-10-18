@@ -11,6 +11,7 @@
 
 #
 # Copyright 2016 Joyent, Inc.
+# Copyright 2021 Oxide Computer Company
 #
 
 #
@@ -19,7 +20,7 @@
 # WARNING:  STOP NOW.  DO NOT MODIFY THIS FILE.
 # Object scoping must comply with the rules detailed in
 #
-#	usr/src/uts/common/README.mapfiles
+#	usr/src/uts/common/mapfiles/README
 #
 # You should not be making modifications here until you've read the most current
 # copy of that file. If you need help, contact a gatekeeper for guidance.
@@ -38,4 +39,8 @@ SYMBOL_SCOPE {
     global:
 	bt_getlowbit			{ FLAGS = EXTERN };
 	servicing_interrupt		{ FLAGS = EXTERN };
+	fnvlist_alloc			{ FLAGS = EXTERN };
+	fnvlist_add_string		{ FLAGS = EXTERN };
+	ncpus_online			{ FLAGS = EXTERN };
+	utsname				{ FLAGS = EXTERN };
 };

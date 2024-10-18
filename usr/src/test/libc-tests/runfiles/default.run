@@ -11,8 +11,11 @@
 
 #
 # Copyright (c) 2012 by Delphix. All rights reserved.
-# Copyright 2014 Garrett D'Amore <garrett@damore.org>
+# Copyright 2015 Garrett D'Amore <garrett@damore.org>
 # Copyright 2019 Joyent, Inc.
+# Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2023 Bill Sommerfeld <sommerfeld@alum.mit.edu>
+# Copyright 2024 Oxide Computer Company
 #
 
 [DEFAULT]
@@ -23,6 +26,7 @@ timeout = 120
 post =
 outputdir = /var/tmp/test_results
 
+[/opt/libc-tests/tests/fexecve_test]
 [/opt/libc-tests/tests/fpround_test]
 [/opt/libc-tests/tests/newlocale_test]
 [/opt/libc-tests/tests/nl_langinfo_test]
@@ -38,12 +42,19 @@ outputdir = /var/tmp/test_results
 [/opt/libc-tests/tests/wcsncasecmp-7350.32]
 [/opt/libc-tests/tests/wcsncasecmp-7350.64]
 
+[/opt/libc-tests/tests/i18n/bindtextdomain_test]
+[/opt/libc-tests/tests/qsort/qsort_test]
+
 [/opt/libc-tests/tests/random/getrandom]
 [/opt/libc-tests/tests/random/getentropy]
 [/opt/libc-tests/tests/random/chacha]
 [/opt/libc-tests/tests/random/inz_child]
 [/opt/libc-tests/tests/random/inz_inval]
+#
+# root privs required for mlock privileges
+#
 [/opt/libc-tests/tests/random/inz_mlock]
+user = root
 [/opt/libc-tests/tests/random/inz_region]
 [/opt/libc-tests/tests/random/inz_split]
 [/opt/libc-tests/tests/random/inz_split_vpp]
@@ -55,7 +66,11 @@ outputdir = /var/tmp/test_results
 [/opt/libc-tests/tests/random/arc4random_preforkall]
 [/opt/libc-tests/tests/random/arc4random_forksig]
 [/opt/libc-tests/tests/random/arc4random_preforksig]
+#
+# root privs required for DTrace
+#
 [/opt/libc-tests/tests/random/arc4key.ksh]
+user = root
 
 [/opt/libc-tests/tests/regex/regex_test]
 
@@ -81,43 +96,70 @@ timeout = 600
 [/opt/libc-tests/tests/stdio/test_mbrtowc.32]
 [/opt/libc-tests/tests/stdio/test_mbrtowc.64]
 
-[/opt/libc-tests/tests/aligned_alloc.32]
-[/opt/libc-tests/tests/aligned_alloc.64]
+[/opt/libc-tests/tests/aligned_alloc]
+[/opt/libc-tests/tests/ascftime.32]
+[/opt/libc-tests/tests/ascftime.64]
+[/opt/libc-tests/tests/asprintf-14933.32]
+[/opt/libc-tests/tests/asprintf-14933.64]
 [/opt/libc-tests/tests/c11_threads.32]
 [/opt/libc-tests/tests/c11_threads.64]
 [/opt/libc-tests/tests/c11_tss.32]
 [/opt/libc-tests/tests/c11_tss.64]
 [/opt/libc-tests/tests/call_once.32]
 [/opt/libc-tests/tests/call_once.64]
+[/opt/libc-tests/tests/clock_lock.32]
+[/opt/libc-tests/tests/clock_lock.64]
+[/opt/libc-tests/tests/closefrom.32]
+[/opt/libc-tests/tests/closefrom.64]
 [/opt/libc-tests/tests/catopen]
+[/opt/libc-tests/tests/endian.32]
+[/opt/libc-tests/tests/endian.64]
 [/opt/libc-tests/tests/env-OS-4089.32]
 [/opt/libc-tests/tests/env-OS-4089.64]
 [/opt/libc-tests/tests/env-7076.32]
 [/opt/libc-tests/tests/env-7076.64]
-[/opt/libc-tests/tests/endian.32]
-[/opt/libc-tests/tests/endian.64]
-[/opt/libc-tests/tests/env-7076.32]
-[/opt/libc-tests/tests/env-7076.64]
+[/opt/libc-tests/tests/err/err.ksh]
 [/opt/libc-tests/tests/fnmatch.32]
 [/opt/libc-tests/tests/fnmatch.64]
+[/opt/libc-tests/tests/isatty.32]
+[/opt/libc-tests/tests/isatty.64]
+[/opt/libc-tests/tests/memchr.32]
+[/opt/libc-tests/tests/memchr.64]
 [/opt/libc-tests/tests/memset_s.32]
 [/opt/libc-tests/tests/memset_s.64]
+[/opt/libc-tests/tests/mutex-16200.32]
+[/opt/libc-tests/tests/mutex-16200.64]
 [/opt/libc-tests/tests/posix_memalign.32]
 [/opt/libc-tests/tests/posix_memalign.64]
+[/opt/libc-tests/tests/printf-15294.32]
+[/opt/libc-tests/tests/printf-15294.64]
 [/opt/libc-tests/tests/printf-6961.64]
 [/opt/libc-tests/tests/printf-9511.32]
 [/opt/libc-tests/tests/printf-9511.64]
 [/opt/libc-tests/tests/priv_gettext]
 [/opt/libc-tests/tests/psignal]
+[/opt/libc-tests/tests/ptsname.32]
+[/opt/libc-tests/tests/ptsname.64]
 [/opt/libc-tests/tests/quick_exit]
 [/opt/libc-tests/tests/set_constraint_handler_s.32]
 [/opt/libc-tests/tests/set_constraint_handler_s.64]
-[/opt/libc-tests/tests/strerror]
+[/opt/libc-tests/tests/strerror.32]
+[/opt/libc-tests/tests/strerror.64]
+[/opt/libc-tests/tests/strtonum.32]
+[/opt/libc-tests/tests/strtonum.64]
 [/opt/libc-tests/tests/thread_name]
 [/opt/libc-tests/tests/timespec_get.32]
 [/opt/libc-tests/tests/timespec_get.64]
+[/opt/libc-tests/tests/uchar.32]
+[/opt/libc-tests/tests/uchar.64]
+[/opt/libc-tests/tests/utimes.32]
+[/opt/libc-tests/tests/utimes.64]
 
+#
+# root privs required for priority changes
+#
 [/opt/libc-tests/tests/pthread_attr_get_np]
+user=root
 
 [/opt/libc-tests/tests/symbols]
 pre = setup
@@ -138,6 +180,8 @@ tests = [
 	'stdnoreturn_h',
 	'string_h',
 	'strings_h',
+	'sys_atomic_h',
+	'sys_mman_h',
 	'sys_stat_h',
 	'sys_time_h',
 	'sys_timeb_h',
@@ -148,3 +192,4 @@ tests = [
 	'wchar_h',
 	'wctype_h'
 	 ]
+timeout = 180

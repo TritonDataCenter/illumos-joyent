@@ -48,7 +48,7 @@
 #include <sys/vtrace.h>
 #include <sys/modctl.h>
 #include <sys/debug.h>
-#include <sys/tnf_probe.h>
+#include <sys/sdt.h>
 #include <sys/procfs.h>
 
 #include <vm/seg.h>
@@ -181,7 +181,7 @@ loop:
 
 	/*
 	 * Set desperate if
-	 * 	1.  At least 2 runnable processes (on average).
+	 *	1.  At least 2 runnable processes (on average).
 	 *	2.  Short (5 sec) and longer (30 sec) average is less
 	 *	    than minfree and desfree respectively.
 	 *	3.  Pagein + pageout rate is excessive.
@@ -571,12 +571,9 @@ top:
 
 			stack_size = swapsize(tp->t_swap);
 			stack_pages = btopr(stack_size);
+
 			/* Kernel probe */
-			TNF_PROBE_4(swapin_lwp, "vm swap swapin", /* CSTYLED */,
-			    tnf_pid,		pid,		pp->p_pid,
-			    tnf_lwpid,		lwpid,		tp->t_tid,
-			    tnf_kthread_id,	tid,		tp,
-			    tnf_ulong,		page_count,	stack_pages);
+			DTRACE_SCHED1(swapin__lwp, kthread_t *, tp);
 
 			rw_enter(&kas.a_lock, RW_READER);
 			err = segkp_fault(segkp->s_as->a_hat, segkp,
@@ -708,15 +705,10 @@ top:
 					stack_size = swapsize(tp->t_swap);
 					stack_pages = btopr(stack_size);
 					ws_pages += stack_pages;
+
 					/* Kernel probe */
-					TNF_PROBE_4(swapout_lwp,
-					    "vm swap swapout",
-					    /* CSTYLED */,
-					    tnf_pid, pid, pp->p_pid,
-					    tnf_lwpid, lwpid, tp->t_tid,
-					    tnf_kthread_id, tid, tp,
-					    tnf_ulong, page_count,
-					    stack_pages);
+					DTRACE_SCHED1(swapout__lwp,
+					    kthread_t *, tp);
 
 					rw_enter(&kas.a_lock, RW_READER);
 					err = segkp_fault(segkp->s_as->a_hat,
@@ -765,10 +757,9 @@ top:
 
 		TRACE_2(TR_FAC_SCHED, TR_SWAPOUT,
 		    "swapout: pp %p pages_pushed %lu", pp, ws_pages);
+
 		/* Kernel probe */
-		TNF_PROBE_2(swapout_process, "vm swap swapout", /* CSTYLED */,
-		    tnf_pid,	pid,		pp->p_pid,
-		    tnf_ulong,	page_count,	ws_pages);
+		DTRACE_SCHED1(swapout__process, proc_t *, pp);
 	}
 	*swrss = ws_pages;
 	return (swapped_lwps);
@@ -883,11 +874,7 @@ process_swap_queue(void)
 		stack_pages = btopr(stack_size);
 
 		/* Kernel probe */
-		TNF_PROBE_4(swapout_lwp, "vm swap swapout", /* CSTYLED */,
-		    tnf_pid,		pid,		pp->p_pid,
-		    tnf_lwpid,		lwpid,		tp->t_tid,
-		    tnf_kthread_id,	tid,		tp,
-		    tnf_ulong,		page_count,	stack_pages);
+		DTRACE_SCHED1(swapout__lwp, kthread_t *, tp);
 
 		rw_enter(&kas.a_lock, RW_READER);
 		err = segkp_fault(segkp->s_as->a_hat, segkp, tp->t_swap,
@@ -931,11 +918,9 @@ process_swap_queue(void)
 			TRACE_2(TR_FAC_SCHED, TR_SWAPQ_PROC,
 			    "swaplist_proc: pp %p pages_pushed: %lu",
 			    pp, ws_pages);
+
 			/* Kernel probe */
-			TNF_PROBE_2(swapout_process, "vm swap swapout",
-			    /* CSTYLED */,
-			    tnf_pid,	pid,		pp->p_pid,
-			    tnf_ulong,	page_count,	ws_pages);
+			DTRACE_SCHED1(swapout__process, proc_t *, pp);
 		}
 		pp->p_swrss += ws_pages;
 		disp_lock_enter(&swapped_lock);

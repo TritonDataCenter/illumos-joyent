@@ -1,5 +1,3 @@
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /* Coding Buffer Specifications */
 #ifndef __ASN1BUF_H__
 #define __ASN1BUF_H__
@@ -17,7 +15,7 @@ typedef struct code_buffer_rep {
 int asn1buf_size
 	(const asn1buf *buf);
 /* requires  *buf has been created and not destroyed
-   effects   Returns the total size 
+   effects   Returns the total size
 	(in octets) of buf's octet buffer. */
 #define asn1buf_size(buf) \
   (((buf) == NULL || (buf)->base == NULL) \
@@ -61,10 +59,10 @@ int asn1buf_len
 #define asn1buf_len(buf)	((buf)->next - (buf)->base)
 
 /****** End of private procedures *****/
-	
+
 /*
-  Overview 
-    
+  Overview
+
     The coding buffer is an array of char (to match a krb5_data structure)
      with 3 reference pointers:
      1) base - The bottom of the octet array.  Used for memory management
@@ -75,9 +73,9 @@ int asn1buf_len
 	       During decoding, this is the next unread position, and it
                  advances as octets are read from the array.
      3) bound - Points to the top of the array. Used for bounds-checking.
-    
+
     All pointers to encoding buffers should be initalized to NULL.
-    
+
   Operations
 
     asn1buf_create
@@ -113,7 +111,7 @@ asn1_error_code asn1buf_wrap_data
 	     Returns ASN1_MISSING_FIELD if code is empty. */
 
 asn1_error_code asn1buf_imbed
-	(asn1buf *subbuf, const asn1buf *buf, 
+	(asn1buf *subbuf, const asn1buf *buf,
 		   const unsigned int length,
 		   const int indef);
 /* requires  *subbuf and *buf are allocated
@@ -124,7 +122,7 @@ asn1_error_code asn1buf_imbed
 	      position starts at the beginning of *subbuf. */
 
 asn1_error_code asn1buf_sync
-	(asn1buf *buf, asn1buf *subbuf, const asn1_class Class, 
+	(asn1buf *buf, asn1buf *subbuf, const asn1_class Class,
 		   const asn1_tagnum lasttag,
 		   const unsigned int length, const int indef,
 		   const int seqindef);
@@ -143,13 +141,11 @@ asn1_error_code asn1buf_destroy
 	(asn1buf **buf);
 /* effects   Deallocates **buf, sets *buf to NULL. */
 
-asn1_error_code asn1buf_insert_octet
-	(asn1buf *buf, const int o);
 /* requires  *buf is allocated
    effects   Inserts o into the buffer *buf, expanding the buffer if
              necessary.  Returns ENOMEM memory is exhausted. */
 #if ((__GNUC__ >= 2) && !defined(ASN1BUF_OMIT_INLINE_FUNCS))
-extern __inline__ asn1_error_code asn1buf_insert_octet(asn1buf *buf, const int o)
+static __inline__ asn1_error_code asn1buf_insert_octet(asn1buf *buf, const int o)
 {
   asn1_error_code retval;
 
@@ -159,6 +155,9 @@ extern __inline__ asn1_error_code asn1buf_insert_octet(asn1buf *buf, const int o
   (buf->next)++;
   return 0;
 }
+#else
+asn1_error_code asn1buf_insert_octet
+	(asn1buf *buf, const int o);
 #endif
 
 asn1_error_code asn1buf_insert_octetstring

@@ -21,6 +21,8 @@
 /*
  * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018, Joyent, Inc.
+ * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #ifndef	_SYS_CONTROLREGS_H
@@ -111,7 +113,7 @@ extern "C" {
 #define	CR4_OSFXSR	0x0200		/* OS fxsave/fxrstor support	*/
 #define	CR4_OSXMMEXCPT	0x0400		/* OS unmasked exception support */
 #define	CR4_UMIP	0x0800		/* user-mode instruction prevention */
-					/* 0x1000 reserved */
+#define	CR4_LA57	0x1000		/* enable 57 bit Logical addressing */
 #define	CR4_VMXE	0x2000		/* VMX enable */
 #define	CR4_SMXE	0x4000		/* SMX enable */
 					/* 0x8000 reserved */
@@ -124,8 +126,8 @@ extern "C" {
 
 #define	FMT_CR4						\
 	"\20\27pke\26smap\25smep\23osxsav"		\
-	"\22pcide\20fsgsbase\17smxe\16vmxe"		\
-	"\14umip\13xmme\12fxsr\11pce\10pge"		\
+	"\22pcide\21fsgsbase\17smxe\16vmxe"		\
+	"\15la57\14umip\13xmme\12fxsr\11pce\10pge"	\
 	"\7mce\6pae\5pse\4de\3tsd\2pvi\1vme"
 
 /*
@@ -162,17 +164,18 @@ extern "C" {
 
 #define	MSR_AMD_EFER	0xc0000080	/* extended feature enable MSR */
 
-#define	AMD_EFER_TCE	0x8000		/* translation cache extension */
-#define	AMD_EFER_FFXSR	0x4000		/* fast fxsave/fxrstor		*/
-#define	AMD_EFER_LMSLE	0x2000		/* long mode segment limit enable */
-#define	AMD_EFER_SVME	0x1000		/* svm enable			*/
-#define	AMD_EFER_NXE	0x0800		/* no-execute enable		*/
-#define	AMD_EFER_LMA	0x0400		/* long mode active (read-only)	*/
-#define	AMD_EFER_LME	0x0100		/* long mode enable		*/
-#define	AMD_EFER_SCE	0x0001		/* system call extensions	*/
-
-#define	FMT_AMD_EFER \
-	"\20\20tce\17ffxsr\16lmsle\15svme\14nxe\13lma\11lme\1sce"
+#define	AMD_EFER_AIBRSE	0x200000	/* Automatic IBRS Enable */
+#define	AMD_EFER_UAIE	0x100000	/* upper address ignore enable */
+#define	AMD_EFER_INTWB	0x040000	/* interruptible wbinvd / wbnoinvd */
+#define	AMD_EFER_MCOMMIT	0x020000 /* enable mcommit instr */
+#define	AMD_EFER_TCE	0x008000	/* translation cache extension */
+#define	AMD_EFER_FFXSR	0x004000	/* fast fxsave/fxrstor		*/
+#define	AMD_EFER_LMSLE	0x002000	/* long mode segment limit enable */
+#define	AMD_EFER_SVME	0x001000	/* svm enable			*/
+#define	AMD_EFER_NXE	0x000800	/* no-execute enable		*/
+#define	AMD_EFER_LMA	0x000400	/* long mode active (read-only)	*/
+#define	AMD_EFER_LME	0x000100	/* long mode enable		*/
+#define	AMD_EFER_SCE	0x000001	/* system call extensions	*/
 
 /* AMD's SYSCFG register */
 
@@ -238,9 +241,15 @@ extern "C" {
 
 #define	AMD_BU_CFG_E298			(UINT64_C(1) << 1)
 
+/*
+ * This MSR exists on families, 10h, 12h+ for AMD. This controls instruction
+ * decoding. Most notably, for the AMD variant of retpolines, we must improve
+ * the serializability of lfence for the lfence based method to work.
+ */
 #define	MSR_AMD_DE_CFG	0xc0011029
 
-#define	AMD_DE_CFG_E721			(UINT64_C(1))
+#define	AMD_DE_CFG_E721			(1UL << 0)
+#define	AMD_DE_CFG_LFENCE_DISPATCH	(1UL << 1)
 
 /* AMD's osvw MSRs */
 #define	MSR_AMD_OSVW_ID_LEN		0xc0010140

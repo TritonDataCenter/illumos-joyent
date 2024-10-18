@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2018 Joyent, Inc.
  * Copyright 2013 Nexenta Systems, Inc. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -44,7 +45,7 @@
  *
  *	This driver. It interfaces with device drivers and provides abstractions
  *	that the rest of the system consumes. All data links -- things managed
- *	with dladm(1M), are accessed through MAC.
+ *	with dladm(8), are accessed through MAC.
  *
  * GLDv3 DEVICE DRIVER
  *
@@ -65,7 +66,7 @@
  *	which is used for all unicast traffic addressed to the address of a MAC
  *	device. For example, when a VNIC is created, a default flow is created
  *	for the VNIC's MAC address. In addition, flows are created for broadcast
- *	groups and a user may create a flow with flowadm(1M).
+ *	groups and a user may create a flow with flowadm(8).
  *
  * CLASSIFICATION
  *
@@ -77,7 +78,7 @@
  *	destination MAC address.
  *
  *	The system also will do classification based on layer three and layer
- *	four properties. This is used to support things like flowadm(1M), which
+ *	four properties. This is used to support things like flowadm(8), which
  *	allows setting QoS and other properties on a per-flow basis.
  *
  * RING
@@ -230,8 +231,8 @@
  * capabilities and rules in place and then to supplement that with hardware
  * resources when available. In general, simple layer two classification is
  * sufficient and nothing else is used, unless a specific flow is created with
- * tools such as flowadm(1M) or bandwidth limits are set on a device with
- * dladm(1M).
+ * tools such as flowadm(8) or bandwidth limits are set on a device with
+ * dladm(8).
  *
  * RINGS AND GROUPS
  *
@@ -292,7 +293,7 @@
  *
  * MAC makes the determination as to which of these modes a given soft ring set
  * obtains based on parameters such as whether or not it's the primary mac
- * client, whether it's on a 10 GbE or faster device, user controlled dladm(1M)
+ * client, whether it's on a 10 GbE or faster device, user controlled dladm(8)
  * properties, and the nature of the hardware and the resources that it has.
  *
  * When there is no fanout, MAC does not create any soft rings for a device and
@@ -1361,9 +1362,7 @@ int mac_srs_worker_wakeup_ticks = 0;
 }
 
 /*
- * MAC_RX_SRS_TOODEEP
- *
- * Macro called as part of receive-side processing to determine if handling
+ * Threshold used in receive-side processing to determine if handling
  * can occur in situ (in the interrupt thread) or if it should be left to a
  * worker thread.  Note that the constant used to make this determination is
  * not entirely made-up, and is a result of some emprical validation. That
@@ -1376,11 +1375,6 @@ uint_t mac_rx_srs_stack_toodeep;
 #ifndef STACK_GROWTH_DOWN
 #error Downward stack growth assumed.
 #endif
-
-#define	MAC_RX_SRS_TOODEEP() (STACK_BIAS + (uintptr_t)getfp() - \
-	(uintptr_t)curthread->t_stkbase < mac_rx_srs_stack_needed && \
-	(++mac_rx_srs_stack_toodeep || (mac_rx_srs_stack_toodeep = 1)))
-
 
 /*
  * Drop the rx packet and advance to the next one in the chain.
@@ -3227,7 +3221,7 @@ mac_rx_srs_subflow_process(void *arg, mac_resource_handle_t srs,
 	while (mp != NULL) {
 
 		/*
-		 * We will increment the stats for the mactching subflow.
+		 * We will increment the stats for the matching subflow.
 		 * when we get the bytes/pkt count for the classified packets
 		 * later in mac_rx_srs_process.
 		 */
@@ -3416,8 +3410,7 @@ mac_rx_srs_process(void *arg, mac_resource_handle_t srs, mblk_t *mp_chain,
 		 * latency, or if our stack is running deep, we should signal
 		 * the worker thread.
 		 */
-		if (loopback || !(mac_srs->srs_state & SRS_LATENCY_OPT) ||
-		    MAC_RX_SRS_TOODEEP()) {
+		if (loopback || !(mac_srs->srs_state & SRS_LATENCY_OPT)) {
 			/*
 			 * For loopback, We need to let the worker take
 			 * over as we don't want to continue in the same
@@ -3425,6 +3418,11 @@ mac_rx_srs_process(void *arg, mac_resource_handle_t srs, mblk_t *mp_chain,
 			 * overflows and may also end up using
 			 * resources (cpu) incorrectly.
 			 */
+			cv_signal(&mac_srs->srs_async);
+		} else if (STACK_BIAS + (uintptr_t)getfp() -
+		    (uintptr_t)curthread->t_stkbase < mac_rx_srs_stack_needed) {
+			if (++mac_rx_srs_stack_toodeep == 0)
+				mac_rx_srs_stack_toodeep = 1;
 			cv_signal(&mac_srs->srs_async);
 		} else {
 			/*

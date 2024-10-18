@@ -1,0 +1,4358 @@
+.\"
+.\" Sun Microsystems, Inc. gratefully acknowledges The Open Group for
+.\" permission to reproduce portions of its copyrighted documentation.
+.\" Original documentation from The Open Group can be obtained online at
+.\" http://www.opengroup.org/bookstore/.
+.\"
+.\" The Institute of Electrical and Electronics Engineers and The Open
+.\" Group, have given us permission to reprint portions of their
+.\" documentation.
+.\"
+.\" In the following statement, the phrase ``this text'' refers to portions
+.\" of the system documentation.
+.\"
+.\" Portions of this text are reprinted and reproduced in electronic form
+.\" in the SunOS Reference Manual, from IEEE Std 1003.1, 2004 Edition,
+.\" Standard for Information Technology -- Portable Operating System
+.\" Interface (POSIX), The Open Group Base Specifications Issue 6,
+.\" Copyright (C) 2001-2004 by the Institute of Electrical and Electronics
+.\" Engineers, Inc and The Open Group.  In the event of any discrepancy
+.\" between these versions and the original IEEE and The Open Group
+.\" Standard, the original IEEE and The Open Group Standard is the referee
+.\" document.  The original Standard can be obtained online at
+.\" http://www.opengroup.org/unix/online.html.
+.\"
+.\" This notice shall appear on any product containing this material.
+.\"
+.\" The contents of this file are subject to the terms of the
+.\" Common Development and Distribution License (the "License").
+.\" You may not use this file except in compliance with the License.
+.\"
+.\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+.\" or http://www.opensolaris.org/os/licensing.
+.\" See the License for the specific language governing permissions
+.\" and limitations under the License.
+.\"
+.\" When distributing Covered Code, include this CDDL HEADER in each
+.\" file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+.\" If applicable, add the following below this CDDL HEADER, with the
+.\" fields enclosed by brackets "[]" replaced with your own identifying
+.\" information: Portions Copyright [yyyy] [name of copyright owner]
+.\"
+.\"
+.\" Copyright (c) 2008, Sun Microsystems, Inc. All Rights Reserved
+.\" Copyright 2017 Joyent, Inc.
+.\" Copyright 2020 RackTop Systems, Inc.
+.\" Copyright 2024 Oxide Computer Company
+.\" Copyright 2024 OmniOS Community Edition (OmniOSce) Association.
+.\"
+.Dd September 15, 2024
+.Dt DLADM 8
+.Os
+.Sh NAME
+.Nm dladm
+.Nd administer data links
+.Sh SYNOPSIS
+.Nm
+.Cm help
+.\" Link
+.Pp
+.Nm
+.Cm show-link
+.Op Fl P
+.Op Fl s Op Fl i Ar interval
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar link
+.Nm
+.Cm rename-link
+.Op Fl R Ar root-dir
+.Op Fl z Ar zonename
+.Ar link new-link
+.\" Phys
+.Pp
+.Nm
+.Cm delete-phys
+.Ar phys-link
+.Nm
+.Cm show-phys
+.Op Fl m | H | P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar phys-link
+.\" Aggr
+.Pp
+.Nm
+.Cm create-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl P Ar policy
+.Op Fl L Ar mode
+.Op Fl T Ar time
+.Op Fl u Ar address
+.Fl l Ar ether-link
+.Oo Fl l Ar ether-link Oc Ns ...
+.Ar aggr-link
+.Nm
+.Cm modify-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl P Ar policy
+.Op Fl L Ar mode
+.Op Fl T Ar time
+.Op Fl u Ar address
+.Ar aggr-link
+.Nm
+.Cm delete-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar aggr-link
+.Nm
+.Cm add-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Fl l Ar ether-link
+.Oo Fl l Ar ether-link Oc Ns ...
+.Ar aggr-link
+.Nm
+.Cm remove-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Fl l Ar ether-link
+.Oo Fl l Ar ether-link Oc Ns ...
+.Ar aggr-link
+.Nm
+.Cm show-aggr
+.Op Fl PLx
+.Op Fl s Op Fl i Ar interval
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar aggr-link
+.\" Bridge
+.Pp
+.Nm
+.Cm create-bridge
+.Op Fl R Ar root-dir
+.Op Fl P Ar protect
+.Op Fl p Ar priority
+.Op Fl m Ar max-age
+.Op Fl h Ar hello-time
+.Op Fl d Ar forward-delay
+.Op Fl f Ar force-protocol
+.Oo Fl l Ar link Oc Ns ...
+.Ar bridge-name
+.Nm
+.Cm modify-bridge
+.Op Fl R Ar root-dir
+.Op Fl P Ar protect
+.Op Fl p Ar priority
+.Op Fl m Ar max-age
+.Op Fl h Ar hello-time
+.Op Fl d Ar forward-delay
+.Op Fl f Ar force-protocol
+.Ar bridge-name
+.Nm
+.Cm delete-bridge
+.Op Fl R Ar root-dir
+.Ar bridge-name
+.Nm
+.Cm add-bridge
+.Op Fl R Ar root-dir
+.Fl l Ar link
+.Oo Fl l Ar link Oc Ns ...
+.Ar bridge-name
+.Nm
+.Cm remove-bridge
+.Op Fl R Ar root-dir
+.Fl l Ar link
+.Oo Fl l Ar link Oc Ns ...
+.Ar bridge-name
+.Nm
+.Cm show-bridge
+.Op Fl flt
+.Op Fl s Op Fl i Ar interval
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Ar bridge-name
+.\" VLAN
+.Pp
+.Nm
+.Cm create-vlan
+.Op Fl ft
+.Op Fl R Ar root-dir
+.Fl l Ar ether-link
+.Fl v Ar vid
+.Op Ar vlan-link
+.Nm
+.Cm delete-vlan
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar vlan-link
+.Nm
+.Cm show-vlan
+.Op Fl P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar vlan-link
+.\" Wifi
+.Pp
+.Nm
+.Cm scan-wifi
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar wifi-link
+.Nm
+.Cm connect-wifi
+.Op Fl e Ar essid
+.Op Fl i Ar bssid
+.Op Fl k Ar key Ns ,...
+.Sm off
+.Oo Fl s\~ Cm none | wep | wpa Oc \ \&
+.Oo Fl a\~ Cm open | shared Oc \ \&
+.Oo Fl b\~ Cm bss | ibss Oc
+.Sm on
+.Op Fl c
+.Sm off
+.Oo Fl m\~ Cm a | b | g Oc \ \&
+.Sm on
+.Op Fl T Ar time
+.Op Ar wifi-link
+.Nm
+.Cm disconnect-wifi
+.Op Fl a
+.Op Ar wifi-link
+.Nm
+.Cm show-wifi
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar wifi-link
+.\" Ether
+.Pp
+.Nm
+.Cm show-ether
+.Op Fl x
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar ether-link
+.\" Linkprop
+.Pp
+.Nm
+.Cm set-linkprop
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl z Ar zonename
+.Fl p Ar prop Ns Cm \&= Ns Ar value Ns Op ,...
+.Ar link
+.Nm
+.Cm reset-linkprop
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl z Ar zonename
+.Op Fl p Ar prop Ns Op ,...
+.Ar link
+.Nm
+.Cm show-linkprop
+.Op Fl P
+.Op Fl z Ar zonename
+.Op Oo Fl c Oc Fl o Ar field Ns Op ,...
+.Op Fl p Ar prop Ns Op ,...
+.Op Ar link
+.\" Secobj
+.Pp
+.Nm
+.Cm create-secobj
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl f Ar file
+.Fl c Ar class Ar secobj
+.Nm
+.Cm delete-secobj
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar secobj Ns Op ,...
+.Nm
+.Cm show-secobj
+.Op Fl P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar secobj Ns Op ,...
+.\" VNIC
+.Pp
+.Nm
+.Cm create-vnic
+.Op Fl t
+.Op Fl R Ar root-dir
+.Fl l Ar link
+.Oo
+.Fl m
+.Ar value |
+.Cm auto |
+.Cm factory Fl n Ar slot-identifier |
+.Cm random Op Fl r Ar prefix
+.Oc
+.Op Fl v Ar vlan-id
+.Op Fl p Ar prop Ns Cm \&= Ns Ar value Ns Op ,...
+.Ar vnic-link
+.Nm
+.Cm delete-vnic
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl z Ar zonename
+.Ar vnic-link
+.Nm
+.Cm show-vnic
+.Op Fl P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Fl s Op Fl i Ar interval
+.Op Fl l Ar link
+.Op Ar vnic-link
+.\" Etherstub
+.Pp
+.Nm
+.Cm create-etherstub
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar etherstub
+.Nm
+.Cm delete-etherstub
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar etherstub
+.Nm
+.Cm show-etherstub
+.Op Ar etherstub
+.\" IPTun
+.Pp
+.Nm
+.Cm create-iptun
+.Op Fl t
+.Op Fl R Ar root-dir
+.Fl T Ar type
+.Sm off
+.Oo Fl a\~
+.Brq Cm local | remote
+.Cm = Ar addr Op ,...
+.Oc
+.Sm on
+.Ar iptun-link
+.Nm
+.Cm modify-iptun
+.Op Fl t
+.Op Fl R Ar root-dir
+.Sm off
+.Oo Fl a\~
+.Brq Cm local | remote
+.Cm = Ar addr Op ,...
+.Oc
+.Sm on
+.Ar iptun-link
+.Nm
+.Cm delete-iptun
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar iptun-link
+.Nm
+.Cm show-iptun
+.Op Fl P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar iptun-link
+.\" Overlay
+.Pp
+.Nm
+.Cm create-overlay
+.Op Fl t
+.Fl e Ar encap
+.Fl s Ar search
+.Fl v Ar vnetid
+.Op Fl p Ar prop Ns Cm \&= Ns Ar value Ns Op ,...
+.Ar overlay
+.Nm
+.Cm delete-overlay
+.Op Fl t
+.Ar overlay
+.Nm
+.Cm modify-overlay
+.Fl d Ar mac |
+.Fl f |
+.Sm off
+.Fl s\~ Ar mac Cm \&= Ar ip Cm \&: Ar port
+.Sm on
+.Ar overlay
+.Nm
+.Cm show-overlay
+.Op Fl f | t
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar overlay
+.\" Usage
+.Pp
+.Nm
+.Cm show-usage
+.Op Fl a
+.Fl f Ar filename
+.Op Fl p Ar plotfile Fl F Ar format
+.Op Fl s Ar time
+.Op Fl e Ar time
+.Op Ar link
+.Sh DESCRIPTION
+The
+.Nm
+command is used to administer data-links.
+A data-link is represented in the system as a STREAMS DLPI
+.Pq v2
+interface which can be plumbed under protocol stacks such as TCP/IP.
+Each data-link relies on either a single network device or an aggregation of
+devices to send packets to or receive packets from a network.
+.Pp
+Each
+.Nm
+subcommand operates on one of the following objects:
+.Bl -tag -width etherstub
+.It Ar link
+A datalink, identified by a name.
+In general, the name can use any alphanumeric characters
+or underscore
+.Pq _ ,
+but must start with an alphabetic character and end with a number.
+A datalink name can be at most 31 characters, and the ending number must be
+between 0 and 4294967294
+.Pq inclusive .
+The ending number must not begin with a zero.
+Datalink names between 3 and 8 characters are recommended.
+.Pp
+Some subcommands operate only on certain types or classes of datalinks.
+For those cases, the following object names are used:
+.Bl -tag -width iptun-link
+.It Ar phys-link
+A physical datalink.
+.It Ar vlan-link
+A VLAN datalink.
+.It Ar aggr-link
+An aggregation datalink
+.Po
+or a key; see
+.Sx NOTES
+.Pc .
+.It Ar ether-link
+A physical Ethernet datalink.
+.It Ar wifi-link
+A WiFi datalink.
+.It Ar vnic-link
+A virtual network interface created on a link, an etherstub, or an overlay.
+It is a pseudo device that can be treated as if it were an network interface
+card on a machine.
+.It Ar iptun-link
+An IP tunnel link.
+.El
+.It Ar dev
+A network device, identified by concatenation of a driver name and an instance
+number.
+.It Ar etherstub
+An Ethernet stub can be used instead of a physical NIC to create VNICs.
+VNICs created on an etherstub will appear to be connected through a virtual
+switch, allowing complete virtual networks to be built without physical
+hardware.
+.It Ar bridge
+A bridge instance, identified by an administratively-chosen name.
+The name may use any alphanumeric characters or the underscore,
+.Pq _ ,
+but must start and end with an alphabetic character.
+A bridge name can be at most 31 characters.
+The name
+.Sq default
+is reserved, as are all names starting with
+.Sq SUNW .
+.Pp
+Note that appending a zero
+.Pq 0
+to a bridge name produces a valid link name, used for observability.
+.It Ar secobj
+A secure object, identified by an administratively-chosen name.
+The name can use any alphanumeric characters, as well as underscore
+.Pq _ ,
+dot
+.Pq \&. ,
+and hyphen
+.Pq \&- .
+A secure object name can be at most 32 characters.
+.It Ar overlay
+An overlay instance, identified by an administratively-chosen name.
+An overlay can be used to create or join an existing software defined network.
+VNICs created on an overlay will appear to be connected by a local virtual
+switch and will also be connected to interfaces on matching overlays provided by
+other hosts.
+For more information on overlay devices, see
+.Xr overlay 7 .
+.El
+.Ss Options
+Each
+.Nm
+subcommand has its own set of options.
+However, many of the subcommands have the following as a common option:
+.Bl -tag -width 4n
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+Specifies an alternate root directory where the operation \(em such as creation,
+deletion, or renaming \(em should apply.
+.El
+.Ss SUBCOMMANDS
+When invoked with no arguments,
+.Nm
+shows the link configuration information, in the same way as
+.Nm
+.Cm show-link .
+.Pp
+The following subcommands are supported:
+.Bl -tag -width 4n
+.It Nm Cm help
+Display brief command usage.
+.It Xo
+.Nm Cm show-link
+.Op Fl P
+.Op Fl s Op Fl i Ar interval
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar link
+.Xc
+.Pp
+Show link configuration information
+.Pq the default
+or statistics, either for all datalinks or for the
+.Ar link .
+By default, the system is configured with one datalink for each known network
+device.
+.Bl -tag -width 4n
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+When not modified by the
+.Fl s
+option
+.Pq described below ,
+the field name must be one of the fields listed below, or the special value
+.Cm all
+to display all fields.
+By default
+.Po without
+.Fl o
+.Pc ,
+.Cm show-link
+displays all fields.
+.Bl -tag -width BRIDGE
+.It Sy LINK
+The name of the datalink.
+.It Sy CLASS
+The class of the datalink.
+.Nm
+distinguishes between the following classes:
+.Bl -tag -width etherstub
+.It Sy phys
+A physical datalink.
+The
+.Cm show-phys
+subcommand displays more detail for this class of datalink.
+.It Sy aggr
+An IEEE 802.3ad link aggregation.
+The
+.Cm show-aggr
+subcommand displays more detail for this class of datalink.
+.It Sy etherstub
+An Ethernet stub.
+The
+.Cm show-etherstub
+subcommand displays more detail for this class of datalink.
+.It Sy overlay
+An overlay.
+The
+.Cm show-overlay
+subcommand displays more detail for this class of datalink.
+.It Sy vlan
+A VLAN datalink.
+The
+.Cm show-vlan
+subcommand displays more detail for this class of datalink.
+.It Sy vnic
+A virtual network interface.
+The
+.Cm show-vnic
+subcommand displays more detail for this class of datalink.
+.It Sy misc
+A generic datalink without any other class-specific properties.
+Generally used to indicate a pseudo device that doesn't otherwise correspond to
+one of the above classes.
+.El
+.It Sy MTU
+The maximum transmission unit size for the datalink being displayed.
+.It Sy STATE
+The link state of the datalink.
+The state can be
+.Sq up ,
+.Sq down ,
+or
+.Sq unknown .
+.It Sy BRIDGE
+The name of the bridge to which this link is assigned, if any.
+.It Sy OVER
+The physical datalink(s) over which the datalink is operating.
+This applies to aggr, bridge, and vlan classes ov datalinks.
+A VLAN is created over a single physical datalink, a bridge has multiple
+attached links, and an aggregation is comprised of one or more physical
+datalinks.
+.El
+.Pp
+When the
+.Fl o
+option is used in conjunction with the
+.Fl s
+option, used to display link statistics, the field name must be one of the
+fields listed below, or the special value
+.Cm all
+to display all fields.
+.Bl -tag -width IPACKETS
+.It Sy LINK
+The name of the datalink.
+.It Sy IPACKETS
+Number of packets received on this link.
+.It Sy RBYTES
+Number of bytes received on this link.
+.It Sy IERRORS
+Number of input errors.
+.It Sy OPACKETS
+Number of packets sent on this link.
+.It Sy OBYTES
+Number of bytes sent on this link.
+.It Sy OERRORS
+Number of output errors.
+.El
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is required with
+.Fl p .
+See
+.Sx "Parsable Output Format" ,
+below.
+.It Fl P , \&-persistent
+Display the persistent link configuration.
+.It Fl s , Fl \&-statistics
+Display link statistics.
+.It Fl i Ar interval , \&-interval Ns Cm \&= Ar interval
+Used with the
+.Fl s
+option to specify an interval, in seconds, at which statistics should be
+displayed.
+If this option is not specified, statistics will be displayed only once.
+.El
+.It Xo
+.Nm Cm rename-link
+.Op Fl R Ar root-dir
+.Op Fl z Ar zonename
+.Ar link new-link
+.Xc
+.Pp
+Rename
+.Ar link
+to
+.Ar new-link .
+This is used to give a link a meaningful name, or to associate existing link
+configuration such as link properties of a removed device with a new device.
+See the
+.Sx EXAMPLES
+section for specific examples of how this subcommand is used.
+.Bl -tag -width 4n
+.It Xo
+.Fl R Ar root-dir , \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Xo
+.Fl z Ar zonename
+.Xc
+A link assigned to a zone can only be renamed while the zone is in the ready
+state.
+.El
+.It Xo
+.Nm Cm delete-phys
+.Ar phys-link
+.Xc
+.Pp
+This command is used to delete the persistent configuration of a link
+associated with physical hardware which has been removed from the system.
+See the
+.Sx EXAMPLES
+section.
+.It Xo
+.Nm Cm show-phys
+.Op Fl m | H | P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar phys-link
+.Xc
+.Pp
+Show the physical device and attributes of all physical links, or of the named
+physical link.
+Without
+.Fl P ,
+only physical links that are available on the running system are displayed.
+.Bl -tag -width 4n
+.It Fl H
+Show hardware resource usage, as returned by the NIC driver.
+Output from
+.Fl H
+displays the following elements:
+.Bl -tag -width 9n
+.It Sy LINK
+A physical device corresponding to a NIC driver.
+.It Sy RINGTYPE
+RX or TX.
+All rings in a group are of the same group type.
+.It Sy RINGS
+A hardware resource used by a data link, subject to assignment by a driver to
+different groups.
+.It Sy CLIENTS
+MAC clients that are using the rings within a group.
+.El
+.It Fl m
+Show MAC addresses and related information.
+Output from
+.Fl m
+displays the following elements:
+.Bl -tag -width 9n
+.It Sy LINK
+A physical device corresponding to a NIC driver.
+.It Sy SLOT
+When a given physical device has multiple factory MAC addresses, this
+indicates the slot of the corresponding MAC address which can be used as
+part of a call to
+.Cm create-vnic .
+.It Sy ADDRESS
+Displays the MAC address of the device.
+.It Sy INUSE
+Displays whether or not a MAC Address is actively being used.
+.It Sy CLIENT
+MAC clients that are using the address.
+.El
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below, or the special value
+.Cm all ,
+to display all fields.
+Note that if either
+.Fl H
+or
+.Fl m
+are specified, then the valid options are those described in their respective
+sections.
+For each link, the following fields can be displayed:
+.Bl -tag -width 9n
+.It Sy LINK
+The name of the datalink.
+.It Sy MEDIA
+The media type provided by the physical datalink.
+.It Sy STATE
+The state of the link.
+This can be
+.Sq up ,
+.Sq down ,
+or
+.Sq unknown .
+.It Sy SPEED
+The current speed of the link, in megabits per second.
+.It Sy DUPLEX
+For Ethernet links, the full/half duplex status of the link is displayed if the
+link state is up.
+The duplex is displayed as unknown in all other cases.
+.It Sy DEVICE
+The name of the physical device under this link.
+.El
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.It Fl P , \&-persistent
+This option displays persistent configuration for all links, including those
+that have been removed from the system.
+The output provides a
+.Sy FLAGS
+column in which the
+.Sy r
+flag indicates that the physical device associated with a physical link has
+been removed.
+For such links,
+.Cm delete-phys
+can be used to purge the link's configuration from the system.
+.El
+.It Xo
+.Nm Cm create-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl P Ar policy
+.Op Fl L Ar mode
+.Op Fl T Ar time
+.Op Fl u\~ Ns Ar address
+.Fl l Ar ether-link
+.Oo Fl l ether-link Oc Ns ...
+.Ar aggr-link
+.Xc
+.Pp
+Combine a set of links into a single IEEE 802.3ad link aggregation named
+.Ar aggr-link .
+The use of an integer
+.Ar key
+to generate a link name for the aggregation is also supported for backward
+compatibility.
+Many of the
+.Cm -aggr
+subcommands below also support the use of a
+.Ar key
+to refer to a given aggregation, but use of the aggregation link name is
+preferred.
+See the
+.Sx NOTES
+section for more information on keys.
+.Pp
+.Nm
+supports a number of port selection policies for an aggregation of
+ports.
+.Po
+See the description of the
+.Fl P
+option, below
+.Pc .
+If you do not specify a policy,
+.Cm create-aggr
+uses the L4 policy, described under the
+.Fl P
+option.
+.Bl -tag -width 4n
+.It Fl l Ar ether-link , Fl \&-link Ns Cm = Ns Ar ether-link
+Each Ethernet link
+.Pq or port
+in the aggregation is specified using an
+.Fl l
+option followed by the name of the link to be included in the aggregation.
+Multiple links are included in the aggregation by specifying multiple
+.Fl l
+options.
+For backwards compatibility, the
+.Nm
+command also supports the using the
+.Fl d
+option
+.Po
+or
+.Fl \&-dev
+.Pc
+with a device name to specify links by their underlying device name.
+The other
+.Cm -aggr
+subcommands that take
+.Fl l
+options also accept
+.Fl d .
+.It Fl t , \&-temporary
+Specifies that the aggregation is temporary.
+Temporary aggregations last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Fl P Ar policy , Fl \&-policy Ns Cm = Ns Ar policy
+Specifies the port selection policy to use for load spreading of outbound
+traffic.
+The policy specifies which
+.Ar dev
+object is used to send packets.
+A policy is a list of one or more layers specifiers separated by commas.
+A layer specifier is one of the following:
+.Bl -tag -width 4n
+.It Sy L2
+Select outbound device according to source and destination MAC addresses of the
+packet.
+.It Sy L3
+Select outbound device according to source and destination IP addresses of the
+packet.
+.It Sy L4
+Select outbound device according to the upper layer protocol information
+contained in the packet.
+For TCP and UDP this includes source and destination ports.
+For IPsec, this includes the SPI
+.Pq Security Parameters Index .
+.El
+.Pp
+For example, to use upper layer protocol information, the following policy can
+be used:
+.Pp
+.D1 -P L4
+.Pp
+Note that policy L4 is the default.
+.Pp
+To use the source and destination MAC addresses as well as the source and
+destination IP addresses, the following policy can be used:
+.Pp
+.D1 -P L2,L3
+.It Fl L Ar mode , Fl \&-lacp-mode Ns Cm = Ns Ar mode
+Specifies whether LACP should be used and, if used, the mode in which it
+should operate.
+Supported values are
+.Cm off ,
+.Cm active
+or
+.Cm passive .
+.It Fl T Ar time , Fl \&-lacp-timer Ns Cm = Ns Ar mode
+Specifies the LACP timer value.
+The supported values are
+.Cm short
+or
+.Cm long .
+.It Fl u Ar address , Fl \&-unicast Ns Cm = Ns Ar address
+Specifies a fixed unicast hardware address to be used for the aggregation.
+If this option is not specified, then an address is automatically chosen from
+the set of addresses of the component devices.
+.El
+.It Xo
+.Nm Cm modify-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl P Ar policy
+.Op Fl L Ar mode
+.Op Fl T Ar time
+.Op Fl u\~ Ns Ar address
+.Ar aggr-link
+.Xc
+.Pp
+Modify the parameters of the specified aggregation.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the modification is temporary.
+Temporary modifications last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Fl P Ar policy , Fl \&-policy Ns Cm = Ns Ar policy
+Specifies the port selection policy to use for load spreading of outbound
+traffic.
+See
+.Nm Cm create-aggr
+for a description of valid policy values.
+.It Fl L Ar mode , Fl \&-lacp-mode Ns Cm = Ns Ar mode
+Specifies whether LACP should be used and, if used, the mode in which it
+should operate.
+Supported values are
+.Cm off ,
+.Cm active ,
+or
+.Cm passive .
+.It Fl T Ar time , Fl \&-lacp-timer Ns Cm = Ns Ar time
+Specifies the LACP timer value.
+The supported values are
+.Cm short
+or
+.Cm long .
+.It Fl u Ar address , Fl \&-unicast Ns Cm = Ns Ar address
+Specifies a fixed unicast hardware address to be used for the aggregation.
+If this option is not specified, then an address is automatically chosen from
+the set of addresses of the component devices.
+.El
+.It Xo
+.Nm Cm delete-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar aggr-link
+.Xc
+.Pp
+Deletes the specified aggregation.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the deletion is temporary.
+Temporary deletions last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.It Xo
+.Nm Cm add-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Fl l Ar ether-link
+.Oo Fl l Ar ether-link Oc Ns ...
+.Ar aggr-link
+.Xc
+.Pp
+Adds links to the specified aggregation.
+.Bl -tag -width 4n
+.It Fl l Ar ether-link , Fl \&-link Ns Cm = Ns Ar ether-link
+Specifies an Ethernet link to add to the aggregation.
+Multiple links can be added by supplying multiple
+.Fl l
+options.
+.It Fl t , \&-temporary
+Specifies that the additions are temporary.
+Temporary additions last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.It Xo
+.Nm Cm remove-aggr
+.Op Fl t
+.Op Fl R Ar root-dir
+.Fl l Ar ether-link
+.Oo Fl l Ar ether-link Oc Ns ...
+.Ar aggr-link
+.Xc
+.Pp
+Removes links from the specified aggregation.
+.Bl -tag -width 4n
+.It Fl l Ar ether-link , Fl \&-link Ns Cm = Ns Ar ether-link
+Specifies an Ethernet link to remove from the aggregation.
+Multiple links can be removed by supplying multiple
+.Fl l
+options.
+.It Fl t , \&-temporary
+Specifies that the removals are temporary.
+Temporary removals last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.It Xo
+.Nm Cm show-aggr
+.Op Fl PLx
+.Op Fl s Op Fl i Ar interval
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar aggr-link
+.Xc
+.Pp
+Show aggregation configuration
+.Pq the default ,
+LACP information, or statistics, either for all aggregations or for the
+specified aggregation.
+.Pp
+By default
+.Pq with no options ,
+the following fields can be displayed:
+.Bl -tag -width LACPACTIVITY
+.It Sy LINK
+The name of the aggregation link.
+.It Sy POLICY
+The LACP policy of the aggregation.
+See the
+.Cm create-aggr
+.Fl P
+option for a description of the possible values.
+.It Sy ADDRPOLICY
+Either
+.Sq auto ,
+if the aggregation is configured to automatically configure its unicast MAC
+address
+.Po the default if the
+.Fl u
+option was not used to create or modify the aggregation
+.Pc ,
+or
+.Sq fixed ,
+if
+.Fl u
+was used to set a fixed MAC address.
+.It Sy LACPACTIVITY
+The LACP mode of the aggregation.
+Possible values are
+.Sq off ,
+.Sq active ,
+or
+.Sq passive ,
+as set by the
+.Fl l
+option to
+.Cm create-aggr
+or
+.Cm modify-aggr .
+.It Sy LACPTIMER
+The LACP timer value of the aggregation as set by the
+.Fl T
+option of
+.Cm create-aggr
+or
+.Cm modify-aggr .
+.It Sy FLAGS
+A set of state flags associated with the aggregation.
+The only possible flag is
+.Sq f ,
+which is displayed if the administrator forced the creation the aggregation
+using the
+.Fl f
+option to
+.Cm create-aggr .
+Other flags might be defined in the future.
+.El
+.Pp
+The
+.Cm show-aggr
+command accepts the following options:
+.Bl -tag -width 4n
+.It Fl L , \&-lacp
+Displays detailed LACP information for the aggregation link and each underlying
+port.
+Most of the state information displayed by this option is defined by IEEE
+802.3.
+With this option, the following fields can be displayed:
+.Bl -tag -width AGGREGATABLE
+.It Sy LINK
+The name of the aggregation link.
+.It Sy PORT
+The name of one of the underlying aggregation ports.
+.It Sy AGGREGATABLE
+Whether the port can be added to the aggregation.
+.It Sy SYNC
+If
+.Sq yes ,
+the system considers the port to be synchronized and part of the aggregation.
+.It Sy COLL
+If
+.Sq yes ,
+collection of incoming frames is enabled on the associated port.
+.It Sy DIST
+If
+.Sq yes ,
+distribution of outgoing frames is enabled on the associated port.
+.It Sy DEFAULTED
+If
+.Sq yes ,
+the port is using defaulted partner information
+.Pq that is, has not received LACP data from the LACP partner .
+.It Sy EXPIRED
+If
+.Sq yes ,
+the receive state of the port is in the EXPIRED state.
+.El
+.It Fl x , \&-extended
+Display additional aggregation information including detailed information on
+each underlying port.
+With
+.Fl x ,
+the following fields can be displayed:
+.Bl -tag -width AGGREGATABLE
+.It Sy LINK
+The name of the aggregation link.
+.It Sy PORT
+The name of one of the underlying aggregation ports.
+.It Sy SPEED
+The speed of the link or port in megabits per second.
+.It Sy DUPLEX
+The full/half duplex status of the link or port is displayed if the link state
+is
+.Sq up .
+The duplex status is displayed as
+.Sq unknown
+in all other cases.
+.It Sy STATE
+The link state.
+This can be
+.Sq up ,
+.Sq down ,
+or
+.Sq unknown .
+.It Sy ADDRESS
+The MAC address of the link or port.
+.It Sy PORTSTATE
+This indicates whether the individual aggregation port is in the
+.Sq standby
+or
+.Sq attached
+state.
+.El
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed above, or the special value
+.Cm all ,
+to display all fields.
+The fields applicable to the
+.Fl o
+option are limited to those listed under each output mode.
+For example, if using
+.Fl L ,
+only the fields listed under
+.Fl L ,
+above, can be used with
+.Fl o .
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.It Fl p , \&-persistent
+Display the persistent aggregation configuration rather than the state of the
+running system.
+.It Fl s , \&-statistics
+Displays aggregation statistics.
+.It Fl i Ar interval , Fl \&-interval Ns Cm = Ns Ar interval
+Used with the
+.Fl s
+option to specify an interval, in seconds, at which statistics should be
+displayed.
+If this option is not specified, statistics will be displayed only once.
+.El
+.It Xo
+.Nm Cm create-bridge
+.Op Fl R Ar root-dir
+.Op Fl P Ar protect
+.Op Fl p Ar priority
+.Op Fl m Ar max-age
+.Op Fl h Ar hello-time
+.Op Fl d Ar forward-delay
+.Op Fl f Ar force-protocol
+.Oo Fl l Ar link Oc Ns ...
+.Ar bridge-name
+.Xc
+.Pp
+Create an 802.1D bridge instance and optionally assign one or more network
+links to the new bridge.
+By default, no bridge instances are present on the system.
+.Pp
+In order to bridge between links, you must create at least one bridge instance.
+Each bridge instance is separate, and there is no forwarding connection between
+bridges.
+.Bl -tag -width 4n
+.It Fl P Ar protect , Fl \&-protect Ns Cm = Ns Ar protect
+Specifies a protection method.
+The defined protection methods are
+.Cm stp
+for the Spanning Tree Protocol and
+.Cm trill
+for TRILL, which is used on RBridges.
+The default value is
+.Cm stp .
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Fl p Ar priority , Fl \&-priority Ns Cm = Ns Ar priority
+Specifies the Bridge Priority.
+This sets the IEEE STP priority value for determining the root bridge node in
+the network.
+The default value is 32768.
+Valid values are 0
+.Pq highest priority
+to 61440
+.Pq lowest priority ,
+in increments of 4096.
+.Pp
+If a value not evenly divisible by 4096 is used, the system silently rounds
+downwards to the next lower value that is divisible by 4096.
+.It Fl m Ar max-age , Fl \&-max-age Ns Cm = Ns Ar max-age
+Specifies the maximum age for configuration information in seconds.
+This sets the STP Bridge Max Age parameter.
+This value is used for all nodes in the network if this node is the root
+bridge.
+Bridge link information older than this time is discarded.
+It defaults to 20 seconds.
+Valid values are from 6 to 40 seconds.
+See the
+.Fl d Ar forward-delay
+parameter for additional constraints.
+.It Fl h Ar hello-time , Fl \&-hello-time Ns Cm = Ns Ar hello-time
+Specifies the STP Bridge Hello Time parameter.
+When this node is the root node, it sends Configuration BPDUs at this interval
+throughout the network.
+The default value is 2 seconds.
+Valid values are from 1 to 10 seconds.
+See the
+.Fl d Ar forward-delay
+parameter for additional constraints.
+.It Fl d Ar forward-delay , Fl \&-forward-delay Ns Cm = Ns Ar forward-delay
+Specifies the STP Bridge Forward Delay parameter.
+When this node is the root node, then all bridges in the network use this timer
+to sequence the link states when a port is enabled.
+The default value is 15 seconds.
+Valid values are from 4 to 30 seconds.
+.Pp
+Bridges must obey the following two constraints:
+.Pp
+.D1 2 * \&( Ns Ar forward-delay No - 1.0) >= Ar max-age
+.Pp
+.D1 Ar max-age No >= 2 * \&( Ns Ar hello-time No + 1.0\&)
+.Pp
+Any parameter setting that would violate those constraints is treated as an
+error and causes the command to fail with a diagnostic message.
+The message provides valid alternatives to the supplied values.
+.It Xo
+.Fl f Ar force-protocol ,
+.Fl \&-force-protocol Ns Cm = Ns Ar force-protocol
+.Xc
+Specifies the MSTP forced maximum supported protocol.
+The default value is 3.
+Valid values are non-negative integers.
+The current implementation does not support RSTP or MSTP, so this currently has
+no effect.
+However, to prevent MSTP from being used in the future, the parameter may be
+set to 0 for STP only or 2 for STP and RSTP.
+.It Fl l Ar link , Fl \&-link Ns Cm = Ns Ar link
+Specifies one or more links to add to the newly-created bridge.
+This is similar to creating the bridge and then adding one or more links, as
+with the
+.Cm add-bridge
+subcommand.
+However, if any of the links cannot be added, the entire command fails, and the
+new bridge itself is not created.
+To add multiple links on the same command line, repeat this option for each
+link.
+You are permitted to create bridges without links.
+For more information about link assignments, see the
+.Cm add-bridge
+subcommand.
+.El
+.Pp
+Bridge creation and link assignment require the PRIV_SYS_DL_CONFIG privilege.
+Bridge creation might fail if the optional bridging feature is not installed on
+the system.
+.It Xo
+.Nm Cm modify-bridge
+.Op Fl R Ar root-dir
+.Op Fl P Ar protect
+.Op Fl p Ar priority
+.Op Fl m Ar max-age
+.Op Fl h Ar hello-time
+.Op Fl d Ar forward-delay
+.Op Fl f Ar force-protocol
+.Ar bridge-name
+.Xc
+.Pp
+Modify the operational parameters of an existing bridge.
+The options are the same as for the
+.Cm create-bridge
+subcommand, except that the
+.Fl l
+option is not permitted.
+To add links to an existing bridge, use the
+.Cm add-bridge
+subcommand.
+.Pp
+Bridge parameter modification requires the PRIV_SYS_DL_CONFIG privilege.
+.It Xo
+.Nm Cm delete-bridge
+.Op Fl R Ar root-dir
+.Ar bridge-name
+.Xc
+Delete a bridge instance.
+The bridge being deleted must not have any attached links.
+Use the
+.Cm remove-bridge
+subcommand to deactivate links before deleting a bridge.
+.Pp
+Bridge deletion requires the PRIV_SYS_DL_CONFIG privilege.
+.Pp
+The
+.Fl R
+.Pq Fl \&-root-dir
+option is the same as for the
+.Cm create-bridge
+subcommand.
+.It Xo
+.Nm Cm add-bridge
+.Op Fl R Ar root-dir
+.Fl l Ar link
+.Oo Fl l Ar link Oc Ns ...
+.Ar bridge-name
+.Xc
+.Pp
+Add one or more links to an existing bridge.
+If multiple links are specified, and adding any one of them results in an
+error, the command fails and no changes are made to the system.
+.Pp
+Link addition to a bridge requires the PRIV_SYS_DL_CONFIG privilege.
+.Pp
+A link may be a member of at most one bridge.
+An error occurs when you attempt to add a link that already belongs to another
+bridge.
+To move a link from one bridge instance to another, remove it from the current
+bridge before adding it to a new one.
+.Pp
+The links assigned to a bridge must not also be VLANs, VNICs, or tunnels.
+Only physical Ethernet datalinks, aggregation datalinks, wireless links, and
+Ethernet stubs are permitted to be assigned to a bridge.
+.Pp
+Links assigned to a bridge must all have the same MTU.
+This is checked when the link is assigned.
+The link is added to the bridge in a deactivated form if it is not the first
+link on the bridge and it has a differing MTU.
+.Pp
+Note that systems using bridging should not set the
+.Xr eeprom 8
+.Dv local-mac-address?\&
+variable to false.
+.Pp
+The options are the same as for the
+.Cm create-bridge
+subcommand.
+.It Xo
+.Nm Cm remove-bridge
+.Op Fl R Ar root-dir
+.Fl l Ar link
+.Oo Fl l Ar link Oc Ns ...
+.Ar bridge-name
+.Xc
+.Pp
+Remove one or more links from a bridge instance.
+If multiple links are specified, and removing any one of them would result in
+an error, the command fails and none are removed.
+.Pp
+Link removal from a bridge requires the PRIV_SYS_DL_CONFIG privilege.
+.Pp
+The options are the same as for the
+.Cm create-bridge
+subcommand.
+.It Xo
+.Nm Cm show-bridge
+.Op Fl flt
+.Op Fl s Op Fl i Ar interval
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Ar bridge-name
+.Xc
+.Pp
+Show the running status and configuration of bridges, their attached links,
+learned forwarding entries, and TRILL nickname databases.
+When showing overall bridge status and configuration, the bridge name can be
+omitted to show all bridges.
+The other forms require a specified bridge.
+.Pp
+The show-bridge subcommand accepts the following options:
+.Bl -tag -width 4n
+.It Fl i Ar interval , Fl \&-interval Ns Cm \&= Ns Ar interval
+Used with the
+.Fl s
+option to specify an interval, in seconds, at which statistics should be
+displayed.
+If this option is not specified, statistics will be displayed only once.
+.It Fl s , \&-statistics
+Display statistics for the specified bridges or for a given bridge's attached
+links.
+This option cannot be used with the
+.Fl f
+and
+.Fl t
+options.
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+See
+.Sx Parsable Output Format ,
+below.
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field names are described below.
+The special value
+.Cm all
+displays all fields.
+Each set of fields has its own default set to display when
+.Fl o
+is not specified.
+.El
+.Pp
+By default, the
+.Cm show-bridge
+subcommand shows bridge configuration.
+The following fields can be shown:
+.Bl -tag -width BHELLOTIME
+.It Sy BRIDGE
+The name of the bridge.
+.It Sy ADDRESS
+The Bridge Unique Identifier value
+.Pq MAC address .
+.It Sy PRIORITY
+Configured priority value; set by
+.Fl p
+with
+.Cm create-bridge
+and
+.Cm modify-bridge .
+.It Sy BMAXAGE
+Configured bridge maximum age; set by
+.Fl m
+with
+.Cm create-bridge
+and
+.Cm modify-bridge .
+.It Sy BHELLOTIME
+Configured bridge hello time; set by
+.Fl h
+with
+.Cm create-bridge
+and
+.Cm modify-bridge .
+.It Sy BFWDDELAY
+Configured forwarding delay; set by
+.Fl d
+with
+.Cm create-bridge
+and
+.Cm modify-bridge .
+.It Sy FORCEPROTO
+Configured forced maximum protocol; set by
+.Fl f
+with
+.Cm create-bridge
+and
+.Cm modify-bridge .
+.It Sy TCTIME
+Time, in seconds, since last topology change.
+.It Sy TCCOUNT
+Count of the number of topology changes.
+.It Sy TCHANGE
+This indicates that a topology change was detected.
+.It Sy DESROOT
+Bridge Identifier of the root node.
+.It Sy ROOTCOST
+Cost of the path to the root node.
+.It Sy ROOTPORT
+Port number used to reach the root node.
+.It Sy MAXAGE
+Maximum age value from the root node.
+.It Sy HELLOTIME
+Hello time value from the root node.
+.It Sy FWDDELAY
+Forward delay value from the root node.
+.It Sy HOLDTIME
+Minimum BPDU interval.
+.El
+.Pp
+By default, when the
+.Fl o
+option is not specified, only the
+.Sy BRIDGE ,
+.Sy ADDRESS ,
+.Sy PRIORITY ,
+and
+.Sy DESROOT
+fields are shown.
+.Pp
+When the
+.Fl s
+option is specified, the
+.Cm show-bridge
+subcommand shows bridge statistics.
+The following fields can be shown:
+.Bl -tag -width BHELLOTIME
+.It Sy BRIDGE
+Bridge name.
+.It Sy DROPS
+Number of packets dropped due to resource problems.
+.It Sy FORWARDS
+Number of packets forwarded from one link to another.
+.It Sy MBCAST
+Number of multicast and broadcast packets handled by the bridge.
+.It Sy RECV
+Number of packets received on all attached links.
+.It Sy SENT
+Number of packets sent on all attached links.
+.It Sy UNKNOWN
+Number of packets handled that have an unknown destination.
+Such packets are sent to all links.
+.El
+.Pp
+By default, when the
+.Fl o
+option is not specified, only the
+.Sy BRIDGE ,
+.Sy DROPS ,
+and
+.Sy FORWARDS
+fields are shown.
+.Pp
+The
+.Cm show-bridge
+subcommand also accepts the following options:
+.Bl -tag -width 4n
+.It Fl l , \&-link
+Displays link-related status and statistics information for all links attached
+to a single bridge instance.
+By using this option and without the
+.Fl s
+option, the following fields can be displayed for each link:
+.Bl -tag -width DESBRIDGE
+.It Sy LINK
+The link name.
+.It Sy INDEX
+Port
+.Pq link
+index number on the bridge.
+.It Sy STATE
+State of the link.
+The state can be
+.Sq disabled ,
+.Sq discarding ,
+.Sq learning ,
+.Sq forwarding ,
+.Sq non-stp ,
+or
+.Sq bad-mtu .
+.It Sy UPTIME
+Number of seconds since the last reset or initialization.
+.It Sy OPERCOST
+Actual cost in use
+.Pq 1-65535 .
+.It Sy OPERP2P
+This indicates whether point-to-point
+.Pq P2P
+mode been detected.
+.It Sy OPEREDGE
+This indicates whether edge mode has been detected.
+.It Sy DESROOT
+The Root Bridge Identifier that has been seen on this port.
+.It Sy DESCOST
+Path cost to the network root node through the designated port.
+.It Sy DESBRIDGE
+Bridge Identifier for this port.
+.It Sy DESPORT
+The ID and priority of the port used to transmit configuration messages for
+this port.
+.It Sy TCACK
+This indicates whether Topology Change Acknowledge has been seen.
+.El
+.Pp
+When the
+.Fl l
+option is specified without the
+.Fl o
+option, only the
+.Sy LINK ,
+.Sy STATE ,
+.Sy UPTIME ,
+and
+.Sy DESROOT
+fields are shown.
+.Pp
+When the
+.Fl l
+option is specified, the
+.Fl s
+option can be used to display the following fields for each link:
+.Bl -tag -width DESBRIDGE
+.It Sy LINK
+Link name.
+.It Sy CFGBPDU
+Number of configuration BPDUs received.
+.It Sy TCNBPDU
+Number of topology change BPDUs received.
+.It Sy RSTPBPDU
+Number of Rapid Spanning Tree BPDUs received.
+.It Sy TXBPDU
+Number of BPDUs transmitted.
+.It Sy DROPS
+Number of packets dropped due to resource problems.
+.It Sy RECV
+Number of packets received by the bridge.
+.It Sy XMIT
+Number of packets sent by the bridge.
+.El
+.Pp
+When the
+.Fl o
+option is not specified, only the
+.Sy LINK ,
+.Sy DROPS ,
+.Sy RECV ,
+and
+.Sy XMIT
+fields are shown.
+.It Fl f , \&-forwarding
+Displays forwarding entries for a single bridge instance.
+With this option, the following fields can be shown for each forwarding entry:
+.Bl -tag -width NEXTHOP
+.It Sy DEST
+Destination MAC address.
+.It Sy AGE
+Age of entry in seconds and milliseconds.
+Omitted for local entries.
+.It Sy FLAGS
+The
+.Sy L
+.Pq local
+flag is shown if the MAC address belongs to an attached link or to a VNIC on
+one of the attached links.
+.It Sy OUTPUT
+For local entries, this is the name of the attached link that has the MAC
+address.
+Otherwise, for bridges that use Spanning Tree Protocol, this is the output
+interface name.
+For RBridges, this is the output TRILL nickname.
+.El
+.Pp
+When the
+.Fl o
+option is not specified, the
+.Sy DEST ,
+.Sy AGE ,
+.Sy FLAGS ,
+and
+.Sy OUTPUT
+fields are shown.
+.It Fl t , \&-trill
+Displays TRILL nickname entries for a single bridge instance.
+With this option, the following fields can be shown for each TRILL nickname
+entry:
+.Bl -tag -width NEXTHOP
+.It Sy NICK
+TRILL nickname for this RBridge, which is a number from 1 to 65535.
+.It Sy FLAGS
+The
+.Sy L
+flag is shown if the nickname identifies the local system.
+.It Sy LINK
+Link name for output when sending messages to this RBridge.
+.It Sy NEXTHOP
+MAC address of the next hop RBridge that is used to reach the RBridge with this
+nickname.
+.El
+.Pp
+When the
+.Fl o
+option is not specified, the
+.Sy NICK ,
+.Sy FLAGS ,
+.Sy LINK ,
+and
+.Sy NEXTHOP
+fields are shown.
+.El
+.It Xo
+.Nm Cm create-vlan
+.Op Fl ft
+.Op Fl R Ar root-dir
+.Fl l Ar ether-link
+.Fl v Ar vid
+.Op Ar vlan-link
+.Xc
+.Pp
+Create a tagged VLAN link with an ID of
+.Ar vid
+over Ethernet link
+.Ar ether-link .
+The name of the VLAN link can be specified as
+.Ar vlan Ns No \&- Ar link .
+If the name is not specified, a name will be automatically generated
+.Po assuming that
+.Ar ether-link
+is
+.Em namePPA
+.Pc
+as:
+.Pp
+.D1 Cm < Ns Ar name Ns Cm >< Ns No 1000 Cm \&* Ar vid Cm \&+ Em PPA Ns Cm >
+.Pp
+For example, if
+.Ar ether-link
+is
+.Em bge1
+and
+.Ar vid
+is 2, the name generated is
+.Em bge2001 .
+.Bl -tag -width 4n
+.It Fl f , \&-force
+Force the creation of the VLAN link.
+Some devices do not allow frame sizes large enough to include a VLAN header.
+When creating a VLAN link over such a device, the
+.Fl f
+option is needed, and the MTU of the IP interfaces on the resulting VLAN must
+be set to 1496 instead of 1500.
+.It Fl l Ar ether-link
+Specifies Ethernet link over which VLAN is created.
+.It Fl t , \&-temporary
+Specifies that the VLAN link is temporary.
+Temporary VLAN links last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.It Xo
+.Nm Cm delete-vlan
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar vlan-link
+.Xc
+.Pp
+Delete the VLAN link specified.
+.Pp
+The
+.Cm delete-vlan
+subcommand accepts the following options:
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the deletion is temporary.
+Temporary deletions last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.It Xo
+.Nm Cm show-vlan
+.Op Fl P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar vlan-link
+.Xc
+.Pp
+Display VLAN configuration for all VLAN links or for the specified VLAN link.
+.Pp
+The
+.Cm show-vlan
+subcommand accepts the following options:
+.Bl -tag -width 4n
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below, or the special value
+.Cm all ,
+to display all fields.
+For each VLAN link, the following fields can be displayed:
+.Bl -tag -width FLAGS
+.It Sy LINK
+The name of the VLAN link.
+.It Sy VID
+The ID associated with the VLAN.
+.It Sy OVER
+The name of the physical link over which this VLAN is configured.
+.It Sy FLAGS
+A set of flags associated with the VLAN link.
+Possible flags are:
+.Bl -tag -width 4n
+.It Fl f
+The VLAN was created using the
+.Fl f
+option to
+.Cm create-vlan .
+.It Fl i
+The VLAN was implicitly created when the DLPI link was opened.
+These VLAN links are automatically deleted on last close of the DLPI link
+.Po
+for example, when the IP interface associated with the VLAN link is unplumbed
+.Pc .
+.El
+.Pp
+Additional flags may be defined in the future.
+.El
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is
+required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.It Fl P , \&-persistent
+Display the persistent VLAN configuration rather than the state of the running
+system.
+.El
+.It Xo
+.Nm Cm scan-wifi
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar wifi-link
+.Xc
+.Pp
+Scans for WiFi networks, either on all WiFi links, or just on the
+specified
+.Ar wifi-link .
+.Pp
+By default, currently all fields but
+.Sy BSSTYPE
+are displayed.
+.Bl -tag -width 4n
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below, or the special value
+.Cm all
+to display all fields.
+For each WiFi network found, the following fields can be displayed:
+.Bl -tag -width STRENGTH
+.It Sy LINK
+The name of the link the WiFi network is on.
+.It Sy ESSID
+The ESSID
+.Pq name
+of the WiFi network.
+.It Sy BSSID
+Either the hardware address of the WiFi network's Access Point
+.Pq for BSS networks ,
+or the WiFi network's randomly generated unique token
+.Pq for IBSS networks .
+.It Sy SEC
+Either
+.Sq none
+for a WiFi network that uses no security,
+.Sq wep
+for a WiFi network that requires WEP
+.Pq Wired Equivalent Privacy ,
+or
+.Sq wpa
+for a WiFi network that requires WPA
+.Pq Wi-Fi Protected Access .
+.It Sy MODE
+The supported connection modes: one or more of
+.Sq a ,
+.Sq b ,
+or
+.Sq g .
+.It Sy STRENGTH
+The strength of the signal: one of
+.Sq excellent ,
+.Sq very good ,
+.Sq good ,
+.Sq weak ,
+or
+.Sq very weak .
+.It Sy SPEED
+The maximum speed of the WiFi network, in megabits per second.
+.It Sy BSSTYPE
+Either
+.Sq bss
+for
+.Sq BSS
+.Pq infrastructure
+networks, or
+.Sq ibss
+for
+.Sq IBSS
+.Pq ad-hoc
+networks.
+.El
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is
+required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.El
+.It Xo
+.Nm Cm connect-wifi
+.Op Fl e Ar essid
+.Op Fl i Ar bssid
+.Op Fl k Ar key Ns ,...
+.Sm off
+.Oo Fl s\~ Cm none | wep | wpa Oc \ \&
+.Oo Fl a\~ Cm open | shared Oc \ \&
+.Oo Fl b\~ Cm bss | ibss Oc
+.Sm on
+.Op Fl c
+.Sm off
+.Oo Fl m\~ Cm a | b | g Oc \ \&
+.Sm on
+.Op Fl T Ar time
+.Op Ar wifi-link
+.Xc
+.Pp
+Connects to a WiFi network.
+This consists of four steps:
+.Em discovery ,
+.Em filtration ,
+.Em prioritization ,
+and
+.Em association .
+However, to enable connections to non-broadcast WiFi networks and to improve
+performance, if a BSSID or ESSID is specified using the
+.Fl e
+or
+.Fl i
+options, then the first three steps are skipped and
+.Cm connect-wifi
+immediately attempts to associate with a BSSID or ESSID that matches the rest
+of the provided parameters.
+If this association fails, but there is a possibility that other networks
+matching the specified criteria exist, then the traditional discovery process
+begins as specified below.
+.Pp
+The discovery step finds all available WiFi networks on the specified WiFi
+link, which must not yet be connected.
+For administrative convenience, if there is only one WiFi link on the system,
+.Ar wifi-link
+can be omitted.
+.Pp
+Once discovery is complete, the list of networks is filtered according to the
+value of the following options:
+.Bl -tag -width 4n
+.It Fl e Ar essid , Fl \&-essid Ns Cm \&= Ns Ar essid
+Networks that do not have the same
+.Ar essid
+are filtered out.
+.It Xo
+.Sm off
+.Fl b\~ Cm bss | ibss No ,\~
+.Fl \&-bsstype Cm = Cm bss | ibss
+.Sm on
+.Xc
+Networks that do not have the same bsstype are filtered out.
+.It Xo
+.Sm off
+.Fl m\~ Cm a | b | g No ,\~
+.Fl \&-mode Cm = Cm a | b | g
+.Sm on
+.Xc
+Networks not appropriate for the specified 802.11 mode are filtered out.
+.It Xo
+.Sm off
+.Fl k\~ Ar key Oo ,... Oc No ,\~
+.Fl \&-key Cm = Ar key Op ,...
+.Sm on
+.Xc
+Use the specified secobj named by the key to connect to the network.
+Networks not appropriate for the specified keys are filtered out.
+.It Xo
+.Sm off
+.Fl s\~ Cm none | wep | wpa No ,\~
+.Fl \&-sec Cm = Cm none | wep | wpa
+.Sm on
+.Xc
+Networks not appropriate for the specified security mode are filtered out.
+.El
+.Pp
+Next, the remaining networks are prioritized, first by signal strength, and
+then by maximum speed.
+Finally, an attempt is made to associate with each network in the list, in
+order, until one succeeds or no networks remain.
+.Pp
+In addition to the options described above, the following options also control
+the behavior of
+.Cm connect-wifi :
+.Bl -tag -width 4n
+.It Xo
+.Sm off
+.Fl a\~ Cm open | shared No ,\~
+.Fl \&-auth Cm = Cm open | shared
+.Sm on
+.Xc
+Connect using the specified authentication mode.
+By default,
+.Cm open
+and
+.Cm shared
+are tried in order.
+.It Fl c , \&-create-ibss
+Used with
+.Fl b Cm ibss
+to create a new ad-hoc network if one matching the specified ESSID cannot be
+found.
+If no ESSID is specified, then
+.Fl c Fl b Cm ibss
+always triggers the creation of a new ad-hoc network.
+.It Fl T Ar time , Fl \&-timeout Ns Cm \&= Ns Ar time
+Specifies the number of seconds to wait for association to succeed.
+If
+.Ar time
+is
+.Cm forever ,
+then the associate will wait indefinitely.
+The current default is ten seconds, but this might change in the future.
+Timeouts shorter than the default might not succeed reliably.
+.It Xo
+.Sm off
+.Fl k\~ Ar key Oo ,... Oc No ,\~
+.Fl \&-key Cm = Ar key Op ,...
+.Sm on
+.Xc
+In addition to the filtering previously described, the specified keys will be
+used to secure the association.
+The security mode to use will be based on the key class; if a security mode was
+explicitly specified, it must be compatible with the key class.
+All keys must be of the same class.
+.Pp
+For security modes that support multiple key slots, the slot to place the key
+will be specified by a colon followed by an index.
+Therefore,
+.Fl k Ar mykey:3
+places
+.Em mykey
+in slot 3.
+By default, slot 1 is assumed.
+For security modes that support multiple keys, a comma-separated list can be
+specified, with the first key being the active key.
+.El
+.It Xo
+.Nm Cm disconnect-wifi
+.Op Fl a
+.Op Ar wifi-link
+.Xc
+.Pp
+Disconnect from one or more WiFi networks.
+If
+.Ar wifi-link
+specifies a connected WiFi link, then it is disconnected.
+For administrative convenience, if only one WiFi link is connected,
+.Ar wifi-link
+can be omitted.
+.Bl -tag -width 4n
+.It Fl a , \&-all-links
+Disconnects from all connected links.
+This is primarily intended for use by scripts.
+.El
+.It Xo
+.Nm Cm show-wifi
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar wifi-link
+.Xc
+.Pp
+Shows WiFi configuration information either for all WiFi links or for the
+specified
+.Ar wifi-link .
+.Bl -tag -width 4n
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below, or the special value
+.Cm all ,
+to display all fields.
+For each WiFi link, the following fields can be displayed:
+.Bl -tag -width STRENGTH
+.It Sy LINK
+The name of the link being displayed.
+.It Sy STATUS
+Either
+.Sq connected
+if the link is connected, or
+.Sq disconnected
+if it is
+not connected.
+If the link is disconnected, all remaining fields have the value
+.Sq -- .
+.It Sy ESSID
+The ESSID
+.Pq name
+of the connected WiFi network.
+.It Sy BSSID
+Either the hardware address of the WiFi network's Access Point
+.Pq for BSS networks ,
+or the WiFi network's randomly generated unique token
+.Pq for IBSS networks .
+.It Sy SEC
+Either
+.Sq none
+for a WiFi network that uses no security,
+.Sq wep
+for a WiFi network that requires WEP, or
+.Sq wpa
+for a WiFi network that requires WPA.
+.It Sy MODE
+The supported connection modes: one or more of
+.Sq a ,
+.Sq b ,
+or
+.Sq g .
+.It Sy STRENGTH
+The connection strength: one of
+.Sq excellent ,
+.Sq very good ,
+.Sq good ,
+.Sq weak ,
+or
+.Sq very weak .
+.It Sy SPEED
+The connection speed, in megabits per second.
+.It Sy AUTH
+Either
+.Sq open
+or
+.Sq shared
+.Po see
+.Cm connect-wifi
+.Pc .
+.It Sy BSSTYPE
+Either
+.Sq bss
+for
+.Sq BSS
+.Pq infrastructure
+networks, or
+.Sq ibss
+for
+.Sq IBSS
+.Pq ad-hoc
+networks.
+.El
+.Pp
+By default, currently all fields but
+.Sy AUTH ,
+.Sy BSSID ,
+and
+.Sy BSSTYPE
+are displayed.
+.It Fl p , \&-parsable
+Displays using a stable machine-parsable format.
+The
+.Fl o
+option is required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.El
+.It Xo
+.Nm Cm show-ether
+.Op Fl x
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar ether-link
+.Xc
+.Pp
+Shows state information either for all physical Ethernet links or for a
+specified physical Ethernet link.
+.Pp
+The
+.Cm show-ether
+subcommand accepts the following options:
+.Bl -tag -width 4n
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below, or the special value
+.Cm all
+to display all fields.
+For each link, the following fields can be displayed:
+.Bl -tag -width STATE
+.It Sy LINK
+The name of the link being displayed.
+.It Sy PTYPE
+Parameter type, where
+.Sq current
+indicates the negotiated state of the link,
+.Sq capable
+indicates capabilities supported by the device,
+.Sq adv
+indicates the advertised capabilities, and
+.Sq peeradv
+indicates the capabilities advertised by the link-partner.
+.It Sy STATE
+The state of the link.
+.It Sy AUTO
+A yes/no value indicating whether auto-negotiation is advertised.
+.It Sy SPEED-DUPLEX
+Combinations of speed and duplex values available.
+The units of speed are encoded with a trailing suffix of
+.Sq G
+.Pq Gigabits/s
+or
+.Sq M
+.Pq Mb/s .
+Duplex values are encoded as
+.Sq f
+.Pq full-duplex
+or
+.Sq h
+.Pq half-duplex .
+.It Sy PAUSE
+Flow control information.
+Can be
+.Sq no ,
+indicating no flow control is available;
+.Sq tx ,
+indicating that the end-point can transmit pause frames, but ignores any
+received pause frames;
+.Sq rx ,
+indicating that the end-point receives and acts upon received pause frames; or
+.Sq bi ,
+indicating bi-directional flow-control.
+.It Sy REM_FAULT
+Fault detection information.
+Valid values are
+.Sq none
+or
+.Sq fault .
+.El
+.Pp
+By default, all fields except
+.Sy REM_FAULT
+are displayed for the
+.Dq current
+.Sy PTYPE .
+.It Fl p , \&-parsable
+Displays using a stable machine-parsable format.
+The
+.Fl o
+option is
+required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.It Fl x , \&-extended
+Extended output is displayed for
+.Sy PTYPE
+values of
+.Sq current ,
+.Sq capable ,
+.Sq adv
+and
+.Sq peeradv .
+.El
+.It Xo
+.Nm Cm set-linkprop
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl z Ar zonename
+.Fl p Ar prop Ns Cm \&= Ns Ar value Ns Op ,...
+.Ar link
+.Xc
+.Pp
+Sets the values of one or more properties on the link specified.
+The list of properties and their possible values depend on the link type, the
+network device driver, and networking hardware.
+These properties can be retrieved using
+.Cm show-linkprop .
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the changes are temporary.
+Temporary changes last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Xo
+.Fl z Ar zonename
+.Xc
+Operate on a link that has been delegated to the specified zone.
+.It Xo
+.Sm off
+.Fl p\~ Ar prop Cm = Ar value Oo ,... Oc \&,\~
+.Fl \&-prop\~ Ar prop Cm = Ar value Op ,...
+.Sm on
+.Xc
+A comma-separated list of properties to set to the specified values.
+.El
+.Pp
+Note that when the persistent value is set, the temporary value changes to the
+same value.
+.It Xo
+.Nm Cm reset-linkprop
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl z Ar zonename
+.Op Fl p Ar prop Ns Op ,...
+.Ar link
+.Xc
+.Pp
+Resets one or more properties to their values on the link specified.
+Properties are reset to the values they had at startup.
+If no properties are specified, all properties are reset.
+See
+.Cm show-linkprop
+for a description of properties.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the resets are temporary.
+Values are reset to default values.
+Temporary resets last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Xo
+.Fl z Ar zonename
+.Xc
+Operate on a link that has been delegated to the specified zone.
+.It Xo
+.Fl p Ar prop Ns Oo ,... Oc ,
+.Fl \&-prop Ns Cm = Ns Ar prop Ns Op ,...
+.Xc
+A comma-separated list of properties to reset.
+.El
+.Pp
+Note that when the persistent value is reset, the temporary value changes to
+the same value.
+.It Xo
+.Nm Cm show-linkprop
+.Op Fl P
+.Op Fl z Ar zonename
+.Op Oo Fl c Oc Fl o Ar field Ns Op ,...
+.Op Fl p Ar prop Ns Op ,...
+.Op Ar link
+.Xc
+.Pp
+Show the current or persistent values of one or more properties, either for all
+datalinks or for the specified link.
+By default, current values are shown.
+If no properties are specified, all available link properties are displayed.
+For each property, the following fields are displayed:
+.Bl -tag -width 4n
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below, or the special value
+.Cm all
+to display all fields.
+For each link, the following fields can be displayed:
+.Bl -tag -width POSSIBLE
+.It Sy LINK
+The name of the datalink.
+.It Sy PROPERTY
+The name of the property.
+.It Sy PERM
+The read/write permissions of the property.
+The value shown is one of
+.Sq ro
+or
+.Sq rw .
+.It Sy VALUE
+The current
+.Pq or persistent
+property value.
+If the value is not set, it is shown as
+.Sq -- .
+If it is unknown, the value is shown as
+.Sq ? .
+Persistent values that are not set or have been reset will be shown as
+.Sq --
+and will use the system DEFAULT value
+.Pq if any .
+.It Sy DEFAULT
+The default value of the property.
+If the property has no default value,
+.Sq --
+is shown.
+.It Sy POSSIBLE
+A comma-separated list of the values the property can have.
+If the values span a numeric range,
+.Sq min-max
+might be shown as shorthand.
+If the possible values are unknown or unbounded,
+.Sq --
+is shown.
+.El
+.Pp
+The list of properties depends on the link type and network device driver, and
+the available values for a given property further depends on the underlying
+network hardware and its state.
+General link properties are documented in the
+.Sx LINK PROPERTIES
+section.
+However, link properties that begin with underscore
+.Pq _
+are specific to a given link or its underlying network device and subject to
+change or removal.
+See the appropriate network device driver man page for details.
+.It Fl c , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is required with this option.
+See
+.Sx Parsable Output Format ,
+below.
+.It Fl P , \&-persistent
+Display persistent link property information.
+.It Xo
+.Fl z Ar zonename
+.Xc
+Operate on a link that has been delegated to the specified zone.
+.It Xo
+.Fl p Ar prop Ns Oo ,... Oc ,
+.Fl \&-prop Ns Cm = Ns Ar prop Ns Op ,...
+.Xc
+A comma-separated list of properties to show.
+See the sections on link properties following subcommand descriptions.
+.El
+.It Xo
+.Nm Cm create-secobj
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl f Ar file
+.Fl c Ar class Ar secobj
+.Xc
+.Pp
+Create a secure object named
+.Ar secobj
+in the specified
+.Ar class
+to be later used as a WEP or WPA key in connecting to an encrypted network.
+The value of the secure object can either be provided interactively or read
+from a file.
+The sequence of interactive prompts and the file format depends on the class of
+the secure object.
+.Pp
+Currently, the classes
+.Sq wep
+and
+.Sq wpa
+are supported.
+The
+.Sq WEP
+.Pq Wired Equivalent Privacy
+key can be either 5 or 13 bytes long.
+It can be provided either as an ASCII or hexadecimal string \(em thus,
+12345 and 0x3132333435 are equivalent 5-byte keys
+.Pq the 0x prefix can be omitted .
+A file containing a
+.Sq WEP
+key must consist of a single line using either
+.Sq WEP
+key format.
+The WPA
+.Pq Wi-Fi Protected Access
+key must be provided as an ASCII string with a length between 8 and 63 bytes.
+.Pp
+This subcommand is only usable by users or roles that belong to the
+"Network Link Security" RBAC profile.
+.Bl -tag -width 4n
+.It Fl c Ar class , Fl \&-class Ns Cm \&= Ns Ar class
+.Ar class
+can be
+.Sq wep
+or
+.Sq wpa .
+See preceding discussion.
+.It Fl t , \&-temporary
+Specifies that the creation is temporary.
+Temporary creation lasts until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Fl f Ar file , Fl \&-file Ns Cm \&= Ns Ar file
+Specifies a file that should be used to obtain the secure object's value.
+The format of this file depends on the secure object class.
+See the
+.Sx EXAMPLES
+section for an example of using this option to set a WEP key.
+.El
+.It Xo
+.Nm Cm delete-secobj
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar secobj Ns Op ,...
+.Xc
+.Pp
+Delete one or more specified secure objects.
+This subcommand is only usable by users or roles that belong to the
+"Network Link Security" RBAC profile.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the deletions are temporary.
+Temporary deletions last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.It Xo
+.Nm Cm show-secobj
+.Op Fl P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar secobj Ns Op ,...
+.Xc
+.Pp
+Show current or persistent secure object information.
+If one or more secure objects are specified, then information for each is
+displayed.
+Otherwise, all current or persistent secure objects are displayed.
+.Pp
+By default, current secure objects are displayed, which are all secure objects
+that have either been persistently created and not temporarily deleted, or
+temporarily created.
+.Pp
+For security reasons, it is not possible to show the value of a secure object.
+.Bl -tag -width 4n
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below.
+For displayed secure object, the following fields can be shown:
+.Bl -tag -width OBJECT
+.It Sy OBJECT
+The name of the secure object.
+.It Sy CLASS
+The class of the secure object.
+.El
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.It Fl P , \&-persistent
+Display persistent secure object information
+.El
+.It Xo
+.Nm Cm create-vnic
+.Op Fl t
+.Op Fl R Ar root-dir
+.Fl l Ar link
+.Oo
+.Fl m
+.Ar value |
+.Cm auto |
+.Cm factory Fl n Ar slot-identifier |
+.Cm random Op Fl r Ar prefix
+.Oc
+.Op Fl v Ar vlan-id
+.Op Fl p Ar prop Ns Cm \&= Ns Ar value Ns Op ,...
+.Ar vnic-link
+.Xc
+.Pp
+Create a VNIC with name
+.Ar vnic-link
+over the specified link.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the VNIC is temporary.
+Temporary VNICs last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Fl l Ar link , Fl \&-link Ns Cm \&= Ns Ar link
+.Ar link
+can be a physical link, an etherstub or an overlay.
+.It Xo
+.Sm off
+.Fl m\~ Ar value | keyword No \&,\~ Fl \&-mac-address Cm = Ar value | Ar keyword
+.Sm on
+.Xc
+Sets the VNIC's MAC address based on the specified value or keyword.
+If
+.Ar value
+is not a keyword, it is interpreted as a unicast MAC address, which must be
+valid for the underlying NIC.
+The following special keywords can be used:
+.Pp
+.Bl -tag -width 4n -compact
+.It Cm factory Op Fl n Ar slot-identifier
+.It Cm factory Op Fl \&-slot Ns Cm = Ns Ar slot-identifier
+Assign a factory MAC address to the VNIC.
+When a factory MAC address is requested,
+.Fl m
+can be combined with the
+.Fl n
+option to specify a MAC address slot to be used.
+If
+.Fl n
+is not specified, the system will choose the next available factory MAC
+address.
+The
+.Fl m
+option of the
+.Cm show-phys
+subcommand can be used to display the list of factory MAC addresses, their slot
+identifiers, and their availability.
+.It Cm random Op Fl r Ar prefix
+.It Cm random Op Fl \&-mac-prefix Ns Cm = Ns Ar prefix
+Assign a random MAC address to the VNIC.
+A default prefix consisting of a valid IEEE OUI with the local bit set will be
+used.
+That prefix can be overridden with the
+.Fl r
+option.
+.It Cm auto
+Try and use a factory MAC address first.
+If none is available, assign a random MAC address.
+.Cm auto
+is the default action if the
+.Fl m
+option is not specified.
+.It Fl v Ar vlan-id
+Enable VLAN tagging for this VNIC.
+The VLAN tag will have id
+.Ar vlan-id .
+.El
+.It Xo
+.Fl p Ar prop Ns Oo ,... Oc ,
+.Fl \&-prop Ns Cm = Ns Ar prop Ns Op ,...
+.Xc
+A comma-separated list of properties to set to the specified values.
+.El
+.It Xo
+.Nm Cm delete-vnic
+.Op Fl t
+.Op Fl R Ar root-dir
+.Op Fl z Ar zonename
+.Ar vnic-link
+.Xc
+.Pp
+Deletes the specified VNIC.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the deletion is temporary.
+Temporary deletions last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Xo
+.Fl z Ar zonename
+.Xc
+Operate on a link that has been delegated to the specified zone.
+.El
+.It Xo
+.Nm Cm show-vnic
+.Op Fl P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Fl s Op Fl i Ar interval
+.Op Fl l Ar link
+.Op Fl z Ar zonename
+.Op Ar vnic-link
+.Xc
+.Pp
+Show VNIC configuration information
+.Pq the default
+or statistics, for all VNICs, all VNICs on a link, or only the specified
+.Ar vnic-link .
+.Bl -tag -width 4n
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below.
+The field name must be one of the fields listed below, or the special value
+.Cm all
+to display all fields.
+By default
+.Po without
+.Fl o
+.Pc ,
+.Cm show-vnic
+displays all fields.
+.Bl -tag -width MACADDRTYPE
+.It Sy LINK
+The name of the VNIC.
+.It Sy OVER
+The name of the physical link over which this VNIC is configured.
+.It Sy SPEED
+The maximum speed of the VNIC, in megabits per second.
+.It Sy MACADDRESS
+MAC address of the VNIC.
+.It Sy MACADDRTYPE
+MAC address type of the VNIC.
+.Nm
+distinguishes among the following MAC address types:
+.Bl -tag -width factory
+.It Sy random
+A random address assigned to the VNIC.
+.It Sy factory
+A factory MAC address used by the VNIC.
+.El
+.It Sy VID
+The VLAN ID for the VNIC.
+.It Sy ZONE
+The zone to which the VNIC is currently assigned.
+.El
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.It Fl P , \&-persistent
+Display the persistent VNIC configuration.
+.It Fl s , \&-statistics
+Displays VNIC statistics.
+.It Fl i Ar interval , Fl \&-interval Ns Cm \&= Ns Ar interval
+Used with the
+.Fl s
+option to specify an interval, in seconds, at which statistics should be
+displayed.
+If this option is not specified, statistics will be displayed only once.
+.It Fl l Ar link , Fl \&-link Ns Cm \&= Ns Ar link
+Display information for all VNICs on the named link.
+.It Fl z Ar zonename
+Operate on a link that has been delegated to the specified zone.
+.El
+.It Xo
+.Nm Cm create-etherstub
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar etherstub
+.Xc
+.Pp
+Create an etherstub with the specified name.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the etherstub is temporary.
+Temporary etherstubs do not persist across reboots.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.Pp
+VNICs can be created on top of etherstubs instead of physical NICs.
+As with physical NICs, such a creation causes the stack to implicitly create a
+virtual switch between the VNICs created on top of the same etherstub.
+.It Xo
+.Nm Cm delete-etherstub
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar etherstub
+.Xc
+.Pp
+Delete the specified etherstub.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the deletion is temporary.
+Temporary deletions last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.It Xo
+.Nm Cm show-etherstub
+.Op Ar etherstub
+.Xc
+.Pp
+Show all configured etherstubs by default, or the specified etherstub if
+.Ar etherstub
+is specified.
+.It Xo
+.Nm Cm create-iptun
+.Op Fl t
+.Op Fl R Ar root-dir
+.Fl T Ar type
+.Sm off
+.Oo Fl a\~
+.Brq Cm local | remote
+.Cm = Ar addr Op ,...
+.Oc
+.Sm on
+.Ar iptun-link
+.Xc
+.Pp
+Create an IP tunnel link named
+.Ar iptun-link .
+Such links can additionally be protected with IPsec using
+.Xr ipsecconf 8 .
+.Pp
+An IP tunnel is conceptually comprised of two parts: a virtual link between two
+or more IP nodes, and an IP interface above this link that allows the system to
+transmit and receive IP packets encapsulated by the underlying link.
+This subcommand creates a virtual link.
+The
+.Xr ifconfig 8
+command is used to configure IP interfaces above the link.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the IP tunnel link is temporary.
+Temporary tunnels last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Fl T Ar type , Fl \&-tunnel-type Ns Cm \&= Ns Ar type
+Specifies the type of tunnel to be created.
+The type must be one of the following:
+.Bl -tag -width 4n
+.It Sy ipv4
+A point-to-point, IP-over-IP tunnel between two IPv4 nodes.
+This type of tunnel requires IPv4 source and destination addresses to function.
+IPv4 and IPv6 interfaces can be plumbed above such a tunnel to create
+IPv4-over-IPv4 and IPv6-over-IPv4 tunneling configurations.
+.It Sy ipv6
+A point-to-point, IP-over-IP tunnel between two IPv6 nodes as defined in IETF
+RFC 2473.
+This type of tunnel requires IPv6 source and destination addresses to function.
+IPv4 and IPv6 interfaces can be plumbed above such a tunnel to create
+IPv4-over-IPv6 and IPv6-over-IPv6 tunneling configurations.
+.It Sy 6to4
+A 6to4, point-to-multipoint tunnel as defined in IETF RFC 3056.
+This type of tunnel requires an IPv4 source address to function.
+An IPv6 interface is plumbed on such a tunnel link to configure a 6to4 router.
+.El
+.It Fl a Cm local= Ns Ar addr
+Literal IP address or hostname corresponding to the tunnel source.
+If a hostname is specified, it will be resolved to IP addresses, and one of
+those IP addresses will be used as the tunnel source.
+As IP tunnels are created before naming services have been brought online
+during the boot process, it is important that any hostname used be included in
+.Pa /etc/inet/hosts .
+.Fl a Cm remote= Ns Ar addr
+Literal IP address or hostname corresponding to the tunnel destination.
+.El
+.It Xo
+.Nm Cm modify-iptun
+.Op Fl t
+.Op Fl R Ar root-dir
+.Sm off
+.Oo Fl a\~
+.Brq Cm local | remote
+.Cm = Ar addr Op ,...
+.Oc
+.Sm on
+.Ar iptun-link
+.Xc
+.Pp
+Modify the parameters of the specified IP tunnel.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the modification is temporary.
+Temporary modifications last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.It Fl a Cm local= Ns Ar addr
+Specifies a new tunnel source address.
+See
+.Cm create-iptun
+for a description.
+.It Fl a Cm remote= Ns Ar addr
+Specifies a new tunnel destination address.
+See
+.Cm create-iptun
+for a description.
+.El
+.It Xo
+.Cm delete-iptun
+.Op Fl t
+.Op Fl R Ar root-dir
+.Ar iptun-link
+.Xc
+.Pp
+Delete the specified IP tunnel link.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the deletion is temporary.
+Temporary deletions last until the next reboot.
+.It Xo
+.Fl R Ar root-dir ,
+.Fl \&-root-dir Ns Cm = Ns Ar root-dir
+.Xc
+See
+.Sx Options ,
+above.
+.El
+.It Xo
+.Nm Cm show-iptun
+.Op Fl P
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar iptun-link
+.Xc
+.Pp
+Show IP tunnel link configuration for a single IP tunnel or all IP tunnels.
+.Bl -tag -width 4n
+.It Fl P , \&-persistent
+Display the persistent IP tunnel configuration.
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed below, or the special value
+.Cm all ,
+to display all fields.
+By default
+.Po without
+.Fl o
+.Pc ,
+.Cm show-iptun
+displays all fields.
+.Bl -tag -width SOURCE
+.It Sy LINK
+The name of the IP tunnel link.
+.It Sy TYPE
+Type of tunnel as specified by the
+.Fl T
+option of
+.Cm create-iptun .
+.It Sy FLAGS
+A set of flags associated with the IP tunnel link.
+Possible flags are:
+.Bl -tag -width 4n
+.It Sy s
+The IP tunnel link is protected by IPsec policy.
+To display the IPsec policy associated with the tunnel link, enter:
+.Pp
+.D1 ipsecconf -ln -i tunnel-link
+.Pp
+See
+.Xr ipsecconf 8
+for more details on how to configure IPsec policy.
+.It Sy i
+The IP tunnel link was implicitly created with
+.Xr ifconfig 8 ,
+and will be automatically deleted when it is no longer referenced
+.Pq that is, when the last IP interface over the tunnel is unplumbed .
+See
+.Xr ifconfig 8
+for details on implicit tunnel creation.
+.El
+.It Sy LOCAL
+The tunnel source address on the local system.
+.It Sy REMOTE
+The tunnel destination address on the remote system.
+.El
+.El
+.It Xo
+.Nm Cm create-overlay
+.Op Fl t
+.Fl e Ar encap
+.Fl s Ar search
+.Fl v Ar vnetid
+.Sm off
+.Op Fl p\~ Ar prop Cm \&= Ar value Op ,...
+.Sm on
+.Ar overlay
+.Xc
+.Pp
+Create an overlay device named
+.Ar overlay .
+.Pp
+Overlay devices are similar to etherstubs.
+VNICs can be created on top of them.
+However, unlike an etherstub which is local to the system, an overlay device
+can be configured to communicate to remote hosts, providing a means for network
+virtualization.
+The way in which it does this is described by the encapsulation module and the
+search plugin.
+For more information on these, see
+.Xr overlay 7 .
+.Pp
+An overlay device has a series of required and optional properties.
+These properties vary based upon the search and encapsulation modules and are
+fully specified in
+.Xr overlay 7 .
+Not every property needs to be specified \(em some have default values which
+will be used if nothing specific is specified.
+For example, the default port for VXLAN comes from its IANA standard.
+If a required property is missing, the command will fail and inform you of the
+missing properties.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the overlay is temporary.
+Temporary overlays last until the next reboot.
+.It Fl e Ar encap , Fl \&-encap Ns Cm \&= Ns Ar encap
+Use
+.Ar encap
+as the encapsulation plugin for the overlay device
+.Ar overlay .
+The encapsulation plugin determines how packets are transformed before being
+put on the wire.
+.It Fl s Ar search , Fl \&-search Ns Cm \&= Ns Ar search
+Use
+.Ar search
+as the search plugin for
+.Ar overlay .
+The search plugin determines how non-local targets are found and where packets
+are directed to.
+.It Xo
+.Sm off
+.Fl p\~ Ar prop Cm = Ar value Oo ,... Oc \&,\~
+.Fl \&-prop\~ Ar prop Cm = Ar value Op ,...
+.Sm on
+.Xc
+A comma-separated list of properties to set to the specified values.
+.It Fl v Ar vnetid , Fl \&-vnetid Ns Cm \&= Ns Ar vnetid
+Sets the virtual networking identifier to
+.Ar vnetid .
+A virtual network identifier determines is similar to a VLAN identifier, in
+that it identifies a unique virtual network.
+All overlay devices on the system share the same space for the virtual network
+identifier.
+However, the valid range of identifiers is determined by the encapsulation
+plugin specified by
+.Fl e .
+.El
+.It Xo
+.Nm Cm delete-overlay
+.Op Fl t
+.Ar overlay
+.Xc
+.Pp
+Delete the specified overlay.
+This will fail if there are VNICs on top of the device.
+.Bl -tag -width 4n
+.It Fl t , \&-temporary
+Specifies that the deletion is temporary.
+Temporary deletions last until the next reboot.
+.El
+.It Xo
+.Nm Cm modify-overlay
+.Fl d Ar mac |
+.Fl f |
+.Sm off
+.Fl s\~ Ar mac Cm \&= Ar ip Cm \&: Ar port
+.Sm on
+.Ar overlay
+.Xc
+.Pp
+Modifies the target tables for the specified overlay.
+.Pp
+The different options allow for different ways of modifying the target table.
+One of
+.Fl d ,
+.Fl f ,
+and
+.Fl s
+is required.
+This is not applicable for all kinds of overlay devices.
+For more information, see
+.Xr overlay 7 .
+.Bl -tag -width 4n
+.It Fl d Ar mac , Fl \&-delete-entry Ns Cm \&= Ns Ar mac
+Deletes the entry for
+.Ar mac
+from the target table for
+.Ar overlay .
+Note, if a lookup is pending or outstanding, this does not cancel it or stop it
+from updating the value.
+.It Fl f , \&-flush-table
+Flushes all values in the target table for
+.Ar overlay .
+.It Xo
+.Fl s Ar mac Ns Cm = Ns Ar value ,
+.Fl \&-set-entry Ns Cm = Ns Ar mac Ns Cm = Ns Ar value
+.Xc
+Sets the value of
+.Ar overlay Ns No 's
+target table entry for
+.Ar mac
+to the specified value.
+The specified value varies upon the encapsulation plugin.
+The value may be a combination of a MAC address, IP address, and port.
+Generally,
+this looks like
+.Sm off
+.Oo Em mac Cm \&, Oc Oo Em IP Cm \&: Oc Op Em port .
+.Sm on
+If a component is the last one, then there is no need for a separator.
+eg.
+if just the MAC address or IP is needed, it would look like
+.Em mac
+and
+.Em IP
+respectively.
+.El
+.It Xo
+.Nm Cm show-overlay
+.Op Fl f | t
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar overlay
+.Xc
+.Pp
+Shows overlay configuration
+.Pq the default ,
+internal target tables
+.Pq Fl t ,
+or
+the FMA state
+.Pq Fl f ,
+either for all overlays or the specified overlay.
+.Pp
+By default
+.Po with neither
+.Fl f
+or
+.Fl t
+specified
+.Pc ,
+the following fields will be displayed:
+.Bl -tag -width PROPERTY
+.It Sy LINK
+The name of the overlay.
+.It Sy PROPERTY
+The name of the property.
+.It Sy PERM
+The read/write permissions of the property.
+The value shown is one of
+.Sq r-
+or
+.Sq rw .
+.It Sy VALUE
+The current property value.
+If the value is not set, it is shown as
+.Sq -- .
+If it is unknown, the value is shown as
+.Sq \&? .
+.It Sy DEFAULT
+The default value of the property.
+If the property has no default value,
+.Sq --
+is shown.
+.It Sy POSSIBLE
+A comma-separated list of the values the property can have.
+If the values span a numeric range,
+.Sq min-max
+If the possible values are unknown or unbounded,
+.Sq --
+is shown.
+.El
+.Pp
+When the
+.Fl f
+option is used, the following fields will be displayed:
+.Bl -tag -width PROPERTY
+.It Sy LINK
+The name of the overlay.
+.It Sy STATUS
+Either
+.Sq ONLINE
+or
+.Sq DEGRADED .
+.It Sy DETAILS
+When the overlay's status is
+.Sq ONLINE ,
+then this has the value
+.Sq -- .
+Otherwise, when it is
+.Sq DEGRADED ,
+this field provides a more detailed explanation as to why it's degraded.
+.El
+.Pp
+When the
+.Fl t
+option is used, the following fields will be displayed:
+.Bl -tag -width PROPERTY
+.It Sy LINK
+The name of the overlay.
+.It Sy TARGET
+The target MAC address of a table entry.
+.It Sy DESTINATION
+The address that an encapsulated packet will be sent to when a packet has the
+address specified by
+.Sq TARGET .
+.El
+.Pp
+The
+.Cm show-overlay
+command supports the following options:
+.Bl -tag -width 4n
+.It Fl f , \&-fma
+Displays information about an overlay device's FMA state.
+.It Xo
+.Fl o Ar field Ns Oo ,... Oc ,
+.Fl \&-output Ns Cm \&= Ns Ar field Ns Op ,...
+.Xc
+A case-insensitive, comma-separated list of output fields to display.
+The field name must be one of the fields listed above, or the special value
+.Cm all ,
+to display all fields.
+The fields applicable to the
+.Fl o
+option are limited to those listed under each output mode.
+For example, if using
+.Fl L ,
+only the fields listed under
+.Fl L ,
+above, can be used with
+.Fl o .
+.It Fl p , \&-parsable
+Display using a stable machine-parsable format.
+The
+.Fl o
+option is required with
+.Fl p .
+See
+.Sx Parsable Output Format ,
+below.
+.It Fl t , \&-target
+Displays information about an overlay device's target table.
+For more information on the target table, see
+.Xr overlay 7 .
+.El
+.It Xo
+.Nm Cm show-usage
+.Op Fl a
+.Fl f Ar filename
+.Op Fl p Ar plotfile Fl F Ar format
+.Sm off
+.Op Fl s\~ Ar time\ \&
+.Op Fl e\~ Ar time
+.Sm on
+.Op Ar link
+.Xc
+.Pp
+Show the historical network usage from a stored extended accounting file.
+Configuration and enabling of network accounting through
+.Xr acctadm 8
+is required.
+The default output will be the summary of network usage for the entire period
+of time in which extended accounting was enabled.
+.Bl -tag -width 4n -compact
+.It Fl a
+Display all historical network usage for the specified period of time during
+which extended accounting is enabled.
+This includes the usage information for the links that have already been
+deleted.
+.Pp
+.It Fl f Ar filename , Fl \&-file Ns Cm \&= Ns Ar filename
+Read extended accounting records of network usage from
+.Ar filename .
+.Pp
+.It Fl F Ar format , Fl \&-format Ns Cm \&= Ns Ar format
+Specifies the format of
+.Ar plotfile
+that is specified by the
+.Fl p
+option.
+.Cm gnuplot
+is the only currently supported format.
+.Pp
+.It Fl p Ar plotfile , Fl \&-plot Ns Cm \&= Ns Ar plotfile
+Write network usage data to a file of the format specified by the
+.Fl F
+option, which is required.
+.Pp
+.It Fl s Ar time , Fl \&-start Ns Cm \&= Ns Ar time
+.It Fl e Ar time , Fl \&-stop Ns Cm \&= Ns Ar time
+Start and stop times for data display.
+Time is in the format MM/DD/YYYY,hh:mm:ss
+.Pp
+.It Ar link
+If specified, display the network usage only for the named link.
+Otherwise, display network usage for all links.
+.El
+.El
+.Ss "Parsable Output Format"
+Many
+.Nm
+subcommands have an option that displays output in a machine-parsable format.
+The output format is one or more lines of colon
+.Pq \&:
+delimited fields.
+The fields displayed are specific to the subcommand used and are listed under
+the entry for the
+.Fl o
+option for a given subcommand.
+Output includes only those fields requested by means of the
+.Fl o
+option, in the order requested.
+.Pp
+When you request multiple fields, any literal colon characters are escaped by a
+backslash
+.Pq \e
+before being output.
+Similarly, literal backslash characters will also be escaped
+.Pq \e\e .
+This escape format is parsable by using shell
+.Xr read 1
+functions with the environment variable
+.Em IFS=:\&
+.Po
+see
+.Sx EXAMPLES ,
+below
+.Pc .
+Note that escaping is not done when you request only a single field.
+.Ss "General Link Properties"
+The following general link properties are supported:
+.Bl -tag -width 4n
+.It Sy allow-all-dhcp-cids
+.Pp
+One of
+.Cm true
+or
+.Cm false ,
+to indicate whether or not all DHCP Client Identifiers should be permitted on
+this interface when DHCP spoofing protection is being used.
+This can be useful in cases where a DHCP client is using RFC 4361-style Client
+Identifiers, which are based on a value that is opaque to the Global Zone,
+but enforcement of MAC addresses in DHCP packets is still desired.
+.It Sy allowed-dhcp-cids
+A comma-separated list of DHCP Client Identifiers that are allowed on the
+interface.
+.Pp
+Client identifiers can be written in three different formats: a string of
+hexadecimal characters prefixed by 0x, indicating the exact bytes used in the
+Client Identifier; an RFC 3315 DUID of the form
+"1.<hardware type>.<time>.<link-layer address>" (DUID-LLT),
+"2.<enterprise number>.<hex string>" (DUID-EN), or
+"3.<hardware type>.<link-layer address>" (DUID-LL); or a string of characters
+whose byte values should be used as the Client Identifier.
+.Pp
+When specifying a string of hexadecimal characters prefixed by
+.Cm 0x
+or as part of a DUID-EN string, an even number of hexadecimal characters must
+be provided in order to fully specify each byte.
+.It Sy allowed-ips
+A comma-separated list of IP addresses that are allowed on the interface.
+.Pp
+An address in CIDR format with no host address specified is used to indicate
+that any address on that subnet is allowed
+.Po
+e.g. 192.168.10.0/24 means any address in the range 192.168.10.0 -
+192.168.10.255 is allowed
+.Pc .
+.It Sy autopush
+Specifies the set of STREAMS modules to push on the stream associated with a
+link when its DLPI device is opened.
+It is a space-delimited list of modules.
+.Pp
+The optional special character sequence
+.Sq [anchor]
+indicates that a STREAMS anchor should be placed on the stream at the module
+previously specified in the list.
+It is an error to specify more than one anchor or to have an anchor first in
+the list.
+.Pp
+The autopush property is preferred over the more general
+.Xr autopush 8
+command.
+.It Sy cpus
+Bind the processing of packets for a given data link to a processor or a set of
+processors.
+The value can be a comma-separated list of one or more processor ids.
+If the list consists of more than one processor, the processing will spread out
+to all the processors.
+Connection to processor affinity and packet ordering for any individual
+connection will be maintained.
+.Pp
+The processor or set of processors are not exclusively reserved for the link.
+Only the kernel threads and interrupts associated with processing of the link
+are bound to the processor or the set of processors specified.
+In case it is desired that processors be dedicated to the link,
+.Xr psrset 8
+can be used to create a processor set and then specifying the processors from
+the processor set to bind the link to.
+.Pp
+If the link was already bound to processor or set of processors due to a
+previous operation, the binding will be removed and the new set of processors
+will be used instead.
+.Pp
+The default is no CPU binding, which is to say that the processing of packets
+is not bound to any specific processor or processor set.
+.It Sy dynamic-methods
+.Pp
+When using IP spoofing protection (see
+.Sx protection
+), addresses can be learned dynamically by monitoring certain network traffic,
+like DHCP transactions or IPv6 Stateless Address Autoconfiguration (SLAAC).
+By default, all learning methods are permitted, but if
+.Cm allowed-ips
+contains any addresses, then all methods are disabled, and any packets sent
+from addresses previously learned will be dropped.
+This property allows selecting which ones are re-enabled, where valid options
+are
+.Cm dhcpv4 ,
+.Cm dhcpv6 ,
+and
+.Cm slaac.
+.Cm addrconf
+is available as an alias for enabling both
+.Cm dhcpv6 and
+.Cm slaac .
+.It Sy learn_limit
+Limits the number of new or changed MAC sources to be learned over a bridge
+link.
+When the number exceeds this value, learning on that link is temporarily
+disabled.
+Only non-VLAN, non-VNIC type links have this property.
+.Pp
+The default value is 1000.
+Valid values are greater or equal to 0.
+.It Sy learn_decay
+Specifies the decay rate for source changes limited by
+.Sy learn_limit .
+This number is subtracted from the counter for a bridge link every 5 seconds.
+Only non-VLAN, non-VNIC type links have this property.
+.Pp
+The default value is 200.
+Valid values are greater or equal to 0.
+.It Sy maxbw
+Sets the full duplex bandwidth for the link.
+The bandwidth is specified as an integer with one of the scale suffixes
+.Po
+.Sy K ,
+.Sy M ,
+or
+.Sy G
+for Kbps, Mbps, and Gbps
+.Pc .
+If no units are specified, the input value will be read as Mbps.
+The default is no bandwidth limit.
+.It Sy priority
+Sets the relative priority for the link.
+The value can be given as one of the tokens
+.Cm high ,
+.Cm medium ,
+or
+.Cm low .
+The default is
+.Cm high .
+.It Sy protection
+This property enabled various forms of link protections, which prevent sending
+applicable traffic out of this link.
+Note that since this enforcement happens late in the networking stack, some
+observability tools like
+.Xr snoop 8
+may still see dropped outbound packets.
+.Pp
+This property should be set to a comma-separated list of protections to enable
+on this link, where available protections are:
+.Bl -tag -width 4n
+.It Sy ip-nospoof
+Prevents sending from IPv4 and IPv6 addresses that have not been permitted
+over the NIC.
+Addresses can be learned dynamically (see
+.Cm dynamic-methods
+) or specified
+explicitly (see
+.Cm allowed-ips
+).
+.It Sy dhcp-nospoof
+Prevents sending DHCP packets whose client hardware address (CHADDR) field
+differs from the link-layer address, or from using a Client Identifier whose
+value cannot be confirmed to be derived from the link-layer address.
+Additional Client Identifiers can be permitted through the
+.Cm allowed-dhcp-cids
+and
+.Cm allow-all-dhcp-cids
+link properties.
+.It Sy mac-nospoof
+Prevents sending packets with a link-layer address that differs from the one
+associated with the NIC.
+Additional addresses to allow can be added using the
+.Cm seconday-macs
+property.
+.It Sy restricted
+Prevents using a VLAN ID not associated with the NIC and sending packets that
+are not IPv4, IPv6 or ARP.
+.El
+.It Sy stp
+Enables or disables Spanning Tree Protocol on a bridge link.
+Setting this value to
+.Sq 0
+disables Spanning Tree, and puts the link into forwarding mode with
+BPDU guarding enabled.
+This mode is appropriate for point-to-point links connected only to end nodes.
+Only non-VLAN, non-VNIC type links have this property.
+The default value is
+.Sq 1 ,
+to enable STP.
+.It Sy forward
+Enables or disables forwarding for a VLAN.
+Setting this value to
+.Sq 0
+disables bridge forwarding for a VLAN link.
+Disabling bridge forwarding removes that VLAN from the "allowed set" for the
+bridge.
+The default value is
+.Sq 1 ,
+to enable bridge forwarding for configured VLANs.
+.It Sy default_tag
+Sets the default VLAN ID that is assumed for untagged packets sent to and
+received from this link.
+Only non-VLAN, non-VNIC type links have this property.
+Setting this value to
+.Sq 0
+disables the bridge forwarding of untagged packets to and from the port.
+The default value is
+.Sq 1 .
+Valid values values are from 0 to 4094.
+.It Sy promisc-filtered
+Enables or disables the default filtering of promiscuous mode for certain
+classes of links.
+By default, VNICs will only see unicast traffic destined for it in promiscuous
+mode.
+Not all the unicast traffic from the underlying device makes it to the VNIC.
+Disabling this would cause a VNIC, for example, to be able to see all unicast
+traffic from the device it is created over.
+The default value is on.
+.It Sy stp_priority
+Sets the STP and RSTP Port Priority value, which is used to determine the
+preferred root port on a bridge.
+Lower numerical values are higher priority.
+The default value is 128.
+Valid values range from 0 to 255.
+.It Sy stp_cost
+Sets the STP and RSTP cost for using the link.
+The default value is
+.Cm auto ,
+which sets the cost based on link speed, using
+.Sq 100
+for 10Mbps,
+.Sq 19
+for 100Mbps,
+.Sq 4
+for 1Gbps, and
+.Sq 2
+for 10Gbps.
+Valid values range from 1 to 65535.
+.It Sy stp_edge
+Enables or disables bridge edge port detection.
+If set to
+.Sq 0
+.Pq false ,
+the system assumes that the port is connected to other bridges even if no
+bridge PDUs of any type are seen.
+The default value is
+.Sq 1 ,
+which detects edge ports automatically.
+.It Sy stp_p2p
+Sets bridge point-to-point operation mode.
+Possible values are
+.Cm true ,
+.Cm false ,
+and
+.Cm auto .
+When set to
+.Cm auto ,
+point-to-point connections are automatically discovered.
+When set to
+.Cm true ,
+the port mode is forced to use point-to-point.
+When set to
+.Cm false ,
+the port mode is forced to use normal multipoint mode.
+The default value is
+.Cm auto .
+.It Sy stp_mcheck
+Triggers the system to run the RSTP
+.Em Force BPDU Migration Check
+procedure on this link.
+The procedure is triggered by setting the property value to
+.Sq 1 .
+The property is automatically reset back to
+.Sq 0 .
+This value cannot be set unless the following are true:
+.Bl -bullet
+.It
+The link is bridged
+.It
+The bridge is protected by Spanning Tree
+.It
+The bridge force-protocol value is at least 2
+.Pq RSTP
+.El
+.Pp
+The default value is 0.
+.It Sy zone
+Specifies the zone to which the link belongs.
+This property can be modified only temporarily through
+.Nm ,
+and thus the
+.Fl t
+option must be specified.
+To modify the zone assignment such that it persists across reboots,
+use
+.Xr zonecfg 8 .
+Possible values consist of any exclusive-IP zone currently running on the
+system.
+By default, the zone binding is as per
+.Xr zonecfg 8 .
+.El
+.Ss "Wifi Link Properties"
+The following WiFi link properties are supported.
+Note that the ability to set a given property to a given value depends on the
+driver and hardware.
+.Bl -tag -width 4n
+.It Sy channel
+Specifies the channel to use.
+This property can be modified only by certain WiFi links when in IBSS mode.
+The default value and allowed range of values varies by regulatory domain.
+.It Sy powermode
+Specifies the power management mode of the WiFi link.
+Possible values are
+.Cm off
+.Cm disable power management ,
+.Cm max
+.Cm maximum power savings ,
+and
+.Cm fast
+.Pq performance-sensitive power management .
+Default is
+.Cm off .
+.It Sy radio
+Specifies the radio mode of the WiFi link.
+Possible values are
+.Cm on
+or
+.Cm off .
+Default is
+.Cm on .
+.It Sy speed
+Specifies a fixed speed for the WiFi link, in megabits per second.
+The set of possible values depends on the driver and hardware
+.Po
+but is shown by
+.Cm show-linkprop
+.Pc ;
+common speeds include 1, 2, 11, and 54.
+By default, there is no fixed speed.
+.El
+.Ss "Ethernet Link Properties"
+The following MII Properties, as documented in
+.Xr ieee802.3 7 ,
+are supported in read-only mode:
+.Pp
+.Bl -bullet -offset 4n -compact
+.It
+duplex
+.It
+state
+.It
+adv_autoneg_cap
+.It
+adv_10gfdx_cap
+.It
+adv_1000fdx_cap
+.It
+adv_1000hdx_cap
+.It
+adv_100fdx_cap
+.It
+adv_100hdx_cap
+.It
+adv_10fdx_cap
+.It
+adv_10hdx_cap
+.El
+.Pp
+Each
+.Sq adv_
+property
+.Po
+for example,
+.Sq adv_10fdx_cap
+.Pc
+also has a read/write counterpart
+.Sq en_
+property
+.Po for example,
+.Sq en_10fdx_cap
+.Pc
+controlling parameters used at auto-negotiation.
+In the absence of Power Management, the
+.Sq adv_*
+speed/duplex parameters provide the values that are both negotiated and
+currently effective in hardware.
+However, with Power Management enabled, the speed/duplex capabilities currently
+exposed in hardware might be a subset of the set of bits that were used in
+initial link parameter negotiation.
+Thus the MII
+.Sq adv_*
+parameters are marked read-only, with an additional set of
+.Sq en_*
+parameters for configuring speed and duplex properties at initial negotiation.
+.Pp
+Note that the
+.Sq adv_autoneg_cap
+does not have an
+.Sq en_autoneg_cap
+counterpart: the
+.Sq adv_autoneg_cap
+is a 0/1 switch that turns off/on auto-negotiation itself, and therefore cannot
+be impacted by Power Management.
+.Pp
+In addition, the following Ethernet properties are reported:
+.Bl -tag -width 4n
+.It Sy speed
+.Pq read-only
+The operating speed of the device, in Mbps.
+.It Sy mtu
+The maximum client SDU
+.Pq Send Data Unit
+supported by the device.
+Valid range is 68-65536.
+.It Sy flowctrl
+Establishes flow-control modes that will be advertised by the device.
+Valid input is one of:
+.Bl -tag -width 4n
+.It Sy no
+No flow control enabled.
+.It Sy rx
+Receive, and act upon incoming pause frames.
+.It Sy tx
+Transmit pause frames to the peer when congestion occurs, but ignore received
+pause frames.
+.It Sy bi
+Bidirectional flow control.
+.El
+.Pp
+Note that the actual settings for this value are constrained by the
+capabilities allowed by the device and the link partner.
+.It Sy en_fec_cap
+Sets the Forward Error Correct
+.Pq FEC
+code(s) to be advertised by the device.
+Valid values are:
+.Bl -tag -width 4n
+.It Sy none
+Allow the device not to use FEC.
+.It Sy auto
+The device will automatically decide which FEC code to use.
+.It Sy rs
+Allow Reed-Solomon FEC code.
+.It Sy base-r
+Allow Base-R
+.Pq also known as FireCode
+code.
+.El
+.Pp
+Valid input is either
+.Cm auto
+as a single value, or a comma separated combination of
+.Cm none ,
+.Cm rs
+and
+.Cm base-r .
+The default value is
+.Cm auto .
+.Pp
+Note the actual FEC settings and combinations are constrained by the
+capabilities allowed by the device and the link partner.
+.It Sy adv_fec_cap
+.Pq read-only
+The current negotiated Forward Error Correction code.
+.It Sy secondary-macs
+A comma-separated list of additional MAC addresses that are allowed on the
+interface.
+.It Sy tagmode
+This link property controls the conditions in which 802.1Q VLAN tags will be
+inserted in packets being transmitted on the link.
+Two mode values can be assigned to this property:
+.Bl -tag -width 4n
+.It Sy normal
+Insert a VLAN tag in outgoing packets under the following conditions:
+.Bl -bullet -offset 4n
+.It
+The packet belongs to a VLAN.
+.It
+The user requested priority tagging.
+.El
+.It Sy vlanonly
+Insert a VLAN tag only when the outgoing packet belongs to a VLAN.
+If a tag is being inserted in this mode and the user has also requested a
+non-zero priority, the priority is honored and included in the VLAN tag.
+.El
+.Pp
+The default value is
+.Cm vlanonly .
+.It Sy media
+.Pq read-only
+The current type of media that the Ethernet link is using, if known.
+For example, this would be something like 1000BASE-T, 25GBASE-CR, 100GBASE-KR4,
+etc.
+.El
+.Ss "IP Tunnel Link Properties"
+The following IP tunnel link properties are supported.
+.Bl -tag -width 4n
+.It Sy hoplimit
+Specifies the IPv4 TTL or IPv6 hop limit for the encapsulating outer IP header
+of a tunnel link.
+This property exists for all tunnel types.
+The default value is 64.
+.It Sy encaplimit
+Specifies the IPv6 encapsulation limit for an IPv6 tunnel as defined in RFC
+2473.
+This value is the tunnel nesting limit for a given tunneled packet.
+The default value is 4.
+A value of 0 disables the encapsulation limit.
+.El
+.Sh EXAMPLES
+.Sy Example 1
+Configuring an Aggregation
+.Pp
+To configure a data-link over an aggregation of devices
+.Em bge0
+and
+.Em bge1
+with key 1, enter the following command:
+.Bd -literal -offset indent
+# dladm create-aggr -d bge0 -d bge1 1
+.Ed
+.Pp
+.Sy Example 2
+Connecting to a WiFi Link
+.Pp
+To connect to the most optimal available unsecured network on a system with a
+single WiFi link
+.Po
+as per the prioritization rules specified for
+.Cm connect-wifi
+.Pc ,
+enter the following command:
+.Bd -literal -offset indent
+# dladm connect-wifi
+.Ed
+.Pp
+.Sy Example 3
+Creating a WiFi Key
+.Pp
+To interactively create the WEP key
+.Sq mykey ,
+enter the following command:
+.Bd -literal -offset indent
+# dladm create-secobj -c wep mykey
+.Ed
+.Pp
+Alternatively, to non-interactively create the WEP key
+.Sq mykey
+using the contents of a file:
+.Bd -literal -offset indent
+# umask 077
+# cat >/tmp/mykey.$$ <<EOF
+12345
+EOF
+# dladm create-secobj -c wep -f /tmp/mykey.$$ mykey
+# rm /tmp/mykey.$$
+.Ed
+.Pp
+.Sy Example 4
+Connecting to a Specified Encrypted WiFi Link
+.Pp
+To use key
+.Sq mykey
+to connect to ESSID
+.Sq wlan
+on link
+.Sq ath0 ,
+enter the following command:
+.Bd -literal -offset indent
+# dladm connect-wifi -k mykey -e wlan ath0
+.Ed
+.Pp
+.Sy Example 5
+Changing a Link Property
+.Pp
+To set powermode to the value
+.Sq fast
+on link
+.Sq pcwl0 ,
+enter the following command:
+.Bd -literal -offset indent
+# dladm set-linkprop -p powermode=fast pcwl0
+.Ed
+.Pp
+.Sy Example 6
+Connecting to a WPA-Protected WiFi Link
+.Pp
+Create a WPA key
+.Sq psk
+and enter the following command:
+.Bd -literal -offset indent
+# dladm create-secobj -c wpa psk
+.Ed
+.Pp
+To then use key
+.Sq psk
+to connect to ESSID
+.Sq wlan
+on link
+.Sq ath0 ,
+enter the following command:
+.Bd -literal -offset indent
+# dladm connect-wifi -k psk -e wlan ath0
+.Ed
+.Pp
+.Sy Example 7
+Renaming a Link
+.Pp
+To rename the
+.Sq bge0
+link to
+.Sq mgmt0 ,
+enter the following command:
+.Bd -literal -offset indent
+# dladm rename-link bge0 mgmt0
+.Ed
+.Pp
+.Sy Example 8
+Replacing a Network Card
+.Pp
+Consider that the bge0 device, whose link was named mgmt0 as shown in the
+previous example, needs to be replaced with a ce0 device because of a hardware
+failure.
+The bge0 NIC is physically removed, and replaced
+with a new ce0 NIC.
+To associate the newly added ce0 device with the mgmt0 configuration previously
+associated with bge0, enter the following command:
+.Bd -literal -offset indent
+# dladm rename-link ce0 mgmt0
+.Ed
+.Pp
+.Sy Example 9
+Removing a Network Card
+.Pp
+Suppose that in the previous example, the intent is not to replace the
+bge0 NIC with another NIC, but rather to remove and not replace the
+hardware.
+In that case, the mgmt0 datalink configuration is not slated to be associated
+with a different physical device as shown in the previous example, but needs to
+be deleted.
+Enter the following command to delete the datalink configuration associated
+with the mgmt0 datalink, whose physical hardware
+.Pq bge0 in this case
+has been removed:
+.Bd -literal -offset indent
+# dladm delete-phys mgmt0
+.Ed
+.Pp
+.Sy Example 10
+Using Parsable Output to Capture a Single Field
+.Pp
+The following assignment saves the MTU of link net0
+to a variable named
+.Sq mtu .
+.Bd -literal -offset indent
+# mtu=`dladm show-link -p -o mtu net0`
+.Ed
+.Pp
+.Sy Example 11
+Using Parsable Output to Iterate over Links
+.Pp
+The following script displays the state of each link on the system.
+.Bd -literal -offset indent
+# dladm show-link -p -o link,state | \e
+    while IFS=: read link state; do
+        print "Link $link is in state $state"
+done
+.Ed
+.Pp
+.Sy Example 12
+Configuring VNICs
+.Pp
+Create two VNICs with names
+.Sq hello0
+and
+.Sq test1
+over a single physical link
+.Sq bge0 :
+.Bd -literal -offset indent
+# dladm create-vnic -l bge0 hello0
+# dladm create-vnic -l bge0 test1
+.Ed
+.Pp
+.Sy Example 13
+Configuring VNICs and Allocating Bandwidth and Priority
+.Pp
+Create two VNICs with names
+.Sq hello0
+and
+.Sq test1
+over a single physical link
+.Sq bge0
+and make
+.Sq hello0
+a high priority VNIC with a factory-assigned MAC address with a maximum
+bandwidth of 50 Mbps.
+Make
+.Sq test1
+a low priority VNIC with a random MAC address and a maximum bandwidth of
+100Mbps.
+.Bd -literal -offset indent
+# dladm create-vnic -l bge0 -m factory \e
+    -p maxbw=50,priority=high hello0
+# dladm create-vnic -l bge0 -m random \e
+    -p maxbw=100M,priority=low test1
+.Ed
+.Pp
+.Sy Example 14
+Configuring a VNIC with a Factory MAC Address
+.Pp
+First, list the available factory MAC addresses and choose one of them:
+.Bd -literal -offset indent
+# dladm show-phys -m bge0
+LINK            SLOT         ADDRESS              INUSE    CLIENT
+bge0            primary      0:e0:81:27:d4:47     yes      bge0
+bge0            1            8:0:20:fe:4e:a5      no
+bge0            2            8:0:20:fe:4e:a6      no
+bge0            3            8:0:20:fe:4e:a7      no
+.Ed
+.Pp
+Create a VNIC named
+.Sq hello0
+and use slot 1's address:
+.Bd -literal -offset indent
+# dladm create-vnic -l bge0 -m factory -n 1 hello0
+# dladm show-phys -m bge0
+LINK            SLOT         ADDRESS              INUSE    CLIENT
+bge0            primary      0:e0:81:27:d4:47     yes      bge0
+bge0            1            8:0:20:fe:4e:a5      yes      hello0
+bge0            2            8:0:20:fe:4e:a6      no
+bge0            3            8:0:20:fe:4e:a7      no
+.Ed
+.Pp
+.Sy Example 15
+Creating a VNIC with User-Specified MAC Address, Binding it to Set of
+Processors
+.Pp
+Create a VNIC with name
+.Sq hello0 ,
+with a user specified MAC address, and a processor binding 0, 1, 2, 3.
+.Bd -literal -offset indent
+# dladm create-vnic -l bge0 -m 8:0:20:fe:4e:b8 \e
+    -p cpus=0,1,2,3 hello0
+.Ed
+.Pp
+.Sy Example 16
+Creating a Virtual Network Without a Physical NIC
+.Pp
+First, create an etherstub with name
+.Sq stub1 :
+.Bd -literal -offset indent
+# dladm create-etherstub stub1
+.Ed
+.Pp
+Create two VNICs with names
+.Sq hello0
+and
+.Sq test1
+on the etherstub.
+This operation implicitly creates a virtual switch connecting
+.Sq hello0
+and
+.Sq test1 .
+.Bd -literal -offset indent
+# dladm create-vnic -l stub1 hello0
+# dladm create-vnic -l stub1 test1
+.Ed
+.Pp
+.Sy Example 17
+Showing Network Usage
+.Pp
+Network usage statistics can be stored using the extended accounting facility,
+.Xr acctadm 8 .
+.Bd -literal -offset indent
+# acctadm -e basic -f /var/log/net.log net
+# acctadm net
+Network accounting: active
+Network accounting file: /var/log/net.log
+Tracked Network resources: basic
+Untracked Network resources: src_ip,dst_ip,src_port,dst_port,...
+.Ed
+.Pp
+The saved historical data can be retrieved in summary form using the
+.Cm show-usage
+subcommand:
+.Bd -literal -offset indent
+# dladm show-usage -f /var/log/net.log
+LINK      DURATION  IPACKETS RBYTES   OPACKETS OBYTES  BANDWIDTH
+e1000g0   80        1031     546908   0        0       2.44 Kbps
+.Ed
+.Pp
+.Sy Example 18
+Displaying Bridge Information
+.Pp
+The following commands use the
+.Cm show-bridge
+subcommand with no and various options.
+.Bd -literal -offset indent
+# dladm show-bridge
+BRIDGE    PROTECT ADDRESS           PRIORITY DESROOT
+foo       stp     32768/8:0:20:bf:f 32768    8192/0:d0:0:76:14:38
+bar       stp     32768/8:0:20:e5:8 32768    8192/0:d0:0:76:14:38
+
+# dladm show-bridge -l foo
+LINK      STATE        UPTIME   DESROOT
+hme0      forwarding   117      8192/0:d0:0:76:14:38
+qfe1      forwarding   117      8192/0:d0:0:76:14:38
+
+# dladm show-bridge -s foo
+BRIDGE    DROPS        FORWARDS
+foo       0            302
+
+# dladm show-bridge -ls foo
+LINK      DROPS     RECV      XMIT
+hme0      0         360832    31797
+qfe1      0         322311    356852
+
+# dladm show-bridge -f foo
+DEST              AGE     FLAGS  OUTPUT
+8:0:20:bc:a7:dc   10.860  --     hme0
+8:0:20:bf:f9:69   --      L      hme0
+8:0:20:c0:20:26   17.420  --     hme0
+8:0:20:e5:86:11   --      L      qfe1
+.Ed
+.Pp
+.Sy Example 19
+Creating an IPv4 Tunnel
+.Pp
+The following sequence of commands creates and then displays a persistent IPv4
+tunnel link named
+.Sq mytunnel0
+between 66.1.2.3 and 192.4.5.6:
+.Bd -literal -offset indent
+# dladm create-iptun -T ipv4 -s 66.1.2.3 -d 192.4.5.6 mytunnel0
+# dladm show-iptun mytunnel0
+LINK            TYPE  FLAGS  SOURCE              DESTINATION
+mytunnel0       ipv4  --     66.1.2.3            192.4.5.6
+.Ed
+.Pp
+A point-to-point IP interface can then be created over this tunnel link:
+.Bd -literal -offset indent
+# ifconfig mytunnel0 plumb 10.1.0.1 10.1.0.2 up
+.Ed
+.Pp
+As with any other IP interface, configuration persistence for this IP interface
+is achieved by placing the desired
+.Xr ifconfig 8
+commands
+.Pq in this case, the command for "10.1.0.1 10.1.0.2"
+into
+.Pa /etc/hostname.mytunnel0 .
+.Pp
+.Sy Example 20
+Creating a 6to4 Tunnel
+.Pp
+The following command creates a 6to4 tunnel link.
+The IPv4 address of the 6to4 router is 75.10.11.12.
+.Bd -literal -offset indent
+# dladm create-iptun -T 6to4 -s 75.10.11.12 sitetunnel0
+# dladm show-iptun sitetunnel0
+LINK            TYPE  FLAGS  SOURCE              DESTINATION
+sitetunnel0     6to4  --     75.10.11.12         --
+.Ed
+.Pp
+The following command plumbs an IPv6 interface on this tunnel:
+.Bd -literal -offset indent
+# ifconfig sitetunnel0 inet6 plumb up
+# ifconfig sitetunnel0 inet6
+sitetunnel0: flags=2200041 <UP,RUNNING,NONUD,IPv6> mtu 65515 index 3
+inet tunnel src 75.10.11.12
+tunnel hop limit 64
+inet6 2002:4b0a:b0c::1/16
+.Ed
+.Pp
+Note that the system automatically configures the IPv6 address on the 6to4 IP
+interface.
+See
+.Xr ifconfig 8
+for a description of how IPv6 addresses are configured on 6to4 tunnel links.
+.Sh INTERFACE STABILITY
+The command line interface of
+.Nm
+is
+.Sy Committed .
+The output of
+.Nm
+is
+.Sy Committed
+.Sh SEE ALSO
+.Xr read 1 ,
+.Xr dlpi 4P ,
+.Xr attributes 7 ,
+.Xr ieee802.3 7 ,
+.Xr overlay 7 ,
+.Xr acctadm 8 ,
+.Xr autopush 8 ,
+.Xr eeprom 8 ,
+.Xr ifconfig 8 ,
+.Xr ipadm 8 ,
+.Xr ipsecconf 8 ,
+.Xr ndd 8 ,
+.Xr psrset 8 ,
+.Xr wpad 8 ,
+.Xr zonecfg 8
+.Pp
+R. Droms, Ed., J. Bound, B. Volz, T. Lemon, C. Perkins, M. Carney.
+\fIRFC 3315:
+Dynamic Host Configuration Protocol for IPv6 (DHCPv6)\fR.
+The Internet Society.
+July 2003.
+.Pp
+T. Lemon, B. Sommerfeld.
+\fIRFC 4361: Node-specific Client
+Identifiers for Dynamic Host Configuration Protocol Version Four (DHCPv4)\fR\.
+The Internet Society.
+February 2006.
+.Sh NOTES
+The preferred method of referring to an aggregation in the aggregation
+subcommands is by its link name.
+Referring to an aggregation by its integer
+.Ar key
+is supported for backward compatibility, but is not necessary.
+When creating an aggregation, if a
+.Ar key
+is specified instead of a link name, the aggregation's link name will be
+automatically generated by
+.Nm
+as
+.Sy aggr Ns Ar key .

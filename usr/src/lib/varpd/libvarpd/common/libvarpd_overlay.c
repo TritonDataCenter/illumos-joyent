@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2015 Joyent, Inc.
+ * Copyright 2021 Joyent, Inc.
  */
 
 /*
@@ -232,11 +232,11 @@ libvarpd_overlay_lookup_reply(varpd_impl_t *vip,
 
 	/*
 	 * The only errors that should cause us to end up here are due to
-	 * programmer errors. Aruably the EINAVL case indicates that something
+	 * programmer errors. Arguably the EINVAL case indicates that something
 	 * is a bit off; however, at this time we don't opt to kill varpd.
 	 */
 	if (ret != 0 && errno != EINVAL)
-		libvarpd_panic("receieved bad errno from lookup_reply "
+		libvarpd_panic("received bad errno from lookup_reply "
 		    "(cmd %d): %d\n", cmd, errno);
 }
 
@@ -283,15 +283,16 @@ libvarpd_overlay_lookup_handle(varpd_impl_t *vip)
 	    (varpd_query_handle_t *)vqp, otl, &otr->otr_answer);
 }
 
-void
-libvarpd_overlay_lookup_run(varpd_handle_t *vhp)
+/* Use "void *" for vhp here to play nicely with thr_create(). */
+void *
+libvarpd_overlay_lookup_run(void *vhp)
 {
 	varpd_impl_t *vip = (varpd_impl_t *)vhp;
 
 	mutex_enter(&vip->vdi_lock);
 	if (vip->vdi_lthr_quiesce == B_TRUE) {
 		mutex_exit(&vip->vdi_lock);
-		return;
+		return (NULL);
 	}
 	vip->vdi_lthr_count++;
 
@@ -306,6 +307,7 @@ libvarpd_overlay_lookup_run(varpd_handle_t *vhp)
 	vip->vdi_lthr_count--;
 	(void) cond_signal(&vip->vdi_lthr_cv);
 	mutex_exit(&vip->vdi_lock);
+	return (NULL);
 }
 
 void
@@ -502,7 +504,7 @@ libvarpd_plugin_query_reply(varpd_query_handle_t *vqh, int action)
 	varpd_query_t *vqp = (varpd_query_t *)vqh;
 
 	if (vqp == NULL)
-		libvarpd_panic("unkonwn plugin passed invalid "
+		libvarpd_panic("unknown plugin passed invalid "
 		    "varpd_query_handle_t");
 
 	if (action == VARPD_LOOKUP_DROP)

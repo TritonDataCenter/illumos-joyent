@@ -187,6 +187,7 @@ tmpfsinit(int fstype, char *name)
 		VFSNAME_STATVFS,	{ .vfs_statvfs = tmp_statvfs },
 		VFSNAME_VGET,		{ .vfs_vget = tmp_vget },
 		VFSNAME_FREEVFS,	{ .vfs_freevfs = tmp_freevfs },
+		VFSNAME_SYNCFS,		{ .vfs_syncfs = fs_syncfs_nop },
 		NULL,			NULL
 	};
 	int error;
@@ -325,8 +326,8 @@ tmp_mount(vfs_t *vfsp, vnode_t *mvp, struct mounta *uap, cred_t *cr)
 		goto out;
 	}
 
-	if ((tm = kmem_zalloc(sizeof (struct tmount),
-	    KM_NOSLEEP | KM_NORMALPRI)) == NULL) {
+	if ((tm = kmem_zalloc(sizeof (struct tmount), KM_NOSLEEP_LAZY)) ==
+	    NULL) {
 		pn_free(&dpn);
 		error = ENOMEM;
 		goto out;

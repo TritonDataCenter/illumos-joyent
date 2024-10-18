@@ -19,8 +19,6 @@
 # CDDL HEADER END
 #
 #
-#ident	"%Z%%M%	%I%	%E% SMI"
-#
 # Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
@@ -36,7 +34,6 @@ all:=		TARGET= all
 install:=	TARGET= install
 clean:=		TARGET= clean
 clobber:=	TARGET= clobber
-lint:=		TARGET= lint
 catalog:=       TARGET= catalog
 
 # for messaging catalog
@@ -53,12 +50,12 @@ all install:	$(SUBDIRS)
 catalog:        $(POFILE)
 
 $(POFILE):      $(SUBDIR2)
-	$(RM) 	$@
+	$(RM)	$@
 	cat     $(POFILES)      > $@
 
-clean clobber lint: $(SUBDIRS)
+clean clobber: $(SUBDIRS)
 
 $(SUBDIRS): FRC
-	@cd $@; pwd; $(MAKE) $(MFLAGS) $(TARGET)
+	@cd $@; pwd; $(MAKE) $(TARGET)
 
 FRC:

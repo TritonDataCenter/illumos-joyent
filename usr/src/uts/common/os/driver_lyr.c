@@ -545,7 +545,7 @@ ldi_vp_from_dev(dev_t dev, int otyp, vnode_t **vpp)
 
 /* get a vnode to a device by pathname */
 int
-ldi_vp_from_name(char *path, vnode_t **vpp)
+ldi_vp_from_name(const char *path, vnode_t **vpp)
 {
 	vnode_t			*vp = NULL;
 	int			ret;
@@ -680,7 +680,7 @@ ldi_devid_match(ddi_devid_t devid, dev_info_t *dip, dev_t dev)
 
 /* get a handle to a device by devid and minor name */
 int
-ldi_vp_from_devid(ddi_devid_t devid, char *minor_name, vnode_t **vpp)
+ldi_vp_from_devid(ddi_devid_t devid, const char *minor_name, vnode_t **vpp)
 {
 	dev_info_t		*dip;
 	vnode_t			*vp;
@@ -1131,7 +1131,7 @@ ldi_usage_walker_helper(struct ldi_ident *lip, vnode_t *vp,
 	else
 		major = lip->li_major;
 
-	ASSERT((major >= 0) && (major < devcnt));
+	ASSERT3U(major, <, devcnt);
 
 	dnp = &devnamesp[major];
 	LOCK_DEV_OPS(&dnp->dn_lock);
@@ -1258,7 +1258,7 @@ ldi_mlink_lh(vnode_t *vp, int cmd, intptr_t arg, cred_t *crp, int *rvalp)
  * in its internal state so that the devinfo snapshot code has some
  * observability into streams device linkage information.
  */
-void
+int
 ldi_mlink_fp(struct stdata *stp, file_t *fpdown, int lhlink, int type)
 {
 	vnode_t			*vp = fpdown->f_vnode;
@@ -1267,9 +1267,13 @@ ldi_mlink_fp(struct stdata *stp, file_t *fpdown, int lhlink, int type)
 	major_t			major;
 	int			ret;
 
-	/* if the lower stream is not a device then return */
+	/*
+	 * If the lower stream is not a device then return but claim to have
+	 * succeeded, which matches our historical behaviour of just not
+	 * setting up LDI in this case.
+	 */
 	if (!vn_matchops(vp, spec_getvnodeops()))
-		return;
+		return (0);
 
 	ASSERT(!servicing_interrupt());
 
@@ -1279,6 +1283,41 @@ ldi_mlink_fp(struct stdata *stp, file_t *fpdown, int lhlink, int type)
 
 	sp = VTOS(vp);
 	csp = VTOS(sp->s_commonvp);
+
+	/* get a layered ident for the upper stream */
+	if (type == LINKNORMAL) {
+		/*
+		 * if the link is not persistant then we can associate
+		 * the upper stream with a dev_t.  this is because the
+		 * upper stream is associated with a vnode, which is
+		 * associated with a dev_t and this binding can't change
+		 * during the life of the stream.  since the link isn't
+		 * persistant once the stream is destroyed the link is
+		 * destroyed.  so the dev_t will be valid for the life
+		 * of the link.
+		 */
+		ret = ldi_ident_from_stream(getendq(stp->sd_wrq), &li);
+	} else {
+		/*
+		 * if the link is persistant we can only associate the
+		 * link with a driver (and not a dev_t.)  this is
+		 * because subsequent opens of the upper device may result
+		 * in a different stream (and dev_t) having access to
+		 * the lower stream.
+		 *
+		 * for example, if the upper stream is closed after the
+		 * persistant link operation is completed, a subsequent
+		 * open of the upper device will create a new stream which
+		 * may have a different dev_t and an unlink operation
+		 * can be performed using this new upper stream.
+		 */
+		VERIFY3S(type, ==, LINKPERSIST);
+		major = getmajor(stp->sd_vnode->v_rdev);
+		ret = ldi_ident_from_major(major, &li);
+	}
+
+	if (ret != 0)
+		return (ret);
 
 	/* check if this was a plink via a layered handle */
 	if (lhlink) {
@@ -1303,8 +1342,10 @@ ldi_mlink_fp(struct stdata *stp, file_t *fpdown, int lhlink, int type)
 		 * while there may still be valid layered handles
 		 * pointing to it.
 		 */
+		VERIFY3S(type, ==, LINKPERSIST);
+
 		mutex_enter(&csp->s_lock);
-		ASSERT(csp->s_count >= 1);
+		VERIFY(csp->s_count >= 1);
 		csp->s_count++;
 		mutex_exit(&csp->s_lock);
 
@@ -1330,48 +1371,17 @@ ldi_mlink_fp(struct stdata *stp, file_t *fpdown, int lhlink, int type)
 	 * mark the snode/stream as multiplexed
 	 */
 	mutex_enter(&sp->s_lock);
-	ASSERT(!(sp->s_flag & SMUXED));
+	VERIFY(!(sp->s_flag & SMUXED));
 	sp->s_flag |= SMUXED;
 	mutex_exit(&sp->s_lock);
 
-	/* get a layered ident for the upper stream */
-	if (type == LINKNORMAL) {
-		/*
-		 * if the link is not persistant then we can associate
-		 * the upper stream with a dev_t.  this is because the
-		 * upper stream is associated with a vnode, which is
-		 * associated with a dev_t and this binding can't change
-		 * during the life of the stream.  since the link isn't
-		 * persistant once the stream is destroyed the link is
-		 * destroyed.  so the dev_t will be valid for the life
-		 * of the link.
-		 */
-		ret = ldi_ident_from_stream(getendq(stp->sd_wrq), &li);
-	} else {
-		/*
-		 * if the link is persistant we can only associate the
-		 * link with a driver (and not a dev_t.)  this is
-		 * because subsequent opens of the upper device may result
-		 * in a different stream (and dev_t) having access to
-		 * the lower stream.
-		 *
-		 * for example, if the upper stream is closed after the
-		 * persistant link operation is compleated, a subsequent
-		 * open of the upper device will create a new stream which
-		 * may have a different dev_t and an unlink operation
-		 * can be performed using this new upper stream.
-		 */
-		ASSERT(type == LINKPERSIST);
-		major = getmajor(stp->sd_vnode->v_rdev);
-		ret = ldi_ident_from_major(major, &li);
-	}
-
-	ASSERT(ret == 0);
 	(void) handle_alloc(vp, (struct ldi_ident *)li);
 	ldi_ident_release(li);
+
+	return (0);
 }
 
-void
+int
 ldi_munlink_fp(struct stdata *stp, file_t *fpdown, int type)
 {
 	struct ldi_handle	*lhp;
@@ -1381,16 +1391,35 @@ ldi_munlink_fp(struct stdata *stp, file_t *fpdown, int type)
 	major_t			major;
 	int			ret;
 
-	/* if the lower stream is not a device then return */
+	/*
+	 * If the lower stream is not a device then return but claim to have
+	 * succeeded, which matches our historical behaviour of just not
+	 * setting up LDI in this case.
+	 */
 	if (!vn_matchops(vp, spec_getvnodeops()))
-		return;
+		return (0);
 
 	ASSERT(!servicing_interrupt());
-	ASSERT((type == LINKNORMAL) || (type == LINKPERSIST));
 
 	LDI_STREAMS_LNK((CE_NOTE, "%s: unlinking streams "
 	    "stp=0x%p, fpdown=0x%p", "ldi_munlink_fp",
 	    (void *)stp, (void *)fpdown));
+
+	/*
+	 * clear the owner for this snode
+	 * see the comment in ldi_mlink_fp() for information about how
+	 * the ident is allocated
+	 */
+	if (type == LINKNORMAL) {
+		ret = ldi_ident_from_stream(getendq(stp->sd_wrq), &li);
+	} else {
+		VERIFY3S(type, ==, LINKPERSIST);
+		major = getmajor(stp->sd_vnode->v_rdev);
+		ret = ldi_ident_from_major(major, &li);
+	}
+
+	if (ret != 0)
+		return (ret);
 
 	/*
 	 * NOTE: here we rely on the streams subsystem not allowing
@@ -1401,27 +1430,15 @@ ldi_munlink_fp(struct stdata *stp, file_t *fpdown, int type)
 	 */
 	sp = VTOS(vp);
 	mutex_enter(&sp->s_lock);
-	ASSERT(sp->s_flag & SMUXED);
+	VERIFY(sp->s_flag & SMUXED);
 	sp->s_flag &= ~SMUXED;
 	mutex_exit(&sp->s_lock);
 
-	/*
-	 * clear the owner for this snode
-	 * see the comment in ldi_mlink_fp() for information about how
-	 * the ident is allocated
-	 */
-	if (type == LINKNORMAL) {
-		ret = ldi_ident_from_stream(getendq(stp->sd_wrq), &li);
-	} else {
-		ASSERT(type == LINKPERSIST);
-		major = getmajor(stp->sd_vnode->v_rdev);
-		ret = ldi_ident_from_major(major, &li);
-	}
-
-	ASSERT(ret == 0);
 	lhp = handle_find(vp, (struct ldi_ident *)li);
 	handle_release(lhp);
 	ldi_ident_release(li);
+
+	return (0);
 }
 
 /*
@@ -1620,7 +1637,7 @@ ldi_open_by_dev(dev_t *devp, int otyp, int flag, cred_t *cr,
 
 /* get a handle to a device by pathname */
 int
-ldi_open_by_name(char *pathname, int flag, cred_t *cr,
+ldi_open_by_name(const char *pathname, int flag, cred_t *cr,
     ldi_handle_t *lhp, ldi_ident_t li)
 {
 	struct ldi_ident	*lip = (struct ldi_ident *)li;
@@ -1645,7 +1662,7 @@ ldi_open_by_name(char *pathname, int flag, cred_t *cr,
 
 /* get a handle to a device by devid and minor_name */
 int
-ldi_open_by_devid(ddi_devid_t devid, char *minor_name,
+ldi_open_by_devid(ddi_devid_t devid, const char *minor_name,
     int flag, cred_t *cr, ldi_handle_t *lhp, ldi_ident_t li)
 {
 	struct ldi_ident	*lip = (struct ldi_ident *)li;

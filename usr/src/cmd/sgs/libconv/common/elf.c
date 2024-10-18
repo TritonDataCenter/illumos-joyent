@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 1992, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2022 Oxide Computer Company
  */
 
 /*
@@ -1119,7 +1120,7 @@ conv_iter_ehdr_osabi(Conv_fmt_flags_t fmt_flags, conv_iter_cb_t func,
 		    ELFOSABI_NONE, uvalue));
 	}
 
-		return (CONV_ITER_CONT);
+	return (CONV_ITER_CONT);
 }
 
 static const conv_ds_t **
@@ -1217,6 +1218,7 @@ conv_reject_desc(Rej_desc * rej, Conv_reject_desc_buf_t *reject_desc_buf,
 	case SGS_REJ_HWCAP_1:
 	case SGS_REJ_SFCAP_1:
 	case SGS_REJ_HWCAP_2:
+	case SGS_REJ_HWCAP_3:
 	case SGS_REJ_MACHCAP:
 	case SGS_REJ_PLATCAP:
 		if (rej->rej_str)

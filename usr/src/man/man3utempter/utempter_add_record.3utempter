@@ -23,7 +23,7 @@
 .\" SUCH DAMAGE.
 .\"
 .\"
-.Dd May 5, 2020
+.Dd February 5, 2022
 .Dt UTEMPTER_ADD_RECORD 3UTEMPTER
 .Os
 .Sh NAME
@@ -53,11 +53,11 @@
 .Sh DESCRIPTION
 These functions provide an interface for terminal emulators such as tmux,
 screen, and xterm to record user sessions to
-.Xr utmpx 4
+.Xr utmpx 5
 database.
 Note that they are best effort and may not succeed.
 If consumers need to know for certain that they have successfully updated the
-.Xr utmpx 4
+.Xr utmpx 5
 database, these functions should not be used because they cannot communicate
 that for compatibility reasons.
 .Pp
@@ -66,8 +66,8 @@ The
 and
 .Fn addToUtmp
 functions add a login record to the
-.Xr utmpx 4
-database for the TTY belonging to the pseudo-terminal master file descriptor
+.Xr utmpx 5
+database for the TTY belonging to the pseudo-terminal manager file descriptor
 .Fa fd ,
 using the username corresponding with the real user ID of the calling
 process and the optional hostname
@@ -83,7 +83,7 @@ The
 and
 .Fn removeLineFromUtmp
 functions mark the login session as being closed for the TTY belonging
-to the pseudo-terminal master file descriptor
+to the pseudo-terminal manager file descriptor
 .Fa fd .
 .Pp
 The
@@ -131,4 +131,4 @@ are
 .Sh SEE ALSO
 .Xr pututxline 3c ,
 .Xr utmpx 3head ,
-.Xr utmpx 4
+.Xr utmpx 5

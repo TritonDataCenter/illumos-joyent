@@ -28,14 +28,12 @@
 include		$(SRC)/Makefile.master
 
 
-$(__GNUC)FILES=	$(MACH)_gcc_map.noexeglobs
-$(__SUNC)FILES= $(MACH)_cc_map.noexeglobs
+FILES=	$(MACH)_gcc_map.noexeglobs
 
 NATIVE_LIBS	+= libc.so
 LDFLAGS		+= $(BDIRECT)
 
-$(__GNUC)$(BUILD64)FILES += $(MACH64)_gcc_map.noexeglobs
-$(__SUNC)$(BUILD64)FILES += $(MACH64)_cc_map.noexeglobs
+$(BUILD64)FILES += $(MACH64)_gcc_map.noexeglobs
 
 SYMS1=		syms.1
 SYMS2=		syms.2
@@ -92,10 +90,10 @@ $(MACH64)_gcc_map.noexeglobs :=	LINK =	$(LINK64.c)
 # global.
 
 %map.noexeglobs:main.c $(TEMPLATE1) $(TEMPLATE2)
-	$(LINK) -o $(MAIN1) -M$(TEMPLATE1) main.c
+	$(LINK) -o $(MAIN1) -Wl,-M$(TEMPLATE1) main.c
 	$(ELFDUMP) -s -N.dynsym $(MAIN1) | $(EGREP) "WEAK|GLOB" | \
 	    $(GREP) -v UNDEF | $(AWK) '{print $$9 }' | $(SORT) > $(SYMS1)
-	$(LINK) -o $(MAIN2) -M$(TEMPLATE2) main.c
+	$(LINK) -o $(MAIN2) -Wl,-M$(TEMPLATE2) main.c
 	$(ELFDUMP) -s -N.dynsym $(MAIN2) | $(EGREP) "WEAK|GLOB" | \
 	    $(GREP) -v UNDEF | $(AWK) '{print $$9 }' | $(SORT) > $(SYMS2)
 	$(ECHO) "# GENERATED FILE - DO NOT EDIT"	>  $@

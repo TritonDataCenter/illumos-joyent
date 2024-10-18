@@ -24,8 +24,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include "lint.h"
 #include "mtlib.h"
 #include <ctype.h>
@@ -46,10 +44,6 @@
 #include "msgfmt.h"
 #include "nlspath_checks.h"
 #include "gettext.h"
-
-#ifdef DEBUG
-#include <assert.h>
-#endif
 
 /* The following symbols are just for GNU binary compatibility */
 int	_nl_msg_cat_cntr;

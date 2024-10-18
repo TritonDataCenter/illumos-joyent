@@ -24,6 +24,7 @@
 # Use is subject to license terms.
 #
 # Copyright 2019 Joyent, Inc.
+# Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 #
 
 #
@@ -64,30 +65,31 @@ CLEANFILES	+= $(LIBSTUBS) $(LIBGEN)
 BINARY		=
 
 #
-# Non-patch genunix builds merge a version of the ip module called ipctf.  This
-# is to ensure that the common network-related types are included in genunix and
-# can thus be uniquified out of other modules.  We don't want to do this for
-# patch builds, since we can't guarantee that ip and genunix will be in the same
-# patch.
+# genunix builds merge a version of the ip module called ipctf.  This is to
+# ensure that the common network-related types are included in genunix and can
+# thus be uniquified out of other modules.
 #
 IPCTF_TARGET	= $(IPCTF)
-$(PATCH_BUILD)IPCTF_TARGET =
 
 CPPFLAGS	+= -I$(SRC)/common
 CPPFLAGS	+= -I$(SRC)/uts/common/fs/zfs
 
 CPPFLAGS	+= -I$(UTSBASE)/i86pc
 
-CERRWARN	+= -_gcc=-Wno-unused-label
 CERRWARN	+= -_gcc=-Wno-unused-variable
 CERRWARN	+= -_gcc=-Wno-unused-value
 CERRWARN	+= -_gcc=-Wno-unused-function
 CERRWARN	+= -_gcc=-Wno-parentheses
-CERRWARN	+= -_gcc=-Wno-switch
-CERRWARN	+= -_gcc=-Wno-type-limits
 CERRWARN	+= $(CNOWARN_UNINIT)
 CERRWARN	+= -_gcc=-Wno-clobbered
 CERRWARN	+= -_gcc=-Wno-empty-body
+
+#
+# Some compilers default to stripping unused debug information from
+# objects. Since genunix is used as the uniquification source for CTF data
+# in the kernel, explicitly keep as much debug data as possible.
+#
+CFLAGS		+= $(CALLSYMS)
 
 # very hairy
 $(OBJS_DIR)/u8_textprep.o := SMATCH=off
@@ -98,7 +100,7 @@ $(OBJS_DIR)/seg_vn.o := SMOFF += deref_check
 $(OBJS_DIR)/ddi_intr_irm.o := SMOFF += deref_check
 
 # need work still
-SMOFF += signed,indenting,all_func_returns
+SMOFF += signed,all_func_returns
 $(OBJS_DIR)/clock_highres.o := SMOFF += signed_integer_overflow_check
 $(OBJS_DIR)/evchannels.o := SMOFF += allocating_enough_data
 $(OBJS_DIR)/klpd.o := SMOFF += cast_assign
@@ -107,8 +109,8 @@ $(OBJS_DIR)/process.o := SMOFF += or_vs_and
 $(OBJS_DIR)/sunpci.o := SMOFF += deref_check
 $(OBJS_DIR)/timers.o := SMOFF += signed_integer_overflow_check
 
-# definitely wrong
-$(OBJS_DIR)/acl_common.o := SMOFF += or_vs_and
+# 3rd party code
+$(OBJS_DIR)/bz2bzlib.o := SMOFF += indenting
 
 #
 #	Default build targets.
@@ -144,7 +146,7 @@ $(IPCTF_TARGET) ipctf_target: FRC
 	@pwd
 
 $(GENUNIX): $(IPCTF_TARGET) $(OBJECTS)
-	$(LD) -r $(LDFLAGS) -o $@ $(OBJECTS)
+	$(LD) -ztype=kmod $(LDFLAGS) -o $@ $(OBJECTS)
 	$(CTFMERGE_GENUNIX_MERGE)
 	$(POST_PROCESS)
 

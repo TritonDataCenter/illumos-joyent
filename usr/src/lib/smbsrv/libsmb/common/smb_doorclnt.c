@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2019 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 #include <assert.h>
@@ -207,7 +208,14 @@ smb_get_dcinfo(char *namebuf, uint32_t namebuflen, smb_inaddr_t *ipaddr)
 bool_t
 smb_joininfo_xdr(XDR *xdrs, smb_joininfo_t *objp)
 {
+	if (!xdr_uint32_t(xdrs, &objp->mode))
+		return (FALSE);
+
 	if (!xdr_vector(xdrs, (char *)objp->domain_name, MAXHOSTNAMELEN,
+	    sizeof (char), (xdrproc_t)xdr_char))
+		return (FALSE);
+
+	if (!xdr_vector(xdrs, (char *)objp->container_name, MAXHOSTNAMELEN,
 	    sizeof (char), (xdrproc_t)xdr_char))
 		return (FALSE);
 
@@ -217,9 +225,6 @@ smb_joininfo_xdr(XDR *xdrs, smb_joininfo_t *objp)
 
 	if (!xdr_vector(xdrs, (char *)objp->domain_passwd,
 	    SMB_PASSWD_MAXLEN + 1, sizeof (char), (xdrproc_t)xdr_char))
-		return (FALSE);
-
-	if (!xdr_uint32_t(xdrs, &objp->mode))
 		return (FALSE);
 
 	return (TRUE);
@@ -293,7 +298,7 @@ smb_find_ads_server(char *fqdn, char *buf, int buflen)
 	return (found);
 }
 
-void
+int
 smb_notify_dc_changed(void)
 {
 	int rc;
@@ -301,8 +306,14 @@ smb_notify_dc_changed(void)
 	rc = smb_door_call(SMB_DR_NOTIFY_DC_CHANGED,
 	    NULL, NULL, NULL, NULL);
 
-	if (rc != 0)
-		syslog(LOG_DEBUG, "smb_notify_dc_changed: %m");
+	if (rc != 0) {
+		rc = errno;
+		if (rc == 0)
+			rc = EPERM;
+		syslog(LOG_DEBUG, "smb_notify_dc_changed: rc=%d", rc);
+		return (rc);
+	}
+	return (0);
 }
 
 

@@ -29,7 +29,7 @@
 /*
  * PRC National Standard GB 18030-2000 encoding of Chinese text.
  *
- * See gb18030(5) for details.
+ * See gb18030(7) for details.
  */
 
 #include "lint.h"
@@ -54,12 +54,6 @@ static size_t	_GB18030_mbsnrtowcs(wchar_t *_RESTRICT_KYWD,
 static size_t	_GB18030_wcsnrtombs(char *_RESTRICT_KYWD,
 		    const wchar_t **_RESTRICT_KYWD, size_t, size_t,
 		    mbstate_t *_RESTRICT_KYWD);
-
-
-typedef struct {
-	int	count;
-	uchar_t	bytes[4];
-} _GB18030State;
 
 void
 _GB18030_init(struct lc_ctype *lct)

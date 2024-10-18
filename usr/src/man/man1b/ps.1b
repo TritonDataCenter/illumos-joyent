@@ -2,7 +2,7 @@
 .\" Copyright (c) 2002, Sun Microsystems, Inc. - All Rights Reserved.
 .\" Copyright (c), 1980 Regents of the University of California.  All rights reserved.  The Berkeley software License Agreement  specifies the terms and conditions for redistribution.
 .\" Copyright 2019 Joyent, Inc.
-.TH PS 1B "Aug 13, 2019"
+.TH PS 1B "Feb 17, 2023"
 .SH NAME
 ps \- display the status of current processes
 .SH SYNOPSIS
@@ -13,7 +13,7 @@ ps \- display the status of current processes
 .SH DESCRIPTION
 The \fBps\fR command displays information about processes. Normally, only those
 processes that are running with your effective user \fBID\fR and are attached
-to a controlling terminal (see \fBtermio\fR(7I)) are shown. Additional
+to a controlling terminal (see \fBtermio\fR(4I)) are shown. Additional
 categories of processes can be added to the display using various options. In
 particular, the \fB-a\fR option allows you to include processes that are not
 owned by you (that do not have your user \fBID\fR), and the \fB-x\fR option
@@ -164,7 +164,7 @@ children.
 .RS 11n
 Lists only process data associated with the terminal, \fIterm\fR. Terminal
 identifiers may be specified in one of two forms: the device's file name (for
-example, \fBtty04\fR or \fBterm/14\fR ) or, if the device's file name starts
+example, \fBtty04\fR or \fBterm/14\fR) or, if the device's file name starts
 with \fBtty\fR, just the digit identifier (for example, \fB04\fR).
 .RE
 
@@ -383,8 +383,14 @@ the user block.
 .RE
 
 .SH SEE ALSO
-\fBkill\fR(1), \fBps\fR(1), \fBwhodo\fR(1M), \fBgetpriority\fR(3C),
-\fBnice\fR(2), \fBproc\fR(4), \fBattributes\fR(5), \fBtermio\fR(7I)
+.BR kill (1),
+.BR ps (1),
+.BR nice (2),
+.BR getpriority (3C),
+.BR termio (4I),
+.BR proc (5),
+.BR attributes (7),
+.BR whodo (8)
 .SH NOTES
 Things can change while \fBps\fR is running. The picture \fBps\fR gives is only
 a close approximation to the current state. Some data printed for defunct

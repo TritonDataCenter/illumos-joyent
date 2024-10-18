@@ -22,10 +22,8 @@
 /*
  * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ * Copyright 2024 OmniOS Community Edition (OmniOSce) Association.
  */
-
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #include <sys/errno.h>
 #include <sys/types.h>
@@ -38,7 +36,7 @@
 #include "passwdutil.h"
 
 int
-__get_authtoken_attr(char *name, pwu_repository_t *rep, attrlist *item)
+__get_authtoken_attr(const char *name, pwu_repository_t *rep, attrlist *item)
 {
 	int repositories;
 	int i;

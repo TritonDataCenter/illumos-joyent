@@ -686,7 +686,7 @@ ipc_event(iu_eh_t *ehp, int fd, short events, iu_event_id_t id, void *arg)
 	 *	action in progress.  If there's a user action running,
 	 *	the user command is sent DHCP_IPC_E_PEND.
 	 *
-	 *    o otherwise, the the transaction is started with
+	 *    o otherwise, the transaction is started with
 	 *	async_start().  if the transaction is on behalf
 	 *	of a user, ipc_action_start() is called to keep
 	 *	track of the ipc information and set up the
@@ -1101,12 +1101,9 @@ dhcp_smach_set_msg_reqhost(dhcp_smach_t *dsmp, ipc_action_t *iap)
 		return;
 	}
 
-	if (iap->ia_request->buffer == NULL ||
-	    iap->ia_request->data_length <= DHCP_OPT_META_LEN) {
+	if (iap->ia_request->data_length <= DHCP_OPT_META_LEN) {
 		dhcpmsg(MSG_WARNING, "dhcp_smach_set_msg_reqhost:"
-		    " DHCP_TYPE_OPTION ia_request buffer is NULL (0) or"
-		    " short (1): %d",
-		    iap->ia_request->buffer == NULL ? 0 : 1);
+		    " DHCP_TYPE_OPTION ia_request buffer is short");
 		return;
 	}
 

@@ -54,11 +54,6 @@ CERRWARN +=	$(CNOWARN_UNINIT)
 # needs work
 SMATCH=off
 
-$(PICS) :=	CFLAGS += $(XFFLAG)
-$(PICS) :=	CCFLAGS += $(XFFLAG)
-$(PICS) :=	CFLAGS64 += $(XFFLAG)
-$(PICS) :=	CCFLAGS64 += $(XFFLAG)
-
 DYNFLAGS +=	$(ZIGNORE)
 
 LIBS = $(DYNLIB)
@@ -69,7 +64,6 @@ MAPFILES =	../mapfile-vers
 LDLIBS +=  -lgss -lnsl -lc
 
 RPCGEN += -C
-SED = sed
 
 .KEEP_STATE:
 

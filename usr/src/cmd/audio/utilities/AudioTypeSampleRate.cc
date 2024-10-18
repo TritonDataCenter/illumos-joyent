@@ -125,7 +125,8 @@ Convert(
 	outbuf = new AudioBuffer(length, "(SampleRate conversion buffer)");
 	if (outbuf == 0)
 		return (AUDIO_UNIXERROR);
-	if (err = outbuf->SetHeader(outhdr)) {
+	err = outbuf->SetHeader(outhdr);
+	if (err != AUDIO_SUCCESS) {
 		delete outbuf;
 		return (err);
 	}
@@ -192,7 +193,7 @@ Flush(
 			if (err)
 				return (err);
 		}
-		delete tmpbuf;
+		delete[] tmpbuf;
 	}
 	return (AUDIO_SUCCESS);
 }

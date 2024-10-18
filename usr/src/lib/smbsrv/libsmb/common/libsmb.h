@@ -21,7 +21,8 @@
 
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2019 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 #ifndef	_LIBSMB_H
@@ -160,6 +161,10 @@ typedef enum {
 	SMB_CI_ENCRYPT,
 	SMB_CI_MIN_PROTOCOL,
 	SMB_CI_BYPASS_TRAVERSE_CHECKING,
+	SMB_CI_ENCRYPT_CIPHERS,
+	SMB_CI_NETLOGON_FLAGS,
+	SMB_CI_SHORT_NAMES,
+	SMB_CI_MAX_OPENS,
 
 	SMB_CI_MAX
 } smb_cfg_id_t;
@@ -217,10 +222,12 @@ extern void smb_config_get_version(smb_version_t *);
 uint32_t smb_config_get_execinfo(char *, char *, size_t);
 extern void smb_config_get_negtok(uchar_t *, uint32_t *);
 
-extern int smb_config_check_protocol(char *);
 extern uint32_t smb_config_get_max_protocol(void);
 extern uint32_t smb_config_get_min_protocol(void);
+extern uint32_t smb_convert_version_str(const char *);
 extern void smb_config_upgrade(void);
+extern uint32_t smb_config_get_encrypt_ciphers(void);
+extern int smb_convert_encrypt_ciphers(char *);
 
 extern smb_cfg_val_t smb_config_get_require(smb_cfg_id_t);
 
@@ -237,10 +244,11 @@ extern void smb_update_netlogon_seqnum(void);
 
 /* See also: smb_joininfo_xdr() */
 typedef struct smb_joininfo {
+	uint32_t mode;
 	char domain_name[MAXHOSTNAMELEN];
+	char container_name[MAXHOSTNAMELEN];
 	char domain_username[SMB_USERNAME_MAXLEN + 1];
 	char domain_passwd[SMB_PASSWD_MAXLEN + 1];
-	uint32_t mode;
 } smb_joininfo_t;
 
 /* See also: smb_joinres_xdr() */
@@ -255,7 +263,7 @@ int smb_join(smb_joininfo_t *, smb_joinres_t *info);
 bool_t smb_joininfo_xdr(XDR *, smb_joininfo_t *);
 bool_t smb_joinres_xdr(XDR *, smb_joinres_t *);
 boolean_t smb_find_ads_server(char *, char *, int);
-void smb_notify_dc_changed(void);
+int smb_notify_dc_changed(void);
 
 extern void smb_config_getdomaininfo(char *, char *, char *, char *, char *);
 extern void smb_config_setdomaininfo(char *, char *, char *, char *, char *);
@@ -317,6 +325,8 @@ extern int smb_chk_hostaccess(smb_inaddr_t *, char *);
 
 extern int smb_getnameinfo(smb_inaddr_t *, char *, int, int);
 
+extern uint32_t smb_get_netlogon_flags(void);
+
 void smb_trace(const char *s);
 void smb_tracef(const char *fmt, ...);
 
@@ -337,6 +347,7 @@ void libsmb_redirect_syslog(__FILE_TAG *fp, int priority);
 #define	SMBAUTH_SESSION_KEY_SZ	SMBAUTH_HASH_SZ
 #define	SMBAUTH_HEXHASH_SZ	(SMBAUTH_HASH_SZ * 2)
 
+#define	SMBAUTH_RETRY		2
 #define	SMBAUTH_FAILURE		1
 #define	SMBAUTH_SUCCESS		0
 #define	MD_DIGEST_LEN		16
@@ -638,6 +649,7 @@ typedef struct smb_trusted_domains {
 typedef struct smb_dcinfo {
 	char			dc_name[MAXHOSTNAMELEN];
 	smb_inaddr_t		dc_addr;
+	uint32_t		dc_flags;
 } smb_dcinfo_t;
 
 /*
@@ -890,7 +902,7 @@ uint32_t smb_sd_write(char *path, smb_sd_t *, uint32_t);
 uint32_t smb_sd_fromfs(smb_fssd_t *, smb_sd_t *);
 
 /* Kernel Module Interface */
-int smb_kmod_bind(void);
+int smb_kmod_bind(boolean_t);
 boolean_t smb_kmod_isbound(void);
 int smb_kmod_setcfg(smb_kmod_cfg_t *);
 int smb_kmod_setgmtoff(int32_t);
@@ -901,6 +913,7 @@ void smb_kmod_unbind(void);
 int smb_kmod_share(nvlist_t *);
 int smb_kmod_unshare(nvlist_t *);
 int smb_kmod_shareinfo(char *, boolean_t *);
+int smb_kmod_shareaccess(smb_netuserinfo_t *, smb_share_t *);
 int smb_kmod_get_open_num(smb_opennum_t *);
 int smb_kmod_enum(smb_netsvc_t *);
 smb_netsvc_t *smb_kmod_enum_init(smb_svcenum_t *);

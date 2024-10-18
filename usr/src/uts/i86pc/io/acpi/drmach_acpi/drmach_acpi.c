@@ -27,6 +27,10 @@
  * All rights reserved.
  */
 
+/*
+ * Copyright 2023 Oxide Computer Company
+ */
+
 #include <sys/types.h>
 #include <sys/cmn_err.h>
 #include <sys/conf.h>
@@ -77,8 +81,8 @@
 #define	_ptob64(p)	((uint64_t)(p) << PAGESHIFT)
 #define	_b64top(b)	((pgcnt_t)((b) >> PAGESHIFT))
 
-static int 		drmach_init(void);
-static void 		drmach_fini(void);
+static int		drmach_init(void);
+static void		drmach_fini(void);
 static int		drmach_name2type_idx(char *);
 static sbd_error_t	*drmach_mem_update_lgrp(drmachid_t);
 
@@ -366,7 +370,7 @@ drmach_node_dispose(drmach_node_t *np)
 
 static int
 drmach_node_walk(drmach_node_t *np, void *param,
-	int (*cb)(drmach_node_walk_args_t *args))
+    int (*cb)(drmach_node_walk_args_t *args))
 {
 	return (np->walk(np, param, cb));
 }
@@ -477,7 +481,7 @@ drmach_get_board_by_bnum(uint_t bnum)
 
 sbd_error_t *
 drmach_device_new(drmach_node_t *node,
-	drmach_board_t *bp, int portid, drmachid_t *idp)
+    drmach_board_t *bp, int portid, drmachid_t *idp)
 {
 	int		 i;
 	int		 rv;
@@ -839,26 +843,24 @@ static void
 drmach_hold_devtree(void)
 {
 	dev_info_t *dip;
-	int circ;
 	int hold = 1;
 
 	dip = ddi_root_node();
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	ddi_walk_devs(ddi_get_child(dip), drmach_hold_rele_devtree, &hold);
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 }
 
 static void
 drmach_release_devtree(void)
 {
 	dev_info_t *dip;
-	int circ;
 	int hold = 0;
 
 	dip = ddi_root_node();
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	ddi_walk_devs(ddi_get_child(dip), drmach_hold_rele_devtree, &hold);
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 }
 
 static boolean_t
@@ -1829,7 +1831,7 @@ drmach_get_portid(drmach_node_t *np)
 static int
 drmach_name2type_idx(char *name)
 {
-	int 	index, ntypes;
+	int	index, ntypes;
 
 	if (name == NULL)
 		return (-1);
@@ -1921,7 +1923,7 @@ drmach_board_find_devices_cb(drmach_node_walk_args_t *args)
 
 sbd_error_t *
 drmach_board_find_devices(drmachid_t id, void *a,
-	sbd_error_t *(*found)(void *a, const char *, int, drmachid_t))
+    sbd_error_t *(*found)(void *a, const char *, int, drmachid_t))
 {
 	drmach_board_t		*bp = (drmach_board_t *)id;
 	sbd_error_t		*err;

@@ -17,15 +17,13 @@ include $(SRC)/cmd/Makefile.cmd
 include $(SRC)/test/Makefile.com
 
 ROOTOPTPKG = $(ROOT)/opt/util-tests/tests
-PROG = allowed-ips set-linkprop show-overlay-exit vnic-mtu
+PROG = allowed-ips set-linkprop show-overlay-exit vnic-mtu show-class-confusion
 
 ROOTPROG = $(PROG:%=$(ROOTOPTPKG)/%)
 
 all:
 
 install: $(ROOTPROG)
-
-lint:
 
 clobber: clean
 

@@ -21,12 +21,12 @@
 /*
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2024 Oxide Computer Co.
  */
 
 #ifndef	_FMD_LOG_H
 #define	_FMD_LOG_H
-
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 
 #include <libnvpair.h>
 #include <exacct.h>
@@ -46,7 +46,7 @@ extern "C" {
  * purpose until they are publicly documented for use outside of Sun.
  */
 
-#define	FMD_LOG_VERSION	2		/* library ABI interface version */
+#define	FMD_LOG_VERSION	3		/* library ABI interface version */
 
 typedef struct fmd_log fmd_log_t;
 
@@ -60,12 +60,12 @@ extern int fmd_log_errno(fmd_log_t *);
 typedef struct fmd_log_header {
 	const char *log_creator;	/* ea_get_creator(3EXACCT) string */
 	const char *log_hostname;	/* ea_get_hostname(3EXACCT) string */
-	const char *log_label;		/* fmd(1M) log file label */
-	const char *log_version;	/* fmd(1M) log file version */
+	const char *log_label;		/* fmd(8) log file label */
+	const char *log_version;	/* fmd(8) log file version */
 	const char *log_osrelease;	/* uname(1) -r value at creation time */
 	const char *log_osversion;	/* uname(1) -v value at creation time */
 	const char *log_platform;	/* uname(1) -i value at creation time */
-	const char *log_uuid;		/* fmd(1M) log file uuid */
+	const char *log_uuid;		/* fmd(8) log file uuid */
 } fmd_log_header_t;
 
 extern void fmd_log_header(fmd_log_t *, fmd_log_header_t *);
@@ -102,6 +102,7 @@ extern fmd_log_rec_f fmd_log_filter_uuid;	/* char *uuid of list.suspect */
 extern fmd_log_rec_f fmd_log_filter_before;	/* struct timeval * latest */
 extern fmd_log_rec_f fmd_log_filter_after;	/* struct timeval * earliest */
 extern fmd_log_rec_f fmd_log_filter_nv;		/* char *namevalue in event */
+extern fmd_log_rec_f fmd_log_filter_nv_multi;	/* multiple name-value pairs */
 
 extern int fmd_log_filter(fmd_log_t *,
     uint_t, fmd_log_filter_t *, const fmd_log_record_t *);
@@ -110,11 +111,12 @@ typedef struct fmd_log_filter_nvarg {
 	char	*nvarg_name;
 	char	*nvarg_value;
 	regex_t	*nvarg_value_regex;
+	struct fmd_log_filter_nvarg *nvarg_next;
 } fmd_log_filter_nvarg_t;
 
 /*
  * fmd_log_xiter() can be used to perform sophisticated iteration over an fmd
- * log file such as that required by fmdump(1M).  The arguments are as follows:
+ * log file such as that required by fmdump(8).  The arguments are as follows:
  *
  * fmd_log_t *lp - log to use for iteration from fmd_log_open()
  * uint_t iflags - FMD_LOG_XITER_* flags (see above)

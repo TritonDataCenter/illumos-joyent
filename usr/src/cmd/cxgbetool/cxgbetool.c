@@ -15,6 +15,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <stdio.h>
@@ -31,6 +32,8 @@
 #include <sys/byteorder.h>
 #include <inttypes.h>
 #include <sys/sysmacros.h>
+#include <err.h>
+#include <libdevinfo.h>
 
 #include "t4nex.h"
 #include "version.h"
@@ -38,10 +41,30 @@
 #include "t4fw_interface.h"
 #include "cudbg.h"
 #include "cudbg_lib_common.h"
+#include "cudbg_entity.h"
 
 #define CUDBG_SIZE (32 * 1024 * 1024)
 #define CUDBG_MAX_ENTITY_STR_LEN 4096
 #define MAX_PARAM_LEN 4096
+#ifndef MAX
+#define MAX(x, y)       ((x) > (y) ? (x) : (y))
+#endif
+
+struct reg_info {
+	const char *name;
+	uint32_t addr;
+	uint32_t len;
+};
+
+struct mod_regs {
+	const char *name;
+	const struct reg_info *ri;
+	unsigned int offset;
+};
+
+#include "reg_defs.h"
+
+static char cxgbetool_nexus[PATH_MAX];
 
 char *option_list[] = {
 	"--collect",
@@ -112,26 +135,14 @@ static int check_option(char *opt)
 
 static void usage(FILE *fp)
 {
-	fprintf(fp, "Usage: %s <path to t4nex#> [operation]\n", progname);
+	fprintf(fp, "Usage: %s <t4nex# | cxgbe#> [operation]\n", progname);
 	fprintf(fp,
 	    "\tdevlog                              show device log\n"
 	    "\tloadfw <FW image>                   Flash the FW image\n"
-	    "\tcudbg                               Chelsio Unified Debugger\n");
+	    "\tcudbg <option> [<args>]             Chelsio Unified Debugger\n"
+	    "\tregdump [<module>]                  Dump registers\n"
+	    "\treg <address>[=<val>]               Read or write the registers\n");
 	exit(fp == stderr ? 1 : 0);
-}
-
-__NORETURN static void
-err(int code, const char *fmt, ...)
-{
-	va_list ap;
-	int e = errno;
-
-	va_start(ap, fmt);
-	fprintf(stderr, "error: ");
-	vfprintf(stderr, fmt, ap);
-	fprintf(stderr, ": %s\n", strerror(e));
-	va_end(ap);
-	exit(code);
 }
 
 static int
@@ -180,7 +191,7 @@ get_devlog(int argc, char *argv[], int start_arg, const char *iff_name)
 	}
 	if (rc) {
 		free(devlog);
-		err(1, "%s: can't get device log", __func__);
+		errx(1, "%s: can't get device log", __func__);
 	}
 
 	/* There are nentries number of entries in the buffer */
@@ -237,6 +248,247 @@ get_devlog(int argc, char *argv[], int start_arg, const char *iff_name)
 	free(devlog);
 }
 
+static uint32_t xtract(uint32_t val, int shift, int len)
+{
+	return (val >> shift) & ((1 << len) - 1);
+}
+
+int dump_block_regs(const struct reg_info *reg_array, const u32 *regs)
+{
+	uint32_t reg_val = 0;
+
+	for ( ; reg_array->name; ++reg_array) {
+		if (!reg_array->len) {
+			reg_val = regs[reg_array->addr / 4];
+			printf("[%#7x] %-47s %#-10x %u\n", reg_array->addr,
+			       reg_array->name, reg_val, reg_val);
+		} else {
+			uint32_t v = xtract(reg_val, reg_array->addr,
+					    reg_array->len);
+			printf("    %*u:%u %-47s %#-10x %u\n",
+			       reg_array->addr < 10 ? 3 : 2,
+			       reg_array->addr + reg_array->len - 1,
+			       reg_array->addr, reg_array->name, v, v);
+		}
+	}
+	return 1;
+}
+
+int dump_regs_table(int argc, char *argv[], int start_arg,
+		    const u32 *regs, const struct mod_regs *modtab,
+		    int nmodules, const char *modnames)
+{
+	int match = 0;
+	const char *block_name = NULL;
+
+	if (argc == start_arg + 1)
+		block_name = argv[start_arg];
+	else if (argc != start_arg)
+		return -1;
+
+	for ( ; nmodules; nmodules--, modtab++) {
+		if (!block_name || !strcmp(block_name, modtab->name))
+			match += dump_block_regs(modtab->ri,
+						 regs + modtab->offset);
+	}
+	if (!match)
+		errx(1, "unknown block \"%s\"\navailable: %s", block_name,
+		     modnames);
+	return 0;
+}
+
+#define T5_MODREGS(name) { #name, t5_##name##_regs }
+static int
+dump_regs_t5(int argc, char *argv[], int start_arg, uint32_t *regs)
+{
+	static struct mod_regs t5_mod[] = {
+		T5_MODREGS(sge),
+		{ "pci", t5_pcie_regs },
+		T5_MODREGS(dbg),
+		{ "mc0", t5_mc_0_regs },
+		{ "mc1", t5_mc_1_regs },
+		T5_MODREGS(ma),
+		{ "edc0", t5_edc_t50_regs },
+		{ "edc1", t5_edc_t51_regs },
+		T5_MODREGS(cim),
+		T5_MODREGS(tp),
+		{ "ulprx", t5_ulp_rx_regs },
+		{ "ulptx", t5_ulp_tx_regs },
+		{ "pmrx", t5_pm_rx_regs },
+		{ "pmtx", t5_pm_tx_regs },
+		T5_MODREGS(mps),
+		{ "cplsw", t5_cpl_switch_regs },
+		T5_MODREGS(smb),
+		{ "i2c", t5_i2cm_regs },
+		T5_MODREGS(mi),
+		T5_MODREGS(uart),
+		T5_MODREGS(pmu),
+		T5_MODREGS(sf),
+		T5_MODREGS(pl),
+		T5_MODREGS(le),
+		T5_MODREGS(ncsi),
+		T5_MODREGS(mac),
+		{ "hma", t5_hma_t5_regs }
+	};
+
+	return dump_regs_table(argc, argv, start_arg, regs, t5_mod,
+			       ARRAY_SIZE(t5_mod),
+			       "sge, pci, dbg, mc0, mc1, ma, edc0, edc1, cim, "
+			       "tp, ulprx, ulptx, pmrx, pmtx, mps, cplsw, smb, "
+			       "i2c, mi, uart, pmu, sf, pl, le, ncsi, "
+			       "mac, hma");
+}
+
+#undef T5_MODREGS
+
+#define T6_MODREGS(name) { #name, t6_##name##_regs }
+static int dump_regs_t6(int argc, char *argv[], int start_arg, const u32 *regs)
+{
+	static struct mod_regs t6_mod[] = {
+		T6_MODREGS(sge),
+		{ "pci", t6_pcie_regs },
+		T6_MODREGS(dbg),
+		{ "mc0", t6_mc_0_regs },
+		T6_MODREGS(ma),
+		{ "edc0", t6_edc_t60_regs },
+		{ "edc1", t6_edc_t61_regs },
+		T6_MODREGS(cim),
+		T6_MODREGS(tp),
+		{ "ulprx", t6_ulp_rx_regs },
+		{ "ulptx", t6_ulp_tx_regs },
+		{ "pmrx", t6_pm_rx_regs },
+		{ "pmtx", t6_pm_tx_regs },
+		T6_MODREGS(mps),
+		{ "cplsw", t6_cpl_switch_regs },
+		T6_MODREGS(smb),
+		{ "i2c", t6_i2cm_regs },
+		T6_MODREGS(mi),
+		T6_MODREGS(uart),
+		T6_MODREGS(pmu),
+		T6_MODREGS(sf),
+		T6_MODREGS(pl),
+		T6_MODREGS(le),
+		T6_MODREGS(ncsi),
+		T6_MODREGS(mac),
+		{ "hma", t6_hma_t6_regs }
+	};
+
+	return dump_regs_table(argc, argv, start_arg, regs, t6_mod,
+			       ARRAY_SIZE(t6_mod),
+			       "sge, pci, dbg, mc0, ma, edc0, edc1, cim, "
+			       "tp, ulprx, ulptx, pmrx, pmtx, mps, cplsw, smb, "
+			       "i2c, mi, uart, pmu, sf, pl, le, ncsi, "
+			       "mac, hma");
+}
+#undef T6_MODREGS
+
+static int
+get_regdump(int argc, char *argv[], int start_arg, const char *iff_name)
+{
+	int rc, vers, revision, is_pcie;
+	uint32_t len, length;
+	struct t4_regdump *regs;
+
+	len = MAX(T5_REGDUMP_SIZE, T6_REGDUMP_SIZE);
+
+	regs = malloc(len + sizeof(struct t4_regdump));
+	if (!regs)
+		err(1, "%s: can't allocate reg dump buffer", __func__);
+
+	regs->len = len;
+
+	rc = doit(iff_name, T4_IOCTL_REGDUMP, regs);
+
+	if (rc == ENOBUFS) {
+		length = regs->len;
+		free(regs);
+
+		regs = malloc(length + sizeof(struct t4_regdump));
+		if (regs == NULL)
+			err(1, "%s: can't reallocate regs buffer", __func__);
+
+		rc = doit(iff_name, T4_IOCTL_REGDUMP, regs);
+	}
+
+	if (rc) {
+		free(regs);
+		errx(1, "%s: can't get register dumps", __func__);
+	}
+
+	vers = regs->version & 0x3ff;
+	revision = (regs->version >> 10) & 0x3f;
+	is_pcie = (regs->version & 0x80000000) != 0;
+
+	if (vers == 5) {
+		return dump_regs_t5(argc, argv, start_arg,
+				(uint32_t *)regs->data);
+	} else if (vers == 6) {
+		return dump_regs_t6(argc, argv, start_arg,
+				(uint32_t *)regs->data);
+	} else {
+		errx(1, "unknown card type %d.%d.%d", vers, revision, is_pcie);
+	}
+
+	return 0;
+}
+
+static void
+write_reg(const char *iff_name, uint32_t addr, uint32_t val)
+{
+	struct t4_reg32_cmd reg;
+
+	reg.reg = addr;
+	reg.value = val;
+
+	if (doit(iff_name, T4_IOCTL_PUT32, &reg) < 0)
+		err(1, "register write");
+}
+
+static uint32_t
+read_reg(const char *iff_name, uint32_t addr)
+{
+	struct t4_reg32_cmd reg;
+
+	reg.reg = addr;
+
+	if (doit(iff_name, T4_IOCTL_GET32, &reg) < 0)
+		err(1, "register read");
+	return reg.value;
+}
+
+static void register_io(int argc, char *argv[], int start_arg,
+		       const char *iff_name)
+{
+	char *p;
+	uint32_t addr = 0, val = 0, write = 0;
+
+	if (argc != start_arg + 1) {
+		errx(1, "incorrect number of arguments");
+	}
+	errno = 0;
+	addr = strtoul(argv[start_arg], &p, 0);
+	if (addr == 0 || errno != 0) {
+		errx(1, "invalid arguments");
+	}
+
+	if (p == argv[start_arg])
+		return;
+	if (*p == '=' && p[1]) {
+		val = strtoul(p + 1, &p, 0);
+		write = 1;
+	}
+	if (*p) {
+		errx(1, "bad parameter \"%s\"", argv[start_arg]);
+	}
+
+	if (write) {
+		write_reg(iff_name, addr, val);
+	} else {
+		val = read_reg(iff_name, addr);
+		printf("%#x [%u]\n", val, val);
+	}
+}
+
 static void
 load_fw(int argc, char *argv[], int start_arg, const char *iff_name)
 {
@@ -247,28 +499,31 @@ load_fw(int argc, char *argv[], int start_arg, const char *iff_name)
 	int fd;
 
 	if (argc != 4)
-		err(1, "incorrect number of arguments.");
+		errx(1, "incorrect number of arguments");
 
 	fd = open(fname, O_RDONLY);
 	if (fd < 0)
 		err(1, "%s: opening %s failed", __func__, fname);
 	if (fstat(fd, &sb) < 0) {
+		warn("%s: fstat %s failed", __func__, fname);
 		close(fd);
-		err(1, "%s: fstat %s failed", __func__, fname);
+		exit(1);
 	}
 	len = (size_t)sb.st_size;
 
 	fw = malloc(sizeof (struct t4_ldfw) + len);
 	if (!fw) {
-		close(fd);
-		err(1, "%s: %s allocate %ld bytes failed",
+		warn("%s: %s allocate %zu bytes failed",
 		    __func__, fname, sizeof (struct t4_ldfw) + len);
+		close(fd);
+		exit(1);
 	}
 
 	if (read(fd, fw->data, len) < len) {
+		warn("%s: %s read failed", __func__, fname);
 		close(fd);
 		free(fw);
-		err(1, "%s: %s read failed", __func__, fname);
+		exit(1);
 	}
 
 	close(fd);
@@ -339,7 +594,7 @@ do_collect(char *dbg_entity_list, const char *iff_name, const char *fname)
 
 	cudbg = malloc(sizeof(struct t4_cudbg_dump) + CUDBG_SIZE);
 	if (!cudbg) {
-		err(1, "%s:allocate %ld bytes failed", __func__, CUDBG_SIZE);
+		err(1, "%s:allocate %d bytes failed", __func__, CUDBG_SIZE);
 	}
 
 	memset(cudbg, 0, sizeof(struct t4_cudbg_dump) + CUDBG_SIZE);
@@ -356,7 +611,7 @@ do_collect(char *dbg_entity_list, const char *iff_name, const char *fname)
 	fd = open(fname, O_CREAT | O_TRUNC | O_EXCL | O_WRONLY,
 		  S_IRUSR | S_IRGRP | S_IROTH);
 	if (fd < 0) {
-		err(1, "%s: file open failed", __func__); 
+		err(1, "%s: file open failed", __func__);
 	}
 
 	write(fd, cudbg->data, cudbg->len);
@@ -595,9 +850,13 @@ get_cudbg(int argc, char *argv[], int start_arg, const char *iff_name)
 {
 	char *dbg_entity_list = NULL;
 	int rc = 0, option;
+
+	if (start_arg >= argc)
+		errx(1, "no option provided");
+
 	rc = check_option(argv[start_arg++]);
 	if (rc < 0) {
-		err(1, "%s:Invalid option provided", __func__);
+		errx(1, "%s:Invalid option provided", __func__);
 	}
 	option = rc;
 
@@ -608,16 +867,16 @@ get_cudbg(int argc, char *argv[], int start_arg, const char *iff_name)
 	}
 
 	if (argc < 5) {
-		err(1, "Invalid number of arguments\n");
+		errx(1, "Invalid number of arguments\n");
 	}
 	rc = get_entity_list(argv[start_arg++],
 			     &dbg_entity_list);
 	if (rc) {
-		err(1, "Error in parsing entity\n");
+		errx(1, "Error in parsing entity\n");
 	}
 
 	if (argc < 6) {
-		err(1, "File name is missing\n");
+		errx(1, "File name is missing\n");
 	}
 
 	switch (option) {
@@ -628,7 +887,7 @@ get_cudbg(int argc, char *argv[], int start_arg, const char *iff_name)
 			do_view(dbg_entity_list, argv[start_arg]);
 			break;
 		default:
-			err(1, "Wrong option provided\n");
+			errx(1, "Wrong option provided\n");
 	}
 
 	put_entity_list(dbg_entity_list);
@@ -643,8 +902,124 @@ run_cmd(int argc, char *argv[], const char *iff_name)
 		load_fw(argc, argv, 3, iff_name);
 	else if (strcmp(argv[2], "cudbg") == 0)
 		get_cudbg(argc, argv, 3, iff_name);
+	else if (strcmp(argv[2], "regdump") == 0)
+		get_regdump(argc, argv, 3, iff_name);
+	else if (strcmp(argv[2], "reg") == 0)
+		register_io(argc, argv, 3, iff_name);
 	else
 		usage(stderr);
+}
+
+/*
+ * Traditionally we expect to be given a path to the t4nex device control file
+ * hidden in /devices. To make life easier, we want to also support folks using
+ * the driver instance numbers for either a given t4nex%d or cxgbe%d. We check
+ * to see if we've been given a path to a character device and if so, just
+ * continue straight on with the given argument. Otherwise we attempt to map it
+ * to something known.
+ */
+static const char *
+cxgbetool_parse_path(char *arg)
+{
+	struct stat st;
+	di_node_t root, node;
+	const char *numptr, *errstr;
+	size_t drvlen;
+	int inst;
+	boolean_t is_t4nex = B_TRUE;
+	char mname[64];
+
+	if (stat(arg, &st) == 0) {
+		if (S_ISCHR(st.st_mode)) {
+			return (arg);
+		}
+	}
+
+	if (strncmp(arg, T4_NEXUS_NAME, sizeof (T4_NEXUS_NAME) - 1) == 0) {
+		drvlen = sizeof (T4_NEXUS_NAME) - 1;
+	} else if (strncmp(arg, T4_PORT_NAME, sizeof (T4_PORT_NAME) - 1) == 0) {
+		is_t4nex = B_FALSE;
+		drvlen = sizeof (T4_PORT_NAME) - 1;
+	} else {
+		errx(EXIT_FAILURE, "cannot use device %s: not a character "
+		    "device or a %s/%s device instance", arg, T4_PORT_NAME,
+		    T4_NEXUS_NAME);
+	}
+
+	numptr = arg + drvlen;
+	inst = (int)strtonum(numptr, 0, INT_MAX, &errstr);
+	if (errstr != NULL) {
+		errx(EXIT_FAILURE, "failed to parse instance number '%s': %s",
+		    numptr, errstr);
+	}
+
+	/*
+	 * Now that we have the instance here, we need to truncate the string at
+	 * the end of the driver name otherwise di_drv_first_node() will be very
+	 * confused as there is no driver called say 't4nex0'.
+	 */
+	arg[drvlen] = '\0';
+	root = di_init("/", DINFOCPYALL);
+	if (root == DI_NODE_NIL) {
+		err(EXIT_FAILURE, "failed to initialize libdevinfo while "
+		    "trying to map device name %s", arg);
+	}
+
+	for (node = di_drv_first_node(arg, root); node != DI_NODE_NIL;
+	    node = di_drv_next_node(node)) {
+		char *bpath;
+		di_minor_t minor = DI_MINOR_NIL;
+
+		if (di_instance(node) != inst) {
+			continue;
+		}
+
+		if (!is_t4nex) {
+			const char *pdrv;
+			node = di_parent_node(node);
+			pdrv = di_driver_name(node);
+			if (pdrv == NULL || strcmp(pdrv, T4_NEXUS_NAME) != 0) {
+				errx(EXIT_FAILURE, "%s does not have %s "
+				    "parent, found %s%d", arg, T4_NEXUS_NAME,
+				    pdrv != NULL ? pdrv : "unknown",
+				    pdrv != NULL ? di_instance(node) : -1);
+			}
+		}
+
+		(void) snprintf(mname, sizeof (mname), "%s,%d", T4_NEXUS_NAME,
+		    di_instance(node));
+
+		while ((minor = di_minor_next(node, minor)) != DI_MINOR_NIL) {
+			if (strcmp(di_minor_name(minor), mname) == 0) {
+				break;
+			}
+		}
+
+		if (minor == DI_MINOR_NIL) {
+			errx(EXIT_FAILURE, "failed to find minor %s on %s%d",
+			    mname, di_driver_name(node), di_instance(node));
+		}
+
+		bpath = di_devfs_minor_path(minor);
+		if (bpath == NULL) {
+			err(EXIT_FAILURE, "failed to get minor path for "
+			    "%s%d:%s", di_driver_name(node), di_instance(node),
+			    di_minor_name(minor));
+		}
+		if (snprintf(cxgbetool_nexus, sizeof (cxgbetool_nexus),
+		    "/devices%s", bpath) >= sizeof (cxgbetool_nexus)) {
+			errx(EXIT_FAILURE, "failed to construct full /devices "
+			    "path for %s: internal path buffer would have "
+			    "overflowed", bpath);
+		}
+		di_devfs_path_free(bpath);
+
+		di_fini(root);
+		return (cxgbetool_nexus);
+	}
+
+	errx(EXIT_FAILURE, "failed to map %s%d to a %s or %s instance",
+	    arg, inst, T4_PORT_NAME, T4_NEXUS_NAME);
 }
 
 int
@@ -670,7 +1045,7 @@ main(int argc, char *argv[])
 	if (argc < 3)
 		usage(stderr);
 
-	iff_name = argv[1];
+	iff_name = cxgbetool_parse_path(argv[1]);
 
 	run_cmd(argc, argv, iff_name);
 

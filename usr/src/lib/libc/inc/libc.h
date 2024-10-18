@@ -43,6 +43,7 @@
 #include <sys/door.h>
 #include <sys/ieeefp.h>
 #include <sys/mount.h>
+#include <sys/fdsync.h>
 #include <floatingpoint.h>
 #include <nl_types.h>
 #include <regex.h>
@@ -151,7 +152,7 @@ extern char	*__posix_asctime_r(const struct tm *, char *);
 /*
  * Internal routine from fsync.c
  */
-extern int __fdsync(int, int);	/* 2nd arg may be wrong in 64bit mode */
+extern int __fdsync(int, uint32_t);	/* 2nd arg may be wrong in 64bit mode */
 
 /*
  * Internal routine from _xregs_clrptr.c
@@ -222,9 +223,15 @@ extern int _so_getsockopt(int, int, int, char *, int *);
 extern int lsign(dl_t);
 
 /*
+ * defined in getctxt.c
+ */
+extern int _getcontext(ucontext_t *) __RETURNS_TWICE;
+
+/*
  * defined in ucontext.s
  */
 extern int __getcontext(ucontext_t *);
+extern int __getcontext_extd(ucontext_t *);
 
 /*
  * defined in door.s
@@ -330,8 +337,21 @@ extern void __throw_constraint_handler_s(const char *_RESTRICT_KYWD, int);
 
 /*
  * defined in assfail.c.
+ *
+ * the implementation of these functions in libc will never return
+ *
+ * HOWEVER, some compilers will generate code that exhibits undefined
+ * control flow behavor (returns to non-instructions) for calls to a
+ * function declared __NORETURN that actually does return; moreover, there
+ * are alternate implementations of assfail and assfail3 in the gate which
+ * will return under certain circumstances.
  */
-extern void common_panic(const char *, const char *);
+extern void common_panic(const char *, const char *) __NORETURN;
+extern void assfail(const char *, const char *, int);
+extern void _assfail(const char *, const char *, int) __NORETURN;
+extern void __assfail(const char *, const char *, int) __NORETURN;
+extern void assfail3(const char *, uintmax_t, const char *,
+    uintmax_t, const char *, int);
 
 /*
  * defined in mbrtowc.c.
@@ -340,6 +360,12 @@ extern size_t mbrtowc_nz_l(wchar_t *_RESTRICT_KYWD, const char *_RESTRICT_KYWD,
     size_t, mbstate_t *_RESTRICT_KYWD, locale_t);
 extern size_t mbrtowc_nz(wchar_t *_RESTRICT_KYWD, const char *_RESTRICT_KYWD,
     size_t, mbstate_t *_RESTRICT_KYWD);
+
+/*
+ * defined in getauxv.c.
+ */
+extern long ___getauxval(int);
+extern void *___getauxptr(int);
 
 #ifdef	__cplusplus
 }

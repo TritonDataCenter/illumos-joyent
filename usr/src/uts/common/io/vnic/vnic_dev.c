@@ -23,6 +23,7 @@
  * Copyright 2018 Joyent, Inc.
  * Copyright 2016 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 #include <sys/types.h>
@@ -571,8 +572,6 @@ vnic_dev_create(datalink_id_t vnic_id, datalink_id_t linkid,
 
 	err = dls_devnet_create(vnic->vn_mh, vnic->vn_id, crgetzoneid(credp));
 	if (err != 0) {
-		VERIFY(is_anchor || mac_margin_remove(vnic->vn_lower_mh,
-		    vnic->vn_margin) == 0);
 		if (!is_anchor) {
 			VERIFY(mac_mtu_remove(vnic->vn_lower_mh,
 			    vnic->vn_mtu) == 0);
@@ -837,8 +836,8 @@ vnic_m_capab_get(void *arg, mac_capab_t cap, void *cap_data)
 		uint32_t *hcksum_txflags = cap_data;
 
 		*hcksum_txflags = vnic->vn_hcksum_txflags &
-		    (HCKSUM_INET_FULL_V4 | HCKSUM_IPHDRCKSUM |
-		    HCKSUM_INET_PARTIAL);
+		    (HCKSUM_INET_FULL_V4 | HCKSUM_INET_FULL_V6 |
+		    HCKSUM_IPHDRCKSUM | HCKSUM_INET_PARTIAL);
 		break;
 	}
 	case MAC_CAPAB_LSO: {
@@ -1119,30 +1118,21 @@ vnic_m_setprop(void *m_driver, const char *pr_name, mac_prop_id_t pr_num,
 		break;
 	}
 	case MAC_PROP_PRIVATE: {
-		long val, i;
-		const char *v;
-
 		if (vn->vn_link_id != DATALINK_INVALID_LINKID ||
 		    strcmp(pr_name, "_linkstate") != 0) {
 			err = ENOTSUP;
 			break;
 		}
 
-		for (v = pr_val, i = 0; i < pr_valsize; i++, v++) {
-			if (*v == '\0')
-				break;
+		if (strcmp(pr_val, "up") == 0) {
+			vn->vn_ls = LINK_STATE_UP;
+		} else if (strcmp(pr_val, "down") == 0) {
+			vn->vn_ls = LINK_STATE_DOWN;
+		} else if (strcmp(pr_val, "unknown") == 0) {
+			vn->vn_ls = LINK_STATE_UNKNOWN;
+		} else {
+			return (EINVAL);
 		}
-		if (i == pr_valsize) {
-			err = EINVAL;
-			break;
-		}
-
-		(void) ddi_strtol(pr_val, (char **)NULL, 0, &val);
-		if (val != LINK_STATE_UP && val != LINK_STATE_DOWN) {
-			err = EINVAL;
-			break;
-		}
-		vn->vn_ls = val;
 		mac_link_update(vn->vn_mh, vn->vn_ls);
 		break;
 	}
@@ -1181,7 +1171,13 @@ vnic_m_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 			ret = EINVAL;
 			break;
 		}
-		(void) snprintf(pr_val, pr_valsize, "%d", vn->vn_ls);
+		if (vn->vn_ls == LINK_STATE_UP) {
+			(void) sprintf(pr_val, "up");
+		} else if (vn->vn_ls == LINK_STATE_DOWN) {
+			(void) sprintf(pr_val, "down");
+		} else {
+			(void) sprintf(pr_val, "unknown");
+		}
 		break;
 	default:
 		ret = ENOTSUP;
@@ -1244,7 +1240,7 @@ vnic_m_propinfo(void *m_driver, const char *pr_name,
 			char buf[16];
 
 			mac_prop_info_set_perm(prh, MAC_PROP_PERM_RW);
-			(void) snprintf(buf, sizeof (buf), "%d", vn->vn_ls);
+			(void) sprintf(buf, "unknown");
 			mac_prop_info_set_default_str(prh, buf);
 		}
 		break;

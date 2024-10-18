@@ -11,14 +11,15 @@
 .\"
 .\" Copyright 2015 Joyent, Inc.
 .\"
-.Dd May 11, 2016
+.Dd November 27, 2023
 .Dt LSTATUS 3PROC
 .Os
 .Sh NAME
 .Nm Lstatus
 .Nd obtain thread status structure
-.Sh SYNOPSIS
+.Sh LIBRARY
 .Lb libproc
+.Sh SYNOPSIS
 .In libproc.h
 .Ft "const lwpstatus_t *"
 .Fo Pstatus
@@ -32,7 +33,7 @@ function returns the status information about the thread handle
 The
 .Sy lwpstatus_t
 structure is defined in
-.Xr proc 4
+.Xr proc 5
 and contains information about the thread including its flags, the size
 of its stack, its user and system time, and more.
 .Pp
@@ -57,4 +58,4 @@ in
 .Sh SEE ALSO
 .Xr libproc 3LIB ,
 .Xr Lfree 3PROC ,
-.Xr proc 4
+.Xr proc 5

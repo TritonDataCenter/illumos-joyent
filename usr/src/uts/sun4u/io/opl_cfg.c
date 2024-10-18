@@ -22,6 +22,7 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright (c) 2016 by Delphix. All rights reserved.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <sys/conf.h>
@@ -170,8 +171,7 @@ _fini(void)
 }
 
 int
-_info(modinfop)
-struct modinfo *modinfop;
+_info(struct modinfo *modinfop)
 {
 	return (mod_info(&modlinkage, modinfop));
 }
@@ -307,7 +307,7 @@ opl_dump_hwd(opl_probe_t *probe)
 /*ARGSUSED*/
 int
 opl_read_hwd(int board, hwd_header_t **hdrp, hwd_sb_status_t **statp,
-	hwd_domain_info_t **dinfop, hwd_sb_t **sbp)
+    hwd_domain_info_t **dinfop, hwd_sb_t **sbp)
 {
 	static int (*getinfop)(uint32_t, uint8_t, uint32_t, uint32_t *,
 	    void *) = NULL;
@@ -452,7 +452,7 @@ opl_init_nodes(dev_info_t *parent, opl_init_func_t init)
 {
 	dev_info_t	*node;
 	char		*name;
-	int 		circ, ret;
+	int		ret;
 	int		len;
 
 	ASSERT(parent != NULL);
@@ -460,7 +460,7 @@ opl_init_nodes(dev_info_t *parent, opl_init_func_t init)
 	/*
 	 * Hold parent node busy to walk its child list
 	 */
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 	node = ddi_get_child(parent);
 
 	while (node != NULL) {
@@ -478,14 +478,14 @@ opl_init_nodes(dev_info_t *parent, opl_init_func_t init)
 		kmem_free(name, len);
 		if (ret != 0) {
 
-			ndi_devi_exit(parent, circ);
+			ndi_devi_exit(parent);
 			return (-1);
 		}
 
 		node = ddi_get_next_sibling(node);
 	}
 
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 
 	return (0);
 }
@@ -630,26 +630,24 @@ void
 opl_hold_devtree()
 {
 	dev_info_t *dip;
-	int circ;
 	int hold = 1;
 
 	dip = ddi_root_node();
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	ddi_walk_devs(ddi_get_child(dip), opl_hold_rele_devtree, &hold);
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 }
 
 void
 opl_release_devtree()
 {
 	dev_info_t *dip;
-	int circ;
 	int hold = 0;
 
 	dip = ddi_root_node();
-	ndi_devi_enter(dip, &circ);
+	ndi_devi_enter(dip);
 	ddi_walk_devs(ddi_get_child(dip), opl_hold_rele_devtree, &hold);
-	ndi_devi_exit(dip, circ);
+	ndi_devi_exit(dip);
 }
 
 /*
@@ -1145,8 +1143,8 @@ opl_probe_memory(opl_probe_t *probe)
 static
 fco_handle_t
 opl_fc_ops_alloc_handle(dev_info_t *parent, dev_info_t *child,
-			void *fcode, size_t fcode_size, char *unit_address,
-			char *my_args)
+    void *fcode, size_t fcode_size, char *unit_address,
+    char *my_args)
 {
 	fco_handle_t	rp;
 	phandle_t	h;
@@ -1901,7 +1899,7 @@ opl_map_phys(dev_info_t *dip, struct regspec *phys_spec,
     caddr_t *addrp, ddi_device_acc_attr_t *accattrp,
     ddi_acc_handle_t *handlep)
 {
-	ddi_map_req_t 	mapreq;
+	ddi_map_req_t	mapreq;
 	ddi_acc_hdl_t	*acc_handlep;
 	int		result;
 	struct regspec	*rspecp;
@@ -2350,7 +2348,7 @@ opl_create_leaf(dev_info_t *node, void *arg, uint_t flags)
 static char *
 opl_get_probe_string(opl_probe_t *probe, int channel, int leaf)
 {
-	char 		*probe_string;
+	char		*probe_string;
 	int		portid;
 
 	probe_string = kmem_zalloc(PROBE_STR_SIZE, KM_SLEEP);
@@ -2369,7 +2367,7 @@ opl_get_probe_string(opl_probe_t *probe, int channel, int leaf)
 static int
 opl_probe_leaf(opl_probe_t *probe)
 {
-	int		channel, leaf, portid, error, circ;
+	int		channel, leaf, portid, error;
 	int		board;
 	fco_handle_t	fco_handle, *cfg_handle;
 	dev_info_t	*parent, *leaf_node;
@@ -2399,7 +2397,7 @@ opl_probe_leaf(opl_probe_t *probe)
 	 * Prevent any changes to leaf_node until we have bound
 	 * it to the correct driver.
 	 */
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 
 	/*
 	 * Ideally, fcode would be run from the "sid_branch_create"
@@ -2423,7 +2421,7 @@ opl_probe_leaf(opl_probe_t *probe)
 
 		cmn_err(CE_WARN, "IKP: create leaf (%d-%d-%d) failed",
 		    probe->pr_board, probe->pr_channel, probe->pr_leaf);
-		ndi_devi_exit(parent, circ);
+		ndi_devi_exit(parent);
 		return (-1);
 	}
 
@@ -2446,7 +2444,7 @@ opl_probe_leaf(opl_probe_t *probe)
 	 * Drop the busy-hold on parent before calling
 	 * fcode_interpreter to prevent potential deadlocks
 	 */
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 
 	(void) sprintf(unit_address, "%x", portid);
 
@@ -2489,14 +2487,14 @@ opl_probe_leaf(opl_probe_t *probe)
 		 * Compatible properties (if any) have been created,
 		 * so bind driver.
 		 */
-		ndi_devi_enter(parent, &circ);
+		ndi_devi_enter(parent);
 		ASSERT(i_ddi_node_state(leaf_node) <= DS_LINKED);
 
 		mutex_enter(&DEVI(leaf_node)->devi_lock);
 		DEVI(leaf_node)->devi_flags &= ~DEVI_NO_BIND;
 		mutex_exit(&DEVI(leaf_node)->devi_lock);
 
-		ndi_devi_exit(parent, circ);
+		ndi_devi_exit(parent);
 
 		if (ndi_devi_bind_driver(leaf_node, 0) != DDI_SUCCESS) {
 			cmn_err(CE_WARN, "IKP: Unable to bind PCI leaf "
@@ -2516,7 +2514,7 @@ opl_init_leaves(int myboard)
 {
 	dev_info_t	*parent, *node;
 	char		*name;
-	int 		circ, ret;
+	int		ret;
 	int		len, portid, board, channel, leaf;
 	opl_board_cfg_t	*cfg;
 
@@ -2525,7 +2523,7 @@ opl_init_leaves(int myboard)
 	/*
 	 * Hold parent node busy to walk its child list
 	 */
-	ndi_devi_enter(parent, &circ);
+	ndi_devi_enter(parent);
 
 	for (node = ddi_get_child(parent); (node != NULL); node =
 	    ddi_get_next_sibling(node)) {
@@ -2574,7 +2572,7 @@ opl_init_leaves(int myboard)
 			break;
 	}
 
-	ndi_devi_exit(parent, circ);
+	ndi_devi_exit(parent);
 }
 
 /*

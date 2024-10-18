@@ -1,0 +1,1274 @@
+.\"
+.\" This file and its contents are supplied under the terms of the
+.\" Common Development and Distribution License ("CDDL"), version 1.0.
+.\" You may only use this file in accordance with the terms of version
+.\" 1.0 of the CDDL.
+.\"
+.\" A full copy of the text of the CDDL should have accompanied this
+.\" source.  A copy of the CDDL is also available via the Internet at
+.\" http://www.illumos.org/license/CDDL.
+.\"
+.\"
+.\" Copyright 2024 Oxide Computer Company
+.\" Copyright 2022 Tintri by DDN, Inc. All rights reserved.
+.\"
+.Dd September 21, 2024
+.Dt NVMEADM 8
+.Os
+.Sh NAME
+.Nm nvmeadm
+.Nd NVMe administration utility
+.Sh SYNOPSIS
+.Nm
+.Fl h
+.Op Ar command
+.Nm
+.Op Fl dv
+.Cm list
+.Oo
+.Fl c
+.Oc
+.Oo
+.Fl p o Ar field Ns [,...]
+.Oc
+.Op Ar ctl[/ns] Ns [,...]
+.Nm
+.Op Fl dv
+.Cm identify
+.Op Fl C | c | d | Oo Fl a Oc Fl n
+.Ar ctl[/ns] Ns [,...]
+.Nm
+.Op Fl dv
+.Cm identify-controller
+.Op Fl C | c | Oo Fl a Oc Fl n
+.Ar ctl Ns [,...]
+.Nm
+.Op Fl dv
+.Cm identify-namespace
+.Op Fl c | d
+.Ar ctl/ns Ns [,...]
+.Nm
+.Op Fl dv
+.Cm list-logpages
+.Op Fl a
+.Op Fl H
+.Op Fl o Ar field Ns [,...] Op Fl p
+.Op Fl s Ar scope Ns [,...]
+.Ar ctl[/ns] Ns [,...]
+.Op Ar logpage...
+.Nm
+.Op Fl dv
+.Cm get-logpage
+.Op Fl O Ar output-file
+.Ar ctl[/ns] Ns [,...]
+.Ar logpage
+.Nm
+.Op Fl dv
+.Cm list-features
+.Op Fl a
+.Op Fl H
+.Op Fl o Ar field Ns [,...] Op Fl p
+.Ar ctl[/ns] Ns [,...]
+.Op Ar feature...
+.Nm
+.Op Fl dv
+.Cm get-features
+.Ar ctl[/ns] Ns [,...]
+.Op Ar feature-list
+.Nm
+.Op Fl dv
+.Cm format
+.Ar ctl[/ns]
+.Op Ar lba-format
+.Nm
+.Op Fl dv
+.Cm secure-erase
+.Op Fl c
+.Ar ctl[/ns]
+.Nm
+.Op Fl dv
+.Cm detach
+.Ar ctl[/ns]
+.Nm
+.Op Fl dv
+.Cm attach
+.Ar ctl[/ns]
+.Nm
+.Op Fl dv
+.Cm list-firmware
+.Ar ctl
+.Nm
+.Op Fl dv
+.Cm load-firmware
+.Ar ctl
+.Ar firmware-file
+.Op Ar offset
+.Nm
+.Op Fl dv
+.Cm commit-firmware
+.Ar ctl
+.Ar slot
+.Nm
+.Op Fl dv
+.Cm activate-firmware
+.Ar ctl
+.Ar slot
+.Nm
+.Op Fl dv
+.Cm wdc/e6dump
+.Fl o Ar output
+.Ar ctl
+.Nm
+.Op Fl dv
+.Cm wdc/resize
+.Fl s Ar size | Fl g
+.Ar ctl
+.Nm
+.Op Fl dv
+.Cm wdc/clear-assert
+.Ar ctl
+.Nm
+.Op Fl dv
+.Cm wdc/inject-assert
+.Ar ctl
+.Sh DESCRIPTION
+The
+.Nm
+utility can be used to enumerate the NVMe controllers and their
+namespaces, query hardware information from a NVMe controller or
+namespace, and to format or secure-erase a NVMe controller or
+namespace.
+.Pp
+The information returned by the hardware is printed by
+.Nm
+in a human-readable form were applicable.
+Generally all 0-based counts are normalized and values may be
+converted to human-readable units such as MB (megabytes), W (watts),
+or C (degrees Celsius).
+.Sh OPTIONS
+The following options are supported:
+.Bl -tag -width Ds
+.It Fl h
+Print a short help text for
+.Nm ,
+or for an optionally specified
+.Nm
+command.
+.It Fl d
+Enable debugging output.
+.It Fl v
+Enable verbose output.
+.El
+.Sh ARGUMENTS
+.Nm
+expects the following kinds of arguments:
+.Bl -tag -width "ctl[/ns]"
+.It Ar command
+Any command
+.Nm
+understands.
+See section
+.Sx COMMANDS .
+.It Ar ctl[/ns]
+Specifies a NVMe controller and optionally a namespace within that
+controller.
+The controller name consists of the driver name
+.Qq nvme
+followed by an instance number.
+A namespace is specified by appending a single
+.Qq /
+to the controller name, followed by either the namespace ID or the namespace
+EUI64 or NGUID as reported by the
+.Cm identify
+command.
+The namespace ID is a positive non-zero decimal number.
+For commands that don't change the device state multiple controllers
+and namespaces can be specified as a comma-separated list.
+.Pp
+The list of controllers and namespaces present in the system can be
+queried with the
+.Cm list
+command without any arguments.
+.It Ar logpage
+Specifies the log page name for the
+.Cm get-logpage
+command.
+.It Ar feature-list
+A comma-separated list of feature names for the
+.Cm get-features
+command.
+Feature names can be specified in upper or lower case.
+All features can be specified either by a short name listed below or by
+the full name that the specification uses.
+.It Ar lba-format
+A non-zero integer specifying the LBA format for the
+.Cm format
+command.
+The list of supported LBA formats on a namespace can be retrieved
+with the
+.Nm
+.Cm identify
+command.
+.It Ar firmware-file
+Specifies the name of a firmware file to be loaded into the controller
+using the
+.Cm load-firmware
+command.
+.It Ar offset
+Specifies the byte offset at which to load
+.It Ar output-file
+Specifies a file system location to write raw binary data out to.
+.Ar firmware-file
+within the controller's upload buffer.
+Vendors may require multiple images to be loaded at different offsets
+before a firmware set is committed to a
+.Ar slot .
+.It Ar scope
+Specifies the scope of a given type of thing to look at, such as a log
+page.
+Scopes can either be specified by their full name or a shortened form.
+For log pages, the following scopes are supported:
+.Bl -tag -width Ds
+.It Sy controller
+Indicates that the log is scoped to the controller.
+The short form is
+.Dq ctrl .
+.It Sy nvm
+Indicates that the log is scoped to the NVM subsystem.
+There is no short form.
+.It Sy namespace
+Indicates that the log is scoped to the namespace.
+The short form is
+.Dq ns .
+.El
+.Pp
+For more information on the differences between these, please see the
+NVMe specification.
+.It Ar slot
+Specifies the firmware slot into which a firmware set is committed
+using the
+.Cm commit-firmware
+command, and subsequently activated with the
+.Cm activate-firmware
+command.
+Slots and their contents can be printed using the
+.Nm
+.Cm list-firmware
+command.
+.El
+.Sh COMMANDS
+.Bl -tag -width ""
+.It Xo
+.Nm
+.Cm list
+.Oo
+.Fl c
+.Oc
+.Oo
+.Fl p o Ar field Ns [,...]
+.Oc
+.Op Ar ctl[/ns] Ns [,...]
+.Xc
+Lists the NVMe controllers and by default also their active
+namespaces, printing a 1-line summary of their basic properties for each.
+If a list of controllers and/or namespaces is given then the listing
+is limited to those devices.
+If no controllers or namespaces are given as arguments, then all controllers
+in the system and their respective active namespaces are listed.
+When using the
+.Fl v
+option
+to
+.Nm ,
+all possible namespaces of the controllers will be listed.
+.Pp
+The
+.Nm
+.Cm list
+command supports the following options:
+.Bl -tag -width Fl
+.It Fl c
+List controllers only and not their namespaces.
+.It Fl p
+Produce parsable output rather than human-readable output.
+This option requires that output fields be selected with the
+.Fl o
+option.
+.It Fl o Ar field Ns [,...]
+A comma-separated list of one or more output fields to be used.
+Fields are listed below and the name is case insensitive.
+.El
+.Pp
+The following fields can be specified when using the parsable form:
+.Bl -tag -width UNALLOCATED
+.It Sy MODEL
+The model number of the device, generally containing information about
+both the manufacturer and the product.
+.It Sy SERIAL
+The NVMe controller's serial number.
+.It Sy FWREV
+The controller's firmware revision.
+.It Sy VERSION
+The version of the NVMe specification the controller supports.
+.It Sy INSTANCE
+The name of the device node and instance of it.
+.El
+.Pp
+In addition, the following fields can be specified when listing namespaces, not
+using the
+.Fl c
+option:
+.Bl -tag -width UNALLOCATED
+.It Sy CAPACITY
+The amount of logical bytes that the namespace may actually have allocated at
+any time.
+This may be different than size due to the use of thin provisioning or due to
+administrative action.
+.It Sy SIZE
+The logical size in bytes of the namespace.
+.It Sy USED
+The number of bytes used in the namespace.
+.It Sy NAMESPACE
+The numerical value of the namespace which can be used as part of other
+.Nm
+operations.
+.It Sy DISK
+The name of the disk device that corresponds to the namespace, if any.
+.El
+.Pp
+When using the
+.Fl c
+option to list controllers, the following additional fields are supported:
+.Bl -tag -width UNALLOCATED
+.It Sy CAPACITY
+The total raw capacity of the NVMe controller in bytes.
+.It Sy UNALLOCATED
+The number of bytes not currently assigned to any namespace in the controller.
+.El
+.It Xo
+.Nm
+.Cm identify-controller
+.Op Fl C | c | Oo Fl a Oc Fl n
+.Ar ctl Ns [,...]
+.Xc
+Print detailed information about the specified controllers.
+For an explanation of the data printed by this command refer to the description
+of the
+.Qq IDENTIFY
+admin command in the NVMe specification.
+.Pp
+By default, a relevant subset of the
+.Qq IDENTIFY CONTROLLER
+data structure is printed.
+The full data structure is only printed when verbose output is requested.
+.Pp
+The following options can be used to print other
+.Qq IDENTIFY
+information:
+.Bl -tag -width Fl
+.It Fl C
+Print the Common Namespace Identification of the controller.
+.It Fl a
+Alter the output of the
+.Fl n
+option to print the list allocated namespace identifiers.
+Can only be specified together with the
+.Fl n
+option.
+.It Fl c
+Print the list of all unique controller identifiers in the NVMe subsystem the
+specified controller belongs to.
+.It Fl n
+Print the list of active namespace identifiers of the controller.
+.El
+.It Xo
+.Nm
+.Cm identify-namespace
+.Op Fl c | d
+.Ar ctl/ns Ns [,...]
+.Xc
+Print detailed information about the specified namespace.
+For an explanation of the data printed by this command refer to the description
+of the
+.Qq IDENTIFY
+admin command in the NVMe specification.
+.Pp
+By default, a relevant subset of the
+.Qq IDENTIFY NAMESPACE
+data structure is printed.
+The full data structure is only printed when verbose output is requested.
+.Pp
+The following options can be used to print other
+.Qq IDENTIFY
+information:
+.Bl -tag -width Fl
+.It Fl c
+Print the list of all unique controller identifiers in the NVMe subsystem the
+specified namespace belongs to and which are currently attached to this
+namespace.
+.It Fl d
+Print the list of namespace identification descriptors of the namespace.
+.El
+.It Xo
+.Nm
+.Cm identify
+.Op Fl C | c | d | Oo Fl a Oc Fl n
+.Ar ctl[/ns] Ns [,...]
+.Xc
+Short-hand for the
+.Cm identify-controller
+and
+.Cm identify-namespace
+commands, prints the same information about the specified controllers and/or
+namespaces, depending on whether a controller or a namespace was specified.
+.Pp
+For a description of the various optional flags refer to the above description
+of the
+.Cm identify-controller
+and
+.Cm identify-namespace
+commands.
+.It Xo
+.Nm
+.Op Fl dv
+.Cm list-logpages
+.Op Fl a
+.Op Fl H
+.Op Fl o Ar field Ns [,...] Op Fl p
+.Op Fl s Ar scope Ns [,...]
+.Ar ctl[/ns] Ns [,...]
+.Op Ar logpage...
+.Xc
+Prints the list of log pages and information about them specific to the
+given controller or namespace.
+This is intended as a discovery mechanism and will print information
+about mandatory, optional, and vendor-specific log pages as well as all
+the information that is useful for retrieving information about them.
+.Pp
+The
+.Nm
+.Cm list-logpages
+command supports the following options:
+.Bl -tag -width Fl
+.It Fl a
+Print all log pages.
+By default, only logs that are implemented are printed.
+.It Fl H
+Omit the output header columns.
+.It Fl o Ar field Ns [,...]
+A comma-separated list of one or more output fields to be used.
+Fields are listed below and the name is case insensitive.
+.It Fl p
+Produce parsable output rather than human-readable output.
+This option requires that output fields be selected with the
+.Fl o
+option.
+.It Fl s Ar scope Ns [,...]
+Print log pages that match the specified scope.
+If no
+.Ar scope
+arguments are specified, then the scope will be set to
+.Dq ctrl,nvm
+when the device is a controller and
+.Dq ns
+when the device refers to a namespace.
+.El
+.Pp
+The following fields are supported:
+.Bl -tag -width MINSIZE
+.It Sy DEVICE
+Prints the name of the controller or namespace.
+.It Sy NAME
+Prints the name of the log page.
+This is the name that can be used to get the log page with the
+.Cm get-logpage
+command.
+This is a shortened form from the NVMe or vendor-specific documentation.
+.It Sy DESC
+This is a description of the log page and generally corresponds to
+information from the specification the log page is drawn from.
+.It Sy SCOPE
+This is the set of scopes that the log page is applicable to.
+As described earlier in the manual, valid scopes include
+.Dq ctrl ,
+.Dq nvm ,
+and
+.Dq ns .
+This indicates whether a controller
+.Po
+.Dq ctrl
+and
+.Dq nvm
+.Pc
+or a namespace
+.Po
+.Dq ns
+.Pc
+will work for this log page when running the
+.Cm get-logpage
+command to get the log.
+.It Sy FIELDS
+This indicates the command fields that are accepted when retrieving the
+log page from the controller.
+The fields include:
+.Bl -tag -width lsp
+.It Sy lsp
+Indicates that a log specific parameter is accepted for this page.
+.It Sy lsi
+Indicates that a log specific identifier is accepted for this page.
+.It Sy rae
+Indicates that one can control whether or not an asynchronous event is
+retained when retrieving the log page.
+By default, asynchronous events are cleared when certain log pages are
+fetched such as the health log page.
+.El
+For more information on these fields, please see the NVMe specification.
+.It Sy CSI
+Indicates the log page's command set interface.
+.It Sy LID
+Indicates the log page's numeric ID.
+This when combined with the log page's CSI is the unique identifier that
+identifies the log page to the controller.
+.It Sy IMPL
+Indicates whether or not the system believes that the log page is
+implemented.
+.It Sy SIZE
+Indicates the size of the log page.
+Not all log pages have a fixed size and in such cases this field will
+not contain a value.
+.It Sy MINSIZE
+When a log page is known to have a variable size, this indicates the
+minimum amount of the log page to read to determine the full size of the
+log page.
+.It Sy SOURCES
+This is a comma separated list of values that indicates where
+information about this log page and its support came from primarily.
+These include the following:
+.Bl -tag -width identify-controller
+.It Dq spec
+This comes from the NVMe specification.
+Generally this refers to mandatory log pages that are not dependent on
+any information in the identify controller data structure.
+.It Dq identify-controller
+Information about this log page comes from the identify controller data
+structure.
+Many log pages are described by the standard but are optional and their
+support is indicated through that.
+.It Dq internal-db
+This indicates that information about this log page comes from our
+internal databases in libnvme.
+Most vendor-specific logs are described in datasheets whose information
+is encoded into the library and system and there is not always a way to
+discover that it is supported or not.
+.It Dq command
+This indicates that information about this log page came from another
+command that was issued to the controller which indicates what was
+implemented and present.
+.El
+.It Sy KIND
+This indicates the kind of log page that this is.
+Valid options are:
+.Bl -tag -width vendor-specific
+.It Dq mandatory
+Indicates that the NVMe specification considers this mandatory for all
+controllers of a given version.
+.It Dq optional
+Indicates that the NVMe specification considers this log page optional.
+Some items may be mandatory if a device implements an optional feature
+like namespace management, but they will still be considered optional as
+the underlying feature is.
+.It Dq vendor-specific
+Indicates that this log is a vendor-specific log page.
+These log pages are not part of the NVMe standard and are generally
+described in their own device's datasheets or a separate standard such
+as the
+.%T OCP Datacenter NVMe SSD Specification .
+.El
+.El
+.Pp
+The
+.Cm list-logpages
+command supports a series of operands which can be used to filter the
+list of log pages that information is printed out about.
+Each
+.Ar logpage
+operand is the name of a log page.
+Only matching log pages will be printed and if no log pages match a
+given operand argument or not log pages are printed at all
+.Pq which can happen due to a log being unsupported
+then the command will generate an error.
+.It Xo
+.Nm
+.Cm get-logpage
+.Op Fl O Ar output-file
+.Ar ctl[/ns] Ns [,...]
+.Ar logpage
+.Xc
+Print the specified log page of the specified controllers and/or namespaces.
+If
+.Fl O
+is specified, rather than print the contents of the log, the raw binary payload
+of the log will be written to
+.Ar output-file .
+Most log pages are only available on a per-controller basis.
+Known log pages are:
+.Bl -tag -width "firmware"
+.It suplog
+Supported Log Pages.
+Lists information about log pages that the device supports.
+Available starting in NVMe 2.0 devices.
+.It error
+Error Information
+.It health
+SMART/Health Information.
+A controller may support this log page on a per-namespace basis.
+.It firmware
+Firmware Slot Information
+.It changens
+Changed Namespaces.
+.It cmdeff
+Commands Supported and Effects.
+An optional log page added in NVMe 1.2 that indicates what commands
+the controller itself actually supports.
+.It pev
+Persistent Event Log.
+An optional log page added in NVMe 1.4 that contains a series of events
+that have occurred on the device.
+.El
+.Pp
+The following vendor-specific log pages are supported.
+Not all devices from a vendor support every log page.
+Use the
+.Cm list-logpages
+command to determine which are supported for a given device and whether
+they operate on a controller or namespace.
+.Bl -tag -width "solidigm/outlier"
+.It kioxia/extsmart
+Kioxia Extended SMART.
+.It micron/smart
+Micron Vendor Unique SMART.
+.It micron/extsmart
+Micron Extended SMART.
+.It ocp/smart
+Open Compute Datacenter NVMe SSD specification SMART / Health information.
+.It ocp/errrec
+Open Compute Datacenter NVMe SSD specification error recovery log.
+.It ocp/fwact
+Open Compute Datacenter NVMe SSD specification firmware activation log.
+.It ocp/latency
+Open Compute Datacenter NVMe SSD specification latency monitor.
+.It ocp/devcap
+Open Compute Datacenter NVMe SSD specification device capabilities.
+.It ocp/unsup
+Open Compute Datacenter NVMe SSD specification unsupported requirements.
+.It solidigm/rlat
+Solidigm/Intel read command latency statistics.
+.It solidigm/wlat
+Solidigm/Intel write command latency statistics.
+.It solidigm/temp
+Solidigm/Intel temperature statistics.
+.It solidigm/smart
+Solidigm/Intel vendor unique SMART log.
+.It solidigm/ioqueue
+Solidigm/Intel I/O queue metrics.
+.It solidigm/name
+Solidigm/Intel drive marketing name.
+.It solidigm/power
+Solidigm/Intel power usage.
+.It solidigm/gc
+Solidigm/Intel garbage collection.
+.It solidigm/outlier
+Solidigm/Intel latency outlier.
+.It wdc/eol
+Western Digital end-of-life.
+.It wdc/devmgmt
+Western Digital device manageability.
+.It wdc/pciesi
+Western Digital PCIe signal integrity.
+.It wdc/power
+Western Digital power samples.
+.It wdc/temp
+Western Digital temperature samples.
+.It wdc/fwact
+Western Digital firmware activation history.
+.It wdc/ccds
+Western Digital CCDS build information.
+.It wdc/cusmart
+Western Digital customer unique SMART data.
+.El
+.Pp
+For an explanation of the contents of the log pages refer to the
+description of the
+.Qq GET LOGPAGE
+admin command in the NVMe specification.
+.It Xo
+.Nm
+.Cm list-features
+.Op Fl a
+.Op Fl H
+.Op Fl o Ar field Ns [,...] Op Fl p
+.Ar ctl[/ns] Ns [,...]
+.Op Ar feature Ns [,...]
+.Xc
+Prints the list of features and information about them specific to the
+given controller or namespace.
+This is intended as a discovery mechanism and will print information
+about known mandatory, optional, and vendor-specific features as well as
+the information that is useful for retrieving information about them.
+.Pp
+The
+.Nm
+.Cm list-features
+command supports the following options:
+.Bl -tag -width Fl
+.It Fl a
+Print all features, regardless of whether or not the controller is known
+to implement them.
+By default unimplemented features are not printed, but implemented and
+unknown ones are.
+.It Fl H
+Omit the output header columns.
+.It Fl o Ar field Ns [,...]
+A comma-separated list of one or more output fields to be used.
+Fields are listed below and the name is case insensitive.
+.It Fl p
+Produce parsable output rather than human-readable output.
+This option requires that output fields be selected with the
+.Fl o
+option.
+.El
+.Pp
+The following fields are supported:
+.Bl -tag -width DATALEN
+.It Sy DEVICE
+Prints the name of the controller or namespace.
+.It Sy SHORT
+This is a shortened name for a feature which can be used to identify it.
+These short names are unique to illumos and not part of the NVMe
+specification.
+.It Sy SPEC
+This is the specification's name for a given feature.
+.It Sy FID
+This is the numeric ID that can be used to uniquely identify a feature.
+.It Sy SCOPE
+This is a comma separated list of values that identifies what scopes
+this feature covers.
+The supported scopes are
+.Dq controller ,
+which indicates that it impacts the entire controller and
+.Dq namespace ,
+which indicates that it impacts just a single namespace.
+.It Sy KIND
+This indicates the kind of feature that this is.
+Valid options are:
+.Bl -tag -width vendor-specific
+.It Dq mandatory
+Indicates that the NVMe specification considers this mandatory for all
+controllers of a given version.
+.It Dq optional
+Indicates that the NVMe specification considers this feature optional.
+Some items may be mandatory if a device implements an optional feature
+like namespace management, but they will still be considered optional as
+the underlying feature is.
+.It Dq vendor-specific
+Indicates that this log is a vendor-specific feature.
+These features are not part of the NVMe standard and are generally
+described in their own device's datasheets or a separate standard such
+as the
+.%T OCP Datacenter NVMe SSD Specification .
+.El
+.It Sy CSI
+The command set interface that the feature is specific to.
+Most features are not specific to a CSI.
+.It Sy FLAGS
+The flags are a series of comma separated strings which describe
+properties of the feature.
+The following flags are currently supported:
+.Bl -tag -width "get-bcastns"
+.It Dq get-bcastns
+Indicates that the broadcast namespace is supported when getting this
+feature.
+.It Dq set-bcastns
+Indicates that the broadcast namespace is supported when setting this
+feature.
+Using the broadcast namespace indicates that all namespace are impacted.
+.El
+.It Sy GET-IN
+A series of comma separated values indicating what is required to get
+this feature.
+The following values are supported:
+.Bl -tag -width cdw11
+.It cdw11
+Indicates that the feature requires an argument in the cdw11 field of
+the command.
+This is generally a selector of some kind.
+For example, for the temperature threshold feature, it selects which of
+several sensors may be referred to.
+.It data
+Indicates that a data buffer is required when getting this feature.
+Its size is indicated by the DATALEN field.
+.It nsid
+Indicates that a namespace ID is required when getting this feature.
+.El
+.It Sy SET-IN
+A series of comma separated values indicating what is required to get
+this feature.
+The following values are supported:
+.Bl -tag -width cdw11
+.It cdw11
+Indicates that the feature uses information in cdw11 to set the feature.
+.It cdw12
+Indicates that the feature uses information in cdw12 to set the feature.
+.It cdw13
+Indicates that the feature uses information in cdw13 to set the feature.
+.It cdw14
+Indicates that the feature uses information in cdw14 to set the feature.
+.It cdw15
+Indicates that the feature uses information in cdw15 to set the feature.
+.It data
+Indicates that the feature takes a data payload to set the feature.
+Its size is indicated by the DATALEN field.
+.It nsid
+Indicates that the feature requires a valid namespace identifier.
+.El
+.It Sy GET-OUT
+A series of comma separated values indicating what the controller will
+return information about this feature in.
+The following values are supported:
+.Bl -tag -width cdw0
+.It cdw0
+Indicates that the controller will give information about the feature in
+the command output 32-bit value.
+.It data
+Indicates that the controller will output information about the feature
+into the output buffer.
+.El
+.It Sy SET-OUT
+A series of comma separated values indicating what the controller will
+update following the successful completion of setting the feature.
+These values are the same as with the GET-OUT field.
+.It Sy DATALEN
+Indicates the length of data for the feature.
+.It Sy IMPL
+Indicates whether or not the feature is known to be implemented or not.
+The following values are possible:
+.Bl -tag -width unknown
+.It Dq unknown
+Indicates that it is unknown as to whether or not the feature is
+implemented.
+Some features are optional and there is no way to determine this short
+of issuing an attempt to get the feature itself.
+.It Dq yes
+Indicates that we know the feature is implemented by the controller.
+.It Dq no
+Indicates that we know the feature is not implemented by the controller.
+.El
+.El
+.Pp
+The
+.Cm list-features
+command supports a series of operands which can be used to filter the
+list of features that information is printed out about.
+Each
+.Ar feature
+operand is either the short name or the specification's name for a given
+feature.
+In addition, the numeric feature ID can also be used as a filter.
+If no features match a given operand or no features are printed at all
+then the command will generate an error.
+.It Xo
+.Nm
+.Cm get-features
+.Ar ctl[/ns] Ns [,...]
+.Op Ar feature-list
+.Xc
+Prints information about the specified features, or all features if
+none are given, of the specified controllers and/or namespaces.
+Feature names are case-insensitive, and they can be shortened as long
+as they remain unique.
+Some features also have alternative short names to which the same
+rules apply.
+The following features are supported:
+.Pp
+.TS
+tab(:);
+l l l.
+FULL NAME:SHORT NAME:CONTROLLER/NAMESPACE
+Arbitration:arb:controller
+Power Management:pm:controller
+LBA Range Type:range:namespace
+Temperature Threshold:temp:controller
+Error Recovery:errec:controller
+Volatile Write Cache:cache:controller
+Number of Queues:queues:controller
+Interrupt Coalescing:coalescing:controller
+Interrupt Vector Configuration:vector:controller
+Write Atomicity:atomicity:controller
+Asynchronous Event Configuration:event:controller
+Autonomous Power State Transition:apst:controller
+Software Progress Marker:progress:controller
+.TE
+.Pp
+For an explanation of the individual features refer to the description
+of the
+.Qq SET FEATURES
+admin command in the NVMe specification.
+.It Xo
+.Nm
+.Cm format
+.Ar ctl[/ns]
+.Op Ar lba-format
+.Xc
+Formats the specified namespace or all namespaces of the specified
+controller.
+This command implies a
+.Nm
+.Cm detach
+and subsequent
+.Nm
+.Cm attach
+of the specified namespace(s), which will cause a changed LBA format
+to be detected.
+If no LBA format is specified the LBA format currently used by the
+namespace will be used.
+When formatting all namespaces without specifying a LBA format the LBA
+format of namespace 1 will be used.
+A list of LBA formats supported by a namespace can be queried with the
+.Nm
+.Cm identify
+command.
+.Pp
+Note that not all devices support formatting individual or all
+namespaces, or support formatting at all.
+.Pp
+LBA formats using a non-zero metadata size are not supported by
+.Nm
+or
+.Xr nvme 4D .
+.Pp
+The list of supported LBA formats on a namespace can be retrieved
+with the
+.Nm
+.Cm identify
+command.
+.It Xo
+.Nm
+.Cm secure-erase
+.Op Fl c
+.Ar ctl[/ns]
+.Xc
+Erases the specified namespace or all namespaces of the controller.
+The flag
+.Fl c
+will cause a cryptographic erase instead of a normal erase.
+This command implies a
+.Nm
+.Cm detach
+and
+.Nm
+.Cm attach
+of the specified namespace(s).
+.Pp
+Note that not all devices support erasing individual or all
+namespaces, or support erasing at all.
+.It Xo
+.Nm
+.Cm detach
+.Ar ctl[/ns]
+.Xc
+Temporarily detaches the
+.Xr blkdev 4D
+instance from the specified namespace or all namespaces of the controller.
+This will prevent I/O access to the affected namespace(s).
+Detach will only succeed if the affected namespace(s) are not
+currently opened.
+The detached state will not persist across reboots or reloads of the
+.Xr nvme 4D
+driver.
+.Pp
+It is not an error to detach a namespace that is already detached, any such
+request will be silently ignored.
+.It Xo
+.Nm
+.Cm attach
+.Ar ctl[/ns]
+.Xc
+Attaches the
+.Xr blkdev 4D
+instance to the specified namespace or all namespaces of the controller.
+This will make I/O accesses to the namespace(s) possible again after a
+previous
+.Nm
+.Cm detach
+command.
+.Pp
+It is not an error to attach a namespace that is already attached, any such
+request will be silently ignored.
+.It Xo
+.Nm
+.Cm list-firmware
+.Ar ctl
+.Xc
+List currently active firmware slot, the next active firmware slot, and the
+current contents of all firmware slots of an NVMe controller.
+This is a synonym for the
+.Nm
+.Cm get-logpage
+.Ar ctl
+.Cm firmware
+command.
+.It Xo
+.Nm
+.Cm load-firmware
+.Ar ctl
+.Ar firmware-file
+.Op Ar offset
+.Xc
+Loads
+.Ar firmware-file
+into the controller's upload memory at
+.Ar offset ,
+the default is 0. A vendor may require multiple files to be loaded
+at different offsets before the firmware is committed to a
+.Ar slot .
+.It Xo
+.Nm
+.Cm commit-firmware
+.Ar ctl
+.Ar slot
+.Xc
+Commits firmware previously loaded by the
+.Cm load-firmware
+command to
+.Ar slot .
+.It Xo
+.Nm
+.Cm activate-firmware
+.Ar ctl
+.Ar slot
+.Xc
+Activates the firmware in slot
+.Ar slot .
+The firmware image in
+.Ar slot
+is activated at the next NVM controller reset.
+.It Xo
+.Nm
+.Cm wdc/e6dump
+.Fl o Ar output
+.Ar ctl
+.Xc
+This vendor-specific command performs a diagnostic dump of device data
+to the file specified by
+.Ar output .
+The device remains in full service while this is occurring.
+.It Xo
+.Nm
+.Cm wdc/resize
+.Fl s Ar size | Fl g
+.Ar ctl
+.Xc
+This vendor-specific command will get the current over provisioning size
+or set it.
+This command operates using power of 10 bytes, that is in terms of
+gigabytes and not gibibytes.
+The sizes that are used here will be different from those that the
+operating system will report for the drive.
+.Pp
+The following options are supported:
+.Bl -tag -width Fl
+.It Fl g
+Returns the current size of the device in gigabytes
+.Pq powers of 10 .
+.It Fl s Ar size
+Sets the size of the device to
+.Ar size
+which is in gigabytes
+.Pq powers of 10 .
+This can be used to adjust the over provisioning ratio on the device.
+The valid points are device-specific.
+Please consult WDC datasheets for more information.
+.Pp
+When performing a resize
+.Em all data and namespace will be erased !
+All namespaces must be detached prior to issuing this.
+.El
+.It Xo
+.Nm
+.Op Fl dv
+.Cm wdc/clear-assert
+.Ar ctl
+.Xc
+This clears an internal assertion record from a WDC device.
+Prior to running this any such internal assertion should be saved by using the
+.Cm wdc/e6dump
+command.
+This command should only be used if instructed to do so as part of a
+troubleshooting process.
+.It Xo
+.Nm
+.Op Fl dv
+.Cm wdc/inject-assert
+.Ar ctl
+.Xc
+This injects a device assertion into a WDC NVMe device.
+The behavior of doing so is device specific; however, all I/O will be
+interrupted and the device may be retired.
+Unless explicitly instructed as part of debugging a device or as part of
+internal development, this command should not be used.
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+.Bl -tag -width ""
+.It Sy Example 1: List all NVMe controllers and namespaces
+.Bd -literal
+# nvmeadm list
+nvme1: model: INTEL SSDPEDMD800G4, serial: CVFT4134001R800CGN, FW rev: 8DV10049, NVMe v1.0
+  nvme1/1 (c1t1d0): Size = 763097 MB, Capacity = 763097 MB, Used = 763097 MB
+nvme4: model: SAMSUNG MZVPV128HDGM-00000, serial: S1XVNYAGA00640, FW rev: BXW7300Q, NVMe v1.1
+  nvme4/1 (c2t2d0): Size = 122104 MB, Capacity = 122104 MB, Used = 5127 MB
+.Ed
+.It Sy Example 2: Identify a namespace
+.Bd -literal
+# nvmeadm identify nvme4/1
+nvme4/1: Identify Namespace
+  Namespace Capabilities and Features
+    Namespace Size:                         122104MB
+    Namespace Capacity:                     122104MB
+    Namespace Utilization:                  5127MB
+    Namespace Features
+      Thin Provisioning:                    unsupported
+    Number of LBA Formats:                  1
+    Formatted LBA Size
+      LBA Format:                           1
+      Extended Data LBA:                    no
+    Metadata Capabilities
+      Extended Data LBA:                    unsupported
+      Separate Metadata:                    unsupported
+    End-to-End Data Protection Capabilities
+      Protection Information Type 1:        unsupported
+      Protection Information Type 2:        unsupported
+      Protection Information Type 3:        unsupported
+      Protection Information first:         unsupported
+      Protection Information last:          unsupported
+    End-to-End Data Protection Settings
+      Protection Information:               disabled
+      Protection Information in Metadata:   last 8 bytes
+    LBA Format 1
+      Metadata Size:                        0 bytes
+      LBA Data Size:                        512 bytes
+      Relative Performance:                 Best
+.Ed
+.It Sy Example 3: Get SMART/Health information (verbose)
+.Bd -literal
+# nvmeadm -v get-logpage nvme4/1 health
+nvme4/1: SMART/Health Information
+  Critical Warnings
+    Available Space:                        OK
+    Temperature:                            OK
+    Device Reliability:                     OK
+    Media:                                  OK
+    Volatile Memory Backup:                 OK
+  Temperature:                              37C
+  Available Spare Capacity:                 100%
+  Available Spare Threshold:                10%
+  Device Life Used:                         0%
+  Data Read:                                0GB
+  Data Written:                             64GB
+  Read Commands:                            52907
+  Write Commands:                           567874
+  Controller Busy:                          1min
+  Power Cycles:                             6
+  Power On:                                 141h
+  Unsafe Shutdowns:                         1
+  Uncorrectable Media Errors:               0
+  Errors Logged:                            1
+.Ed
+.It Sy Example 4: Get Asynchronous Event Configuration information
+.Bd -literal
+# nvmeadm get-features nvme0,nvme4 event,power
+nvme0: Get Features
+  Asynchronous Event Configuration
+    Available Space below threshold:        disabled
+    Temperature above threshold:            disabled
+    Device Reliability compromised:         disabled
+    Media read-only:                        disabled
+  Power Management
+    Power State:                            0
+nvme4: Get Features
+  Asynchronous Event Configuration
+    Available Space below threshold:        disabled
+    Temperature above threshold:            disabled
+    Device Reliability compromised:         disabled
+    Media read-only:                        disabled
+    Volatile Memory Backup failed:          disabled
+  Power Management
+    Power State:                            0
+.Ed
+.It Sy Example 5: Load and activate firmware
+.Bd -literal
+# nvmeadm list-firmware nvme3
+nvme3: Firmware Slot Information
+  Active Firmware Slot:                     4
+  Next Firmware Slot:                       4
+  Firmware Revision for Slot 1:             KNGND110 (read-only)
+  Firmware Revision for Slot 2:             KNGND110
+  Firmware Revision for Slot 3:             KNGND110
+  Firmware Revision for Slot 4:             KNGND112
+  Firmware Revision for Slot 5:             KNGND110
+
+# nvmeadm -v load-firmware nvme3 KNGND113.bin
+1740544 bytes downloaded.
+
+# nvmeadm -v commit-firmware nvme3 5
+Firmware committed to slot 5.
+
+# nvmeadm -v activate-firmware nvme3 5
+Slot 5 activated: NVM subsystem reset required - power cycle your system.
+
+# nvmeadm list-firmware nvme3
+nvme3: Firmware Slot Information
+  Active Firmware Slot:                     4
+  Next Firmware Slot:                       5
+  Firmware Revision for Slot 1:             KNGND110 (read-only)
+  Firmware Revision for Slot 2:             KNGND110
+  Firmware Revision for Slot 3:             KNGND110
+  Firmware Revision for Slot 4:             KNGND112
+  Firmware Revision for Slot 5:             KNGND113
+.Ed
+.It Sy Example 6: Listing Log Pages
+.Bd -literal
+# nvmeadm list-logpages nvme8
+DEVICE  NAME          SCOPE         FIELDS    DESC
+nvme8   error         controller    rae       Error information
+nvme8   health        controller,   rae       SMART / Health information
+                      namespace
+nvme8   firmware      nvm           --        Firmware Slot Information
+nvme8   changens      controller    rae       changed namespaces
+nvme8   wdc/eol       nvm           --        EOL
+nvme8   wdc/devmgmt   controller,   --        Device Manageability
+                      namespace
+nvme8   wdc/pciesi    controller    lsp       PCIe Signal Integrity
+nvme8   wdc/power     controller    --        Power Samples
+nvme8   wdc/temp      controller    --        Temperature Samples
+nvme8   wdc/fwact     controller    --        Firmware Activation
+nvme8   wdc/ccds      controller    --        CCDS Build Information
+# nvmeadm list-logpages -p -o name,impl nvme8 firmware
+firmware:yes
+.Ed
+.El
+.Sh INTERFACE STABILITY
+The command line interface of
+.Nm
+is
+.Sy Evolving .
+The output of
+.Nm
+is
+.Sy Not-an-Interface
+and may change any time.
+.Sh SEE ALSO
+.Xr nvme 4D
+.Pp
+.Lk http://www.nvmexpress.org/specifications/ "NVMe specifications"

@@ -11,6 +11,7 @@
 
 #
 # Copyright (c) 2018, Joyent, Inc.
+# Copyright 2024 Oxide Computer Company
 #
 
 include $(SRC)/Makefile.master
@@ -18,32 +19,50 @@ include $(SRC)/Makefile.master
 ROOTOPTPKG = $(ROOT)/opt/util-tests
 TESTDIR = $(ROOTOPTPKG)/tests/
 
-PROGS = libjedec_test
+PROGS = libjedec_vendors libjedec_temp libjedec_spd
+PROGS32 = $(PROGS:%=%.32)
+PROGS64 = $(PROGS:%=%.64)
 
-LINTS = $(PROGS:%=%.ln)
+ROOTOPTPROGS = $(PROGS32:%=$(TESTDIR)/%) \
+	$(PROGS64:%=$(TESTDIR)/%)
 
 include $(SRC)/cmd/Makefile.cmd
 include $(SRC)/test/Makefile.com
 
+SUBDIRS = hex2spd
+
 CMDS = $(PROGS:%=$(TESTDIR)/%)
 $(CMDS) := FILEMODE = 0555
 
-#
-# Different tests require different sets of libraries. If we try and use
-# the same set, we'll get guidance errors from ld.
-#
 LDLIBS += -ljedec
+LDLIBS64 += -ljedec
 
-all: $(PROGS)
+libjedec_spd.32		:= LDLIBS += -lnvpair
+libjedec_spd.64		:= LDLIBS64 += -lnvpair
 
-install: all $(CMDS) $(OUTFILES)
+CSTD = $(GNU_C99)
 
-lint:
+#
+# recursive support
+#
+all     :=      TARGET = all
+install :=      TARGET = install
+clean   :=      TARGET = clean
+clobber :=      TARGET = clobber
 
-clobber: clean
-	-$(RM) $(PROGS) $(LINTS)
+$(SUBDIRS): FRC
+	cd $@; pwd; $(MAKE) $(TARGET)
 
-clean:
+all: $(PROGS32) $(PROGS64) $(SUBDIRS)
+
+$(ROOTOPTPROGS): all
+
+install: all $(ROOTOPTPROGS) $(SUBDIRS)
+
+clobber: clean $(SUBDIRS)
+	-$(RM) $(PROGS32) $(PGROGS64)
+
+clean: $(SUBDIRS)
 
 $(CMDS): $(TESTDIR) $(PROG)
 
@@ -53,6 +72,12 @@ $(TESTDIR):
 $(TESTDIR)/%: %
 	$(INS.file)
 
-%: %.c
+%.64: %.c
+	$(LINK64.c) -o $@ $< $(LDLIBS64)
+	$(POST_PROCESS)
+
+%.32: %.c
 	$(LINK.c) -o $@ $< $(LDLIBS)
 	$(POST_PROCESS)
+
+FRC:

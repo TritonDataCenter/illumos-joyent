@@ -43,7 +43,7 @@ extern "C" {
  * Solaris system and DTrace subsystem and are subject to change at any time
  * without notice.  Applications and drivers using these interfaces will fail
  * to run on future releases.  These interfaces should not be used for any
- * purpose except those expressly outlined in dtrace(7D) and libdtrace(3LIB).
+ * purpose except those expressly outlined in dtrace(4D) and libdtrace(3LIB).
  * Please refer to the "Solaris Dynamic Tracing Guide" for more information.
  */
 
@@ -1188,7 +1188,7 @@ typedef struct dtrace_argdesc {
  * The D compiler can query the provider attributes (dtrace_pattr_t below) in
  * order to compute the properties of an input program and report them.
  */
-typedef uint8_t dtrace_stability_t;	/* stability code (see attributes(5)) */
+typedef uint8_t dtrace_stability_t;	/* stability code (see attributes(7)) */
 typedef uint8_t dtrace_class_t;		/* architectural dependency class */
 
 #define	DTRACE_STABILITY_INTERNAL	0	/* private to DTrace itself */
@@ -1507,7 +1507,7 @@ typedef struct dof_helper {
  *   argument is the probe argument as passed to dtrace_probe_create().
  *   dtps_disable() will be called when a probe transitions from being enabled
  *   to having zero ECBs.  dtrace_probe() should never be called for a probe
- *   identifier that has been explicitly enabled via dtps_disable().
+ *   identifier that has been explicitly disabled via dtps_disable().
  *
  * 1.5.3  Return value
  *
@@ -2254,16 +2254,12 @@ extern int dtrace_meta_unregister(dtrace_meta_provider_id_t);
  */
 
 typedef enum dtrace_vtime_state {
-	DTRACE_VTIME_INACTIVE = 0,	/* No DTrace, no TNF */
-	DTRACE_VTIME_ACTIVE,		/* DTrace virtual time, no TNF */
-	DTRACE_VTIME_INACTIVE_TNF,	/* No DTrace, TNF active */
-	DTRACE_VTIME_ACTIVE_TNF		/* DTrace virtual time _and_ TNF */
+	DTRACE_VTIME_INACTIVE = 0,	/* No DTrace */
+	DTRACE_VTIME_ACTIVE,		/* DTrace virtual time */
 } dtrace_vtime_state_t;
 
 extern dtrace_vtime_state_t dtrace_vtime_active;
 extern void dtrace_vtime_switch(kthread_t *next);
-extern void dtrace_vtime_enable_tnf(void);
-extern void dtrace_vtime_disable_tnf(void);
 extern void dtrace_vtime_enable(void);
 extern void dtrace_vtime_disable(void);
 

@@ -23,8 +23,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <stdio.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -783,8 +781,9 @@ dprog_compile()
 }
 
 static void
-status_fire(void)
-{}
+status_fire(int signal __unused)
+{
+}
 
 static void
 status_init(void)
@@ -1018,7 +1017,7 @@ main(int argc, char **argv)
 	char *data_buf;
 	lsrec_t *lsp, **current, **first, **sort_buf, **merge_buf;
 	FILE *out = stdout;
-	char c;
+	int c;
 	pid_t child;
 	int status;
 	int i, j;
@@ -1616,7 +1615,7 @@ format_symbol(char *buf, uintptr_t addr, int show_size)
 
 static void
 report_stats(FILE *out, lsrec_t **sort_buf, size_t nrecs, uint64_t total_count,
-	uint64_t total_time)
+    uint64_t total_time)
 {
 	uint32_t event = sort_buf[0]->ls_event;
 	lsrec_t *lsp;

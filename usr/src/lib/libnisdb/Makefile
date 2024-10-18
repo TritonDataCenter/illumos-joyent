@@ -32,8 +32,6 @@ VERS=	.2
 PROTOCOL_DIR= $(ROOT)/include/rpcsvc
 YPTOL_DIR= ./yptol
 
-SED=	sed
-
 OBJECTS = \
 	db_entry.o db_entry_c_xdr.o \
 	db_item.o db_item_c_xdr.o \
@@ -175,8 +173,6 @@ CCERRWARN +=	-_gcc=-Wno-return-type
 CCERRWARN +=	-_gcc=-Wno-uninitialized
 
 CCERRWARN +=	-_gcc7=-Wno-nonnull-compare
-CCERRWARN +=	-_gcc8=-Wno-nonnull-compare
-CCERRWARN +=	-_gcc9=-Wno-nonnull-compare
 
 # not linted
 SMATCH=off

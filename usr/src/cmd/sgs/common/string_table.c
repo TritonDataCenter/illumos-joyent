@@ -158,7 +158,7 @@ st_new(uint_t flags)
 {
 	Str_tbl	*stp;
 
-	if ((stp = calloc(sizeof (*stp), 1)) == NULL)
+	if ((stp = calloc(1, sizeof (*stp))) == NULL)
 		return (NULL);
 
 	/*
@@ -173,7 +173,7 @@ st_new(uint_t flags)
 	if ((stp->st_flags & FLG_STTAB_COMPRESS) == 0)
 		return (stp);
 
-	if ((stp->st_lentree = calloc(sizeof (*stp->st_lentree), 1)) == NULL)
+	if ((stp->st_lentree = calloc(1, sizeof (*stp->st_lentree))) == NULL)
 		return (NULL);
 
 	avl_create(stp->st_lentree, &avl_len_compare, sizeof (LenNode),
@@ -225,14 +225,17 @@ st_insert(Str_tbl *stp, const char *str)
 	 */
 	ln.ln_strlen = len;
 	if ((lnp = avl_find(stp->st_lentree, &ln, &where)) == NULL) {
-		if ((lnp = calloc(sizeof (*lnp), 1)) == NULL)
+		if ((lnp = calloc(1, sizeof (*lnp))) == NULL)
 			return (-1);
+
+		if ((lnp->ln_strtree = calloc(1, sizeof (*lnp->ln_strtree))) ==
+		    NULL) {
+			free(lnp);
+			return (-1);
+		}
+
 		lnp->ln_strlen = len;
 		avl_insert(stp->st_lentree, lnp, where);
-
-		if ((lnp->ln_strtree = calloc(sizeof (*lnp->ln_strtree), 1)) ==
-		    NULL)
-			return (0);
 
 		avl_create(lnp->ln_strtree, &avl_str_compare, sizeof (StrNode),
 		    SGSOFFSETOF(StrNode, sn_avlnode));
@@ -245,7 +248,7 @@ st_insert(Str_tbl *stp, const char *str)
 	 */
 	sn.sn_str = str;
 	if ((snp = avl_find(lnp->ln_strtree, &sn, &where)) == NULL) {
-		if ((snp = calloc(sizeof (*snp), 1)) == NULL)
+		if ((snp = calloc(1, sizeof (*snp))) == NULL)
 			return (-1);
 		snp->sn_str = str;
 		avl_insert(lnp->ln_strtree, snp, where);
@@ -337,10 +340,47 @@ st_destroy(Str_tbl *stp)
 	free(stp);
 }
 
+/*
+ * Hash a single additional character into hashval, separately so we can
+ * iteratively get suffix hashes.  See st_string_hash and st_hash_insert
+ */
+static inline uint_t
+st_string_hashround(uint_t hashval, char c)
+{
+	/* h = ((h * 33) + c) */
+	return (((hashval << 5) + hashval) + c);
+}
 
 /*
- * For a given string - copy it into the buffer associated with
- * the string table - and return the offset it has been assigned.
+ * We use a classic 'Bernstein k=33' hash function.  But
+ * instead of hashing from the start of the string to the
+ * end, we do it in reverse.
+ *
+ * This way we are essentially building all of the
+ * suffix hashvalues as we go.  We can check to see if
+ * any suffixes already exist in the tree as we generate
+ * the hash.
+ */
+static inline uint_t
+st_string_hash(const char *str)
+{
+	uint_t hashval = HASHSEED;
+	size_t stlen = strlen(str);
+
+	/* We should never be hashing the NUL string */
+	assert(stlen > 0);
+
+	for (int i = stlen; i >= 0; i--) {
+		assert(i <= stlen); /* not unsigned->signed truncated */
+		hashval = st_string_hashround(hashval, str[i]);
+	}
+
+	return (hashval);
+}
+
+/*
+ * For a given string - copy it into the buffer associated with the string
+ * table - and return the offset it has been assigned in stoff.
  *
  * If a value of '-1' is returned - the string was not found in
  * the Str_tbl.
@@ -352,12 +392,11 @@ st_setstring(Str_tbl *stp, const char *str, size_t *stoff)
 	uint_t		hashval;
 	Str_hash	*sthash;
 	Str_master	*mstr;
-	int		i;
 
 	/*
 	 * String table *must* have been previously cooked
 	 */
-	assert(stp->st_strbuf);
+	assert(stp->st_strbuf != NULL);
 
 	assert(stp->st_flags & FLG_STTAB_COOKED);
 	stlen = strlen(str);
@@ -365,7 +404,8 @@ st_setstring(Str_tbl *stp, const char *str, size_t *stoff)
 	 * Null string always points to head of string table
 	 */
 	if (stlen == 0) {
-		*stoff = 0;
+		if (stoff != NULL)
+			*stoff = 0;
 		return (0);
 	}
 
@@ -380,7 +420,8 @@ st_setstring(Str_tbl *stp, const char *str, size_t *stoff)
 		if ((_stoff + stlen) > stp->st_fullstrsize)
 			return (-1);
 		memcpy(stp->st_strbuf + _stoff, str, stlen);
-		*stoff = _stoff;
+		if (stoff != NULL)
+			*stoff = _stoff;
 		stp->st_nextoff += stlen;
 		return (0);
 	}
@@ -388,11 +429,7 @@ st_setstring(Str_tbl *stp, const char *str, size_t *stoff)
 	/*
 	 * Calculate reverse hash for string.
 	 */
-	hashval = HASHSEED;
-	for (i = stlen; i >= 0; i--) {
-		hashval = ((hashval << 5) + hashval) +
-		    str[i];			/* h = ((h * 33) + c) */
-	}
+	hashval = st_string_hash(str);
 
 	for (sthash = stp->st_hashbcks[hashval % stp->st_hbckcnt]; sthash;
 	    sthash = sthash->hi_next) {
@@ -436,11 +473,11 @@ st_setstring(Str_tbl *stp, const char *str, size_t *stoff)
 	/*
 	 * Calculate offset of (sub)string.
 	 */
-	*stoff = mstr->sm_stroff + mstr->sm_strlen - sthash->hi_strlen;
+	if (stoff != NULL)
+		*stoff = mstr->sm_stroff + mstr->sm_strlen - sthash->hi_strlen;
 
 	return (0);
 }
-
 
 static int
 st_hash_insert(Str_tbl *stp, const char *str, size_t len)
@@ -452,19 +489,12 @@ st_hash_insert(Str_tbl *stp, const char *str, size_t len)
 	Str_hash	*sthash;
 	Str_master	*mstr = 0;
 
-	/*
-	 * We use a classic 'Bernstein k=33' hash function.  But
-	 * instead of hashing from the start of the string to the
-	 * end, we do it in reverse.
-	 *
-	 * This way - we are essentially building all of the
-	 * suffix hashvalues as we go.  We can check to see if
-	 * any suffixes already exist in the tree as we generate
-	 * the hash.
-	 */
 	for (i = len; i >= 0; i--) {
-		hashval = ((hashval << 5) + hashval) +
-		    str[i];			/* h = ((h * 33) + c) */
+		/*
+		 * Build up 'hashval' character by character, so we always
+		 * have the hash of the current string suffix
+		 */
+		hashval = st_string_hashround(hashval, str[i]);
 
 		for (sthash = hashbcks[hashval % bckcnt];
 		    sthash; sthash = sthash->hi_next) {
@@ -512,7 +542,7 @@ st_hash_insert(Str_tbl *stp, const char *str, size_t len)
 		/*
 		 * allocate a new master string
 		 */
-		if ((mstr = calloc(sizeof (*mstr), 1)) == 0)
+		if ((mstr = calloc(1, sizeof (*mstr))) == NULL)
 			return (-1);
 		mstr->sm_next = stp->st_mstrlist;
 		stp->st_mstrlist = mstr;
@@ -527,7 +557,7 @@ st_hash_insert(Str_tbl *stp, const char *str, size_t len)
 		stp->st_strsize += len - mstr->sm_strlen;
 	}
 
-	if ((sthash = calloc(sizeof (*sthash), 1)) == 0)
+	if ((sthash = calloc(1, sizeof (*sthash))) == NULL)
 		return (-1);
 
 	mstr->sm_hashval = sthash->hi_hashval = hashval;
@@ -568,8 +598,8 @@ st_getstrtab_sz(Str_tbl *stp)
 		 * strings input.
 		 */
 		stp->st_hbckcnt = findprime(stp->st_strcnt);
-		if ((stp->st_hashbcks = calloc(sizeof (*stp->st_hashbcks),
-		    stp->st_hbckcnt)) == NULL)
+		if ((stp->st_hashbcks = calloc(stp->st_hbckcnt,
+		    sizeof (*stp->st_hashbcks))) == NULL)
 			return (0);
 
 		/*
@@ -646,15 +676,16 @@ st_getstrtab_sz(Str_tbl *stp)
 	return (stp->st_strsize);
 }
 
-/*
- * Associate a buffer with a string table.
- */
 const char *
 st_getstrbuf(Str_tbl *stp)
 {
 	return (stp->st_strbuf);
 }
 
+
+/*
+ * Associate a buffer with a string table.
+ */
 int
 st_setstrbuf(Str_tbl *stp, char *stbuf, size_t bufsize)
 {
@@ -681,4 +712,88 @@ st_setstrbuf(Str_tbl *stp, char *stbuf, size_t bufsize)
 	memset(stbuf, 0x0, bufsize);
 #endif
 	return (0);
+}
+
+/*
+ * Populate the buffer with all strings from stp.
+ * The table must be compressed and cooked
+ */
+void
+st_setallstrings(Str_tbl *stp)
+{
+	assert(stp->st_strbuf != NULL);
+	assert((stp->st_flags & FLG_STTAB_COOKED));
+	assert((stp->st_flags & FLG_STTAB_COMPRESS));
+
+	for (Str_master *str = stp->st_mstrlist; str != NULL;
+	    str = str->sm_next) {
+		int res __maybe_unused;
+
+		res = st_setstring(stp, str->sm_str, NULL);
+		assert(res == 0);
+	}
+}
+
+/*
+ * Find str in the given table
+ * return it's offset, or -1
+ */
+off_t
+st_findstring(Str_tbl *stp, const char *needle)
+{
+	uint_t hashval;
+	Str_hash *sthash;
+	Str_master *mstr;
+
+	assert(stp->st_strbuf != NULL);
+	assert((stp->st_flags & FLG_STTAB_COOKED));
+
+	/* The NUL string is always first */
+	if (needle[0] == '\0')
+		return (0);
+
+	/* In the uncompressed case we must linear search */
+	if ((stp->st_flags & FLG_STTAB_COMPRESS) == 0) {
+		const char *str, *end;
+
+		end = stp->st_strbuf + stp->st_fullstrsize;
+
+		for (str = stp->st_strbuf; str < end;
+		    str += strlen(str) + 1) {
+			if (strcmp(str, needle) == 0)
+				return (str - stp->st_strbuf);
+		}
+
+		return (-1);
+	}
+
+	hashval = st_string_hash(needle);
+
+	for (sthash = stp->st_hashbcks[hashval % stp->st_hbckcnt];
+	    sthash != NULL;
+	    sthash = sthash->hi_next) {
+		const char	*hstr;
+
+		if (sthash->hi_hashval != hashval)
+			continue;
+
+		hstr = &sthash->hi_mstr->sm_str[sthash->hi_mstr->sm_strlen -
+		    sthash->hi_strlen];
+		if (strcmp(needle, hstr) == 0)
+			break;
+	}
+
+	/*
+	 * Did we find the string?
+	 */
+	if (sthash == NULL)
+		return (-1);
+
+	mstr = sthash->hi_mstr;
+	assert(mstr->sm_stroff != 0);
+
+	/*
+	 * Calculate offset of (sub)string.
+	 */
+	return (mstr->sm_stroff + mstr->sm_strlen - sthash->hi_strlen);
 }

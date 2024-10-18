@@ -21,6 +21,7 @@
 
 #
 # Copyright (c) 1996, 2010, Oracle and/or its affiliates. All rights reserved.
+# Copyright 2022 Oxide Computer Company
 #
 
 @ _START_
@@ -176,17 +177,17 @@
 #     As compiler drivers may assign -D a different meaning, the
 #     LD_OPTIONS environment variable is often used:
 #        LD_OPTIONS=-Dtoken1,token2 cc -o prog ...
-# 
+#
 #     The position of -D on the link-edit command line is significant.
 #     Diagnostics are enabled when a debug token is first encountered,
 #     and can be switched off by prepending the token with "!".
-# 
+#
 #     Diagnostic output can be directed to a file using the "output"
 #     token, The output file is used as specified, without a process
 #     id suffix.
-# 
+#
 #     All link-editor diagnostics are prepended with the string "debug".
-# 
+#
 
 # TRANSLATION_NOTE - The next series of messages makes the above output in C
 # locale.
@@ -312,8 +313,8 @@
 #                              alt        all alternative link-map lists
 #                              alt[0-9]+  specific alternative link-map list
 #                              base       the base, or main, link-map list
-#                              ldso       the runtime linker link-map list 
-# 
+#                              ldso       the runtime linker link-map list
+#
 
 # TRANSLATION_NOTE - The next series of messages makes the above output in C
 # locale.
@@ -367,7 +368,7 @@
 #         fullname         prepend full output file name to diagnostics
 #         class            prepend output file elfclass (32/64) to
 #                            diagnostics
-# 
+#
 
 # TRANSLATION_NOTE - The next series of messages makes the above output in C
 # locale.
@@ -562,9 +563,6 @@
 			 removed"
 @ MSG_ARG_FILE		"arg[%d]\tfile=%s"
 
-@ MSG_ARG_NG_UNKNOWN	"warning: unrecognized -z guidance item: %s"
-
-
 # Bindings messages
 # NOTE: these are used by appcert(1) and lari(1), use care when changing.
 
@@ -666,7 +664,6 @@
 @ MSG_FIL_FIXNAME	"file=%s;  required name=%s"
 @ MSG_FIL_PROMOTE	"file=%s;  promoting mode to %s"
 @ MSG_FIL_DEFERRED	"file=%s;  deferred dependency exchanged for file=%s"
-@ MSG_FIL_AOUT		"file=%s  [ AOUT ]; generating link map"
 @ MSG_FIL_ELF		"file=%s  [ ELF ]; generating link map%s"
 @ MSG_FIL_LDSO		"file=%s  [ ELF ]"
 
@@ -755,6 +752,10 @@
 			 unsupported: %s"
 @ MSG_REJ_HWCAP_2	"obj=%s;  rejected: hardware capability (CA_SUNW_HW_2) \
 			 unsupported: %s"
+@ MSG_REJ_ARCHIVE	"obj=%s;  rejected: archive unsed incorrectly"
+@ MSG_REJ_KMOD		"obj=%s;  rejected: kernel module"
+@ MSG_REJ_HWCAP_3	"obj=%s;  rejected: hardware capability (CA_SUNW_HW_3) \
+			 unsupported: %s"
 
 # Libs messages
 
@@ -801,9 +802,9 @@
 @ MSG_MAP_DV		"depend versions directive; line=%llu, object=%s"
 @ MSG_MAP_DV_ENTRY	"%12.12s  %s; line=%llu"
 
-@ MSG_MAP_SORT_TITLE	"mapfile additions: segment sorting required" 
-@ MSG_MAP_SORT_TITLE_O	"before:" 
-@ MSG_MAP_SORT_TITLE_S	"after:" 
+@ MSG_MAP_SORT_TITLE	"mapfile additions: segment sorting required"
+@ MSG_MAP_SORT_TITLE_O	"before:"
+@ MSG_MAP_SORT_TITLE_S	"after:"
 @ MSG_MAP_POST_TITLE	"mapfile post processing"
 @ MSG_MAP_ENT_ORD_TITLE	"set entrance criteria input section sort keys; \
 			 segment=%s"
@@ -845,7 +846,7 @@
 # TRANSLATION_NOTE - The following two items are used following a number in
 # the MSG_SHD_OFFSET_ENT_XX format strings below. For example "1 entry"
 # or "23 entries".
-# 
+#
 @ MSG_SHD_ENTRY_1	"entry"
 @ MSG_SHD_ENTRY_N	"entries"
 
@@ -864,9 +865,9 @@
 			 discarded in favor of section=%s; file=%s"
 
 @ MSG_SEC_GNU_COMDAT_1	"section=%s; identified as COMDAT with \
-			 relaxed relocations enabled" 
+			 relaxed relocations enabled"
 @ MSG_SEC_GNU_COMDAT_2	"section=%s; identified as COMDAT"
-@ MSG_SEC_GNU_COMDAT_3	"section=%s; relaxed relocations enabled" 
+@ MSG_SEC_GNU_COMDAT_3	"section=%s; relaxed relocations enabled"
 
 @ MSG_SEC_GRP_DEFINE	"section=%s; input from file=%s; defines %s\
 			 group: signature symbol: %s"
@@ -896,7 +897,7 @@
 			 unused: does not satisfy any references%s"
 @ MSG_USD_SECDISCARD	"; discarded"
 @ MSG_USD_FILE		"file=%s  unused: does not satisfy any references"
-@ MSG_USD_NEEDSTR	"file=%s  unused: unable to determine use" 
+@ MSG_USD_NEEDSTR	"file=%s  unused: unable to determine use"
 @ MSG_USD_UNREF		"file=%s  unreferenced: unused dependency of %s"
 @ MSG_USD_FILECYCLIC	"file=%s  unused: cyclic group [%d] member: \
 			 unreferenced outside of group"
@@ -980,7 +981,6 @@
 @ MSG_SYM_COPY_DST	"symbol=%s;  copy destination: alignment: 0x%x"
 @ MSG_SYM_COPY_REF	"symbol=%s;  copy reference"
 
-@ MSG_SYM_AOUT		"symbol=%s;  (original AOUT name)"
 @ MSG_SYM_LOOKUP	"symbol=%s;  lookup in file=%s  [ %s ]"
 
 @ MSG_DLSYM_1		"symbol=%s;  dlsym() called from file=%s %s %s"
@@ -1001,6 +1001,8 @@
 			 (CA_SUNW_PLAT):  [ %s ]"
 @ MSG_CAP_SYM_HW_2	"  symbol=%s[%u]:  capability specific \
 			 (CA_SUNW_HW_2):  [ %s ]"
+@ MSG_CAP_SYM_HW_3	"  symbol=%s[%u]:  capability specific \
+			 (CA_SUNW_HW_3):  [ %s ]"
 
 @ MSG_SYM_LAZY_RESCAN	"rescanning for lazy dependencies for symbol: %s"
 
@@ -1072,7 +1074,7 @@
 @ MSG_AUD_PLTEXIT	"auditor %s: la_pltexit(): %s"
 
 @ MSG_AUD_IGNORE	"file=%s;  global auditing request ignored: object \
-			 did not initiate process" 
+			 did not initiate process"
 @ MSG_AUD_SKIP		"file=%s;  skipped: using auditor from %s"
 @ MSG_AUD_TERM		"file=%s;  auditor has indicated path should be skipped"
 
@@ -1186,12 +1188,14 @@
 @ MSG_CAP_SYS_MACH	"machine capability (CA_SUNW_MACH) - %s"
 @ MSG_CAP_SYS_PLAT	"platform capability (CA_SUNW_PLAT) - %s"
 @ MSG_CAP_SYS_HW_2	"hardware capabilities (CA_SUNW_HW_2) - %s"
+@ MSG_CAP_SYS_HW_3	"hardware capabilities (CA_SUNW_HW_3) - %s"
 
 @ MSG_CAP_ALT_HW_1	"alternative hardware capabilities (CA_SUNW_HW_1) - %s"
 @ MSG_CAP_ALT_SF_1	"alternative software capabilities (CA_SUNW_SF_1) - %s"
 @ MSG_CAP_ALT_MACH	"alternative machine capability (CA_SUNW_MACH) - %s"
 @ MSG_CAP_ALT_PLAT	"alternative platform capability (CA_SUNW_PLAT) - %s"
 @ MSG_CAP_ALT_HW_2	"alternative hardware capabilities (CA_SUNW_HW_2) - %s"
+@ MSG_CAP_ALT_HW_3	"alternative hardware capabilities (CA_SUNW_HW_3) - %s"
 
 @ MSG_CAP_SEC_TITLE	"capabilities; input file=%s"
 @ MSG_CAP_SEC_ENTRY     "%12.12s  %-15.15s  %s"
@@ -1762,7 +1766,6 @@
 
 @ MSG_MR_PADDING	"[ PADDING ]"
 @ MSG_MR_HDR_ELF	"[ HDR_ELF ]"
-@ MSG_MR_HDR_AOUT	"[ HDR_AOUT ]"
 
 # audit originator
 

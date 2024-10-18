@@ -20,7 +20,8 @@
  */
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
+ * Copyright 2015-2021 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2022-2023 RackTop Systems, Inc.
  */
 
 /*
@@ -36,6 +37,7 @@
 #include <smbsrv/smb_idmap.h>
 #include <smbsrv/smb_kproto.h>
 #include <smbsrv/smb_token.h>
+#include <smbsrv/smb2_kproto.h>
 
 static uint32_t smb_authsock_open(smb_request_t *);
 static int smb_authsock_send(ksocket_t, void *, size_t);
@@ -285,6 +287,14 @@ smb_authenticate_ext(smb_request_t *sr)
 			goto errout;
 
 		msg_hdr.lmh_msgtype = LSA_MTYPE_ESFIRST;
+
+		if (sr->session->dialect >= SMB_VERS_3_11) {
+			if (smb31_preauth_sha512_calc(sr, &sr->command,
+			    sr->session->smb31_preauth_hashval,
+			    user->u_preauth_hashval) != 0)
+				cmn_err(CE_WARN, "(2) Preauth hash calculation "
+				    "failed");
+		}
 	} else {
 		user = smb_session_lookup_uid_st(sr->session,
 		    sr->smb2_ssnid, sr->smb_uid, SMB_USER_STATE_LOGGING_ON);
@@ -295,6 +305,14 @@ smb_authenticate_ext(smb_request_t *sr)
 		sr->uid_user = user;
 
 		msg_hdr.lmh_msgtype = LSA_MTYPE_ESNEXT;
+
+		if (sr->session->dialect >= SMB_VERS_3_11) {
+			if (smb31_preauth_sha512_calc(sr, &sr->command,
+			    user->u_preauth_hashval,
+			    user->u_preauth_hashval) != 0)
+				cmn_err(CE_WARN, "(4) Preauth hash calculation "
+				    "failed");
+		}
 	}
 
 	/*
@@ -459,8 +477,10 @@ smb_auth_get_token(smb_request_t *sr)
 	 * Setup the logon object.
 	 */
 	cr = smb_cred_create(token);
-	if (cr == NULL)
+	if (cr == NULL) {
+		status = NT_STATUS_INTERNAL_ERROR;
 		goto errout;
+	}
 	privileges = smb_priv_xlate(token);
 	(void) smb_user_logon(user, cr,
 	    token->tkn_domain_name, token->tkn_account_name,
@@ -468,20 +488,13 @@ smb_auth_get_token(smb_request_t *sr)
 	crfree(cr);
 
 	/*
-	 * Some basic processing for encryption needs to be done,
-	 * even for anonymous/guest sessions. In particular,
-	 * we need to set Session.EncryptData.
-	 *
-	 * Windows handling of anon/guest and encryption is strange.
-	 * It allows these accounts to get through session setup,
-	 * even when they provide no key material.
-	 * Additionally, Windows somehow manages to have key material
-	 * for anonymous accounts under unknown circumstances.
-	 * As such, We set EncryptData on anon/guest to behave like Windows,
-	 * at least through Session Setup.
+	 * Set Session.EncryptData so encryption can be enforced,
+	 * and set up encryption keys if we have a session key.
+	 * This happens even for anonymous/guest users, as Windows
+	 * currently will send encrypted requests from them.
 	 */
 	if (sr->session->dialect >= SMB_VERS_3_0)
-		smb3_encrypt_begin(sr, token);
+		smb3_encrypt_begin(sr->uid_user, token);
 
 	/*
 	 * Save the session key, and (maybe) enable signing,
@@ -564,8 +577,6 @@ smb_authsock_cancel(smb_request_t *sr)
 	smb_user_t *user = sr->cancel_arg2;
 	ksocket_t authsock = NULL;
 
-	if (user == NULL)
-		return;
 	ASSERT(user == sr->uid_user);
 
 	/*
@@ -612,6 +623,9 @@ smb_authsock_sendrecv(smb_request_t *sr, smb_lsa_msg_hdr_t *hdr,
 	ksocket_hold(so);
 	mutex_exit(&user->u_mutex);
 
+	/*
+	 * Prepare for cancellable send/recv.
+	 */
 	mutex_enter(&sr->sr_mutex);
 	if (sr->sr_state != SMB_REQ_STATE_ACTIVE) {
 		mutex_exit(&sr->sr_mutex);
@@ -623,6 +637,9 @@ smb_authsock_sendrecv(smb_request_t *sr, smb_lsa_msg_hdr_t *hdr,
 	sr->cancel_arg2 = user;
 	mutex_exit(&sr->sr_mutex);
 
+	/*
+	 * The actual send/recv work.
+	 */
 	rc = smb_authsock_send(so, hdr, sizeof (*hdr));
 	if (rc == 0 && hdr->lmh_msglen != 0) {
 		rc = smb_authsock_send(so, sndbuf, hdr->lmh_msglen);
@@ -649,21 +666,29 @@ smb_authsock_sendrecv(smb_request_t *sr, smb_lsa_msg_hdr_t *hdr,
 		break;
 	}
 
+	/*
+	 * Did send/recv complete or was it cancelled?
+	 */
 	mutex_enter(&sr->sr_mutex);
-	sr->cancel_method = NULL;
-	sr->cancel_arg2 = NULL;
+switch_state:
 	switch (sr->sr_state) {
 	case SMB_REQ_STATE_WAITING_AUTH:
+		/* Normal wakeup.  Keep status from above. */
 		sr->sr_state = SMB_REQ_STATE_ACTIVE;
 		break;
 	case SMB_REQ_STATE_CANCEL_PENDING:
-		sr->sr_state = SMB_REQ_STATE_CANCELLED;
+		/* cancel_method running. wait. */
+		cv_wait(&sr->sr_st_cv, &sr->sr_mutex);
+		goto switch_state;
+	case SMB_REQ_STATE_CANCELLED:
 		status = NT_STATUS_CANCELLED;
 		break;
 	default:
 		status = NT_STATUS_INTERNAL_ERROR;
 		break;
 	}
+	sr->cancel_method = NULL;
+	sr->cancel_arg2 = NULL;
 	mutex_exit(&sr->sr_mutex);
 
 out:
@@ -760,10 +785,7 @@ smb_authsock_open(smb_request_t *sr)
 	    &smb_auth_recv_tmo, sizeof (smb_auth_recv_tmo), CRED());
 
 	/*
-	 * Connect to the smbd auth. service.
-	 *
-	 * Would like to set the connect timeout too, but there's
-	 * apparently no easy way to do that for AF_UNIX.
+	 * Prepare for cancellable connect.
 	 */
 	mutex_enter(&sr->sr_mutex);
 	if (sr->sr_state != SMB_REQ_STATE_ACTIVE) {
@@ -776,6 +798,12 @@ smb_authsock_open(smb_request_t *sr)
 	sr->cancel_arg2 = user;
 	mutex_exit(&sr->sr_mutex);
 
+	/*
+	 * Connect to the smbd auth. service.
+	 *
+	 * Would like to set the connect timeout too, but there's
+	 * apparently no easy way to do that for AF_UNIX.
+	 */
 	rc = ksocket_connect(so, (struct sockaddr *)&smbauth_sockname,
 	    sizeof (smbauth_sockname), CRED());
 	if (rc != 0) {
@@ -783,21 +811,29 @@ smb_authsock_open(smb_request_t *sr)
 		status = NT_STATUS_NETLOGON_NOT_STARTED;
 	}
 
+	/*
+	 * Did connect complete or was it cancelled?
+	 */
 	mutex_enter(&sr->sr_mutex);
-	sr->cancel_method = NULL;
-	sr->cancel_arg2 = NULL;
+switch_state:
 	switch (sr->sr_state) {
 	case SMB_REQ_STATE_WAITING_AUTH:
+		/* Normal wakeup.  Keep status from above. */
 		sr->sr_state = SMB_REQ_STATE_ACTIVE;
 		break;
 	case SMB_REQ_STATE_CANCEL_PENDING:
-		sr->sr_state = SMB_REQ_STATE_CANCELLED;
+		/* cancel_method running. wait. */
+		cv_wait(&sr->sr_st_cv, &sr->sr_mutex);
+		goto switch_state;
+	case SMB_REQ_STATE_CANCELLED:
 		status = NT_STATUS_CANCELLED;
 		break;
 	default:
 		status = NT_STATUS_INTERNAL_ERROR;
 		break;
 	}
+	sr->cancel_method = NULL;
+	sr->cancel_arg2 = NULL;
 	mutex_exit(&sr->sr_mutex);
 
 errout:

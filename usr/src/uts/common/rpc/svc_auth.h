@@ -34,8 +34,6 @@
 #ifndef _RPC_SVC_AUTH_H
 #define	_RPC_SVC_AUTH_H
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * svc_auth.h, Service side of rpc authentication.
  */
@@ -65,7 +63,7 @@ typedef struct {
  * sec_svc_control() commands
  */
 #define	RPC_SVC_SET_GSS_CALLBACK	1  /* set rpcsec_gss callback routine */
-extern bool_t sec_svc_control();
+extern bool_t sec_svc_control(uint_t, void *);
 
 /*
  * Interface to server-side authentication flavors, may change on
@@ -98,23 +96,16 @@ typedef struct {
 /*
  * Server side authenticator
  */
-#ifdef __STDC__
 extern enum auth_stat sec_svc_msg(struct svc_req *, struct rpc_msg *,
 				bool_t *);
-#else
-extern enum auth_stat sec_svc_msg();
-#endif /* __STDC__ */
+
+extern int sec_svc_getcred(struct svc_req *, cred_t *,  caddr_t *, int *);
 
 #else
 
-#ifdef __STDC__
 extern enum auth_stat __gss_authenticate(struct svc_req *, struct rpc_msg *,
 				bool_t *);
 extern enum auth_stat __authenticate(struct svc_req *, struct rpc_msg *);
-#else
-extern enum auth_stat __gss_authenticate();
-extern enum auth_stat __authenticate();
-#endif /* __STDC__ */
 
 #endif /* _KERNEL */
 

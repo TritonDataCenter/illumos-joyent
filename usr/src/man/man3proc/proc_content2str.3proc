@@ -11,15 +11,16 @@
 .\"
 .\" Copyright 2015 Joyent, Inc.
 .\"
-.Dd May 11, 2016
+.Dd November 27, 2023
 .Dt PROC_CONTENT2STR 3PROC
 .Os
 .Sh NAME
 .Nm proc_content2str ,
 .Nm proc_str2content
 .Nd convert a string to and from a core_content_t
-.Sh SYNOPSIS
+.Sh LIBRARY
 .Lb libproc
+.Sh SYNOPSIS
 .In libproc.h
 .Ft int
 .Fo proc_content2str
@@ -85,6 +86,6 @@ will be returned to indicate an unknown string.
 .Sh MT-LEVEL
 .Sy MT-Safe
 .Sh SEE ALSO
-.Xr coreadm 1M ,
 .Xr libproc 3LIB ,
-.Xr proc 4
+.Xr proc 5 ,
+.Xr coreadm 8

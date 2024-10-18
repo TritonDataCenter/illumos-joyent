@@ -23,6 +23,8 @@
  * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2014, OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright 2018, Joyent, Inc.
+ * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 Oxide Computer Company
  */
 /* Copyright (c) 1990 Mentat Inc. */
 
@@ -2479,8 +2481,8 @@ udp_input(void *arg1, mblk_t *mp, void *arg2, ip_recv_attr_t *ira)
 		*(uint32_t *)&sin->sin_zero[4] = 0;
 
 		/*
-		 * Add options if IP_RECVDSTADDR, IP_RECVIF, IP_RECVSLLA or
-		 * IP_RECVTTL has been set.
+		 * Add options if IP_RECVDSTADDR, IP_RECVIF, IP_RECVSLLA,
+		 * IP_RECVTTL or IP_RECVTOS has been set.
 		 */
 		if (udi_size != 0) {
 			conn_recvancillary_add(connp, recv_ancillary, ira,
@@ -3863,6 +3865,16 @@ udp_output_newdst(conn_t *connp, mblk_t *data_mp, sin_t *sin, sin6_t *sin6,
 		error = EISCONN;
 		goto ud_error;
 	}
+
+	/*
+	 * Before we modify the ixa at all, invalidate our most recent address
+	 * to assure that any subsequent call to conn_same_as_last_v6() will
+	 * not indicate a match: any thread that picks up conn_lock after we
+	 * drop it (but before we pick it up again and properly set the most
+	 * recent address) must not associate the ixa with the (now old) last
+	 * address.
+	 */
+	connp->conn_v6lastdst = ipv6_all_zeros;
 
 	/* In case previous destination was multicast or multirt */
 	ip_attr_newdst(ixa);
@@ -6566,7 +6578,7 @@ udp_ioctl(sock_lower_handle_t proto_handle, int cmd, intptr_t arg,
 		 */
 		error = ip_create_helper_stream(connp, us->us_ldi_ident);
 		if (error != 0) {
-			ip0dbg(("tcp_ioctl: create of IP helper stream "
+			ip0dbg(("udp_ioctl: create of IP helper stream "
 			    "failed %d\n", error));
 			return (error);
 		}

@@ -13,6 +13,7 @@
  * Copyright (c) 2014 by Chunwei Chen. All rights reserved.
  * Copyright (c) 2019 by Delphix. All rights reserved.
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 /*
@@ -219,7 +220,7 @@ abd_init(void)
 	 * Since ABD chunks do not appear in crash dumps, we pass KMC_NOTOUCH
 	 * so that no allocator metadata is stored with the buffers.
 	 */
-	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, 0,
+	abd_chunk_cache = kmem_cache_create("abd_chunk", zfs_abd_chunk_size, 64,
 	    NULL, NULL, NULL, NULL, data_alloc_arena, KMC_NOTOUCH);
 
 	abd_ksp = kstat_create("zfs", 0, "abdstats", "misc", KSTAT_TYPE_NAMED,
@@ -599,8 +600,10 @@ abd_borrow_buf(abd_t *abd, size_t n)
 	ASSERT3U(abd->abd_size, >=, n);
 	if (abd_is_linear(abd)) {
 		buf = abd_to_buf(abd);
-	} else {
+	} else if ((abd->abd_flags & ABD_FLAG_META) != 0) {
 		buf = zio_buf_alloc(n);
+	} else {
+		buf = zio_data_buf_alloc(n);
 	}
 	(void) zfs_refcount_add_many(&abd->abd_children, n, buf);
 
@@ -630,9 +633,12 @@ abd_return_buf(abd_t *abd, void *buf, size_t n)
 	ASSERT3U(abd->abd_size, >=, n);
 	if (abd_is_linear(abd)) {
 		ASSERT3P(buf, ==, abd_to_buf(abd));
-	} else {
+	} else if ((abd->abd_flags & ABD_FLAG_META) != 0) {
 		ASSERT0(abd_cmp_buf(abd, buf, n));
 		zio_buf_free(buf, n);
+	} else {
+		ASSERT0(abd_cmp_buf(abd, buf, n));
+		zio_data_buf_free(buf, n);
 	}
 	(void) zfs_refcount_remove_many(&abd->abd_children, n, buf);
 }

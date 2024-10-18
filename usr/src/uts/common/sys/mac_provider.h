@@ -23,6 +23,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
  * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 #ifndef	_SYS_MAC_PROVIDER_H
@@ -110,7 +111,7 @@ typedef enum {
 	MAC_CAPAB_LEGACY	= 0x00200000, /* data is mac_capab_legacy_t */
 	MAC_CAPAB_VRRP		= 0x00400000, /* data is mac_capab_vrrp_t */
 	MAC_CAPAB_OVERLAY	= 0x00800000, /* boolean only, no data */
-	MAC_CAPAB_TRANSCEIVER	= 0x01000000, /* mac_capab_transciever_t */
+	MAC_CAPAB_TRANSCEIVER	= 0x01000000, /* mac_capab_transceiver_t */
 	MAC_CAPAB_LED		= 0x02000000  /* data is mac_capab_led_t */
 } mac_capab_t;
 
@@ -604,6 +605,8 @@ extern int			mac_margin_add(mac_handle_t, uint32_t *,
 extern void			mac_init_ops(struct dev_ops *, const char *);
 extern void			mac_fini_ops(struct dev_ops *);
 extern int			mac_devt_to_instance(dev_t);
+extern int			mac_getinfo(dev_info_t *, ddi_info_cmd_t,
+				    void *, void **);
 extern minor_t			mac_private_minor(void);
 extern void			mac_ring_intr_set(mac_ring_handle_t,
 				    ddi_intr_handle_t);
@@ -672,7 +675,7 @@ typedef struct mac_ether_offload_info {
 	size_t		meoi_len;	/* Total message length */
 	uint8_t		meoi_l2hlen;	/* How long is the Ethernet header? */
 	uint16_t	meoi_l3proto;	/* What's the Ethertype */
-	uint8_t		meoi_l3hlen;	/* How long is the header? */
+	uint16_t	meoi_l3hlen;	/* How long is the header? */
 	uint8_t		meoi_l4proto;	/* What is the payload type? */
 	uint8_t		meoi_l4hlen;	/* How long is the L4 header */
 } mac_ether_offload_info_t;

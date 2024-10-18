@@ -156,7 +156,7 @@ cmd(sym, flg)
  *	list || term
  */
 static struct trenod *
-list(flg)
+list(int flg)
 {
 	struct trenod *r;
 	int		b;
@@ -172,7 +172,7 @@ list(flg)
  *	item |^ term
  */
 static struct trenod *
-term(flg)
+term(int flg)
 {
 	struct trenod *t;
 
@@ -270,7 +270,7 @@ item(flag)
 	case CASYM:
 		{
 			struct swnod *t;
-			
+
 			t = (struct swnod *)getstor(sizeof(struct swnod));
 			r = (struct trenod *)t;
 
@@ -341,7 +341,7 @@ item(flag)
 		{
 			struct whnod *t;
 
-			t = (struct whnod *)getstor(sizeof(struct whnod));	
+			t = (struct whnod *)getstor(sizeof(struct whnod));
 			r = (struct trenod *)t;
 
 			t->whtyp = (wdval == WHSYM ? TWH : TUN);

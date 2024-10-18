@@ -441,7 +441,7 @@ and
 return the total
 number of bits set in the bit masks.
 Otherwise,
-.Sy 1
+.Sy -1
 is returned and
 .Dv errno
 is set to indicate the error.
@@ -527,5 +527,5 @@ argument may be modified.
 .Xr ualarm 3C ,
 .Xr accept 3SOCKET ,
 .Xr listen 3SOCKET ,
-.Xr attributes 5 ,
-.Xr standards 5
+.Xr attributes 7 ,
+.Xr standards 7

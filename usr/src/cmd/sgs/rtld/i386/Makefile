@@ -57,14 +57,12 @@ CRTS=		$(CRTI)		$(CRTN)
 include		$(SRC)/Makefile.master
 
 # This is safe because linking is done only with the primary compiler.
-MAPFILE-ORDER =		../common/mapfile-order-devpro
-$(__GNUC)MAPFILE-ORDER =	../common/mapfile-order-gcc
+MAPFILE-ORDER =	../common/mapfile-order-gcc
 
 include		$(SRC)/cmd/sgs/rtld/Makefile.com
 
 # Add any machine specific flags.
 
-ADBGENCFLAGS +=	-erroff=%all
 ADBGENFLAGS +=	-milp32
 ADBSUB=		$(ADBSUB32)
 SONAME=		/lib/ld.so.1

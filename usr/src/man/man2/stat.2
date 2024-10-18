@@ -4,11 +4,10 @@
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH STAT 2 "Oct 10, 2007"
+.TH STAT 2 "June 13, 2021"
 .SH NAME
 stat, lstat, fstat, fstatat \- get file status
 .SH SYNOPSIS
-.LP
 .nf
 #include <fcntl.h>
 #include <sys/types.h>
@@ -34,8 +33,6 @@ stat, lstat, fstat, fstatat \- get file status
 .fi
 
 .SH DESCRIPTION
-.sp
-.LP
 The \fBstat()\fR function obtains information about the file pointed to by
 \fIpath\fR. Read, write, or execute permission of the named file is not
 required, but all directories listed in the path name leading to the file must
@@ -68,7 +65,7 @@ the \fIfildes\fR argument is unused.  If the \fIfildes\fR argument has the
 special value \fBAT_FDCWD\fR, relative paths are resolved from the current
 working directory. If \fBAT_SYMLINK_NOFOLLOW\fR is set in the \fIflag\fR
 argument, the function behaves like \fBlstat()\fR and does not automatically
-follow symbolic links. See \fBfsattr\fR(5). If \fB_ATTR_TRIGGER\fR is set in
+follow symbolic links. See \fBfsattr\fR(7). If \fB_ATTR_TRIGGER\fR is set in
 the  \fIflag\fR argument and the vnode is a trigger mount point, the mount is
 performed and the function returns the attributes of the root of the mounted
 filesystem.
@@ -117,7 +114,7 @@ to the modes described on the \fBmknod\fR(2) manual page, the mode of a file
 can also be \fBS_IFSOCK\fR if the file is a socket, \fBS_IFDOOR\fR if the file
 is a door, \fBS_IFPORT\fR if the file is an event port, or \fBS_IFLNK\fR if the
 file is a symbolic link. \fBS_IFLNK\fR can be returned either by \fBlstat()\fR
-or by \fBfstat()\fR when the \fBAT_SYMLINK_NOFOLLOW\fR flag is set.
+or by \fBfstatat()\fR when the \fBAT_SYMLINK_NOFOLLOW\fR flag is set.
 .RE
 
 .sp
@@ -250,18 +247,14 @@ disk. This field is not defined for block special or character special files.
 \fB\fBst_fstype\fR\fR
 .ad
 .RS 14n
-A null-teminated string that uniquely identifies the type of the filesystem
+A null-terminated string that uniquely identifies the type of the filesystem
 that contains the file.
 .RE
 
 .SH RETURN VALUES
-.sp
-.LP
 Upon successful completion, \fB0\fR is returned. Otherwise, \fB\(mi1\fR is
 returned and \fBerrno\fR is set to indicate the error.
 .SH ERRORS
-.sp
-.LP
 The \fBstat()\fR, \fBfstat()\fR, \fBlstat()\fR, and \fBfstatat()\fR functions
 will fail if:
 .sp
@@ -439,7 +432,7 @@ resolution of the \fIpath\fR argument.
 \fB\fBENAMETOOLONG\fR\fR
 .ad
 .RS 16n
-As a result of encountering a symbolic link in resolution of the\fIpath\fR
+As a result of encountering a symbolic link in resolution of the \fIpath\fR
 argument, the length of the substituted pathname strings exceeds
 {\fBPATH_MAX\fR}.
 .RE
@@ -458,7 +451,6 @@ corresponding I/O device has been retired by the fault management framework.
 .RE
 
 .SH EXAMPLES
-.LP
 \fBExample 1 \fRUse \fBstat()\fR to obtain file status information.
 .sp
 .LP
@@ -589,8 +581,6 @@ status = lstat("/modules/pass1", &buffer);
 .in -2
 
 .SH USAGE
-.sp
-.LP
 If \fBchmod()\fR or \fBfchmod()\fR is used to change the file group owner
 permissions on a file with non-trivial ACL entries, only the ACL mask is set to
 the new permissions and the group owner permission bits in the file's mode
@@ -601,11 +591,9 @@ users and groups that have ACL entries on the file.
 .sp
 .LP
 The \fBstat()\fR, \fBfstat()\fR, and \fBlstat()\fR functions have transitional
-interfaces for 64-bit file offsets.  See \fBlf64\fR(5).
+interfaces for 64-bit file offsets.  See \fBlf64\fR(7).
 .SH ATTRIBUTES
-.sp
-.LP
-See \fBattributes\fR(5) for descriptions of the following attributes:
+See \fBattributes\fR(7) for descriptions of the following attributes:
 .sp
 
 .sp
@@ -619,16 +607,28 @@ Interface Stability	Committed
 _
 MT-Level	Async-Signal-Safe
 _
-Standard 	See below.
+Standard	See below.
 .TE
 
 .sp
 .LP
-For \fBstat()\fR, \fBfstat()\fR, and \fBlstat()\fR, see \fBstandards\fR(5).
+For \fBstat()\fR, \fBfstat()\fR, and \fBlstat()\fR, see \fBstandards\fR(7).
 .SH SEE ALSO
-.sp
-.LP
-\fBaccess\fR(2), \fBchmod\fR(2), \fBchown\fR(2), \fBcreat\fR(2), \fBlink\fR(2),
-\fBmknod\fR(2), \fBpipe\fR(2), \fBread\fR(2), \fBtime\fR(2), \fBunlink\fR(2),
-\fButime\fR(2), \fBwrite\fR(2), \fBfattach\fR(3C), \fBstat.h\fR(3HEAD),
-\fBattributes\fR(5), \fBfsattr\fR(5), \fBlf64\fR(5), \fBstandards\fR(5)
+.BR access (2),
+.BR chmod (2),
+.BR chown (2),
+.BR creat (2),
+.BR link (2),
+.BR mknod (2),
+.BR pipe (2),
+.BR read (2),
+.BR time (2),
+.BR unlink (2),
+.BR utime (2),
+.BR write (2),
+.BR fattach (3C),
+.BR stat.h (3HEAD),
+.BR attributes (7),
+.BR fsattr (7),
+.BR lf64 (7),
+.BR standards (7)

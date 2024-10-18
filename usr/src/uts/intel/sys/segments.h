@@ -3,6 +3,7 @@
  */
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2022 Oxide Computer Company
  */
 
 #ifndef	_SYS_SEGMENTS_H
@@ -71,15 +72,9 @@ extern "C" {
  * TI  = table indicator (0 = GDT, 1 = LDT)
  * RPL = requestor privilege level
  */
-#if !defined(_ASM) || defined(__GNUC_AS__)
 #define	IDXTOSEL(s)	((s) << 3)		/* index to selector */
+#define	SELTOIDX(s)	((s) >> 3)		/* selector to index */
 #define	SEL_GDT(s, r)	(IDXTOSEL(s) | r)	/* global sel */
-#else
-#define	IDXTOSEL(s)	[s << 3]
-#define	SEL_GDT(s, r)	[IDXTOSEL(s) | r]
-#endif
-
-#define	SELTOIDX(s)	((s) >> 3)	/* selector to index */
 
 /*
  * SEL_(KPL,UPL,XPL) is the RPL or DPL value for code and data selectors
@@ -391,7 +386,7 @@ typedef struct gate_desc {
  */
 #if defined(__amd64)
 
-extern void set_usegd(user_desc_t *, uint_t, void *, size_t, uint_t, uint_t,
+extern void set_usegd(user_desc_t *, uint_t, void *, uint32_t, uint_t, uint_t,
     uint_t, uint_t);
 
 #elif defined(__i386)
@@ -434,6 +429,14 @@ void init_boot_gdt(user_desc_t *);
 #define	SDP_OP32	1	/* code and data default operand = 32 bits */
 #define	SDP_LONG	1	/* long mode code segment (64 bits) */
 #define	SDP_SHORT	0	/* compat/legacy code segment (32 bits) */
+
+/*
+ * The maximum segment limit that can be put into a segment descriptor for
+ * 16-bit and 32-bit segments.  In 64-bit mode, segment base addresses are
+ * fixed to 0 and the segment limit is ignored.
+ */
+#define	SDP_LIMIT_MAX	0xFFFFFU
+
 /*
  * System segments and gate types.
  *
@@ -529,6 +532,12 @@ void init_boot_gdt(user_desc_t *);
 #define	GDT_B64CODE	5	/* dboot 64 bit code descriptor */
 #define	GDT_BGSTMP	7	/* kmdb descriptor only used early in boot */
 #define	GDT_CPUID	16	/* store numeric id of current CPU */
+
+/*
+ * Early boot code may need to create a temporary GDT;
+ * this is the minimum length required.
+ */
+#define	LEN_MIN_GDT_BOOT	(GDT_B64CODE + 1)
 
 #if defined(__amd64)
 

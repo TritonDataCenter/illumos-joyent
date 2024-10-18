@@ -21,7 +21,8 @@
 
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Tintri by DDN, Inc. All rights reserved.
+ * Copyright 2023 RackTop Systems, Inc.
  */
 
 /*
@@ -73,9 +74,9 @@
  *	NT_STATUS_INTERNAL_ERROR	(bad args etc)
  *	NT_STATUS_NO_MEMORY
  */
-DWORD
-ndr_rpc_bind(mlsvc_handle_t *handle, char *server, char *domain,
-    char *username, const char *service)
+static DWORD
+ndr_rpc_bind_common(mlsvc_handle_t *handle, char *server, char *domain,
+    char *username, const char *service, ndr_auth_ctx_t *auth_ctx)
 {
 	struct smb_ctx		*ctx = NULL;
 	ndr_service_t		*svc;
@@ -109,8 +110,8 @@ ndr_rpc_bind(mlsvc_handle_t *handle, char *server, char *domain,
 	status = smbrdr_ctx_new(&ctx, server, domain, username);
 	if (status != NT_STATUS_SUCCESS) {
 		syslog(LOG_ERR, "ndr_rpc_bind: smbrdr_ctx_new"
-		    "(Srv=%s Dom=%s User=%s), %s (0x%x)",
-		    server, domain, username,
+		    "(Srv=%s Dom=%s User=%s Svc=%s), %s (0x%x)",
+		    server, domain, username, service,
 		    xlate_nt_status(status), status);
 		/*
 		 * If the error is one where changing to a new DC
@@ -145,13 +146,26 @@ ndr_rpc_bind(mlsvc_handle_t *handle, char *server, char *domain,
 	}
 
 	/*
+	 * Setup authentication, if requested.
+	 */
+	status = mlrpc_clh_set_auth(handle, auth_ctx);
+	if (status != 0) {
+		syslog(LOG_DEBUG, "ndr_rpc_bind: "
+		    "mlrpc_clh_set_auth, %s (0x%x)",
+		    xlate_nt_status(status), status);
+
+		goto errout;
+	}
+
+	/*
 	 * This does the pipe open and OtW RPC bind.
 	 * Handles pipe open retries.
 	 */
 	status = mlrpc_clh_bind(handle, svc);
 	if (status != 0) {
-		syslog(LOG_DEBUG, "ndr_rpc_bind: "
-		    "mlrpc_clh_bind, %s (0x%x)",
+		syslog(LOG_DEBUG, "ndr_rpc_bind: mlrpc_clh_bind"
+		    "(Srv=%s Dom=%s User=%s Svc=%s), %s (0x%x)",
+		    server, domain, username, service,
 		    xlate_nt_status(status), status);
 		switch (status) {
 		case RPC_NT_SERVER_TOO_BUSY:
@@ -161,13 +175,34 @@ ndr_rpc_bind(mlsvc_handle_t *handle, char *server, char *domain,
 		default:
 			break;
 		}
-		ctx = mlrpc_clh_free(handle);
-		if (ctx != NULL) {
-			smbrdr_ctx_free(ctx);
-		}
+
+		goto errout;
 	}
 
+	return (NT_STATUS_SUCCESS);
+
+errout:
+	ctx = mlrpc_clh_free(handle);
+	if (ctx != NULL) {
+		smbrdr_ctx_free(ctx);
+	}
 	return (status);
+}
+
+DWORD
+ndr_rpc_bind(mlsvc_handle_t *handle, char *server, char *domain,
+    char *username, const char *service)
+{
+	return (ndr_rpc_bind_common(handle, server, domain, username, service,
+	    NULL));
+}
+
+DWORD
+ndr_rpc_bind_secure(mlsvc_handle_t *handle, char *server, char *domain,
+    char *username, const char *service, ndr_auth_ctx_t *auth_ctx)
+{
+	return (ndr_rpc_bind_common(handle, server, domain, username, service,
+	    auth_ctx));
 }
 
 /*

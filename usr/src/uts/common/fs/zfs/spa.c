@@ -30,8 +30,10 @@
  * Copyright (c) 2017, 2019, Datto Inc. All rights reserved.
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2017, Intel Corporation.
- * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2020 Joshua M. Clulow <josh@sysmgr.org>
+ * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 MNX Cloud, Inc.
  */
 
 /*
@@ -1077,12 +1079,15 @@ static void
 spa_thread(void *arg)
 {
 	callb_cpr_t cprinfo;
-
 	spa_t *spa = arg;
+	char spa_id_readable[CB_MAXNAME + 1];
 	user_t *pu = PTOU(curproc);
 
+	(void) snprintf(spa_id_readable, sizeof (spa_id_readable), "SPA:0x%p",
+	    spa);
+
 	CALLB_CPR_INIT(&cprinfo, &spa->spa_proc_lock, callb_generic_cpr,
-	    spa->spa_name);
+	    spa_id_readable);
 
 	ASSERT(curproc != &p0);
 	(void) snprintf(pu->u_psargs, sizeof (pu->u_psargs),
@@ -1731,13 +1736,15 @@ spa_load_l2cache(spa_t *spa)
 
 	ASSERT(spa_config_held(spa, SCL_ALL, RW_WRITER) == SCL_ALL);
 
+	nl2cache = 0;
+	newvdevs = NULL;
 	if (sav->sav_config != NULL) {
 		VERIFY(nvlist_lookup_nvlist_array(sav->sav_config,
 		    ZPOOL_CONFIG_L2CACHE, &l2cache, &nl2cache) == 0);
-		newvdevs = kmem_alloc(nl2cache * sizeof (void *), KM_SLEEP);
-	} else {
-		nl2cache = 0;
-		newvdevs = NULL;
+		if (nl2cache > 0) {
+			newvdevs = kmem_alloc(
+			    nl2cache * sizeof (void *), KM_SLEEP);
+		}
 	}
 
 	oldvdevs = sav->sav_vdevs;
@@ -1829,7 +1836,11 @@ spa_load_l2cache(spa_t *spa)
 	VERIFY(nvlist_remove(sav->sav_config, ZPOOL_CONFIG_L2CACHE,
 	    DATA_TYPE_NVLIST_ARRAY) == 0);
 
-	l2cache = kmem_alloc(sav->sav_count * sizeof (void *), KM_SLEEP);
+	l2cache = NULL;
+	if (sav->sav_count > 0) {
+		l2cache = kmem_alloc(
+		    sav->sav_count * sizeof (void *), KM_SLEEP);
+	}
 	for (i = 0; i < sav->sav_count; i++)
 		l2cache[i] = vdev_config_generate(spa,
 		    sav->sav_vdevs[i], B_TRUE, VDEV_CONFIG_L2CACHE);
@@ -2408,7 +2419,8 @@ spa_load(spa_t *spa, spa_load_state_t state, spa_import_type_t type)
 			spa->spa_loaded_ts.tv_nsec = 0;
 		}
 		if (error != EBADF) {
-			zfs_ereport_post(ereport, spa, NULL, NULL, NULL, 0, 0);
+			(void) zfs_ereport_post(ereport, spa,
+			    NULL, NULL, NULL, 0, 0);
 		}
 	}
 	spa->spa_load_state = error ? SPA_LOAD_ERROR : SPA_LOAD_NONE;
@@ -3611,6 +3623,7 @@ spa_ld_get_props(spa_t *spa)
 		spa_prop_find(spa, ZPOOL_PROP_DELEGATION, &spa->spa_delegation);
 		spa_prop_find(spa, ZPOOL_PROP_FAILUREMODE, &spa->spa_failmode);
 		spa_prop_find(spa, ZPOOL_PROP_AUTOEXPAND, &spa->spa_autoexpand);
+		spa_prop_find(spa, ZPOOL_PROP_BOOTSIZE, &spa->spa_bootsize);
 		spa_prop_find(spa, ZPOOL_PROP_MULTIHOST, &spa->spa_multihost);
 		spa_prop_find(spa, ZPOOL_PROP_DEDUPDITTO,
 		    &spa->spa_dedup_ditto);
@@ -4380,6 +4393,8 @@ spa_load_impl(spa_t *spa, spa_import_type_t type, char **ereport)
 	}
 
 	spa_import_progress_remove(spa);
+	spa_async_request(spa, SPA_ASYNC_L2CACHE_REBUILD);
+
 	spa_load_note(spa, "LOADED");
 
 	return (0);
@@ -5485,6 +5500,21 @@ spa_import_rootpool(char *devpath, char *devid, uint64_t pool_guid,
 	char *pname;
 	int error;
 	const char *altdevpath = NULL;
+	const char *rdpath = NULL;
+
+	if ((rdpath = vdev_disk_preroot_force_path()) != NULL) {
+		/*
+		 * We expect to import a single-vdev pool from a specific
+		 * device such as a ramdisk device.  We don't care what the
+		 * pool label says.
+		 */
+		config = spa_generate_rootconf(rdpath, NULL, &guid, 0);
+		if (config != NULL) {
+			goto configok;
+		}
+		cmn_err(CE_NOTE, "Cannot use root disk device '%s'", rdpath);
+		return (SET_ERROR(EIO));
+	}
 
 	/*
 	 * Read the label from the boot device and generate a configuration.
@@ -5527,6 +5557,7 @@ spa_import_rootpool(char *devpath, char *devid, uint64_t pool_guid,
 		return (SET_ERROR(EIO));
 	}
 
+configok:
 	VERIFY(nvlist_lookup_string(config, ZPOOL_CONFIG_POOL_NAME,
 	    &pname) == 0);
 	VERIFY(nvlist_lookup_uint64(config, ZPOOL_CONFIG_POOL_TXG, &txg) == 0);
@@ -5599,6 +5630,12 @@ spa_import_rootpool(char *devpath, char *devid, uint64_t pool_guid,
 		error = SET_ERROR(EINVAL);
 		goto out;
 	}
+
+	/*
+	 * The root disk may have been expanded while the system was offline.
+	 * Kick off an async task to check for and handle expansion.
+	 */
+	spa_async_request(spa, SPA_ASYNC_AUTOEXPAND);
 
 	error = 0;
 out:
@@ -7524,8 +7561,6 @@ spa_async_probe(spa_t *spa, vdev_t *vd)
 static void
 spa_async_autoexpand(spa_t *spa, vdev_t *vd)
 {
-	sysevent_id_t eid;
-	nvlist_t *attr;
 	char *physpath;
 
 	if (!spa->spa_autoexpand)
@@ -7542,13 +7577,8 @@ spa_async_autoexpand(spa_t *spa, vdev_t *vd)
 	physpath = kmem_zalloc(MAXPATHLEN, KM_SLEEP);
 	(void) snprintf(physpath, MAXPATHLEN, "/devices%s", vd->vdev_physpath);
 
-	VERIFY(nvlist_alloc(&attr, NV_UNIQUE_NAME, KM_SLEEP) == 0);
-	VERIFY(nvlist_add_string(attr, DEV_PHYS_PATH, physpath) == 0);
+	zfs_post_dle_sysevent(physpath);
 
-	(void) ddi_log_sysevent(zfs_dip, SUNW_VENDOR, EC_DEV_STATUS,
-	    ESC_DEV_DLE, attr, &eid, DDI_SLEEP);
-
-	nvlist_free(attr);
 	kmem_free(physpath, MAXPATHLEN);
 }
 
@@ -7660,6 +7690,17 @@ spa_async_thread(void *arg)
 		spa_config_enter(spa, SCL_CONFIG, FTAG, RW_READER);
 		vdev_autotrim_restart(spa);
 		spa_config_exit(spa, SCL_CONFIG, FTAG);
+		mutex_exit(&spa_namespace_lock);
+	}
+
+	/*
+	 * Kick off L2 cache rebuilding.
+	 */
+	if (tasks & SPA_ASYNC_L2CACHE_REBUILD) {
+		mutex_enter(&spa_namespace_lock);
+		spa_config_enter(spa, SCL_L2ARC, FTAG, RW_READER);
+		l2arc_spa_rebuild_start(spa);
+		spa_config_exit(spa, SCL_L2ARC, FTAG);
 		mutex_exit(&spa_namespace_lock);
 	}
 

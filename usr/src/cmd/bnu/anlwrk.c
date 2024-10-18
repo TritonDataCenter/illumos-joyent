@@ -28,7 +28,6 @@
 /*	  All Rights Reserved  	*/
 
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
 /*
 	This module contains routines that find C. files
 	in a system spool directory, return the next C. file
@@ -73,8 +72,7 @@ static short Nfiles = 0;	     /* Number of files in Filent	     */
  *	positive # -> number of arguments
  */
 static int
-anlwrk(file, wvec, wcount)
-char *file, **wvec;
+anlwrk(char *file, char **wvec, int wcount)
 {
 	int i;
 	FILE *p_bookmark;    /* pointer to afile */
@@ -189,7 +187,7 @@ char *file;
 		/* If Role is MASTER and JobGrade is null, then
 		 * there is no work for the remote.
 		 *
-		 * In the case of uucico slave, the job grade 
+		 * In the case of uucico slave, the job grade
 		 * to process should be determined before building
 		 * the work list.
 		 */
@@ -279,8 +277,7 @@ bldflst()
  *	0 	->  no arguments - fail
  */
 extern int
-gtwvec(file, wrkvec, wcount)
-char *file, **wrkvec;
+gtwvec(char *file, char **wrkvec, int wcount)
 {
 	int nargs;
 

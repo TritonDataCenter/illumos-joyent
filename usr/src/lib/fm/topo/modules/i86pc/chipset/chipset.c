@@ -91,7 +91,8 @@ topo_chipset_enum(topo_mod_t *mod, tnode_t *pnode, const char *name,
 	}
 
 	if (!topo_chipset_present()) {
-		topo_mod_dprintf(mod, "chipset_enum: no device present", name);
+		topo_mod_dprintf(mod, "chipset_enum: no %s device present",
+		    name);
 		return (0);
 	}
 
@@ -136,7 +137,7 @@ topo_chipset_enum(topo_mod_t *mod, tnode_t *pnode, const char *name,
 	/*
 	 * Finally, create the temperature sensor.
 	 */
-	if ((ret = topo_sensor_create_temp_sensor(mod, tn,
+	if ((ret = topo_sensor_create_scalar_sensor(mod, tn,
 	    topo_chipset_temp_sensor, "temp")) != 0) {
 		topo_mod_dprintf(mod, "failed to create chipset temperature "
 		    "sensor");

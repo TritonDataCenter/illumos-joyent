@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2022 RackTop Systems, Inc.
  */
 
 #ifndef _IDMAPD_H
@@ -68,7 +69,7 @@ typedef enum idmap_namemap_mode {
  *
  * A typical debugging output sequence would look like
  *
- * 	if (DBG(CONFIG, 2)) {
+ *	if (DBG(CONFIG, 2)) {
  *		idmapdlog(LOG_DEBUG,
  *		    "some message about config at verbosity 2");
  *	}
@@ -245,7 +246,7 @@ typedef struct wksids_table {
 #define	IDMAP_DBDIR	"/var/idmap"
 #define	IDMAP_CACHEDIR	"/var/run/idmap"
 #define	IDMAP_DBNAME	IDMAP_DBDIR "/idmap.db"
-#define	IDMAP_CACHENAME	IDMAP_CACHEDIR "/idmap.db"
+#define	IDMAP_CACHENAME	IDMAP_CACHEDIR "/cache.db"
 
 #define	IS_ID_NONE(id)	\
 	((id).idtype == IDMAP_NONE)
@@ -305,28 +306,31 @@ typedef int (*list_svc_cb)(void *, int, char **, char **);
 
 extern void	idmap_prog_1(struct svc_req *, register SVCXPRT *);
 extern void	idmapdlog(int, const char *, ...);
-extern int	init_mapping_system();
-extern void	fini_mapping_system();
-extern void	print_idmapdstate();
+extern int	init_mapping_system(void);
+extern void	fini_mapping_system(void);
+extern void	print_idmapdstate(void);
 extern int	create_directory(const char *, uid_t, gid_t);
-extern int	load_config();
-extern void	reload_ad();
+extern int	load_config(void);
+extern void	reload_gcs(void);
+extern void	reload_dcs(void);
 extern void	idmap_init_tsd_key(void);
 extern void	degrade_svc(int, const char *);
 extern void	restore_svc(void);
 extern void	notify_dc_changed(void);
 
 
-extern int		init_dbs();
-extern void		fini_dbs();
+extern int		init_dbs(void);
+extern void		fini_dbs(void);
 extern idmap_retcode	get_db_handle(sqlite **);
 extern idmap_retcode	get_cache_handle(sqlite **);
+extern void		kill_db_handle(sqlite *);
+extern void		kill_cache_handle(sqlite *);
 extern idmap_retcode	sql_exec_no_cb(sqlite *, const char *, char *);
 extern idmap_retcode	add_namerule(sqlite *, idmap_namerule *);
 extern idmap_retcode	rm_namerule(sqlite *, idmap_namerule *);
 extern idmap_retcode	flush_namerules(sqlite *);
 
-extern char 		*tolower_u8(const char *);
+extern char		*tolower_u8(const char *);
 
 extern idmap_retcode	gen_sql_expr_from_rule(idmap_namerule *, char **);
 extern idmap_retcode	validate_list_cb_data(list_cb_data_t *, int,

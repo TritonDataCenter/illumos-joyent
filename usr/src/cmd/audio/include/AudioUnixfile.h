@@ -27,8 +27,6 @@
 #ifndef _MULTIMEDIA_AUDIOUNIXFILE_H
 #define	_MULTIMEDIA_AUDIOUNIXFILE_H
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <AudioStream.h>
 
 #ifdef __cplusplus
@@ -94,7 +92,7 @@ public:
 
 	// Methods specific to the audio file format
 	// Get info string
-	virtual char *const GetInfostring(
+	virtual char *GetInfostring(
 	    int& len) const;			// return length
 
 	// Set info string

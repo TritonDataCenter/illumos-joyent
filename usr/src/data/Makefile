@@ -12,6 +12,7 @@
 #
 # Copyright 2017 Nexenta Systems, Inc.
 # Copyright 2019 Joyent, Inc.
+# Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 #
 
 COMMON_SUBDIRS=	consfonts \
@@ -20,7 +21,7 @@ COMMON_SUBDIRS=	consfonts \
 		terminfo \
 		zoneinfo
 
-i386_SUBDIRS=	amdpmc perfmon ucode
+i386_SUBDIRS=	amdpmc bhyve perfmon ucode
 
 SUBDIRS = $(COMMON_SUBDIRS) $($(MACH)_SUBDIRS)
 
@@ -31,6 +32,8 @@ clean :=	TARGET=clean
 clobber :=	TARGET=clobber
 install :=	TARGET=install
 _msg :=		TARGET=_msg
+
+.PARALLEL: $(SUBDIRS)
 
 .KEEP_STATE:
 

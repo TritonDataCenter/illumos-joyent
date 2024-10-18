@@ -23,8 +23,6 @@
  * Use is subject to license terms.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 /*
  * sub3.c ... ALE enhancement.
  * Since a typical Asian language has a huge character set, it is not
@@ -62,9 +60,9 @@
  */
 
 lchar	yycgidtbl[MAXNCG] = {
-	0, 		/* For ease of computation of the id. */
-	'\n', 		/* Newline is always special because '.' exclude it. */
-	0x000000ff, 	/* The upper limit of codeset 0. */
+	0,		/* For ease of computation of the id. */
+	'\n',		/* Newline is always special because '.' exclude it. */
+	0x000000ff,	/* The upper limit of codeset 0. */
 	0x20ffffff,	/* The upper limit of codeset 2. */
 	0x40ffffff	/* The upper limit of codeset 3. */
 /*	0x60ffffff	   The upper limit of codeset 1. */
@@ -79,7 +77,7 @@ static void setsymbol(int i);
 /*
  * For given 16-bit wchar_t (See NOTE), lchar is computed as illustrated below:
  *
- * 	wc: axxxxxxbyyyyyyy
+ *	wc: axxxxxxbyyyyyyy
  *
  * returns: 0ab0000000000000axxxxxxxbyyyyyyy
  *
@@ -136,12 +134,13 @@ remch(wchar_t c)
 	 * Make sure no EUC chars are used in reg. exp.
 	 */
 	if (!handleeuc) {
-		if (!isascii(c))
+		if (!isascii(c)) {
 			if (iswprint(c))
 				warning(
 "Non-ASCII character '%wc' in pattern; use -w or -e lex option.", c);
 			else warning(
 "Non-ASCII character of value %#x in pattern; use -w or -e lex option.", c);
+		}
 		/* In any case, we don't need to construct ncgidtbl[]. */
 		return;
 	}
@@ -303,7 +302,7 @@ repbycgid(void)
 				symbol[j] = FALSE;
 
 			s = (CHR *) left[i];
-			while (cc = *s++) {
+			while ((cc = *s++) != 0) {
 				if (cc == RANGE) {
 					int	low, high, i;
 					/*
@@ -390,7 +389,7 @@ repbycgid(void)
 static void
 setsymbol(int i)
 {
-	if (i > sizeof (symbol))
+	if (i > (int)sizeof (symbol))
 		error("setsymbol: (SYSERR) %d out of range", i);
 	symbol[i] = TRUE;
 }

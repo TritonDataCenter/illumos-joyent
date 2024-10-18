@@ -10,7 +10,7 @@
 #
 
 #
-# Copyright 2020 Joyent, Inc.
+# Copyright 2021 Joyent, Inc.
 #
 
 LIBRARY =	libvarpd_direct.a
@@ -24,15 +24,12 @@ LIBS =		$(DYNLIB)
 LDLIBS +=	-lc -lumem -lnvpair
 CPPFLAGS +=	-I../common
 
-C99MODE=	-xc99=%all
-C99LMODE=	-Xc99=%all
+CSTD=		$(CSTD_GNU99)
 
 SRCDIR =	../common
 
 .KEEP_STATE:
 
 all:	$(LIBS)
-
-lint:	lintcheck
 
 include ../../../Makefile.targ

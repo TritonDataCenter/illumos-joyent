@@ -24,6 +24,7 @@
  */
 /*
  * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2022 Oxide Computer Company
  */
 
 /*
@@ -140,7 +141,7 @@ safe_strdup(const char *s1)
 
 /*
  * Given a wchar_t which might represent an 'escapable' sequence (see
- * formats(5)), return the base ascii character needed to print that
+ * formats(7)), return the base ascii character needed to print that
  * sequence.
  *
  * The comparisons performed may look suspect at first, but all are valid;
@@ -202,7 +203,7 @@ unctrl_str_strict_ascii(const char *src, int escape_slash, int *unprintable)
 }
 
 /*
- * Convert control characters as described in format(5) to their readable
+ * Convert control characters as described in formats(7) to their readable
  * representation; special care is taken to handle multibyte character sets.
  *
  * If escape_slash is true, escaping of '\' occurs.  The first time a string
@@ -623,6 +624,7 @@ get_args(pargs_data_t *datap)
 	if (read_ptr_array(datap, argvoff, datap->pd_argv, argc) <= 0) {
 		free(datap->pd_argv);
 		datap->pd_argv = NULL;
+		datap->pd_argc = 0;
 		return;
 	}
 
@@ -753,6 +755,17 @@ at_hwcap2(long val, char *instr, size_t n, char *str)
 #endif
 }
 
+/*ARGSUSED*/
+static void
+at_hwcap3(long val, char *instr, size_t n, char *str)
+{
+#if defined(__i386) || defined(__amd64)
+	(void) elfcap_hw3_to_str(ELFCAP_STYLE_UC, val, str, n,
+	    ELFCAP_FMT_PIPSPACE, EM_386);
+#else
+#error	"port me"
+#endif
+}
 
 /*ARGSUSED*/
 static void
@@ -835,6 +848,7 @@ static struct aux_id aux_arr[] = {
 	{ AT_SUN_EXECNAME,	"AT_SUN_EXECNAME",	at_str	},
 	{ AT_SUN_HWCAP,		"AT_SUN_HWCAP",		at_hwcap },
 	{ AT_SUN_HWCAP2,	"AT_SUN_HWCAP2",	at_hwcap2 },
+	{ AT_SUN_HWCAP3,	"AT_SUN_HWCAP3",	at_hwcap3 },
 	{ AT_SUN_IFLUSH,	"AT_SUN_IFLUSH",	at_null	},
 	{ AT_SUN_CPU,		"AT_SUN_CPU",		at_null	},
 	{ AT_SUN_MMU,		"AT_SUN_MMU",		at_null	},

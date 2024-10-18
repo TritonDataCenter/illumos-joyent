@@ -11,6 +11,7 @@
 
 #
 # Copyright (c) 2017, Joyent, Inc.
+# Copyright 2020 RackTop Systems, Inc.
 #
 
 #
@@ -19,7 +20,7 @@
 # WARNING:  STOP NOW.  DO NOT MODIFY THIS FILE.
 # Object scoping must comply with the rules detailed in
 #
-#	usr/src/uts/common/README.mapfiles
+#	usr/src/uts/common/mapfiles/README
 #
 # You should not be making modifications here until you've read the most current
 # copy of that file. If you need help, contact a gatekeeper for guidance.
@@ -42,6 +43,7 @@ SYMBOL_SCOPE {
 	mac_lso_get				{ FLAGS = EXTERN };
 	mac_maxsdu_update			{ FLAGS = EXTERN };
 	mac_prop_info_set_default_link_flowctrl	{ FLAGS = EXTERN };
+	mac_prop_info_set_default_fec		{ FLAGS = EXTERN };
 	mac_prop_info_set_default_str		{ FLAGS = EXTERN };
 	mac_prop_info_set_default_uint8		{ FLAGS = EXTERN };
 	mac_prop_info_set_perm			{ FLAGS = EXTERN };

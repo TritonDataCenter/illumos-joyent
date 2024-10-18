@@ -21,7 +21,6 @@ UTSBASE		= ../..
 #
 MODULE		= acpica
 OBJECTS		= $(ACPICA_OBJS:%=$(OBJS_DIR)/%)
-LINTS		= $(ACPICA_OBJS:%.o=$(LINTS_DIR)/%.ln)
 ROOTMODULE	= $(ROOT_MISC_DIR)/$(MODULE)
 INC_PATH        += -I$(UTSBASE)/intel/sys/acpi
 INC_PATH	+= -I$(UTSBASE)/i86pc
@@ -36,7 +35,6 @@ include $(UTSBASE)/intel/Makefile.intel
 #	Define targets
 #
 ALL_TARGET	= $(BINARY) $(CONFMOD)
-LINT_TARGET	= $(MODULE).lint
 INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 
 #
@@ -45,26 +43,21 @@ INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 DEBUG_DEFS	+= $(DEBUG_FLGS)
 
 #
-# lint pass one non-enforcement
+# For now, disable these warnings; maintainers should endeavor
+# to investigate and remove these for maximum coverage.
+# Please do not carry these forward to new Makefiles.
 #
-CFLAGS += $(CCVERBOSE) -DPWRDMN -DACPI_USE_LOCAL_CACHE -DACPI_DEBUG_OUTPUT
-
-#
-# 3rd party code is not lint clean
-#
-CERRWARN += -erroff=E_STATEMENT_NOT_REACHED
-
+CFLAGS += $(CCVERBOSE)
+CERRWARN += -_gcc=-Wno-unused-variable
+CERRWARN += -_gcc=-Wno-parentheses
+CERRWARN += $(CNOWARN_UNINIT)
+CERRWARN += -_gcc=-Wno-unused-function
 SMOFF += all_func_returns
 
-LINTFLAGS += -errchk=%none
-LINTFLAGS += -errhdr=%none
-LINTFLAGS += -erroff=%all
-LINTFLAGS += -errwarn=%none
+CFLAGS += -DPWRDMN -DACPI_USE_LOCAL_CACHE -DACPI_DEBUG_OUTPUT
 
-CERRWARN	+= -_gcc=-Wno-unused-variable
-CERRWARN	+= -_gcc=-Wno-parentheses
-CERRWARN	+= $(CNOWARN_UNINIT)
-CERRWARN	+= -_gcc=-Wno-unused-function
+# We are using stack pointer value there
+$(OBJS_DIR)/utdebug.o := CERRWARN += -_gcc=-Wno-dangling-pointer
 
 #
 #	Default build targets.
@@ -78,12 +71,6 @@ all:		$(ALL_DEPS)
 clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
-
-lint:		$(LINT_DEPS)
-
-modlintlib:	$(MODLINTLIB_DEPS)
-
-clean.lint:	$(CLEAN_LINT_DEPS)
 
 install:	$(INSTALL_DEPS)
 

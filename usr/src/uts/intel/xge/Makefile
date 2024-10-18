@@ -82,13 +82,13 @@ XGE_CFLAGS	= $(HAL_CFLAGS) $(TRACE_CFLAGS) $(CCVERBOSE) \
 		-I$(UTSBASE)/common/io/xge/hal/xgehal \
 		-I$(UTSBASE)/common/io/xge/drv -DSOLARIS
 
-CFLAGS		+= $(XGE_CFLAGS) -xO4 -xcrossfile
-CFLAGS64	+= $(XGE_CFLAGS) -xO4 -xcrossfile
+CFLAGS		+= $(XGE_CFLAGS) -xO4
+CFLAGS64	+= $(XGE_CFLAGS) -xO4
 
 #
 #	Driver depends on MAC & IP
 #
-LDFLAGS		+=  -dy -N misc/mac -N drv/ip
+LDFLAGS		+=  -N misc/mac -N drv/ip
 
 CERRWARN	+= -_gcc=-Wno-parentheses
 CERRWARN	+= -_gcc=-Wno-unused-variable

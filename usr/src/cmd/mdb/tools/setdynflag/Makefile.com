@@ -34,18 +34,21 @@ SRCS = \
 	setdynflag.c
 OBJS = $(SRCS:%.c=%.o)
 
-include ../../../../Makefile.cmd
+include $(SRC)/cmd/Makefile.cmd
 include ../../common/Makefile.util
 
 #
 # We're going to run this as part of the build, so we want it to use the
 # running kernel's includes and libraries.
 #
+include $(SRC)/Makefile.native
+
 CPPFLAGS = -I../../common
 CFLAGS += $(CCVERBOSE)
+CFLAGS64 += $(CCVERBOSE)
 CERRWARN += $(CNOWARN_UNINIT)
-LDFLAGS = $(ZLAZYLOAD) $(BDIRECT)
-LDLIBS	= -lelf
+LDFLAGS += $(ZLAZYLOAD) $(BDIRECT)
+LDLIBS = -lelf
 NATIVE_LIBS += libelf.so libc.so
 
 install all: $(PROG)

@@ -147,7 +147,7 @@ nwamd_get_dhcpinfo_data(const char *sym_name, char *ifname)
 {
 	dhcp_symbol_t *entry;
 	dhcp_optnum_t optnum;
-	dhcp_ipc_request_t *request;
+	dhcp_ipc_request_t *request = NULL;
 	dhcp_ipc_reply_t *reply;
 	DHCP_OPT *opt;
 	size_t opt_len;
@@ -159,7 +159,7 @@ nwamd_get_dhcpinfo_data(const char *sym_name, char *ifname)
 	if (ifname == NULL)
 		ifname = "";
 
-	/* find code and category in dhcp_inittab(4) */
+	/* find code and category in dhcp_inittab(5) */
 	entry = inittab_getbyname(ITAB_CAT_SITE | ITAB_CAT_STANDARD |
 	    ITAB_CAT_VENDOR | ITAB_CAT_FIELD, ITAB_CONS_INFO, sym_name);
 
@@ -862,7 +862,7 @@ nwamd_ncu_handle_if_state_event(nwamd_event_t event)
 	if (evm->nwe_data.nwe_if_state.nwe_addr_valid) {
 		struct nwam_event_if_state *if_state;
 		char addrstr[INET6_ADDRSTRLEN];
-		boolean_t static_addr, addr_added;
+		boolean_t static_addr = B_FALSE, addr_added;
 		boolean_t v4dhcp_running, v6dhcp_running, stateless_running;
 		ipadm_addr_info_t *ai = NULL, *addrinfo = NULL;
 		boolean_t stateless_ai_found = B_FALSE;
@@ -878,6 +878,10 @@ nwamd_ncu_handle_if_state_event(nwamd_event_t event)
 		family = if_state->nwe_addr.ss_family;
 		addr = &if_state->nwe_addr;
 		addr_added = if_state->nwe_addr_added;
+
+		v4dhcp_running = B_FALSE;
+		v6dhcp_running = B_FALSE;
+		stateless_running = B_FALSE;
 
 		nlog(LOG_DEBUG,
 		    "nwamd_ncu_handle_if_state_event: addr %s %s",
