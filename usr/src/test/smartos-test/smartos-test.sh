@@ -235,8 +235,16 @@ function setup_pkgsrc {
 # consult with pkgsrc and/or maintainers of usr/src/test tests to update.
 
 function install_required_pkgs {
-
     log_must pkgin -y in smartos-test-tools
+
+    # Some packages install defaults that mess with tests (e.g. OS-8582).
+    # Address those defaults here if possible.
+
+    # sudo needs to keep /opt/zfs-tests/bin in its PATH.
+    SUDOERS=/opt/tools/etc/sudoers
+    grep "^Defaults secure_path" $SUDOERS | grep -q "/opt/zfs-tests/bin" || \
+	sed -I -e '/^Defaults secure_path/s,"\(.*\)","\1:/opt/zfs-tests/bin",' \
+	$SUDOERS
 }
 
 function add_test_accounts {
