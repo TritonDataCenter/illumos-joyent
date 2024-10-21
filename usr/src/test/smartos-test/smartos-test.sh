@@ -23,7 +23,10 @@
 # It exits 1 if any configuration, setup or test fails.
 #
 
-export PATH=/usr/bin:/usr/sbin:/opt/tools/sbin:/opt/tools/bin:$PATH
+# Restrict path to only what we need for running tests.  Note that in illumos,
+# /bin points to /usr/bin, but /sbin is its own directory.  Also note that
+# the ZFS test suites require that we have /opt/zfs-tests/bin in $PATH
+export PATH=/usr/bin:/sbin:/usr/sbin:/opt/tools/sbin:/opt/tools/bin:/opt/zfs-tests-bin
 
 #
 # Set $KEEP as a precaution in case we ever end up running the zfs-test suite
@@ -243,8 +246,7 @@ function install_required_pkgs {
     # sudo needs to keep /opt/zfs-tests/bin in its PATH.
     SUDOERS=/opt/tools/etc/sudoers
     grep "^Defaults secure_path" $SUDOERS | grep -q "/opt/zfs-tests/bin" || \
-	sed -I -e '/^Defaults secure_path/s,"\(.*\)","\1:/opt/zfs-tests/bin",' \
-	$SUDOERS
+	/usr/bin/sed -I -e '/^Defaults secure_path/s,".*","'$PATH'",g' $SUDOERS
 }
 
 function add_test_accounts {
@@ -272,7 +274,7 @@ function add_test_accounts {
         zprofile=/zones/global/ztest/.profile
         if [[ ! -f $zprofile ]]; then
             cat > $zprofile <<-EOF
-PATH=/bin:/usr/bin:/sbin:/usr/sbin:/opt/tools/bin:/opt/tools/sbin:/opt/zfs-tests/bin
+PATH="$PATH"
 export PATH
 
 KEEP="zones"
