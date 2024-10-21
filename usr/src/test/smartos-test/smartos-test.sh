@@ -26,7 +26,7 @@
 # Restrict path to only what we need for running tests.  Note that in illumos,
 # /bin points to /usr/bin, but /sbin is its own directory.  Also note that
 # the ZFS test suites require that we have /opt/zfs-tests/bin in $PATH
-export PATH=/usr/bin:/sbin:/usr/sbin:/opt/tools/sbin:/opt/tools/bin:/opt/zfs-tests-bin
+export PATH=/usr/bin:/sbin:/usr/sbin:/opt/tools/sbin:/opt/tools/bin:/opt/zfs-tests/bin
 
 #
 # Set $KEEP as a precaution in case we ever end up running the zfs-test suite
