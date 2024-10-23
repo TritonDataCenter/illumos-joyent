@@ -12,6 +12,7 @@
 /*
  * Copyright 2018 Joyent, Inc.
  * Copyright 2024 Hans Rosenfeld
+ * Copyright 2024 MNX Cloud, Inc.
  *
  * Convenience routines for identifying current or available devices that are
  * suitable for PCI passthrough to a bhyve guest.
@@ -383,20 +384,11 @@ inspect_node(di_node_t di_node, void *arg)
 
 	driver = di_driver_name(di_node);
 
-	if (driver != NULL) {
-		if (strcmp(driver, "ppt") == 0) {
-			if (asprintf(&devname, "/dev/ppt%d",
-			    di_instance(di_node)) < 0) {
-				data->nd_err = errno;
-				goto out;
-			}
-		} else if (data->nd_print_native_path) {
-			if (asprintf(&devname, "%s", di_binding_name(di_node)) <
-			    0) {
-				data->nd_err = errno;
-				goto out;
-			}
-			    
+        if (driver != NULL && strcmp(driver, "ppt") == 0) {
+		if (asprintf(&devname, "/dev/ppt%d",
+		    di_instance(di_node)) < 0) {
+			data->nd_err = errno;
+			goto out;
 		}
 	}
 
@@ -410,9 +402,33 @@ inspect_node(di_node_t di_node, void *arg)
 	if (info_nvl == NULL)
 		goto out;
 
-	if (devname == NULL && (!data->nd_seek_unknown ||
-	    !match_ppt(&data->nd_matches, info_nvl))) {
-		goto out;
+	/* (devname == NULL) implies "device is not passed-through". */
+	if (devname == NULL) {
+		bool has_driver = (driver != NULL);
+
+		if (!match_ppt(&data->nd_matches, info_nvl)) {
+			/*
+			 * Print unmatched only if no driver and we want to
+			 * see the unknown devices.
+			 */
+			if (has_driver || !data->nd_seek_unknown)
+				goto out;
+		} else if (has_driver && data->nd_print_native_path) {
+			/*
+			 * If we wish to see driver names that are in our
+			 * list of ppt_matches, make sure we print them and
+			 * add them to the returned nvlist, aka. info_nvl.
+			 */
+			if (asprintf(&devname, "%s%d", driver,
+				di_instance(di_node)) < 0) {
+				data->nd_err = errno;
+				goto out;
+			}
+			data->nd_err = nvlist_add_string(info_nvl, "dev",
+			    devname);
+			if (data->nd_err != 0)
+				goto out;
+		}
 	}
 
 	data->nd_err = nvlist_add_nvlist(data->nd_nvl, path, info_nvl);

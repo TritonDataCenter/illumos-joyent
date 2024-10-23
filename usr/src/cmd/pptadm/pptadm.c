@@ -49,7 +49,7 @@ static ofmt_cb_t print_field;
 
 static ofmt_field_t fields[] = {
 /* name,	field width, index, callback */
-{ "DEV",	40, PPT_DEV, print_field }, /* XXX KEBE SAYS FIX ME! */
+{ "DEV",	sizeof ("/dev/pptXX"), PPT_DEV, print_field },
 { "VENDOR",	sizeof ("VENDOR"), PPT_VENDOR, print_field },
 { "DEVICE",	sizeof ("DEVICE"), PPT_DEVICE, print_field },
 { "SUBVENDOR",	sizeof ("SUBVENDOR"), PPT_SUBVENDOR, print_field },
@@ -59,6 +59,9 @@ static ofmt_field_t fields[] = {
 { "LABEL",	60, PPT_LABEL, print_field },
 { NULL,		0, 0, NULL },
 };
+
+/* For some outputs we want wider device paths. */
+#define	devwidth (fields[0].of_width)
 
 static void
 usage(const char *errmsg)
@@ -139,6 +142,7 @@ list(int argc, char *argv[])
 			parsable = true;
 			break;
 		case 'N':
+			devwidth = 20;
 			nativepath = true;
 			break;
 		case 'U':
