@@ -36,6 +36,7 @@
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2024 Oxide Computer Company
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 
@@ -384,33 +385,34 @@ viona_tx_csum(viona_vring_t *ring, const struct virtio_net_hdr *hdr,
 	 * trusted. Besides, our own stack will determine the header
 	 * boundary.
 	 */
-	if ((link->l_cap_csum & HCKSUM_INET_PARTIAL) != 0 &&
-	    (hdr->vrh_gso_type & VIRTIO_NET_HDR_GSO_TCPV4) != 0 &&
+	if ((hdr->vrh_gso_type & VIRTIO_NET_HDR_GSO_TCPV4) != 0 &&
 	    ftype == ETHERTYPE_IP) {
-		uint16_t	*cksump;
-		uint32_t	cksum;
-		ipaddr_t	src = ipha->ipha_src;
-		ipaddr_t	dst = ipha->ipha_dst;
+		if ((link->l_cap_csum & HCKSUM_INET_PARTIAL) != 0) {
+			uint16_t	*cksump;
+			uint32_t	cksum;
+			ipaddr_t	src = ipha->ipha_src;
+			ipaddr_t	dst = ipha->ipha_dst;
 
-		/*
-		 * Our native IP stack doesn't set the L4 length field
-		 * of the pseudo header when LSO is in play. Other IP
-		 * stacks, e.g. Linux, do include the length field.
-		 * This is a problem because the hardware expects that
-		 * the length field is not set. When it is set it will
-		 * cause an incorrect TCP checksum to be generated.
-		 * The reason this works in Linux is because Linux
-		 * corrects the pseudo-header checksum in the driver
-		 * code. In order to get the correct HW checksum we
-		 * need to assume the guest's IP stack gave us a bogus
-		 * TCP partial checksum and calculate it ourselves.
-		 */
-		cksump = IPH_TCPH_CHECKSUMP(ipha, IPH_HDR_LENGTH(ipha));
-		cksum = IP_TCP_CSUM_COMP;
-		cksum += (dst >> 16) + (dst & 0xFFFF) +
-		    (src >> 16) + (src & 0xFFFF);
-		cksum = (cksum & 0xFFFF) + (cksum >> 16);
-		*(cksump) = (cksum & 0xFFFF) + (cksum >> 16);
+			/*
+			 * Our native IP stack doesn't set the L4 length field
+			 * of the pseudo header when LSO is in play. Other IP
+			 * stacks, e.g. Linux, do include the length field.
+			 * This is a problem because the hardware expects that
+			 * the length field is not set. When it is set it will
+			 * cause an incorrect TCP checksum to be generated.
+			 * The reason this works in Linux is because Linux
+			 * corrects the pseudo-header checksum in the driver
+			 * code. In order to get the correct HW checksum we
+			 * need to assume the guest's IP stack gave us a bogus
+			 * TCP partial checksum and calculate it ourselves.
+			 */
+			cksump = IPH_TCPH_CHECKSUMP(ipha, IPH_HDR_LENGTH(ipha));
+			cksum = IP_TCP_CSUM_COMP;
+			cksum += (dst >> 16) + (dst & 0xFFFF) +
+			    (src >> 16) + (src & 0xFFFF);
+			cksum = (cksum & 0xFFFF) + (cksum >> 16);
+			*(cksump) = (cksum & 0xFFFF) + (cksum >> 16);
+		}
 
 		/*
 		 * Since viona is a "legacy device", the data stored
