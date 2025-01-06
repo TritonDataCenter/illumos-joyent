@@ -6,7 +6,7 @@
 
 /*
  * Copyright 2021 Joyent, Inc.
- * Copyright 2024 MNX Cloud, Inc.
+ * Copyright 2025 MNX Cloud, Inc.
  */
 
 @Library('jenkins-joylib@v1.0.8') _
@@ -14,7 +14,7 @@
 pipeline {
 
     agent {
-        label 'platform:true && image_ver:23.4.0 && pkgsrc_arch:x86_64 && ' +
+        label 'platform:true && image_ver:24.4.1 && pkgsrc_arch:x86_64 && ' +
             'dram:16gb && !virt:kvm && fs:pcfs && fs:ufs && jenkins_agent:3'
     }
 
