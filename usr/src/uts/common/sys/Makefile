@@ -274,6 +274,7 @@ CHKHDRS=			\
 	gld.h			\
 	gldpriv.h		\
 	group.h			\
+	hexdump.h		\
 	hdio.h			\
 	hook.h			\
 	hook_event.h		\
@@ -556,6 +557,7 @@ CHKHDRS=			\
 	statfs.h		\
 	statvfs.h		\
 	stdalign.h		\
+	stdbit.h		\
 	stdbool.h		\
 	stddef.h		\
 	stdint.h		\
