@@ -12,6 +12,7 @@
 #
 # Copyright 2015 Toomas Soome <tsoome@me.com>
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2025 MNX Cloud, Inc.
 #
 
 #
@@ -33,7 +34,7 @@ LDFLAGS=-e start -Ttext ${ORG} -N -S --oformat binary $(GLDTARGET)
 
 all: $(PROG)
 
-install: $(PROG:%=$(ROOT_BOOT)/%)
+install: $(PROG:%=$(ROOT_BOOT)/%) $(PROG:%=$(ROOT)/usr/lib/pcfs/%)
 
 $(PROG): $(OBJS)
 	$(GLD) $(LDFLAGS) -o $(PROG) $(OBJS)
