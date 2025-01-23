@@ -34,7 +34,9 @@ LDFLAGS=-e start -Ttext ${ORG} -N -S --oformat binary $(GLDTARGET)
 
 all: $(PROG)
 
-install: $(PROG:%=$(ROOT_BOOT)/%) $(PROG:%=$(ROOT)/usr/lib/pcfs/%)
+# XXX SmartOS -- also install pmbr in usr/lib/fs/pcfs/pmbr.
+install: $(PROG:%=$(ROOT_BOOT)/%)
+	$(CP) $(ROOT_BOOT)/$(PROG) $(ROOT)/usr/lib/fs/pcfs/.
 
 $(PROG): $(OBJS)
 	$(GLD) $(LDFLAGS) -o $(PROG) $(OBJS)
