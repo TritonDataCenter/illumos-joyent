@@ -36,6 +36,7 @@ all: $(PROG)
 
 # XXX SmartOS -- also install pmbr in usr/lib/fs/pcfs/pmbr.
 install: $(PROG:%=$(ROOT_BOOT)/%)
+	$(MKDIR) -p $(ROOT)/usr/lib/fs/pcfs
 	$(CP) $(ROOT_BOOT)/$(PROG) $(ROOT)/usr/lib/fs/pcfs/.
 
 $(PROG): $(OBJS)
