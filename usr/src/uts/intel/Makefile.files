@@ -186,18 +186,19 @@ VGATEXT_OBJS += vgatext.o
 #
 #	Kernel linker
 #
-KRTLD_OBJS +=		\
-	bootfsops.o	\
+KRTLD_OBJS += bootfsops.o \
 	bootrd.o	\
-	bootrd_cpio.o	\
-	ufsops.o	\
-	hsfs.o		\
 	doreloc.o	\
 	kobj_boot.o	\
 	kobj_convrelstr.o \
 	kobj_crt.o	\
 	kobj_isa.o	\
 	kobj_reloc.o
+
+$(NO_BOOTRD_CPIO)KRTLD_OBJS += bootrd_cpio.o
+$(NO_BOOTRD_ZFS)KRTLD_OBJS += bootrd_zfs.o
+$(NO_BOOTRD_UFS)KRTLD_OBJS += ufsops.o
+$(NO_BOOTRD_HSFS)KRTLD_OBJS += hsfs.o
 
 #
 #	misc. modules

@@ -38,13 +38,40 @@ extern void (*_vkobj_printf)(void *, const char *fmt, va_list)
     __KVPRINTFLIKE(2);
 extern int get_weakish_int(int *);
 extern struct bootops *ops;
-extern struct boot_fs_ops bufs_ops, bhsfs_ops, bbootfs_ops, bcpio_ops;
 extern int kmem_ready;
+
+/* Always include bootfs */
+extern struct boot_fs_ops bbootfs_ops;
+#ifdef BOOTRD_UFS
+extern struct boot_fs_ops bufs_ops;
+#endif
+#ifdef BOOTRD_HSFS
+extern struct boot_fs_ops bhsfs_ops;
+#endif
+#ifdef BOOTRD_CPIO
+extern struct boot_fs_ops bcpio_ops;
+#endif
+#ifdef BOOTRD_ZFS
+extern struct boot_fs_ops bzfs_ops;
+#endif
 
 static uint64_t rd_start, rd_end;
 struct boot_fs_ops *bfs_ops;
 struct boot_fs_ops *bfs_tab[] = {
-	&bufs_ops, &bhsfs_ops, &bbootfs_ops, &bcpio_ops, NULL,
+#ifdef BOOTRD_UFS
+	&bufs_ops,
+#endif
+#ifdef BOOTRD_HSFS
+	&bhsfs_ops,
+#endif
+#ifdef BOOTRD_CPIO
+	&bcpio_ops,
+#endif
+#ifdef BOOTRD_ZFS
+	&bzfs_ops,
+#endif
+	&bbootfs_ops,
+	NULL,
 };
 
 int bootrd_debug = 0;

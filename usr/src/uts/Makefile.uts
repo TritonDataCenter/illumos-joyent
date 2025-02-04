@@ -74,6 +74,14 @@ ALL_BUILDS64				= obj64 debug64
 ALL_BUILDSONLY64			= obj64 debug64
 
 #
+#	Default bootrd formats
+#
+NO_BOOTRD_UFS=
+NO_BOOTRD_HSFS=
+NO_BOOTRD_CPIO=
+NO_BOOTRD_ZFS=
+
+#
 #	Build class (32b or 64b)
 #
 CLASS_OBJ32	= 32

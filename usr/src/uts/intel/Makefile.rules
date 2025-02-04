@@ -47,6 +47,12 @@ SUBARCH_DIR = amd64
 #
 #	Section 1a: C object build rules
 #
+# usr/src/common/fs/bootrd_zfs.c needs zfs include paths
+$(NO_BOOTRD_ZFS)$(OBJS_DIR)/bootrd_zfs.o := \
+	CPPFLAGS += -I$(UTSBASE)/common/fs/zfs
+$(NO_BOOTRD_ZFS)$(OBJS_DIR)/bootrd_zfs.o := \
+	CPPFLAGS += -I$(SRC)/common/zfs
+
 $(OBJS_DIR)/%.o:		$(SRC)/common/fs/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -292,6 +298,11 @@ KRTLD_INC_PATH	= -I$(UTSBASE)/common/krtld -I$(UTSBASE)/intel/sys
 KRTLD_INC_PATH	+= -I$(UTSBASE)/intel/$(SUBARCH_DIR)/krtld
 
 KRTLD_CPPFLAGS	= -D_KRTLD -DELF_TARGET_AMD64 -DMODDIR_SUFFIX=\"amd64\"
+
+$(NO_BOOTRD_UFS)$(OBJS_DIR)/bootrd.o := KRTLD_CPPFLAGS += -DBOOTRD_UFS
+$(NO_BOOTRD_HSFS)$(OBJS_DIR)/bootrd.o := KRTLD_CPPFLAGS += -DBOOTRD_HSFS
+$(NO_BOOTRD_CPIO)$(OBJS_DIR)/bootrd.o := KRTLD_CPPFLAGS += -DBOOTRD_CPIO
+$(NO_BOOTRD_ZFS)$(OBJS_DIR)/bootrd.o := KRTLD_CPPFLAGS += -DBOOTRD_ZFS
 
 $(OBJS_DIR)/%.o:	$(UTSBASE)/common/krtld/%.c
 	$(COMPILE.c) $(KRTLD_INC_PATH) $(KRTLD_CPPFLAGS) -o $@ $<
