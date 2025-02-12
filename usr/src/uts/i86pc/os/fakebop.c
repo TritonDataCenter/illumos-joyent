@@ -28,6 +28,7 @@
  *
  * Copyright 2020 Joyent, Inc.
  * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 MNX Cloud, Inc.
  */
 
 /*
@@ -449,12 +450,42 @@ bsetpropsi(char *name, int value)
 	bsetprops(name, prop_val);
 }
 
+static void
+do_bsys_setprop(bootops_t *bop, char *name, char *value)
+{
+	bootprop_t *b;
+	int len, vlen;
+
+	len = do_bsys_getproplen(bop, name);
+	if (len != -1) {
+		/* Find existing property. */
+		for (b = bprops; b; b = b->bp_next) {
+			if (strcmp(name, b->bp_name) == 0)
+				break;
+		}
+
+		vlen = strlen(value) + 1;
+		if (len <= vlen) {
+			/* value does fit into current space */
+			b->bp_vlen = vlen;
+			bcopy(value, b->bp_value, vlen);
+			return;	/* Done */
+		} else {
+			/*
+			 * We can not free the space, but we can change
+			 * the type to DDI_PROP_UNDEF_IT;
+			 */
+			b->bp_flags = DDI_PROP_UNDEF_IT;
+		}
+	}
+	bsetprops(name, value);
+}
+
 /*
  * to find the type of the value associated with this name
  */
-/*ARGSUSED*/
 int
-do_bsys_getproptype(bootops_t *bop, const char *name)
+do_bsys_getproptype(bootops_t *bop __unused, const char *name)
 {
 	bootprop_t *b;
 
@@ -469,13 +500,14 @@ do_bsys_getproptype(bootops_t *bop, const char *name)
 /*
  * to find the size of the buffer to allocate
  */
-/*ARGSUSED*/
 int
-do_bsys_getproplen(bootops_t *bop, const char *name)
+do_bsys_getproplen(bootops_t *bop __unused, const char *name)
 {
 	bootprop_t *b;
 
 	for (b = bprops; b; b = b->bp_next) {
+		if (b->bp_flags == DDI_PROP_UNDEF_IT)
+			continue;
 		if (strcmp(name, b->bp_name) != 0)
 			continue;
 		return (b->bp_vlen);
@@ -486,13 +518,14 @@ do_bsys_getproplen(bootops_t *bop, const char *name)
 /*
  * get the value associated with this name
  */
-/*ARGSUSED*/
 int
-do_bsys_getprop(bootops_t *bop, const char *name, void *value)
+do_bsys_getprop(bootops_t *bop __unused, const char *name, void *value)
 {
 	bootprop_t *b;
 
 	for (b = bprops; b; b = b->bp_next) {
+		if (b->bp_flags == DDI_PROP_UNDEF_IT)
+			continue;
 		if (strcmp(name, b->bp_name) != 0)
 			continue;
 		bcopy(b->bp_value, value, b->bp_vlen);
@@ -504,9 +537,8 @@ do_bsys_getprop(bootops_t *bop, const char *name, void *value)
 /*
  * get the name of the next property in succession from the standalone
  */
-/*ARGSUSED*/
 static char *
-do_bsys_nextprop(bootops_t *bop, char *name)
+do_bsys_nextprop(bootops_t *bop __unused, char *name)
 {
 	bootprop_t *b;
 
@@ -639,6 +671,9 @@ boot_prop_display(char *buffer)
 				if (i < len - 1)
 					bop_printf(NULL, ".");
 			}
+			break;
+		case DDI_PROP_UNDEF_IT:
+			bop_printf(NULL, "undefined");
 			break;
 		default:
 			if (!unprintable(buffer, len)) {
@@ -2186,6 +2221,7 @@ _start(struct xboot_info *xbp)
 	bops->bsys_nextprop = do_bsys_nextprop;
 	bops->bsys_printf = bop_printf;
 	bops->bsys_doint = do_bsys_doint;
+	bops->bsys_setprop = do_bsys_setprop;
 
 	/*
 	 * BOP_EALLOC() is no longer needed

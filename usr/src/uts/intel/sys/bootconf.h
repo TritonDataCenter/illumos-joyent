@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2016 Nexenta Systems, Inc.
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2025 MNX Cloud, Inc.
  */
 
 #ifndef	_SYS_BOOTCONF_H
@@ -96,7 +97,7 @@ struct bsys_mem {
  *          please consider adding new stuff to the end and using the
  *          "bootops-extensions" mechanism described below.
  */
-#define	BO_VERSION	10		/* bootops interface revision # */
+#define	BO_VERSION	11		/* bootops interface revision # */
 
 typedef struct bootops {
 	/*
@@ -154,6 +155,8 @@ typedef struct bootops {
 		int align, int flags);
 
 	/* end of bootops which exist if (bootops-extensions >= 1) */
+
+	void (*bsys_setprop)(struct bootops *, char *, char *);
 } bootops_t;
 
 #define	BOP_GETVERSION(bop)		((bop)->bsys_version)
@@ -163,6 +166,7 @@ typedef struct bootops {
 #define	BOP_GETPROPLEN(bop, name)	((bop)->bsys_getproplen)(bop, name)
 #define	BOP_GETPROP(bop, name, buf)	((bop)->bsys_getprop)(bop, name, buf)
 #define	BOP_NEXTPROP(bop, prev)		((bop)->bsys_nextprop)(bop, prev)
+#define	BOP_SETPROP(bop, name, val)	((bop)->bsys_setprop)(bop, name, val)
 #define	BOP_DOINT(bop, intnum, rp)	((bop)->bsys_doint)(bop, intnum, rp)
 #define	BOP_EALLOC(bop, virthint, size, align, flags)\
 		((bop)->bsys_ealloc)(bop, virthint, size, align, flags)
@@ -233,12 +237,10 @@ extern char *netdev_path;
 
 extern void bop_no_more_mem(void);
 
-/*PRINTFLIKE2*/
 extern void bop_printf(void *, const char *, ...)
     __KPRINTFLIKE(2);
 extern void vbop_printf(void *, const char *, va_list);
 
-/*PRINTFLIKE1*/
 extern void bop_panic(const char *, ...)
     __KPRINTFLIKE(1) __NORETURN;
 #pragma rarely_called(bop_panic)
