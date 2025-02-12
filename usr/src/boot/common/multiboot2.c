@@ -571,8 +571,14 @@ update_cmdline(char *cl, bool mb2)
 /*
  * Build the kernel command line. Shared function between MB1 and MB2.
  *
- * In both cases, if fstype is set and is not zfs, we do not set up
- * zfs-bootfs property. But we set kernel file name and options.
+ * In both cases:
+ * 1. If fstype is set and is not zfs, we do not set up zfs-bootfs property.
+ * 2. If zfs-rootdisk-path is set and fstype is not set, we do not set up
+ *    zfs-bootfs property.
+ * That is, "fstype" is to set rootfs type to file system on boot media,
+ * "zfs-rootdisk-path" is to set rootfs type to file system on ramdisk.
+ *
+ * In all cases we do set kernel file name and options.
  *
  * For the MB1, we only can pass properties on command line, so
  * we will set console, ttyX-mode (for serial console) and zfs-bootfs.
@@ -616,6 +622,10 @@ mb_kernel_cmdline(struct preloaded_file *fp, struct devdesc *rootdev,
 
 	/* If we have fstype set in env, reset zfs_root if needed. */
 	if (fs != NULL && strcmp(fs, "zfs") != 0)
+		zfs_root = false;
+
+	/* If fstype is not set, but archive-fstype is set, reset zfs_root */
+	if (fs == NULL && getenv("zfs-rootdisk-path") != NULL)
 		zfs_root = false;
 
 	/*
