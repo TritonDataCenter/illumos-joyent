@@ -32,7 +32,7 @@
  * Copyright 2012 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
  * Copyright 2014 Josef 'Jeff' Sipek <jeffpc@josefsipek.net>
  * Copyright 2018 Nexenta Systems, Inc.
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  * Copyright 2024 MNX Cloud, Inc.
  */
 
@@ -785,6 +785,55 @@ extern "C" {
 #define	IA32_PKG_THERM_INTERRUPT_PL_NE		0x01000000
 
 /*
+ * AMD Performance counters
+ *
+ * Older (pre-F15h) CPUs exposed a set of 4 CPU performance counters, along with
+ * corresponding control registers.  F15h and later CPUs added an additional 2
+ * CPU counters, exposing them all through a new range of MSRs (with the
+ * original 4 counters aliasing onto the new ones, entries 0-3)
+ *
+ * Support for those newer extended counters is denoted by CPUID_AMD_ECX_PCEC in
+ * function 0x80000001.
+ */
+#define	MSR_AMD_K7_PERF_EVTSEL0		0xc0010000
+#define	MSR_AMD_K7_PERF_EVTSEL1		0xc0010001
+#define	MSR_AMD_K7_PERF_EVTSEL2		0xc0010002
+#define	MSR_AMD_K7_PERF_EVTSEL3		0xc0010003
+#define	MSR_AMD_K7_PERF_CTR0		0xc0010004
+#define	MSR_AMD_K7_PERF_CTR1		0xc0010005
+#define	MSR_AMD_K7_PERF_CTR2		0xc0010006
+#define	MSR_AMD_K7_PERF_CTR3		0xc0010007
+
+#define	MSR_AMD_F15H_PERF_EVTSEL0	0xc0010200
+#define	MSR_AMD_F15H_PERF_EVTSEL1	0xc0010202
+#define	MSR_AMD_F15H_PERF_EVTSEL2	0xc0010204
+#define	MSR_AMD_F15H_PERF_EVTSEL3	0xc0010206
+#define	MSR_AMD_F15H_PERF_EVTSEL4	0xc0010208
+#define	MSR_AMD_F15H_PERF_EVTSEL5	0xc001020a
+
+#define	MSR_AMD_F15H_PERF_CTR0		0xc0010201
+#define	MSR_AMD_F15H_PERF_CTR1		0xc0010203
+#define	MSR_AMD_F15H_PERF_CTR2		0xc0010205
+#define	MSR_AMD_F15H_PERF_CTR3		0xc0010207
+#define	MSR_AMD_F15H_PERF_CTR4		0xc0010209
+#define	MSR_AMD_F15H_PERF_CTR5		0xc001020b
+
+#define	AMD_PERF_EVTSEL_EVT_MASK	0xf000000ff	/* Event select bits */
+#define	AMD_PERF_EVTSEL_UNIT_MASK	0xff00		/* Unit mask */
+#define	AMD_PERF_EVTSEL_USER_MODE	(1 << 16)	/* User mode */
+#define	AMD_PERF_EVTSEL_OS_MODE		(1 << 17)	/* OS mode */
+#define	AMD_PERF_EVTSEL_EDGE		(1 << 18)	/* Edge detect */
+#define	AMD_PERF_EVTSEL_INT_EN		(1 << 20)	/* Interrupt enable */
+#define	AMD_PERF_EVTSEL_CTR_EN		(1 << 22)	/* Counter enable */
+#define	AMD_PERF_EVTSEL_INV_CMP		(1 << 23)	/* Invert comparison */
+#define	AMD_PERF_EVTSEL_CNT_MASK	0xff000000	/* Counter mask */
+#define	AMD_PERF_EVTSEL_HG_MASK		0x30000000000	/* Host/guest mask */
+
+#define	AMD_PERF_EVTSEL_HG_GUEST	0x10000000000	/* Guest-only */
+#define	AMD_PERF_EVTSEL_HG_HOST		0x20000000000	/* Host-only */
+#define	AMD_PERF_EVTSEL_HG_BOTH		0x30000000000	/* Guest and host */
+
+/*
  * AMD TOM and TOM2 MSRs. These control the split between DRAM and MMIO below
  * and above 4 GiB respectively. These have existed since family 0xf.
  *
@@ -1119,6 +1168,8 @@ typedef enum x86_processor_family {
 	X86_PF_AMD_DENSE_TURIN,
 	X86_PF_AMD_STRIX,
 	X86_PF_AMD_GRANITE_RIDGE,
+	X86_PF_AMD_KRACKAN,
+	X86_PF_AMD_STRIX_HALO,
 
 	X86_PF_ANY = 0xff
 } x86_processor_family_t;
@@ -1313,6 +1364,15 @@ typedef enum x86_chiprev {
 	_DECL_CHIPREV(AMD, GRANITE_RIDGE, B0, 0x0002),
 	_DECL_CHIPREV(AMD, GRANITE_RIDGE, ANY, _X86_CHIPREV_REV_MATCH_ALL),
 
+	_DECL_CHIPREV(AMD, KRACKAN, UNKNOWN, 0x0001),
+	_DECL_CHIPREV(AMD, KRACKAN, A0, 0x0002),
+	_DECL_CHIPREV(AMD, KRACKAN, ANY, _X86_CHIPREV_REV_MATCH_ALL),
+
+	_DECL_CHIPREV(AMD, STRIX_HALO, UNKNOWN, 0x0001),
+	_DECL_CHIPREV(AMD, STRIX_HALO, A0, 0x0002),
+	_DECL_CHIPREV(AMD, STRIX_HALO, ANY, _X86_CHIPREV_REV_MATCH_ALL),
+
+
 	/* Keep at the end */
 	X86_CHIPREV_ANY = _X86_CHIPREV_MKREV(_X86_VENDOR_MATCH_ALL, X86_PF_ANY,
 	    _X86_CHIPREV_REV_MATCH_ALL)
@@ -1476,7 +1536,8 @@ typedef enum x86_uarchrev {
 #define	X86_SOCKET_FL1		_X86_SOCKET_MKVAL(X86_VENDOR_AMD, 0x2b)
 #define	X86_SOCKET_SP6		_X86_SOCKET_MKVAL(X86_VENDOR_AMD, 0x2c)
 #define	X86_SOCKET_TR5		_X86_SOCKET_MKVAL(X86_VENDOR_AMD, 0x2d)
-#define	X86_NUM_SOCKETS_AMD	0x2d
+#define	X86_SOCKET_FP11		_X86_SOCKET_MKVAL(X86_VENDOR_AMD, 0x2e)
+#define	X86_NUM_SOCKETS_AMD	0x2e
 
 /*
  * Hygon socket types
@@ -1691,6 +1752,7 @@ extern uint64_t xrdmsr(uint_t);
 extern void xwrmsr(uint_t, const uint64_t);
 extern int checked_rdmsr(uint_t, uint64_t *);
 extern int checked_wrmsr(uint_t, uint64_t);
+extern void wrmsr_and_test(uint_t, const uint64_t);
 
 extern void invalidate_cache(void);
 extern ulong_t getcr4(void);

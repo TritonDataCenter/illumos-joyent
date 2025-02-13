@@ -19,7 +19,7 @@
 # CDDL HEADER END
 #
 #
-# Copyright 2023 MNX Cloud, Inc.
+# Copyright 2025 MNX Cloud, Inc.
 # Copyright 2020 Joyent, Inc.
 # Copyright 2017 ASS-Einrichtungssysteme GmbH
 #
@@ -4632,14 +4632,17 @@ f usr/include/sys/nvme/kioxia_cd8.h 0644 root bin
 f usr/include/sys/nvme/micron.h 0644 root bin
 f usr/include/sys/nvme/micron_7300.h 0644 root bin
 f usr/include/sys/nvme/micron_74x0.h 0644 root bin
+f usr/include/sys/nvme/micron_9550.h 0644 root bin
 f usr/include/sys/nvme/micron_x500.h 0644 root bin
 f usr/include/sys/nvme/ocp.h 0644 root bin
+f usr/include/sys/nvme/phison.h 0644 root bin
 f usr/include/sys/nvme/solidigm.h 0644 root bin
 f usr/include/sys/nvme/solidigm_p5xxx.h 0644 root bin
 f usr/include/sys/nvme/solidigm_ps10x0.h 0644 root bin
 f usr/include/sys/nvme/wdc.h 0644 root bin
 f usr/include/sys/nvme/wdc_sn65x.h 0644 root bin
 f usr/include/sys/nvme/wdc_sn840.h 0644 root bin
+f usr/include/sys/nvme/wdc_sn861.h 0644 root bin
 f usr/include/sys/nvpair.h 0644 root bin
 f usr/include/sys/nvpair_impl.h 0644 root bin
 f usr/include/sys/objfs.h 0644 root bin
@@ -6120,6 +6123,7 @@ f usr/lib/fs/pcfs/fstyp.so.1 0555 root bin
 h usr/lib/fs/pcfs/fstyp=usr/sbin/fstyp
 f usr/lib/fs/pcfs/mkfs 0555 root bin
 f usr/lib/fs/pcfs/mount 0555 root bin
+f usr/lib/fs/pcfs/pmbr 0444 root bin
 d usr/lib/fs/proc 0755 root sys
 f usr/lib/fs/proc/mount 0555 root bin
 d usr/lib/fs/sharefs 0755 root sys
@@ -6671,6 +6675,7 @@ f usr/lib/iconv/amd64/UCS-2LE%UTF-8.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%646.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%UCS-2.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%UCS-2LE.so 0755 root bin
+f usr/lib/iconv/alias 0444 root bin
 f usr/lib/idmapd 0555 root bin
 d usr/lib/inet 0755 root bin
 d usr/lib/inet/amd64 0755 root bin
@@ -13860,6 +13865,7 @@ s usr/share/man/man3c/schedctl_lookup.3c=schedctl_init.3c
 s usr/share/man/man3c/schedctl_start.3c=schedctl_init.3c
 s usr/share/man/man3c/schedctl_stop.3c=schedctl_init.3c
 s usr/share/man/man3c/seconvert.3c=econvert.3c
+s usr/share/man/man3c/secure_getenv.3c=getenv.3c
 s usr/share/man/man3c/seed48.3c=drand48.3c
 f usr/share/man/man3c/seekdir.3c 0444 root bin
 f usr/share/man/man3c/select.3c 0444 root bin
