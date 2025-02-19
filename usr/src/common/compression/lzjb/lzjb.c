@@ -45,9 +45,9 @@
 #define	OFFSET_MASK	((1 << (16 - MATCH_BITS)) - 1)
 #define	LEMPEL_SIZE	1024
 
-/*ARGSUSED*/
 size_t
-lzjb_compress(void *s_start, void *d_start, size_t s_len, size_t d_len, int n)
+lzjb_compress(void *s_start, void *d_start, size_t s_len, size_t d_len,
+    int n __unused)
 {
 	uchar_t *src = s_start;
 	uchar_t *dst = d_start;
@@ -94,9 +94,9 @@ lzjb_compress(void *s_start, void *d_start, size_t s_len, size_t d_len, int n)
 	return (dst - (uchar_t *)d_start);
 }
 
-/*ARGSUSED*/
 int
-lzjb_decompress(void *s_start, void *d_start, size_t s_len, size_t d_len, int n)
+lzjb_decompress(void *s_start, void *d_start, size_t s_len, size_t d_len,
+    int n __unused)
 {
 	uchar_t *src = s_start;
 	uchar_t *dst = d_start;

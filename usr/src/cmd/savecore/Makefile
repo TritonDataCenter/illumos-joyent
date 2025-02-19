@@ -35,7 +35,8 @@ include ../Makefile.ctf
 CSTD = $(CSTD_GNU99)
 
 CFLAGS += $(CCVERBOSE)
-CPPFLAGS += -DBZ_NO_STDIO -I$(SRC)/common -I$(SRC)/uts/common
+CPPFLAGS += -DBZ_NO_STDIO
+CPPFLAGS += -I$(SRC)/common -I$(SRC)/common/compression -I$(SRC)/uts/common
 
 LDLIBS += -L$(ROOT)/usr/lib/fm/64 -lfmevent -lnvpair
 LDFLAGS += -R/usr/lib/fm/64
@@ -80,8 +81,8 @@ include ../Makefile.targ
 	$(COMPILE.c) $<
 	$(POST_PROCESS_O)
 
-bz2%.o: ../../common/bzip2/%.c
-	$(COMPILE.c) -o $@ -I$(SRC)/common/bzip2 $<
+bz2%.o: ../../common/compression/bzip2/%.c
+	$(COMPILE.c) -o $@ $<
 	$(POST_PROCESS_O)
 
 %.o: ../../common/crypto/chacha/%.c

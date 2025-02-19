@@ -17,7 +17,7 @@
 include		../Makefile.tools
 
 SOFTCORE=	$(SRC)/common/ficl/softcore
-LZ4=		$(SRC)/common/lz4
+LZ4=		$(SRC)/common/compression/lz4
 PROG=		makesoftcore
 
 CSTD=		$(CSTD_GNU99)

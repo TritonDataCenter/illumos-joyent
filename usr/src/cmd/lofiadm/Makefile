@@ -33,7 +33,7 @@ POFILES= $(OBJS:%.o=%.po)
 
 include ../Makefile.cmd
 
-CPPFLAGS += -I $(SRC)/common/crypto -I $(SRC)/common/lzma
+CPPFLAGS += -I $(SRC)/common/crypto -I $(SRC)/common/compression/lzma
 LDLIBS += -ldevinfo -lpkcs11 -lcryptoutil
 
 CERRWARN += -_gcc=-Wno-parentheses
@@ -46,12 +46,8 @@ SMATCH=off
 
 all: $(LZMAOBJS) $(PROG) $(POFILE)
 
-LzmaEnc.o:	$(SRC)/common/lzma/LzmaEnc.c
-	$(COMPILE.c) -o $@ $(SRC)/common/lzma/LzmaEnc.c
-	$(POST_PROCESS)
-
-LzFind.o:	$(SRC)/common/lzma/LzFind.c
-	$(COMPILE.c) -o $@ $(SRC)/common/lzma/LzFind.c
+%.o:	$(SRC)/common/compression/lzma/%.c
+	$(COMPILE.c) $<
 	$(POST_PROCESS)
 
 $(PROG): $(OBJS)

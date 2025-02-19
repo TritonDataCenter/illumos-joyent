@@ -157,4 +157,8 @@ nvlist_t *vdev_read_bootenv(vdev_t *);
 extern struct devsw zfs_dev;
 extern struct fs_ops zfs_fsops;
 
+/* compression */
+int lzjb_decompress(void *, void *, size_t, size_t, int);
+int zle_decompress(void *, void *, size_t, size_t, int);
+
 #endif /* _BOOT_LIBZFS_H_ */

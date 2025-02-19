@@ -54,7 +54,8 @@ $(OBJS_DIR)/trees.o := CPPFLAGS += -DHAVE_MEMCPY
 $(OBJS_DIR)/decompress.o := CPPFLAGS += -I$(SRC)/contrib/zlib
 $(OBJS_DIR)/zmod.o := CPPFLAGS += -I$(SRC)/contrib/zlib
 $(OBJS_DIR)/zmod_subr.o := CPPFLAGS += -I$(SRC)/contrib/zlib
-$(OBJS_DIR)/lz4.o := CPPFLAGS += -I$(COMMONBASE)/lz4
+$(OBJS_DIR)/lz4.o := CPPFLAGS += -I$(COMMONBASE)/compression/lz4
+$(OBJS_DIR)/lz4.o := CPPFLAGS += -I$(UTSBASE)/common/fs/zfs
 
 $(OBJS_DIR)/%.o:		$(COMMONBASE)/core/%.c
 	$(COMPILE.c) -o $@ $<
@@ -391,7 +392,19 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/fs/zfs/lua/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(COMMONBASE)/lz4/%.c
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/compression/gzip/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/compression/lz4/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/compression/lzjb/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/compression/zle/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -1628,7 +1641,7 @@ $(OBJS_DIR)/%.o:		$(COMMONBASE)/list/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
-$(OBJS_DIR)/%.o:		$(COMMONBASE)/lzma/%.c
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/compression/lzma/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -1759,6 +1772,6 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/tpm/%.c
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/tpm/%.S
 	$(COMPILE.s) -o $@ $<
 
-$(OBJS_DIR)/bz2%.o:		$(COMMONBASE)/bzip2/%.c
-	$(COMPILE.c) -o $@ -I$(COMMONBASE)/bzip2 $<
+$(OBJS_DIR)/bz2%.o:		$(COMMONBASE)/compression/bzip2/%.c
+	$(COMPILE.c) -o $@ -I$(COMMONBASE)/compression/bzip2 $<
 	$(CTFCONVERT_O)

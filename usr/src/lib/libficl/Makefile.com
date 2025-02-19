@@ -31,7 +31,7 @@ LIBS=	$(DYNLIB)
 CSTD=	$(CSTD_GNU99)
 
 FICLDIR=	$(SRC)/common/ficl
-LZ4=		$(SRC)/common/lz4
+LZ4=		$(SRC)/common/compression/lz4
 PNGLITE=	$(SRC)/common/pnglite
 CPPFLAGS +=	-I.. -I$(FICLDIR) -I$(FICLDIR)/emu -D_LARGEFILE64_SOURCE=1
 # These in-gate headers must take precedence over any that may appear in an

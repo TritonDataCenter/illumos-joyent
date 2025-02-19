@@ -38,7 +38,7 @@ SASRC=		$(BOOTSRC)/libsa
 CRYPTOSRC=	$(SASRC)/crypto
 ZFSSRC=		$(SASRC)/zfs
 ZLIB=		$(SRC)/contrib/zlib
-LZ4=		$(SRC)/common/lz4
+LZ4=		$(SRC)/common/compression/lz4
 
 # set standard values
 AS_CPPFLAGS=

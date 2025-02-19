@@ -93,6 +93,11 @@ COMMON_CORE_OBJS +=			\
 
 CORE_OBJS +=	$(COMMON_CORE_OBJS) $($(MACH)_CORE_OBJS)
 
+GZIP_OBJS =	gzip.o
+LZJB_OBJS =	lzjb.o
+LZ4_OBJS =	lz4.o
+ZLE_OBJS =	zle.o
+
 ZLIB_OBJS =	zutil.o zmod.o zmod_subr.o \
 		adler32.o crc32.o deflate.o inffast.o \
 		inflate.o inftrees.o trees.o
@@ -1417,10 +1422,7 @@ ZFS_COMMON_OBJS +=		\
 	dsl_prop.o		\
 	dsl_scan.o		\
 	zfeature.o		\
-	gzip.o			\
 	hkdf.o			\
-	lz4.o			\
-	lzjb.o			\
 	metaslab.o		\
 	mmp.o			\
 	multilist.o		\
@@ -1483,7 +1485,6 @@ ZFS_COMMON_OBJS +=		\
 	zio_compress.o		\
 	zio_crypt.o		\
 	zio_inject.o		\
-	zle.o			\
 	zrlock.o		\
 	zthr.o
 

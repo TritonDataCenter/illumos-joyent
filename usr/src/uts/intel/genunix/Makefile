@@ -72,9 +72,12 @@ BINARY		=
 IPCTF_TARGET	= $(IPCTF)
 
 CPPFLAGS	+= -I$(SRC)/common
-CPPFLAGS	+= -I$(SRC)/uts/common/fs/zfs
 
 CPPFLAGS	+= -I$(UTSBASE)/i86pc
+
+$(OBJS_DIR)/dumpsubr.o := CPPFLAGS += -I$(SRC)/common/compression
+$(OBJS_DIR)/tlabel.o := CPPFLAGS += -I$(SRC)/uts/common/fs/zfs
+$(OBJS_DIR)/vfs.o := CPPFLAGS += -I$(SRC)/uts/common/fs/zfs
 
 CERRWARN	+= -_gcc=-Wno-unused-variable
 CERRWARN	+= -_gcc=-Wno-unused-value

@@ -46,7 +46,7 @@ include $(UTSBASE)/intel/Makefile.intel
 #
 #	Overrides.
 #
-INC_PATH	+= -I$(SRC)/common/lzma
+INC_PATH	+= -I$(SRC)/common/compression/lzma
 
 #
 #	Define targets

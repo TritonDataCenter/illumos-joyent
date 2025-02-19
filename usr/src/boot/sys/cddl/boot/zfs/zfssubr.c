@@ -159,9 +159,6 @@ typedef struct zio_compress_info {
 	const char		*ci_name;	/* algorithm name */
 } zio_compress_info_t;
 
-#include "lzjb.c"
-#include "zle.c"
-
 /*
  * Compression vectors.
  */

@@ -43,6 +43,10 @@ DBOOT		= dboot
 
 OBJECTS		= $(SPECIAL_OBJS:%=$(OBJS_DIR)/%) \
 		  $(CORE_OBJS:%=$(OBJS_DIR)/%) \
+		  $(GZIP_OBJS:%=$(OBJS_DIR)/%) \
+		  $(LZ4_OBJS:%=$(OBJS_DIR)/%) \
+		  $(LZJB_OBJS:%=$(OBJS_DIR)/%) \
+		  $(ZLE_OBJS:%=$(OBJS_DIR)/%) \
 		  $(KRTLD_OBJS:%=$(OBJS_DIR)/%) \
 		  $(MACH_NOT_YET_KMODS:%=$(OBJS_DIR)/%)
 
