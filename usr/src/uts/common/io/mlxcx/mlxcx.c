@@ -650,61 +650,6 @@ mlxcx_panic(mlxcx_t *mlxp, const char *fmt, ...)
 	va_end(ap);
 }
 
-uint16_t
-mlxcx_get16(mlxcx_t *mlxp, uintptr_t off)
-{
-	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
-	return (ddi_get16(mlxp->mlx_regs_handle, (void *)addr));
-}
-
-uint32_t
-mlxcx_get32(mlxcx_t *mlxp, uintptr_t off)
-{
-	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
-	return (ddi_get32(mlxp->mlx_regs_handle, (void *)addr));
-}
-
-uint64_t
-mlxcx_get64(mlxcx_t *mlxp, uintptr_t off)
-{
-	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
-	return (ddi_get64(mlxp->mlx_regs_handle, (void *)addr));
-}
-
-void
-mlxcx_put32(mlxcx_t *mlxp, uintptr_t off, uint32_t val)
-{
-	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
-	ddi_put32(mlxp->mlx_regs_handle, (void *)addr, val);
-}
-
-void
-mlxcx_put64(mlxcx_t *mlxp, uintptr_t off, uint64_t val)
-{
-	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
-	ddi_put64(mlxp->mlx_regs_handle, (void *)addr, val);
-}
-
-void
-mlxcx_uar_put32(mlxcx_t *mlxp, mlxcx_uar_t *mlu, uintptr_t off, uint32_t val)
-{
-	/*
-	 * The UAR is always inside the first BAR, which we mapped as
-	 * mlx_regs
-	 */
-	uintptr_t addr = off + (uintptr_t)mlu->mlu_base +
-	    (uintptr_t)mlxp->mlx_regs_base;
-	ddi_put32(mlxp->mlx_regs_handle, (void *)addr, val);
-}
-
-void
-mlxcx_uar_put64(mlxcx_t *mlxp, mlxcx_uar_t *mlu, uintptr_t off, uint64_t val)
-{
-	uintptr_t addr = off + (uintptr_t)mlu->mlu_base +
-	    (uintptr_t)mlxp->mlx_regs_base;
-	ddi_put64(mlxp->mlx_regs_handle, (void *)addr, val);
-}
-
 static void
 mlxcx_fm_fini(mlxcx_t *mlxp)
 {
@@ -816,6 +761,7 @@ mlxcx_teardown_bufs(mlxcx_t *mlxp)
 	list_destroy(&mlxp->mlx_buf_shards);
 
 	kmem_cache_destroy(mlxp->mlx_bufs_cache);
+	kmem_cache_destroy(mlxp->mlx_mbrm_cache);
 }
 
 static void
@@ -1259,7 +1205,7 @@ mlxcx_regs_map(mlxcx_t *mlxp)
 	 * device.
 	 */
 	bzero(&da, sizeof (ddi_device_acc_attr_t));
-	da.devacc_attr_version = DDI_DEVICE_ATTR_V0;
+	da.devacc_attr_version = DDI_DEVICE_ATTR_V1;
 	da.devacc_attr_endian_flags = DDI_STRUCTURE_BE_ACC;
 	da.devacc_attr_dataorder = DDI_STRICTORDER_ACC;
 	if (DDI_FM_ACC_ERR_CAP(mlxp->mlx_fm_caps)) {
@@ -1434,6 +1380,26 @@ mlxcx_bufs_cache_destr(void *arg, void *cookie)
 	list_destroy(&b->mlb_tx_chain);
 }
 
+static int
+mlxcx_mbrm_cache_constr(void *arg, void *cookie, int kmflags)
+{
+	mlxcx_t *mlxp = cookie;
+	mlxcx_buf_return_mblk_t *mbrm = arg;
+	(void)mlxp;
+	bzero(mbrm, sizeof (mlxcx_buf_return_mblk_t));
+	return (0);
+}
+
+static void
+mlxcx_mbrm_cache_destr(void *arg, void *cookie)
+{
+	mlxcx_t *mlxp = cookie;
+	mlxcx_buf_return_mblk_t *mbrm = arg;
+	(void)mlxp;
+	VERIFY3P(mbrm->mbrm_mp, ==, NULL);
+	VERIFY(!list_link_active(&mbrm->mbrm_entry));
+}
+
 mlxcx_buf_shard_t *
 mlxcx_mlbs_create(mlxcx_t *mlxp)
 {
@@ -1466,6 +1432,12 @@ mlxcx_setup_bufs(mlxcx_t *mlxp)
 	mlxp->mlx_bufs_cache = kmem_cache_create(namebuf,
 	    sizeof (mlxcx_buffer_t), sizeof (uint64_t),
 	    mlxcx_bufs_cache_constr, mlxcx_bufs_cache_destr,
+	    NULL, mlxp, NULL, 0);
+	(void) snprintf(namebuf, KSTAT_STRLEN, "mlxcx%d_mbrm_cache",
+	    ddi_get_instance(mlxp->mlx_dip));
+	mlxp->mlx_mbrm_cache = kmem_cache_create(namebuf,
+	    sizeof (mlxcx_buf_return_mblk_t), sizeof (uint64_t),
+	    mlxcx_mbrm_cache_constr, mlxcx_mbrm_cache_destr,
 	    NULL, mlxp, NULL, 0);
 
 	list_create(&mlxp->mlx_buf_shards, sizeof (mlxcx_buf_shard_t),
@@ -1518,10 +1490,11 @@ mlxcx_eq_check(void *arg)
 {
 	mlxcx_t *mlxp = (mlxcx_t *)arg;
 	mlxcx_event_queue_t *eq;
-	mlxcx_eventq_ctx_t ctx;
+	mlxcx_eventq_ctx_t *ctx;
 	const char *str;
-
 	uint_t i;
+
+	ctx = kmem_zalloc(sizeof (*ctx), KM_SLEEP);
 
 	for (i = 0; i < mlxp->mlx_intr_count; ++i) {
 		eq = &mlxp->mlx_eqs[i];
@@ -1536,11 +1509,11 @@ mlxcx_eq_check(void *arg)
 		 */
 		ASSERT0(eq->mleq_state & MLXCX_EQ_DESTROYED);
 
-		if (!mlxcx_cmd_query_eq(mlxp, eq, &ctx))
+		if (!mlxcx_cmd_query_eq(mlxp, eq, ctx))
 			continue;
 
 		str = "???";
-		switch (ctx.mleqc_status) {
+		switch (ctx->mleqc_status) {
 		case MLXCX_EQ_STATUS_OK:
 			break;
 		case MLXCX_EQ_STATUS_WRITE_FAILURE:
@@ -1548,14 +1521,14 @@ mlxcx_eq_check(void *arg)
 			break;
 		}
 
-		if (ctx.mleqc_status != MLXCX_EQ_STATUS_OK) {
+		if (ctx->mleqc_status != MLXCX_EQ_STATUS_OK) {
 			mlxcx_fm_qstate_ereport(mlxp, "event",
-			    eq->mleq_num, str, ctx.mleqc_status);
+			    eq->mleq_num, str, ctx->mleqc_status);
 			mlxcx_warn(mlxp, "EQ %u is in bad status: %x (%s)",
-			    eq->mleq_intr_index, ctx.mleqc_status, str);
+			    eq->mleq_intr_index, ctx->mleqc_status, str);
 		}
 
-		if (ctx.mleqc_state != MLXCX_EQ_ST_ARMED &&
+		if (ctx->mleqc_state != MLXCX_EQ_ST_ARMED &&
 		    (eq->mleq_state & MLXCX_EQ_ARMED)) {
 			if (eq->mleq_cc == eq->mleq_check_disarm_cc &&
 			    ++eq->mleq_check_disarm_cnt >= 3) {
@@ -1569,6 +1542,8 @@ mlxcx_eq_check(void *arg)
 			eq->mleq_check_disarm_cnt = 0;
 		}
 	}
+
+	kmem_free(ctx, sizeof (*ctx));
 }
 
 static void
@@ -1576,9 +1551,11 @@ mlxcx_cq_check(void *arg)
 {
 	mlxcx_t *mlxp = (mlxcx_t *)arg;
 	mlxcx_completion_queue_t *cq;
-	mlxcx_completionq_ctx_t ctx;
+	mlxcx_completionq_ctx_t *ctx;
 	const char *str, *type;
 	uint_t v;
+
+	ctx = kmem_zalloc(sizeof (*ctx), KM_SLEEP);
 
 	for (cq = list_head(&mlxp->mlx_cqs); cq != NULL;
 	    cq = list_next(&mlxp->mlx_cqs, cq)) {
@@ -1597,7 +1574,7 @@ mlxcx_cq_check(void *arg)
 		if (cq->mlcq_fm_repd_qstate)
 			continue;
 
-		if (!mlxcx_cmd_query_cq(mlxp, cq, &ctx))
+		if (!mlxcx_cmd_query_cq(mlxp, cq, ctx))
 			continue;
 
 		if (cq->mlcq_wq != NULL) {
@@ -1613,7 +1590,7 @@ mlxcx_cq_check(void *arg)
 		}
 
 		str = "???";
-		v = get_bits32(ctx.mlcqc_flags, MLXCX_CQ_CTX_STATUS);
+		v = get_bits32(ctx->mlcqc_flags, MLXCX_CQ_CTX_STATUS);
 		switch (v) {
 		case MLXCX_CQC_STATUS_OK:
 			break;
@@ -1636,7 +1613,7 @@ mlxcx_cq_check(void *arg)
 			cq->mlcq_fm_repd_qstate = B_TRUE;
 		}
 
-		v = get_bits32(ctx.mlcqc_flags, MLXCX_CQ_CTX_STATE);
+		v = get_bits32(ctx->mlcqc_flags, MLXCX_CQ_CTX_STATE);
 		if (v != MLXCX_CQC_STATE_ARMED &&
 		    (cq->mlcq_state & MLXCX_CQ_ARMED) &&
 		    !(cq->mlcq_state & MLXCX_CQ_POLLING)) {
@@ -1652,19 +1629,25 @@ mlxcx_cq_check(void *arg)
 			cq->mlcq_check_disarm_cc = 0;
 		}
 	}
+
+	kmem_free(ctx, sizeof (*ctx));
 }
 
 void
 mlxcx_check_sq(mlxcx_t *mlxp, mlxcx_work_queue_t *sq)
 {
-	mlxcx_sq_ctx_t ctx;
+	mlxcx_sq_ctx_t *ctx;
 	mlxcx_sq_state_t state;
 
-	if (!mlxcx_cmd_query_sq(mlxp, sq, &ctx))
-		return;
+	ctx = kmem_zalloc(sizeof (mlxcx_sq_ctx_t), KM_SLEEP);
 
-	ASSERT3U(from_be24(ctx.mlsqc_cqn), ==, sq->mlwq_cq->mlcq_num);
-	state = get_bits32(ctx.mlsqc_flags, MLXCX_SQ_STATE);
+	if (!mlxcx_cmd_query_sq(mlxp, sq, ctx)) {
+		kmem_free(ctx, sizeof (*ctx));
+		return;
+	}
+
+	ASSERT3U(from_be24(ctx->mlsqc_cqn), ==, sq->mlwq_cq->mlcq_num);
+	state = get_bits32(ctx->mlsqc_flags, MLXCX_SQ_STATE);
 	switch (state) {
 	case MLXCX_SQ_STATE_RST:
 		if (sq->mlwq_state & MLXCX_WQ_STARTED) {
@@ -1691,20 +1674,25 @@ mlxcx_check_sq(mlxcx_t *mlxp, mlxcx_work_queue_t *sq)
 		sq->mlwq_fm_repd_qstate = B_TRUE;
 		break;
 	}
+
+	kmem_free(ctx, sizeof (mlxcx_sq_ctx_t));
 }
 
 void
 mlxcx_check_rq(mlxcx_t *mlxp, mlxcx_work_queue_t *rq)
 {
-	mlxcx_rq_ctx_t ctx;
+	mlxcx_rq_ctx_t *ctx;
 	mlxcx_rq_state_t state;
 
+	ctx = kmem_zalloc(sizeof (*ctx), KM_SLEEP);
 
-	if (!mlxcx_cmd_query_rq(mlxp, rq, &ctx))
+	if (!mlxcx_cmd_query_rq(mlxp, rq, ctx)) {
+		kmem_free(ctx, sizeof (*ctx));
 		return;
+	}
 
-	ASSERT3U(from_be24(ctx.mlrqc_cqn), ==, rq->mlwq_cq->mlcq_num);
-	state = get_bits32(ctx.mlrqc_flags, MLXCX_RQ_STATE);
+	ASSERT3U(from_be24(ctx->mlrqc_cqn), ==, rq->mlwq_cq->mlcq_num);
+	state = get_bits32(ctx->mlrqc_flags, MLXCX_RQ_STATE);
 	switch (state) {
 	case MLXCX_RQ_STATE_RST:
 		if (rq->mlwq_state & MLXCX_WQ_STARTED) {
@@ -1731,6 +1719,8 @@ mlxcx_check_rq(mlxcx_t *mlxp, mlxcx_work_queue_t *rq)
 		rq->mlwq_fm_repd_qstate = B_TRUE;
 		break;
 	}
+
+	kmem_free(ctx, sizeof (*ctx));
 }
 
 static void
