@@ -1,6 +1,5 @@
 #!/usr/bin/ksh
 #
-#
 # This file and its contents are supplied under the terms of the
 # Common Development and Distribution License ("CDDL"), version 1.0.
 # You may only use this file in accordance with the terms of version
@@ -12,13 +11,13 @@
 #
 
 #
-# Copyright 2022 MNX Cloud, Inc.
+# Copyright 2025 Oxide Computer Company
 #
 
-if ! add_drv -m '* 0666 root sys' \
-    -p 'read_priv_set=sys_devices write_priv_set=sys_devices' vmm_drv_test; then
-        printf "failed to add vmm_drv_test driver\n" 2>&1
-        exit 1
-fi
+set -o errexit
 
-exit 0
+# Load the required ktest module
+ktest load mac
+
+# Run any mac tests which do not require input
+exec ktest run -n mac::

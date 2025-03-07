@@ -1,5 +1,3 @@
-#!/usr/bin/ksh
-#
 #
 # This file and its contents are supplied under the terms of the
 # Common Development and Distribution License ("CDDL"), version 1.0.
@@ -12,12 +10,10 @@
 #
 
 #
-# Copyright 2022 MNX Cloud, Inc.
+# Copyright 2025 Oxide Computer Company
 #
 
-if ! rem_drv vmm_drv_test; then
-        printf "failed to remove vmm_drv_test driver\n" 2>&1
-        exit 1
-fi
+include ../Makefile.com
+include ../../Makefile.lib.64
 
-exit 0
+install: all $(ROOTLIBS64) $(ROOTLINKS64)
