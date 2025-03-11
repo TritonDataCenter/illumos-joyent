@@ -30,7 +30,7 @@ i386_SUBDIRS= bhyve kvm lx
 i386_MSGSUBDIRS= lx
 
 SUBDIRS= shared .WAIT sn1 solaris10 ipkg labeled \
-    jcommon joyent joyent-minimal $($(MACH)_SUBDIRS)
+    jcommon joyent joyent-minimal builder $($(MACH)_SUBDIRS)
 
 MSGSUBDIRS= solaris10 shared $($(MACH)_MSGSUBDIRS)
 
