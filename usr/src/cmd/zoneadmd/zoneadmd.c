@@ -334,13 +334,12 @@ filter_bootargs(zlog_t *zlogp, const char *inargs, char *outargs,
     char *init_file)
 {
 	int argc = 0, argc_save;
-	int i;
+	int i, c;
 	int err = Z_OK;
 	char *arg, *lasts, **argv = NULL, **argv_save;
 	char zonecfg_args[BOOTARGS_MAX];
 	char scratchargs[BOOTARGS_MAX], *sargs;
-	char scratchopt[3];
-	char c;
+	char argsw[5];
 
 	bzero(outargs, BOOTARGS_MAX);
 
@@ -436,11 +435,10 @@ filter_bootargs(zlog_t *zlogp, const char *inargs, char *outargs,
 		case 'm':
 		case 's':
 			/* These pass through unmolested */
-			(void) snprintf(scratchopt, sizeof (scratchopt),
-			    "-%c", c);
-			strnappend(outargs, BOOTARGS_MAX, scratchopt);
-			if (optarg != NULL)
-				strnappend(outargs, BOOTARGS_MAX, optarg);
+			(void) snprintf(argsw, sizeof (argsw), " -%c ", c);
+			(void) strlcat(outargs, argsw, BOOTARGS_MAX);
+			if (optarg)
+				(void) strlcat(outargs, optarg, BOOTARGS_MAX);
 			break;
 		case '?':
 			/*

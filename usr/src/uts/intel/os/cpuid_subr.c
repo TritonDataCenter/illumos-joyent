@@ -34,7 +34,7 @@
  * Copyright 2012 Jens Elkner <jel+illumos@cs.uni-magdeburg.de>
  * Copyright 2012 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
  * Copyright 2019 Joyent, Inc.
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 /*
@@ -350,6 +350,40 @@ static uint32_t amd_skts[][16] = {
 	{
 		[4] = X86_SOCKET_SP5,
 		[8] = X86_SOCKET_SP6
+	},
+	/*
+	 * Family 0x1a models 00-1f	(Zen 5[c] - Turin)
+	 */
+#define	A_SKTS_TURIN			30
+	{
+		[4] = X86_SOCKET_SP5,
+	},
+
+	/*
+	 * Family 0x1a models 20-2f	(Zen 5 - Strix)
+	 * Family 0x1a models 60-6f	(Zen 5 - Krackan)
+	 */
+#define	A_SKTS_STRIX			31
+	{
+		[0] = X86_SOCKET_AM5,
+		[1] = X86_SOCKET_FP8
+	},
+
+	/*
+	 * Family 0x1a models 40-4f	(Zen 5 - Granite Ridge)
+	 */
+#define	A_SKTS_GRANITE_RIDGE		32
+	{
+		[0] = X86_SOCKET_AM5,
+		[1] = X86_SOCKET_FL1
+	},
+
+	/*
+	 * Family 0x1a models 70-77	(Zen 5 - Strix Halo)
+	 */
+#define	A_SKTS_STRIX_HALO		33
+	{
+		[1] = X86_SOCKET_FP11
 	}
 };
 
@@ -406,6 +440,7 @@ static struct amd_sktmap_s amd_sktmap_strs[] = {
 	{ X86_SOCKET_FL1,	"FL1" },
 	{ X86_SOCKET_SP6,	"SP6" },
 	{ X86_SOCKET_TR5,	"TR5" },
+	{ X86_SOCKET_FP11,	"FP11" },
 	{ X86_SOCKET_UNKNOWN,	"Unknown" }	/* Must be last! */
 };
 
@@ -776,7 +811,56 @@ static const struct amd_rev_mapent {
 	{ 0x19, 0xa0, 0xaf, 0x2, 0x2, X86_CHIPREV_AMD_BERGAMO_A2, "RSDN-A2",
 	    X86_UARCHREV_AMD_ZEN4_A2, A_SKTS_BERGAMO },
 	{ 0x19, 0xa0, 0xaf, 0x0, 0xf, X86_CHIPREV_AMD_BERGAMO_UNKNOWN, "???",
-	    X86_UARCHREV_AMD_ZEN4_UNKNOWN, A_SKTS_BERGAMO }
+	    X86_UARCHREV_AMD_ZEN4_UNKNOWN, A_SKTS_BERGAMO },
+
+	/*
+	 * =============== AuthenticAMD Family 0x1a ===============
+	 */
+	/* Turin */
+	{ 0x1a, 0x00, 0x00, 0x0, 0x0, X86_CHIPREV_AMD_TURIN_A0, "BRH-A0",
+	    X86_UARCHREV_AMD_ZEN5_A0, A_SKTS_TURIN },
+	/* BRH-A0 & BRH-B0 both map to Zen 5 uarch A0 */
+	{ 0x1a, 0x01, 0x01, 0x0, 0x0, X86_CHIPREV_AMD_TURIN_B0, "BRH-B0",
+	    X86_UARCHREV_AMD_ZEN5_A0, A_SKTS_TURIN },
+	/* BRH-B1 maps to Zen 5 uarch B0 */
+	{ 0x1a, 0x01, 0x01, 0x1, 0x1, X86_CHIPREV_AMD_TURIN_B1, "BRH-B1",
+	    X86_UARCHREV_AMD_ZEN5_B0, A_SKTS_TURIN },
+	{ 0x1a, 0x02, 0x02, 0x0, 0x0, X86_CHIPREV_AMD_TURIN_C0, "BRH-C0",
+	    X86_UARCHREV_AMD_ZEN5_C0, A_SKTS_TURIN },
+	{ 0x1a, 0x02, 0x02, 0x1, 0x1, X86_CHIPREV_AMD_TURIN_C1, "BRH-C1",
+	    X86_UARCHREV_AMD_ZEN5_C1, A_SKTS_TURIN },
+	{ 0x1a, 0x00, 0x0f, 0x0, 0xf, X86_CHIPREV_AMD_TURIN_UNKNOWN, "BRH-???",
+	    X86_UARCHREV_AMD_ZEN5_UNKNOWN, A_SKTS_TURIN },
+	{ 0x1a, 0x10, 0x10, 0x0, 0x0, X86_CHIPREV_AMD_DENSE_TURIN_A0,
+	    "BRHD-A0", X86_UARCHREV_AMD_ZEN5_A0, A_SKTS_TURIN },
+	{ 0x1a, 0x11, 0x11, 0x0, 0x0, X86_CHIPREV_AMD_DENSE_TURIN_B0,
+	    "BRHD-B0", X86_UARCHREV_AMD_ZEN5_B0, A_SKTS_TURIN },
+	/* BRHD-B0 & BRHD-B1 both map to Zen 5 uarch B0 */
+	{ 0x1a, 0x11, 0x11, 0x1, 0x1, X86_CHIPREV_AMD_DENSE_TURIN_B1,
+	    "BRHD-B1", X86_UARCHREV_AMD_ZEN5_B0, A_SKTS_TURIN },
+	{ 0x1a, 0x10, 0x1f, 0x0, 0xf, X86_CHIPREV_AMD_DENSE_TURIN_UNKNOWN,
+	    "BRHD-???", X86_UARCHREV_AMD_ZEN5_UNKNOWN, A_SKTS_TURIN },
+
+	/* Strix and Krackan */
+	{ 0x1a, 0x24, 0x24, 0x0, 0x0, X86_CHIPREV_AMD_STRIX_B0,
+	    "STX-B0", X86_UARCHREV_AMD_ZEN5_B0, A_SKTS_STRIX },
+	{ 0x1a, 0x20, 0x2f, 0x0, 0xf, X86_CHIPREV_AMD_STRIX_UNKNOWN,
+	    "STX-???", X86_UARCHREV_AMD_ZEN5_UNKNOWN, A_SKTS_STRIX },
+	{ 0x1a, 0x60, 0x60, 0x0, 0x0, X86_CHIPREV_AMD_KRACKAN_A0,
+	    "KRK-A0", X86_UARCHREV_AMD_ZEN5_A0, A_SKTS_STRIX },
+	{ 0x1a, 0x60, 0x6f, 0x0, 0xf, X86_CHIPREV_AMD_KRACKAN_UNKNOWN,
+	    "KRK-???", X86_UARCHREV_AMD_ZEN5_UNKNOWN, A_SKTS_STRIX },
+
+	/* Granite Ridge */
+	{ 0x1a, 0x44, 0x44, 0x0, 0x0, X86_CHIPREV_AMD_GRANITE_RIDGE_B0,
+	    "GNR-B0", X86_UARCHREV_AMD_ZEN5_B0, A_SKTS_GRANITE_RIDGE },
+	{ 0x1a, 0x40, 0x4f, 0x0, 0xf, X86_CHIPREV_AMD_GRANITE_RIDGE_UNKNOWN,
+	    "GNR-???", X86_UARCHREV_AMD_ZEN5_UNKNOWN, A_SKTS_GRANITE_RIDGE },
+
+	{ 0x1a, 0x70, 0x70, 0x0, 0x0, X86_CHIPREV_AMD_STRIX_HALO_A0,
+	    "STXH-A0", X86_UARCHREV_AMD_ZEN5_A0, A_SKTS_STRIX_HALO },
+	{ 0x1a, 0x70, 0x77, 0x0, 0xf, X86_CHIPREV_AMD_STRIX_HALO_UNKNOWN,
+	    "STXH-???", X86_UARCHREV_AMD_ZEN5_UNKNOWN, A_SKTS_STRIX_HALO }
 };
 
 /*

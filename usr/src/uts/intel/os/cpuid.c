@@ -24,8 +24,8 @@
  * Copyright 2013 Nexenta Systems, Inc. All rights reserved.
  * Copyright 2014 Josef "Jeff" Sipek <jeffpc@josefsipek.net>
  * Copyright 2020 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
- * Copyright 2022 MNX Cloud, Inc.
+ * Copyright 2025 Oxide Computer Company
+ * Copyright 2024 MNX Cloud, Inc.
  */
 /*
  * Copyright (c) 2010, Intel Corporation.
@@ -324,19 +324,25 @@
  * pass that captures it has been executed.  These conditions can be tested
  * using cpuid_checkpass().
  *
- * The Microcode Pass
+ * ---------
+ * Microcode
+ * ---------
  *
- * After a microcode update, we do a selective rescan of the cpuid leaves to
- * determine what features have changed. Microcode updates can provide more
- * details about security related features to deal with issues like Spectre and
- * L1TF. On occasion, vendors have violated their contract and removed bits.
- * However, we don't try to detect that because that puts us in a situation that
- * we really can't deal with. As such, the only thing we rescan are security
- * related features today. See cpuid_pass_ucode().  This pass may be run in a
- * different sequence on APs and therefore is not part of the sequential order;
- * It is invoked directly instead of by cpuid_execpass() and its completion
- * status cannot be checked by cpuid_checkpass().  This could be integrated with
- * a more complex dependency mechanism if warranted by future developments.
+ * Microcode updates may be applied by the firmware (BIOS/UEFI) and/or by the
+ * operating system and may result in architecturally visible changes (e.g.,
+ * changed MSR or CPUID bits). As such, we want to apply any updates as early
+ * as possible during the boot process -- right after the IDENT pass.
+ *
+ * Microcode may also be updated at runtime via ucodeadm(8), after which we do
+ * a selective rescan of the cpuid leaves to determine what features have
+ * changed. Microcode updates can provide more details about security related
+ * features to deal with issues like Spectre and L1TF. On occasion, vendors have
+ * violated their contract and removed bits. However, we don't try to detect
+ * that because that puts us in a situation that we really can't deal with. As
+ * such, the only thing we rescan are security related features today. See
+ * cpuid_pass_ucode(). This is not a pass in the same sense as the others and
+ * is run on demand, via cpuid_post_ucodeadm().
+ *
  *
  * All of the passes are run on all CPUs. However, for the most part we only
  * care about what the boot CPU says about this information and use the other
@@ -1107,12 +1113,14 @@
  *   - Spectre v1
  *   - swapgs (Spectre v1 variant)
  *   - Spectre v2
+ *     - Branch History Injection (BHI).
  *   - Meltdown (Spectre v3)
  *   - Rogue Register Read (Spectre v3a)
  *   - Speculative Store Bypass (Spectre v4)
  *   - ret2spec, SpectreRSB
  *   - L1 Terminal Fault (L1TF)
  *   - Microarchitectural Data Sampling (MDS)
+ *   - Register File Data Sampling (RFDS)
  *
  * Each of these requires different sets of mitigations and has different attack
  * surfaces. For the most part, this discussion is about protecting the kernel
@@ -1202,10 +1210,14 @@
  * enhanced IBRS. When eIBRS is present and enabled, then there should be
  * nothing else that we need to do to protect the kernel at this time.
  *
- * Unfortunately, eIBRS or not, we need to manually overwrite the contents of
- * the return stack buffer. We do this through the x86_rsb_stuff() function.
- * Currently this is employed on context switch and vmx_exit. The
- * x86_rsb_stuff() function is disabled only when mitigations in general are.
+ * Unfortunately, not all eIBRS implementations are sufficient to guard
+ * against RSB manipulations, so we still need to manually overwrite the
+ * contents of the return stack buffer unless the hardware specifies we are
+ * covered. We do this through the x86_rsb_stuff() function.  Currently this
+ * is employed on context switch and vmx_exit. The x86_rsb_stuff() function is
+ * disabled only when mitigations in general are, or if we have hardware
+ * indicating no need for post-barrier RSB protections, either in one place
+ * (old hardware), or on both (newer hardware).
  *
  * If SMEP is not present, then we would have to stuff the RSB every time we
  * transitioned from user mode to the kernel, which isn't very practical right
@@ -1245,6 +1257,33 @@
  * what the kernel does. The threat model of kmdb is more limited and therefore
  * it may make more sense to investigate using prediction barriers as the whole
  * system is only executing a single instruction at a time while in kmdb.
+ *
+ * Branch History Injection (BHI)
+ *
+ * BHI is a specific form of SPECTREv2 where an attacker may manipulate branch
+ * history before transitioning from user to supervisor mode (or from VMX
+ * non-root/guest to root mode). The attacker can then exploit certain
+ * compiler-generated code-sequences ("gadgets") to disclose information from
+ * other contexts or domains.  Recent (late-2023/early-2024) research in
+ * object code analysis discovered many more potential gadgets than what was
+ * initially reported (which previously was confined to Linux use of
+ * unprivileged eBPF).
+ *
+ * The BHI threat doesn't exist in processsors that predate eIBRS, or in AMD
+ * ones. Some eIBRS processors have the ability to disable branch history in
+ * certain (but not all) cases using an MSR write. eIBRS processors that don't
+ * have the ability to disable must use a software sequence to scrub the
+ * branch history buffer.
+ *
+ * BHI_DIS_S (the aforementioned MSR) prevents ring 0 from ring 3 (VMX guest
+ * or VMX root). It does not protect different user processes from each other,
+ * or ring 3 VMX guest from ring 3 VMX root or vice versa.
+ *
+ * The BHI clearing sequence prevents user exploiting kernel gadgets, and user
+ * A's use of user B's gadgets.
+ *
+ * SMEP and eIBRS are a continuing defense-in-depth measure protecting the
+ * kernel.
  *
  * SPECTRE v1, v4
  *
@@ -1422,6 +1461,16 @@
  * effective. Currently we basically are relying on microcode for processors
  * that enumerate MDS_NO.
  *
+ * Another MDS-variant in a few select Intel Atom CPUs is Register File Data
+ * Sampling: RFDS. This allows an attacker to sample values that were in any
+ * of integer, floating point, or vector registers. This was discovered by
+ * Intel during internal validation work.  The existence of the RFDS_NO
+ * capability, or the LACK of a RFDS_CLEAR capability, means we do not have to
+ * act. Intel has said some CPU models immune to RFDS MAY NOT enumerate
+ * RFDS_NO. If RFDS_NO is not set, but RFDS_CLEAR is, we must set x86_md_clear,
+ * and make sure it's using VERW. Unlike MDS, RFDS can't be helped by the
+ * MSR that L1D uses.
+ *
  * The microcode features are enumerated as part of the IA32_ARCH_CAPABILITIES.
  * When bit 7 (IA32_ARCH_CAP_TSX_CTRL) is present, then we are given two
  * different powers. The first allows us to cause all transactions to
@@ -1462,6 +1511,8 @@
  *  - L1TF: spec_uarch_flush, SMT exclusion, requires microcode
  *  - MDS: x86_md_clear, requires microcode, disabling SMT
  *  - TAA: x86_md_clear and disabling SMT OR microcode and disabling TSX
+ *  - RFDS: microcode with x86_md_clear if RFDS_CLEAR set and RFDS_NO not.
+ *  - BHI: software sequence, and use of BHI_DIS_S if microcode has it.
  *
  * The following table indicates the x86 feature set bits that indicate that a
  * given problem has been solved or a notable feature is present:
@@ -1469,6 +1520,8 @@
  *  - RDCL_NO: Meltdown, L1TF, MSBDS subset of MDS
  *  - MDS_NO: All forms of MDS
  *  - TAA_NO: TAA
+ *  - RFDS_NO: RFDS
+ *  - BHI_NO: BHI
  */
 
 #include <sys/types.h>
@@ -1660,7 +1713,12 @@ static char *x86_feature_names[NUM_X86_FEATURES] = {
 	"avx512_bitalg",
 	"avx512_vbmi2",
 	"avx512_bf16",
-	"auto_ibrs"
+	"auto_ibrs",
+	"rfds_no",
+	"rfds_clear",
+	"pbrsb_no",
+	"bhi_no",
+	"bhi_clear"
 };
 
 boolean_t
@@ -1813,7 +1871,7 @@ struct cpuid_info {
 					/* Intel fn: 4, AMD fn: 8000001d */
 	struct cpuid_regs **cpi_cache_leaves;	/* Actual leaves from above */
 	struct cpuid_regs cpi_std[NMAX_CPI_STD];	/* 0 .. 7 */
-	struct cpuid_regs cpi_sub7[1];	/* Leaf 7, sub-leaf 1 */
+	struct cpuid_regs cpi_sub7[2];	/* Leaf 7, sub-leaves 1-2 */
 	/*
 	 * extended function information
 	 */
@@ -1893,6 +1951,7 @@ static struct cpuid_info cpuid_info0;
 #define	CPI_FEATURES_7_0_ECX(cpi)	((cpi)->cpi_std[7].cp_ecx)
 #define	CPI_FEATURES_7_0_EDX(cpi)	((cpi)->cpi_std[7].cp_edx)
 #define	CPI_FEATURES_7_1_EAX(cpi)	((cpi)->cpi_sub7[0].cp_eax)
+#define	CPI_FEATURES_7_2_EDX(cpi)	((cpi)->cpi_sub7[1].cp_edx)
 
 #define	CPI_BRANDID(cpi)	BITX((cpi)->cpi_std[1].cp_ebx, 7, 0)
 #define	CPI_CHUNKS(cpi)		BITX((cpi)->cpi_std[1].cp_ebx, 15, 7)
@@ -2190,8 +2249,22 @@ determine_platform(void)
 			platform_type = HW_BHYVE;
 			return;
 		}
-		if (strcmp(hvstr, HVSIG_MICROSOFT) == 0)
+		if (strcmp(hvstr, HVSIG_MICROSOFT) == 0) {
 			platform_type = HW_MICROSOFT;
+			return;
+		}
+		if (strcmp(hvstr, HVSIG_QEMU_TCG) == 0) {
+			platform_type = HW_QEMU_TCG;
+			return;
+		}
+		if (strcmp(hvstr, HVSIG_VIRTUALBOX) == 0) {
+			platform_type = HW_VIRTUALBOX;
+			return;
+		}
+		if (strcmp(hvstr, HVSIG_ACRN) == 0) {
+			platform_type = HW_ACRN;
+			return;
+		}
 	} else {
 		/*
 		 * Check older VMware hardware versions. VMware hypervisor is
@@ -2823,8 +2896,8 @@ spec_uarch_flush_msr(void)
 /*
  * This function points to a function that will flush certain
  * micro-architectural state on the processor. This flush is used to mitigate
- * two different classes of Intel CPU vulnerabilities: L1TF and MDS. This
- * function can point to one of three functions:
+ * three different classes of Intel CPU vulnerabilities: L1TF, MDS, and RFDS.
+ * This function can point to one of three functions:
  *
  * - A noop which is done because we either are vulnerable, but do not have
  *   microcode available to help deal with a fix, or because we aren't
@@ -2837,7 +2910,8 @@ spec_uarch_flush_msr(void)
  *
  * - x86_md_clear which will flush the MDS related state. This is done when we
  *   have a processor that is vulnerable to MDS, but is not vulnerable to L1TF
- *   (RDCL_NO is set).
+ *   (RDCL_NO is set); or if the CPU is vulnerable to RFDS and indicates VERW
+ *   can clear it (RFDS_CLEAR is set).
  */
 void (*spec_uarch_flush)(void) = spec_uarch_flush_noop;
 
@@ -2846,18 +2920,24 @@ cpuid_update_md_clear(cpu_t *cpu, uchar_t *featureset)
 {
 	struct cpuid_info *cpi = cpu->cpu_m.mcpu_cpi;
 
+	/* Non-Intel doesn't concern us here. */
+	if (cpi->cpi_vendor != X86_VENDOR_Intel)
+		return;
+
 	/*
 	 * While RDCL_NO indicates that one of the MDS vulnerabilities (MSBDS)
 	 * has been fixed in hardware, it doesn't cover everything related to
 	 * MDS. Therefore we can only rely on MDS_NO to determine that we don't
 	 * need to mitigate this.
+	 *
+	 * We must ALSO check the case of RFDS_NO and if RFDS_CLEAR is set,
+	 * because of the small cases of RFDS.
 	 */
-	if (cpi->cpi_vendor != X86_VENDOR_Intel ||
-	    is_x86_feature(featureset, X86FSET_MDS_NO)) {
-		return;
-	}
 
-	if (is_x86_feature(featureset, X86FSET_MD_CLEAR)) {
+	if ((!is_x86_feature(featureset, X86FSET_MDS_NO) &&
+	    is_x86_feature(featureset, X86FSET_MD_CLEAR)) ||
+	    (!is_x86_feature(featureset, X86FSET_RFDS_NO) &&
+	    is_x86_feature(featureset, X86FSET_RFDS_CLEAR))) {
 		const uint8_t nop = NOP_INSTR;
 		uint8_t *md = (uint8_t *)x86_md_clear;
 
@@ -2870,18 +2950,19 @@ cpuid_update_md_clear(cpu_t *cpu, uchar_t *featureset)
 static void
 cpuid_update_l1d_flush(cpu_t *cpu, uchar_t *featureset)
 {
-	boolean_t need_l1d, need_mds;
+	boolean_t need_l1d, need_mds, need_rfds;
 	struct cpuid_info *cpi = cpu->cpu_m.mcpu_cpi;
 
 	/*
-	 * If we're not on Intel or we've mitigated both RDCL and MDS in
-	 * hardware, then there's nothing left for us to do for enabling the
-	 * flush. We can also go ahead and say that SMT exclusion is
+	 * If we're not on Intel or we've mitigated all of RDCL, MDS, and RFDS
+	 * in hardware, then there's nothing left for us to do for enabling
+	 * the flush. We can also go ahead and say that SMT exclusion is
 	 * unnecessary.
 	 */
 	if (cpi->cpi_vendor != X86_VENDOR_Intel ||
 	    (is_x86_feature(featureset, X86FSET_RDCL_NO) &&
-	    is_x86_feature(featureset, X86FSET_MDS_NO))) {
+	    is_x86_feature(featureset, X86FSET_MDS_NO) &&
+	    is_x86_feature(featureset, X86FSET_RFDS_NO))) {
 		extern int smt_exclusion;
 		smt_exclusion = 0;
 		spec_uarch_flush = spec_uarch_flush_noop;
@@ -2912,9 +2993,22 @@ cpuid_update_l1d_flush(cpu_t *cpu, uchar_t *featureset)
 		need_mds = B_FALSE;
 	}
 
+	if (!is_x86_feature(featureset, X86FSET_RFDS_NO) &&
+	    is_x86_feature(featureset, X86FSET_RFDS_CLEAR)) {
+		need_rfds = B_TRUE;
+	} else {
+		need_rfds = B_FALSE;
+	}
+
 	if (need_l1d) {
+		/*
+		 * As of Feb, 2024, no CPU needs L1D *and* RFDS mitigation
+		 * together. If the following VERIFY trips, we need to add
+		 * further fixes here.
+		 */
+		VERIFY(!need_rfds);
 		spec_uarch_flush = spec_uarch_flush_msr;
-	} else if (need_mds) {
+	} else if (need_mds || need_rfds) {
 		spec_uarch_flush = x86_md_clear;
 	} else {
 		/*
@@ -2926,12 +3020,122 @@ cpuid_update_l1d_flush(cpu_t *cpu, uchar_t *featureset)
 }
 
 /*
- * We default to enabling RSB mitigations.
+ * Branch History Injection (BHI) mitigations.
  *
- * NOTE: We used to skip RSB mitigations with eIBRS, but developments around
- * post-barrier RSB guessing suggests we should enable RSB mitigations always
- * unless specifically instructed not to.
+ * Intel has provided a software sequence that will scrub the BHB. Like RSB
+ * (below) we can scribble a return at the beginning to avoid if if the CPU
+ * is modern enough. We can also scribble a return if the CPU is old enough
+ * to not have an RSB (pre-eIBRS).
+ */
+typedef enum {
+	X86_BHI_TOO_OLD_OR_DISABLED,	/* Pre-eIBRS or disabled */
+	X86_BHI_NEW_ENOUGH,		/* AMD, or Intel with BHI_NO set */
+	X86_BHI_DIS_S,			/* BHI_NO == 0, but BHI_DIS_S avail. */
+	/* NOTE: BHI_DIS_S above will still need the software sequence. */
+	X86_BHI_SOFTWARE_SEQUENCE,	/* Use software sequence */
+} x86_native_bhi_mitigation_t;
+
+x86_native_bhi_mitigation_t x86_bhi_mitigation = X86_BHI_SOFTWARE_SEQUENCE;
+
+static void
+cpuid_enable_bhi_dis_s(void)
+{
+	uint64_t val;
+
+	val = rdmsr(MSR_IA32_SPEC_CTRL);
+	val |= IA32_SPEC_CTRL_BHI_DIS_S;
+	wrmsr(MSR_IA32_SPEC_CTRL, val);
+}
+
+/*
+ * This function scribbles RET into the first instruction of x86_bhb_clear()
+ * if SPECTREV2 mitigations are disabled, the CPU is too old, the CPU is new
+ * enough to fix (which includes non-Intel CPUs), or the CPU has an explicit
+ * disable-Branch-History control.
+ */
+static x86_native_bhi_mitigation_t
+cpuid_learn_and_patch_bhi(x86_spectrev2_mitigation_t v2mit, cpu_t *cpu,
+    uchar_t *featureset)
+{
+	struct cpuid_info *cpi = cpu->cpu_m.mcpu_cpi;
+	const uint8_t ret = RET_INSTR;
+	uint8_t *bhb_clear = (uint8_t *)x86_bhb_clear;
+
+	ASSERT0(cpu->cpu_id);
+
+	/* First check for explicitly disabled... */
+	if (v2mit == X86_SPECTREV2_DISABLED) {
+		*bhb_clear = ret;
+		return (X86_BHI_TOO_OLD_OR_DISABLED);
+	}
+
+	/*
+	 * Then check for BHI_NO, which means the CPU doesn't have this bug,
+	 * or if it's non-Intel, in which case this mitigation mechanism
+	 * doesn't apply.
+	 */
+	if (cpi->cpi_vendor != X86_VENDOR_Intel ||
+	    is_x86_feature(featureset, X86FSET_BHI_NO)) {
+		*bhb_clear = ret;
+		return (X86_BHI_NEW_ENOUGH);
+	}
+
+	/*
+	 * Now check for the BHI_CTRL MSR, and then set it if available.
+	 * We will still need to use the software sequence, however.
+	 */
+	if (is_x86_feature(featureset, X86FSET_BHI_CTRL)) {
+		cpuid_enable_bhi_dis_s();
+		return (X86_BHI_DIS_S);
+	}
+
+	/*
+	 * Finally, check if we are too old to bother with RSB:
+	 */
+	if (v2mit == X86_SPECTREV2_RETPOLINE) {
+		*bhb_clear = ret;
+		return (X86_BHI_TOO_OLD_OR_DISABLED);
+	}
+
+	ASSERT(*bhb_clear != ret);
+	return (X86_BHI_SOFTWARE_SEQUENCE);
+}
+
+/*
+ * We default to enabling Return Stack Buffer (RSB) mitigations.
  *
+ * We used to skip RSB mitigations with Intel eIBRS, but developments around
+ * post-barrier RSB (PBRSB) guessing suggests we should enable Intel RSB
+ * mitigations always unless explicitly bypassed, or unless hardware indicates
+ * the bug has been fixed.
+ *
+ * The current decisions for using, or ignoring, a RSB software stuffing
+ * sequence are expressed by the following table:
+ *
+ * +-------+------------+-----------------+--------+
+ * | eIBRS |  PBRSB_NO  |  context switch | vmexit |
+ * +-------+------------+-----------------+--------+
+ * |   Yes |     No     |  stuff          | stuff  |
+ * |   Yes |     Yes    |  ignore         | ignore |
+ * |   No  |     No     |  stuff          | ignore |
+ * +-------+------------+-----------------+--------+
+ *
+ * Note that if an Intel CPU has no eIBRS, it will never enumerate PBRSB_NO,
+ * because machines with no eIBRS do not have a problem with PBRSB overflow.
+ * See the Intel document cited below for details.
+ *
+ * Also note that AMD AUTO_IBRS has no PBRSB problem, so it is not included in
+ * the table above, and that there is no situation where vmexit stuffing is
+ * needed, but context-switch stuffing isn't.
+ */
+
+/* BEGIN CSTYLED */
+/*
+ * https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/advisory-guidance/post-barrier-return-stack-buffer-predictions.html
+ */
+/* END CSTYLED */
+
+/*
  * AMD indicates that when Automatic IBRS is enabled we do not need to implement
  * return stack buffer clearing for VMEXIT as it takes care of it. The manual
  * also states that as long as SMEP and we maintain at least one page between
@@ -2940,17 +3144,41 @@ cpuid_update_l1d_flush(cpu_t *cpu, uchar_t *featureset)
  * present.
  */
 static void
-cpuid_patch_rsb(x86_spectrev2_mitigation_t mit)
+cpuid_patch_rsb(x86_spectrev2_mitigation_t mit, bool intel_pbrsb_no)
 {
 	const uint8_t ret = RET_INSTR;
 	uint8_t *stuff = (uint8_t *)x86_rsb_stuff;
+	uint8_t *vmx_stuff = (uint8_t *)x86_rsb_stuff_vmexit;
 
 	switch (mit) {
 	case X86_SPECTREV2_AUTO_IBRS:
 	case X86_SPECTREV2_DISABLED:
+		/* Don't bother with any RSB stuffing! */
 		*stuff = ret;
+		*vmx_stuff = ret;
+		break;
+	case X86_SPECTREV2_RETPOLINE:
+		/*
+		 * The Intel document on Post-Barrier RSB says that processors
+		 * without eIBRS do not have PBRSB problems upon VMEXIT.
+		 */
+		VERIFY(!intel_pbrsb_no);
+		VERIFY3U(*stuff, !=, ret);
+		*vmx_stuff = ret;
 		break;
 	default:
+		/*
+		 * eIBRS is all that's left.  If CPU claims PBRSB is fixed,
+		 * don't use the RSB mitigation in either case.  Otherwise
+		 * both vmexit and context-switching require the software
+		 * mitigation.
+		 */
+		if (intel_pbrsb_no) {
+			/* CPU claims PBRSB problems are fixed. */
+			*stuff = ret;
+			*vmx_stuff = ret;
+		}
+		VERIFY3U(*stuff, ==, *vmx_stuff);
 		break;
 	}
 }
@@ -3171,6 +3399,14 @@ cpuid_scan_security(cpu_t *cpu, uchar_t *featureset)
 		}
 
 		/*
+		 * Some prediction controls are enumerated by subleaf 2 of
+		 * leaf 7.
+		 */
+		if (CPI_FEATURES_7_2_EDX(cpi) & CPUID_INTC_EDX_7_2_BHI_CTRL) {
+			add_x86_feature(featureset, X86FSET_BHI_CTRL);
+		}
+
+		/*
 		 * Don't read the arch caps MSR on xpv where we lack the
 		 * on_trap().
 		 */
@@ -3217,6 +3453,22 @@ cpuid_scan_security(cpu_t *cpu, uchar_t *featureset)
 					add_x86_feature(featureset,
 					    X86FSET_TAA_NO);
 				}
+				if (reg & IA32_ARCH_CAP_RFDS_NO) {
+					add_x86_feature(featureset,
+					    X86FSET_RFDS_NO);
+				}
+				if (reg & IA32_ARCH_CAP_RFDS_CLEAR) {
+					add_x86_feature(featureset,
+					    X86FSET_RFDS_CLEAR);
+				}
+				if (reg & IA32_ARCH_CAP_PBRSB_NO) {
+					add_x86_feature(featureset,
+					    X86FSET_PBRSB_NO);
+				}
+				if (reg & IA32_ARCH_CAP_BHI_NO) {
+					add_x86_feature(featureset,
+					    X86FSET_BHI_NO);
+				}
 			}
 			no_trap();
 		}
@@ -3247,6 +3499,10 @@ cpuid_scan_security(cpu_t *cpu, uchar_t *featureset)
 			break;
 		}
 
+		/* If we're committed to BHI_DIS_S, set it for this core. */
+		if (x86_bhi_mitigation == X86_BHI_DIS_S)
+			cpuid_enable_bhi_dis_s();
+
 		cpuid_apply_tsx(x86_taa_mitigation, featureset);
 		return;
 	}
@@ -3259,10 +3515,11 @@ cpuid_scan_security(cpu_t *cpu, uchar_t *featureset)
 
 	/*
 	 * By default we've come in with retpolines enabled. Check whether we
-	 * should disable them or enable enhanced or automatic IBRS. RSB
-	 * stuffing is enabled by default. Note, we do not allow the use of AMD
-	 * optimized retpolines as it was disclosed by AMD in March 2022 that
-	 * they were still vulnerable. Prior to that point, we used them.
+	 * should disable them or enable enhanced or automatic IBRS.
+	 *
+	 * Note, we do not allow the use of AMD optimized retpolines as it was
+	 * disclosed by AMD in March 2022 that they were still
+	 * vulnerable. Prior to that point, we used them.
 	 */
 	if (x86_disable_spectrev2 != 0) {
 		v2mit = X86_SPECTREV2_DISABLED;
@@ -3277,7 +3534,8 @@ cpuid_scan_security(cpu_t *cpu, uchar_t *featureset)
 	}
 
 	cpuid_patch_retpolines(v2mit);
-	cpuid_patch_rsb(v2mit);
+	cpuid_patch_rsb(v2mit, is_x86_feature(featureset, X86FSET_PBRSB_NO));
+	x86_bhi_mitigation = cpuid_learn_and_patch_bhi(v2mit, cpu, featureset);
 	x86_spectrev2_mitigation = v2mit;
 	membar_producer();
 
@@ -3296,7 +3554,7 @@ cpuid_scan_security(cpu_t *cpu, uchar_t *featureset)
 
 	/*
 	 * Update whether or not we need to be taking explicit action against
-	 * MDS.
+	 * MDS or RFDS.
 	 */
 	cpuid_update_md_clear(cpu, featureset);
 
@@ -4063,8 +4321,8 @@ cpuid_pass_basic(cpu_t *cpu, void *arg)
 		}
 
 		/*
-		 * If we have subleaf 1 available, grab and store that. This is
-		 * used for more AVX and related features.
+		 * If we have subleaf 1 or 2 available, grab and store
+		 * that. This is used for more AVX and related features.
 		 */
 		if (ecp->cp_eax >= 1) {
 			struct cpuid_regs *c71;
@@ -4072,6 +4330,15 @@ cpuid_pass_basic(cpu_t *cpu, void *arg)
 			c71->cp_eax = 7;
 			c71->cp_ecx = 1;
 			(void) __cpuid_insn(c71);
+		}
+
+		/* Subleaf 2 has certain security indicators in it. */
+		if (ecp->cp_eax >= 2) {
+			struct cpuid_regs *c72;
+			c72 = &cpi->cpi_sub7[1];
+			c72->cp_eax = 7;
+			c72->cp_ecx = 2;
+			(void) __cpuid_insn(c72);
 		}
 	}
 
@@ -4571,7 +4838,7 @@ cpuid_pass_basic(cpu_t *cpu, void *arg)
 	case X86_VENDOR_AMD:
 	case X86_VENDOR_HYGON:
 		if (cpi->cpi_xmaxeax >= CPUID_LEAF_EXT_21) {
-			cp = &cpi->cpi_extd[7];
+			cp = &cpi->cpi_extd[0x21];
 			cp->cp_eax = CPUID_LEAF_EXT_21;
 			cp->cp_ecx = 0;
 			(void) __cpuid_insn(cp);
@@ -5995,11 +6262,11 @@ cpuid_getstep(cpu_t *cpu)
 uint_t
 cpuid_getsig(struct cpu *cpu)
 {
-	ASSERT(cpuid_checkpass(cpu, CPUID_PASS_BASIC));
+	ASSERT(cpuid_checkpass(cpu, CPUID_PASS_IDENT));
 	return (cpu->cpu_m.mcpu_cpi->cpi_std[1].cp_eax);
 }
 
-uint32_t
+x86_chiprev_t
 cpuid_getchiprev(struct cpu *cpu)
 {
 	ASSERT(cpuid_checkpass(cpu, CPUID_PASS_IDENT));
@@ -7574,6 +7841,8 @@ cpuid_deep_cstates_supported(void)
 
 	switch (cpi->cpi_vendor) {
 	case X86_VENDOR_Intel:
+	case X86_VENDOR_AMD:
+	case X86_VENDOR_HYGON:
 		if (cpi->cpi_xmaxeax < 0x80000007)
 			return (0);
 
@@ -7686,6 +7955,8 @@ cpuid_arat_supported(void)
 
 	switch (cpi->cpi_vendor) {
 	case X86_VENDOR_Intel:
+	case X86_VENDOR_AMD:
+	case X86_VENDOR_HYGON:
 		/*
 		 * Always-running Local APIC Timer is
 		 * indicated by CPUID.6.EAX[2].
@@ -7820,7 +8091,8 @@ cpuid_pass_ucode(cpu_t *cpu, uchar_t *fset)
 	 * Reread the CPUID portions that we need for various security
 	 * information.
 	 */
-	if (cpi->cpi_vendor == X86_VENDOR_Intel) {
+	switch (cpi->cpi_vendor) {
+	case X86_VENDOR_Intel:
 		/*
 		 * Check if we now have leaf 7 available to us.
 		 */
@@ -7829,7 +8101,7 @@ cpuid_pass_ucode(cpu_t *cpu, uchar_t *fset)
 			cp.cp_eax = 0;
 			cpi->cpi_maxeax = __cpuid_insn(&cp);
 			if (cpi->cpi_maxeax < 7)
-				return;
+				break;
 		}
 
 		bzero(&cp, sizeof (cp));
@@ -7837,20 +8109,21 @@ cpuid_pass_ucode(cpu_t *cpu, uchar_t *fset)
 		cp.cp_ecx = 0;
 		(void) __cpuid_insn(&cp);
 		cpi->cpi_std[7] = cp;
-	} else if (cpi->cpi_vendor == X86_VENDOR_AMD ||
-	    cpi->cpi_vendor == X86_VENDOR_HYGON) {
+		break;
+
+	case X86_VENDOR_AMD:
+	case X86_VENDOR_HYGON:
 		/* No xcpuid support */
 		if (cpi->cpi_family < 5 ||
 		    (cpi->cpi_family == 5 && cpi->cpi_model < 1))
-			return;
+			break;
 
 		if (cpi->cpi_xmaxeax < CPUID_LEAF_EXT_8) {
 			bzero(&cp, sizeof (cp));
 			cp.cp_eax = CPUID_LEAF_EXT_0;
 			cpi->cpi_xmaxeax = __cpuid_insn(&cp);
-			if (cpi->cpi_xmaxeax < CPUID_LEAF_EXT_8) {
-				return;
-			}
+			if (cpi->cpi_xmaxeax < CPUID_LEAF_EXT_8)
+				break;
 		}
 
 		/*
@@ -7863,22 +8136,24 @@ cpuid_pass_ucode(cpu_t *cpu, uchar_t *fset)
 		platform_cpuid_mangle(cpi->cpi_vendor, CPUID_LEAF_EXT_8, &cp);
 		cpi->cpi_extd[8] = cp;
 
-		if (cpi->cpi_xmaxeax < CPUID_LEAF_EXT_21) {
-			return;
-		}
+		if (cpi->cpi_xmaxeax < CPUID_LEAF_EXT_21)
+			break;
 
 		bzero(&cp, sizeof (cp));
 		cp.cp_eax = CPUID_LEAF_EXT_21;
 		(void) __cpuid_insn(&cp);
 		platform_cpuid_mangle(cpi->cpi_vendor, CPUID_LEAF_EXT_21, &cp);
 		cpi->cpi_extd[0x21] = cp;
-	} else {
+		break;
+
+	default:
 		/*
 		 * Nothing to do here. Return an empty set which has already
 		 * been zeroed for us.
 		 */
 		return;
 	}
+
 	cpuid_scan_security(cpu, fset);
 }
 
@@ -8165,7 +8440,7 @@ cpuid_getcache(struct cpu *cpu, uint32_t cno, x86_cache_t *cache)
 		return (EINVAL);
 	}
 
-	bzero(cache, sizeof (cache));
+	bzero(cache, sizeof (x86_cache_t));
 	cp = cpi->cpi_cache_leaves[cno];
 	switch (CPI_CACHE_TYPE(cp)) {
 	case CPI_CACHE_TYPE_DATA:

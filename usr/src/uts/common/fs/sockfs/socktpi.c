@@ -24,6 +24,7 @@
  * Copyright 2015, Joyent, Inc.
  * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2022 Garrett D'Amore
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -278,7 +279,6 @@ sotpi_create(struct sockparams *sp, int family, int type, int protocol,
 {
 	struct sonode	*so;
 	kmem_cache_t	*cp;
-	int		sfamily = family;
 
 	ASSERT(sp->sp_sdev_info.sd_vnode != NULL);
 
@@ -523,7 +523,8 @@ sotpi_init(struct sonode *so, struct sonode *tso, struct cred *cr, int flags)
 			 */
 			return (error);
 		}
-		if (error = so_strinit(so, tso)) {
+		error = so_strinit(so, tso);
+		if (error != 0) {
 			(void) sotpi_close(so, flags, cr);
 			return (error);
 		}
@@ -637,7 +638,7 @@ sotpi_bindlisten(struct sonode *so, struct sockaddr *name,
 	int			unbind_on_err = 1;
 	boolean_t		clear_acceptconn_on_err = B_FALSE;
 	boolean_t		restore_backlog_on_err = B_FALSE;
-	int			save_so_backlog;
+	int			save_so_backlog = 0;
 	t_scalar_t		PRIM_type = O_T_BIND_REQ;
 	boolean_t		tcp_udp_xport;
 	sotpi_info_t		*sti = SOTOTPI(so);
@@ -1638,7 +1639,7 @@ sotpi_accept(struct sonode *so, int fflag, struct cred *cr,
 	/* Check that we are not already connected */
 	if ((so->so_state & SS_ACCEPTCONN) == 0)
 		goto conn_bad;
-again:
+
 	if ((error = sowaitconnind(so, fflag, &mp)) != 0)
 		goto e_bad;
 
@@ -2028,7 +2029,7 @@ again:
 	 */
 	mutex_enter(&nso->so_lock);
 	sinlen = (nso->so_family == AF_INET) ? sizeof (sin_t) : sizeof (sin6_t);
-	if ((nso->so_family == AF_INET) || (nso->so_family == AF_INET6) &&
+	if ((nso->so_family == AF_INET || nso->so_family == AF_INET6) &&
 	    MBLKL(ack_mp) == (sizeof (struct T_ok_ack) + sinlen)) {
 		ack_mp->b_rptr += sizeof (struct T_ok_ack);
 		bcopy(ack_mp->b_rptr, nsti->sti_laddr_sa, sinlen);
@@ -2064,15 +2065,10 @@ again:
 
 	return (0);
 
-
-eproto_disc_unl:
-	error = EPROTO;
 e_disc_unl:
 	eprintsoline(so, error);
 	goto disconnect_unlocked;
 
-pr_disc_vp_unl:
-	eprintsoline(so, error);
 disconnect_vp_unlocked:
 	(void) VOP_CLOSE(nvp, 0, 1, 0, cr, NULL);
 	VN_RELE(nvp);
@@ -2080,8 +2076,6 @@ disconnect_unlocked:
 	(void) sodisconnect(so, SEQ_number, 0);
 	return (error);
 
-pr_disc_vp:
-	eprintsoline(so, error);
 disconnect_vp:
 	(void) sodisconnect(so, SEQ_number, _SODISCONNECT_LOCK_HELD);
 	so_unlock_single(so, SOLOCKED);
@@ -3226,9 +3220,8 @@ retry:
 			 */
 			control = kmem_zalloc(controllen, KM_SLEEP);
 
-			error = so_opt2cmsg(mp, opt, optlen,
-			    !(flags & MSG_XPG4_2),
-			    control, controllen);
+			error = so_opt2cmsg(mp, opt, optlen, flags, control,
+			    controllen);
 			if (error) {
 				freemsg(mp);
 				if (msg->msg_namelen != 0)
@@ -3293,9 +3286,8 @@ retry:
 			 */
 			control = kmem_zalloc(controllen, KM_SLEEP);
 
-			error = so_opt2cmsg(mp, opt, optlen,
-			    !(flags & MSG_XPG4_2),
-			    control, controllen);
+			error = so_opt2cmsg(mp, opt, optlen, flags, control,
+			    controllen);
 			if (error) {
 				freemsg(mp);
 				kmem_free(control, controllen);
@@ -5044,6 +5036,8 @@ sotpi_getsockopt(struct sonode *so, int level, int option_name,
 	mutex_enter(&so->so_lock);
 	so_lock_single(so);	/* Set SOLOCKED */
 
+	len = (t_uscalar_t)sizeof (uint32_t);	/* Default */
+
 	/*
 	 * Check for SOL_SOCKET options.
 	 * Certain SOL_SOCKET options are returned directly whereas
@@ -5071,6 +5065,7 @@ sotpi_getsockopt(struct sonode *so, int level, int option_name,
 #endif /* notyet */
 		case SO_DOMAIN:
 		case SO_DGRAM_ERRIND:
+		case SO_PROTOCOL:
 			if (maxlen < (t_uscalar_t)sizeof (int32_t)) {
 				error = EINVAL;
 				eprintsoline(so, error);
@@ -5111,8 +5106,6 @@ sotpi_getsockopt(struct sonode *so, int level, int option_name,
 			}
 			break;
 		}
-
-		len = (t_uscalar_t)sizeof (uint32_t);	/* Default */
 
 		switch (option_name) {
 		case SO_TYPE:
@@ -5234,6 +5227,11 @@ sotpi_getsockopt(struct sonode *so, int level, int option_name,
 		}
 		case SO_DOMAIN:
 			value = so->so_family;
+			option = &value;
+			goto copyout; /* No need to issue T_SVR4_OPTMGMT_REQ */
+
+		case SO_PROTOCOL:
+			value = so->so_protocol;
 			option = &value;
 			goto copyout; /* No need to issue T_SVR4_OPTMGMT_REQ */
 
@@ -5579,12 +5577,13 @@ done:
 			clock_t val;
 
 			if (get_udatamodel() == DATAMODEL_NONE ||
-			    get_udatamodel() == DATAMODEL_NATIVE)
-				bcopy(&tl, (struct timeval *)optval,
+			    get_udatamodel() == DATAMODEL_NATIVE) {
+				bcopy((struct timeval *)optval, &tl,
 				    sizeof (struct timeval));
-			else
+			} else {
 				TIMEVAL32_TO_TIMEVAL(&tl,
 				    (struct timeval32 *)optval);
+			}
 			val = tl.tv_sec * 1000 * 1000 + tl.tv_usec;
 			if (option_name == SO_RCVTIMEO)
 				so->so_rcvtimeo = drv_usectohz(val);
@@ -5768,8 +5767,8 @@ sotpi_ioctl(struct sonode *so, int cmd, intptr_t arg, int mode,
 		 * (!value != !(so->so_state & SS_ASYNC))
 		 * but some engineers find that too hard to read.
 		 */
-		if (value == 0 && (so->so_state & SS_ASYNC) != 0 ||
-		    value != 0 && (so->so_state & SS_ASYNC) == 0)
+		if ((value == 0 && (so->so_state & SS_ASYNC) != 0) ||
+		    (value != 0 && (so->so_state & SS_ASYNC) == 0))
 			error = so_flip_async(so, vp, mode, cr);
 		mutex_exit(&so->so_lock);
 		return (error);

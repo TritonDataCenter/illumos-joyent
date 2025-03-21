@@ -14,7 +14,7 @@
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2019 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
-# Copyright 2022 Oxide Computer Company
+# Copyright 2024 Oxide Computer Company
 #
 
 .PARALLEL: $(SUBDIRS)
@@ -25,7 +25,10 @@ SUBDIRS = \
 	elf-tests \
 	libc-tests \
 	libmlrpc-tests \
+	libproc-tests \
+	libsec-tests \
 	net-tests \
+	nvme-tests \
 	os-tests \
 	smartos-test \
 	smbclient-tests \

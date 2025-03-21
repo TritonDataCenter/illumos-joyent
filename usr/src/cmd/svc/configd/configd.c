@@ -72,12 +72,12 @@
  *
  * 2. Door Thread Pool Management
  * ------------------------------
- * Whenever door_return(3door) returns from the kernel and there are no
+ * Whenever door_return(3C) returns from the kernel and there are no
  * other configd threads waiting for requests, libdoor automatically
  * invokes a function registered with door_server_create(), to request a new
  * door server thread.  The default function just creates a thread that calls
- * door_return(3door).  Unfortunately, since it can take a while for the new
- * thread to *get* to door_return(3door), a stream of requests can cause a
+ * door_return(3C).  Unfortunately, since it can take a while for the new
+ * thread to *get* to door_return(3C), a stream of requests can cause a
  * large number of threads to be created, even though they aren't all needed.
  *
  * In our callback, new_server_needed(), we limit ourself to two new threads
@@ -477,7 +477,7 @@ daemonize_start(void)
 		 */
 		struct sigaction act;
 
-		act.sa_sigaction = SIG_DFL;
+		act.sa_handler = SIG_DFL;
 		(void) sigemptyset(&act.sa_mask);
 		act.sa_flags = 0;
 
@@ -675,7 +675,7 @@ main(int argc, char *argv[])
 	(void) sigfillset(&act.sa_mask);
 
 	/* signals to ignore */
-	act.sa_sigaction = SIG_IGN;
+	act.sa_handler = SIG_IGN;
 	act.sa_flags = 0;
 	(void) sigaction(SIGPIPE, &act, NULL);
 	(void) sigaction(SIGALRM, &act, NULL);

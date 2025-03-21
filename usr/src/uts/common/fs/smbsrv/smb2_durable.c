@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2017-2022 Tintri by DDN, Inc. All rights reserved.
- * Copyright 2021-2023 RackTop Systems, Inc.
+ * Copyright 2021-2024 RackTop Systems, Inc.
  */
 
 /*
@@ -58,6 +58,13 @@ uint32_t smb2_res_max_timeout = 300 * MILLISEC;	/* mSec. */
 uint32_t smb2_persist_timeout = 300 * MILLISEC;	/* mSec. */
 
 /*
+ * Escape hatch in case persistent handles on directories cause problems.
+ * We don't have directory leases, so there's not really much point in
+ * persistence for directory handles, but Hyper-V wants them.
+ */
+int smb2_dh_allow_dir = 1;
+
+/*
  * Max. size of the file used to store a CA handle.
  * Don't adjust this while the server is running.
  */
@@ -100,6 +107,41 @@ smb2_dh_make_stream_name(char *buf, size_t buflen, uint64_t id)
 	(void) snprintf(buf, buflen,
 	    ":%016" PRIx64 ":$CA", id);
 }
+
+/*
+ * smb_dh_create_allowed
+ *
+ * Helper for smb2_create to decide whether the open/create call should
+ * allow this handle to become durable.
+ *
+ * For files:
+ * 1. op_oplock_level == SMB2_OPLOCK_LEVEL_BATCH
+ * 2. A lease is requested with handle caching
+ *    - for v1, the lease must not be on a directory
+ * 3. For v2, flags has "persistent" (tree is CA)
+ *    (when tree not CA, turned off persist earlier)
+ *
+ * For directories, we don't do leases, but allow persistent.
+ */
+boolean_t
+smb_dh_create_allowed(smb_request_t *sr, smb_ofile_t *of)
+{
+	smb_arg_open_t *op = &sr->arg.open;
+
+	if (smb2_dh_allow_dir && smb_node_is_dir(of->f_node) &&
+	    (op->dh_v2_flags & SMB2_DHANDLE_FLAG_PERSISTENT) != 0)
+		return (B_TRUE);
+
+	if (smb_node_is_file(of->f_node) &&
+	    ((op->dh_v2_flags & SMB2_DHANDLE_FLAG_PERSISTENT) != 0 ||
+	    (op->op_oplock_level == SMB2_OPLOCK_LEVEL_BATCH) ||
+	    (op->op_oplock_level == SMB2_OPLOCK_LEVEL_LEASE &&
+	    (op->lease_state & OPLOCK_LEVEL_CACHE_HANDLE) != 0)))
+		return (B_TRUE);
+
+	return (B_FALSE);
+}
+
 
 /*
  * smb_dh_should_save
@@ -1244,7 +1286,7 @@ smb2_dh_update_locks(smb_request_t *sr, smb_ofile_t *of)
 }
 
 /*
- * Save "sticky" times
+ * Save "sticky" times.
  */
 void
 smb2_dh_update_times(smb_request_t *sr, smb_ofile_t *of, smb_attr_t *attr)
@@ -1260,15 +1302,24 @@ smb2_dh_update_times(smb_request_t *sr, smb_ofile_t *of, smb_attr_t *attr)
 	if (attr->sa_mask & SMB_AT_ATIME) {
 		t = ts2hrt(&attr->sa_vattr.va_atime);
 		(void) nvlist_add_hrtime(of->dh_nvlist, "atime", t);
+	} else {
+		(void) nvlist_remove_all(of->dh_nvlist, "atime");
 	}
+
 	if (attr->sa_mask & SMB_AT_MTIME) {
 		t = ts2hrt(&attr->sa_vattr.va_mtime);
 		(void) nvlist_add_hrtime(of->dh_nvlist, "mtime", t);
+	} else {
+		(void) nvlist_remove_all(of->dh_nvlist, "mtime");
 	}
+
 	if (attr->sa_mask & SMB_AT_CTIME) {
 		t = ts2hrt(&attr->sa_vattr.va_ctime);
 		(void) nvlist_add_hrtime(of->dh_nvlist, "ctime", t);
+	} else {
+		(void) nvlist_remove_all(of->dh_nvlist, "ctime");
 	}
+
 	mutex_exit(&of->dh_nvlock);
 
 	sr->dh_nvl_dirty = B_TRUE;

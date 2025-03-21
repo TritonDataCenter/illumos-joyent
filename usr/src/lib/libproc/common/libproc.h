@@ -29,7 +29,7 @@
  * Copyright (c) 2013 by Delphix. All rights reserved.
  * Copyright 2019, Carlos Neira <cneirabustos@gmail.com>
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -207,6 +207,7 @@ typedef char *(*pop_platform_t)(struct ps_prochandle *, char *, size_t, void *);
 typedef int (*pop_uname_t)(struct ps_prochandle *, struct utsname *, void *);
 typedef char *(*pop_zonename_t)(struct ps_prochandle *, char *, size_t, void *);
 typedef char *(*pop_execname_t)(struct ps_prochandle *, char *, size_t, void *);
+typedef int (*pop_cwd_t)(struct ps_prochandle *, prcwd_t **, void *);
 #if defined(__i386) || defined(__amd64)
 typedef int (*pop_ldt_t)(struct ps_prochandle *, struct ssd *, int, void *);
 #endif
@@ -228,6 +229,7 @@ typedef struct ps_ops {
 	pop_zonename_t		pop_zonename;
 	pop_execname_t		pop_execname;
 	pop_secflags_t		pop_secflags;
+	pop_cwd_t		pop_cwd;
 #if defined(__i386) || defined(__amd64)
 	pop_ldt_t		pop_ldt;
 #endif
@@ -366,7 +368,7 @@ extern	int	pr_getitimer(struct ps_prochandle *,
 extern	int	pr_setitimer(struct ps_prochandle *,
 			int, const struct itimerval *, struct itimerval *);
 extern	int	pr_ioctl(struct ps_prochandle *, int, int, void *, size_t);
-extern	int	pr_fcntl(struct ps_prochandle *, int, int, void *);
+extern	int	pr_fcntl(struct ps_prochandle *, int, int, void *, void *);
 extern	int	pr_stat(struct ps_prochandle *, const char *, struct stat *);
 extern	int	pr_lstat(struct ps_prochandle *, const char *, struct stat *);
 extern	int	pr_fstat(struct ps_prochandle *, int, struct stat *);
@@ -809,6 +811,12 @@ extern int Pfdinfo_iter(struct ps_prochandle *, proc_fdinfo_f *, void *);
  */
 extern int Pupanic(struct ps_prochandle *, prupanic_t **);
 extern void Pupanic_free(prupanic_t *);
+
+/*
+ * NT_CWD information.
+ */
+extern int Pcwd(struct ps_prochandle *, prcwd_t **);
+extern void Pcwd_free(prcwd_t *);
 
 #ifdef	__cplusplus
 }

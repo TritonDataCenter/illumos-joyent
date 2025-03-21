@@ -367,6 +367,8 @@ sid:		devi->devi_node_attributes |= DDI_PERSISTENT;
 		elem->next = devimap->dno_free;
 		devimap->dno_free = elem;
 		mutex_exit(&devimap->dno_lock);
+	} else if (elem != NULL) {
+		kmem_free(elem, sizeof (*elem));
 	}
 
 	/*
@@ -1584,7 +1586,6 @@ i_ndi_config_node(dev_info_t *dip, ddi_node_state_t state, uint_t flag)
 			 * locking needed.
 			 */
 			link_node(dip);
-			translate_devid((dev_info_t *)dip);
 			i_ddi_set_node_state(dip, DS_LINKED);
 			break;
 		case DS_LINKED:
@@ -2293,6 +2294,9 @@ find_sibling(dev_info_t *head, char *cname, char *caddr, uint_t flag,
 			return (NULL);
 	}
 
+	if (head == NULL)
+		return (NULL);
+
 	buf = NULL;
 	/* preallocate buffer of naming node by callback */
 	if (flag & FIND_ADDR_BY_CALLBACK)
@@ -2301,8 +2305,6 @@ find_sibling(dev_info_t *head, char *cname, char *caddr, uint_t flag,
 	/*
 	 * Walk the child list to find a match
 	 */
-	if (head == NULL)
-		return (NULL);
 	ASSERT(DEVI_BUSY_OWNED(ddi_get_parent(head)));
 	for (dip = head; dip; dip = ddi_get_next_sibling(dip)) {
 		if (by == FIND_NODE_BY_NODENAME) {
@@ -2490,13 +2492,18 @@ i_ddi_prop_list_dup(ddi_prop_t *prop, uint_t flag)
 		copy->prop_dev = prop->prop_dev;
 		copy->prop_flags = prop->prop_flags;
 		copy->prop_name = i_ddi_strdup(prop->prop_name, flag);
-		if (copy->prop_name == NULL)
+		if (copy->prop_name == NULL) {
+			kmem_free(copy, sizeof (struct ddi_prop));
 			goto fail;
+		}
 
 		if ((copy->prop_len = prop->prop_len) != 0) {
 			copy->prop_val = kmem_zalloc(prop->prop_len, flag);
-			if (copy->prop_val == NULL)
+			if (copy->prop_val == NULL) {
+				strfree(copy->prop_name);
+				kmem_free(copy, sizeof (struct ddi_prop));
 				goto fail;
+			}
 
 			bcopy(prop->prop_val, copy->prop_val, prop->prop_len);
 		}
@@ -2849,6 +2856,11 @@ ddi_compatible_driver_major(dev_info_t *dip, char **formp)
 	if (formp)
 		*formp = NULL;
 
+	/*
+	 * The "ddi-assigned" property indicates a device has been given to a
+	 * virtualized environment.  Prevent its use.  This is only used by
+	 * Xen and (previously) by sun4v LDOMs.  See pcie_init_dom().
+	 */
 	if (ddi_prop_exists(DDI_DEV_T_NONE, dip, DDI_PROP_DONTPASS,
 	    "ddi-assigned")) {
 		major = ddi_name_to_major("nulldriver");

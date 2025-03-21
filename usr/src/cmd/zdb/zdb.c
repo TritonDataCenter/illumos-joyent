@@ -3390,7 +3390,7 @@ dump_one_dir(const char *dsname, void *arg __unused)
 		return (0);
 
 	for (spa_feature_t f = 0; f < SPA_FEATURES; f++) {
-		if (!dmu_objset_ds(os)->ds_feature_inuse[f])
+		if (!dsl_dataset_feature_is_active(dmu_objset_ds(os), f))
 			continue;
 		ASSERT(spa_feature_table[f].fi_flags &
 		    ZFEATURE_FLAG_PER_DATASET);
@@ -3702,7 +3702,7 @@ zdb_blkptr_cb(spa_t *spa, zilog_t *zilog, const blkptr_t *bp,
 		/* make sure nicenum has enough space */
 		CTASSERT(sizeof (buf) >= NN_NUMBUF_SZ);
 
-		zfs_nicenum(bytes, buf, sizeof (buf));
+		zfs_nicebytes(bytes, buf, sizeof (buf));
 		(void) fprintf(stderr,
 		    "\r%5s completed (%4dMB/s) "
 		    "estimated time remaining: %uhr %02umin %02usec        ",

@@ -28,6 +28,15 @@
 
 #include <efi.h>
 #include <efilib.h>
+#include <eficonsctl.h>
+#include <Guid/ConsoleInDevice.h>
+#include <Guid/ConsoleOutDevice.h>
+#include <Guid/StandardErrorDevice.h>
+#include <Protocol/GraphicsOutput.h>
+#include <Protocol/UgaDraw.h>
+#include <Protocol/SimpleTextIn.h>
+#include <Protocol/SimpleTextInEx.h>
+#include <Protocol/SimpleTextOut.h>
 #include <sys/tem_impl.h>
 #include <sys/multiboot2.h>
 #include <machine/metadata.h>
@@ -35,13 +44,22 @@
 
 #include "bootstrap.h"
 
-struct efi_fb		efifb;
-EFI_GRAPHICS_OUTPUT	*gop;
-EFI_UGA_DRAW_PROTOCOL	*uga;
+struct efi_fb			efifb;
+EFI_GRAPHICS_OUTPUT_PROTOCOL	*gop;
+EFI_UGA_DRAW_PROTOCOL		*uga;
 
-static EFI_GUID ccontrol_protocol_guid = EFI_CONSOLE_CONTROL_PROTOCOL_GUID;
+EFI_GUID gEfiConsoleInDeviceGuid = EFI_CONSOLE_IN_DEVICE_GUID;
+EFI_GUID gEfiConsoleOutDeviceGuid = EFI_CONSOLE_OUT_DEVICE_GUID;
+EFI_GUID gEfiStandardErrorDeviceGuid = EFI_STANDARD_ERROR_DEVICE_GUID;
+EFI_GUID gEfiConsoleControlProtocolGuid = EFI_CONSOLE_CONTROL_PROTOCOL_GUID;
+EFI_GUID gEfiSimpleTextInProtocolGuid = EFI_SIMPLE_TEXT_INPUT_PROTOCOL_GUID;
+EFI_GUID gEfiSimpleTextInputExProtocolGuid =
+    EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL_GUID;
+EFI_GUID gEfiSimpleTextOutProtocolGuid = EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL_GUID;
+
+extern EFI_GRAPHICS_OUTPUT_BLT_PIXEL *shadow_fb;
+static size_t shadow_sz;	/* units of pages */
 static EFI_CONSOLE_CONTROL_PROTOCOL	*console_control;
-static EFI_GUID simple_input_ex_guid = EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL_GUID;
 static EFI_CONSOLE_CONTROL_SCREEN_MODE	console_mode;
 static SIMPLE_TEXT_OUTPUT_INTERFACE	*conout;
 
@@ -424,15 +442,25 @@ static void
 efi_framebuffer_setup(void)
 {
 	int bpp, pos;
-	extern EFI_GRAPHICS_OUTPUT_BLT_PIXEL *shadow_fb;
+	EFI_STATUS status;
 
 	bpp = fls(efifb.fb_mask_red | efifb.fb_mask_green |
 	    efifb.fb_mask_blue | efifb.fb_mask_reserved);
 
-	if (shadow_fb != NULL)
-		free(shadow_fb);
-	shadow_fb = malloc(efifb.fb_width * efifb.fb_height *
+	/*
+	 * To save heap space, allocate shadow fb with AllocatePages().
+	 * FB memory can be rather large and its size depends on resolution.
+	 */
+	if (shadow_fb != NULL) {
+		BS->FreePages((EFI_PHYSICAL_ADDRESS)(uintptr_t)shadow_fb,
+		    shadow_sz);
+	}
+	shadow_sz = EFI_SIZE_TO_PAGES(efifb.fb_width * efifb.fb_height *
 	    sizeof (*shadow_fb));
+	status = BS->AllocatePages(AllocateMaxAddress, EfiLoaderData,
+	    shadow_sz, (EFI_PHYSICAL_ADDRESS *)&shadow_fb);
+	if (status != EFI_SUCCESS)
+		shadow_fb = NULL;
 
 	gfx_fb.framebuffer_common.mb_type = MULTIBOOT_TAG_TYPE_FRAMEBUFFER;
 	gfx_fb.framebuffer_common.mb_size = sizeof (gfx_fb);
@@ -468,20 +496,17 @@ efi_framebuffer_setup(void)
 static void
 efi_cons_probe(struct console *cp)
 {
-	cp->c_flags |= C_PRESENTIN | C_PRESENTOUT;
-}
-
-static int
-efi_cons_init(struct console *cp, int arg __unused)
-{
 	struct efi_console_data *ecd;
 	void *coninex;
 	EFI_STATUS status;
-	UINTN i, max_dim, best_mode, cols, rows;
+
+	cp->c_flags |= C_PRESENTIN | C_PRESENTOUT;
 
 	if (cp->c_private != NULL)
-		return (0);
+		return;
 
+	memset(keybuf, 0, KEYBUFSZ);
+	conout = ST->ConOut;
 	ecd = calloc(1, sizeof (*ecd));
 	/*
 	 * As console probing is called very early, the only reason for
@@ -492,21 +517,50 @@ efi_cons_init(struct console *cp, int arg __unused)
 	cp->c_private = ecd;
 
 	ecd->ecd_conin = ST->ConIn;
-	conout = ST->ConOut;
+	/*
+	 * Try to set up for SimpleTextInputEx protocol. If not available,
+	 * we will use SimpleTextInput protocol.
+	 */
+	coninex = NULL;
+	status = BS->OpenProtocol(ST->ConsoleInHandle,
+	    &gEfiSimpleTextInputExProtocolGuid,
+	    &coninex, IH, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+	if (status == EFI_SUCCESS)
+		ecd->ecd_coninex = coninex;
+
+	if (efi_find_framebuffer(&efifb)) {
+		console_mode = EfiConsoleControlScreenText;
+		ecd->ecd_visual_ops = &text_ops;
+	} else {
+		efi_framebuffer_setup();
+		console_mode = EfiConsoleControlScreenGraphics;
+		ecd->ecd_visual_ops = &fb_ops;
+	}
+
+	/*
+	 * UEFI console is tricky, it may be video or serial device(s),
+	 * or both, SimpleTextOutput protocol will output on all listed
+	 * devices in "ConOut". If video console is present, we will not
+	 * use SimpleTextOutput and render the text on video screen only.
+	 */
+	if (console_mode == EfiConsoleControlScreenGraphics)
+		(void) setenv("console", cp->c_name, 1);
+}
+
+static int
+efi_cons_init(struct console *cp, int arg __unused)
+{
+	EFI_STATUS status;
+	UINTN i, max_dim, best_mode, cols, rows;
+
+	if (tem != NULL)
+		return (0);
 
 	conout->SetAttribute(conout, EFI_TEXT_ATTR(DEFAULT_FGCOLOR,
 	    DEFAULT_BGCOLOR));
-	memset(keybuf, 0, KEYBUFSZ);
 
-	status = BS->LocateProtocol(&ccontrol_protocol_guid, NULL,
+	status = BS->LocateProtocol(&gEfiConsoleControlProtocolGuid, NULL,
 	    (void **)&console_control);
-	if (status == EFI_SUCCESS) {
-		BOOLEAN GopUgaExists, StdInLocked;
-		status = console_control->GetMode(console_control,
-		    &console_mode, &GopUgaExists, &StdInLocked);
-	} else {
-		console_mode = EfiConsoleControlScreenText;
-	}
 
 	max_dim = best_mode = 0;
 	for (i = 0; i <= conout->Mode->MaxMode; i++) {
@@ -532,30 +586,12 @@ efi_cons_init(struct console *cp, int arg __unused)
 		setenv("screen-#cols", env, 1);
 	}
 
-	if (efi_find_framebuffer(&efifb)) {
-		console_mode = EfiConsoleControlScreenText;
-		ecd->ecd_visual_ops = &text_ops;
-	} else {
-		efi_framebuffer_setup();
-		console_mode = EfiConsoleControlScreenGraphics;
-		ecd->ecd_visual_ops = &fb_ops;
-	}
 
 	if (console_control != NULL)
 		(void) console_control->SetMode(console_control, console_mode);
 
 	/* some firmware enables the cursor when switching modes */
 	conout->EnableCursor(conout, FALSE);
-
-	coninex = NULL;
-	/*
-	 * Try to set up for SimpleTextInputEx protocol. If not available,
-	 * we will use SimpleTextInput protocol.
-	 */
-	status = BS->OpenProtocol(ST->ConsoleInHandle, &simple_input_ex_guid,
-	    &coninex, IH, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
-	if (status == EFI_SUCCESS)
-		ecd->ecd_coninex = coninex;
 
 	gfx_framework_init();
 
@@ -811,16 +847,14 @@ efi_cons_devinfo(struct console *cp __unused)
 {
 	EFI_HANDLE *handles;
 	uint_t nhandles;
-	extern EFI_GUID gop_guid;
-	extern EFI_GUID uga_guid;
 	EFI_STATUS status;
 
 	if (gop != NULL)
-		status = efi_get_protocol_handles(&gop_guid, &nhandles,
-		    &handles);
+		status = efi_get_protocol_handles(
+		    &gEfiGraphicsOutputProtocolGuid, &nhandles, &handles);
 	else
-		status = efi_get_protocol_handles(&uga_guid, &nhandles,
-		    &handles);
+		status = efi_get_protocol_handles(&gEfiUgaDrawProtocolGuid,
+		    &nhandles, &handles);
 
 	if (EFI_ERROR(status))
 		return;

@@ -22,7 +22,7 @@
 /*
  * Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
@@ -456,6 +456,7 @@ typedef struct smbios_processor {
 	uint16_t smbp_cflags;
 		/* processor characteristics (SMB_PRC_*) */
 	uint32_t smbp_threadsenabled;	/* number of enabled threads */
+	const char *smbp_socktype;	/* socket type string */
 } smbios_processor_t;
 
 #define	SMB_PRT_OTHER		0x01	/* other */
@@ -564,6 +565,13 @@ typedef struct smbios_processor {
 #define	SMB_PRU_BGA4129		0x4E	/* Socket BGA4129 */
 #define	SMB_PRU_LGA4710		0x4F	/* Socket LBA4710 */
 #define	SMB_PRU_LGA7529		0x50	/* Socket LBA7529 */
+#define	SMB_PRU_BGA1964		0x51	/* Socket BGA1964 */
+#define	SMB_PRU_BGA1792		0x52	/* Socket BGA1792 */
+#define	SMB_PRU_BGA2049		0x53	/* Socket BGA2049 */
+#define	SMB_PRU_BGA2551		0x54	/* Socket BGA2551 */
+#define	SMB_PRU_LGA1851		0x55	/* Socket LGA1851 */
+#define	SMB_PRU_BGA2114		0x56	/* Socket BGA2114 */
+#define	SMB_PRU_BGA2883		0x57	/* Socket BGA2883 */
 
 #define	SMB_PRC_RESERVED	0x0001	/* reserved */
 #define	SMB_PRC_UNKNOWN		0x0002	/* unknown */
@@ -748,6 +756,7 @@ typedef struct smbios_processor {
 #define	SMB_PRF_CORE_I5		0xCD	/* Intel Core i5 */
 #define	SMB_PRF_CORE_I3		0xCE	/* Intel Core i3 */
 #define	SMB_PRF_CORE_I9		0xCF	/* Intel Core i9 */
+#define	SMD_PRF_XEON_D		0xD0	/* Intel Xeon D */
 #define	SMB_PRF_C7M		0xD2	/* VIA C7-M */
 #define	SMB_PRF_C7D		0xD3	/* VIA C7-D */
 #define	SMB_PRF_C7		0xD4	/* VIA C7 */
@@ -800,9 +809,10 @@ typedef struct smbios_processor {
 #define	SMG_PRF_LOONG_3A	0x25D	/* Loongson 3A Processor Family */
 #define	SMG_PRF_LOONG_3B	0x25E	/* Loongson 3B Processor Family */
 #define	SMG_PRF_LOONG_3C	0x25F	/* Loongson 3C Processor Family */
-#define	SMG_PRF_LOONG_3D	0x260	/* Loongson 3E Processor Family */
+#define	SMG_PRF_LOONG_3D	0x260	/* Loongson 3D Processor Family */
+#define	SMG_PRF_LOONG_E3	0x261	/* Loongson 3E Processor Family */
 /* BEGIN CSTYLED */
-#define	SMG_PRF_LOONG_2K_DC	0x261	/* Dual-Core Loongson 2K Processor 2xxx Series */
+#define	SMG_PRF_LOONG_2K_DC	0x262	/* Dual-Core Loongson 2K Processor 2xxx Series */
 #define	SMG_PRF_LOONG_3A_QC	0x26C	/* Quad-Core Loongson 3A Processor 5xxx Series */
 #define	SMG_PRF_LOONG_3A_MC	0x26D	/* Multi-Core Loongson 3A Processor 5xxx Series */
 #define	SMG_PRF_LOONG_3B_QC	0x26E	/* Quad-Core Loongson 3B Processor 5xxx Series */
@@ -810,6 +820,14 @@ typedef struct smbios_processor {
 #define	SMG_PRF_LOONG_3C_MC	0x270	/* Multi-Core Loongson 3C Processor 5xxx Series */
 #define	SMG_PRF_LOONG_3D_MC	0x271	/* Multi-Core Loongson 3D Processor 5xxx Series */
 /* END CSTYLED */
+#define	SMG_PRF_CORE_3		0x300	/* Intel Core 3 */
+#define	SMG_PRF_CORE_5		0x301	/* Intel Core 5 */
+#define	SMG_PRF_CORE_7		0x302	/* Intel Core 7 */
+#define	SMG_PRF_CORE_9		0x303	/* Intel Core 9 */
+#define	SMG_PRF_CORE_ULT_3	0x304	/* Intel Core Ultra 3 */
+#define	SMG_PRF_CORE_ULT_5	0x305	/* Intel Core Ultra 5 */
+#define	SMG_PRF_CORE_ULT_7	0x306	/* Intel Core Ultra 7 */
+#define	SMG_PRF_CORE_ULT_9	0x307	/* Intel Core Ultra 9 */
 
 /*
  * SMBIOS Cache Information.  See DSP0134 Section 7.8 for more information.
@@ -1771,6 +1789,21 @@ typedef struct smbios_powersup {
 #define	SMB_POWERSUP_T_REGL	0x08	/* regulator */
 
 /*
+ * SMBIOS Additional Information. The top level structure defines a number of
+ * additional information entries, each of which is variable length and intended
+ * to augment some existing field in the system. Therefore we have a single
+ * function to get the number of additional entries present and then a different
+ * one that retrieves each entity function.
+ */
+typedef struct smbios_addinfo_ent {
+	id_t smbai_ref;			/* referenced handle */
+	uint32_t smbai_ref_off;		/* offset into referenced handle */
+	const char *smbai_str;		/* optional string description */
+	uint32_t smbai_dlen;		/* optional data length */
+	void *smbai_data;		/* optional data */
+} smbios_addinfo_ent_t;
+
+/*
  * SMBIOS Onboard Devices Extended Information.  See DSP0134 Section 7.42
  * for more information.
  */
@@ -2026,7 +2059,8 @@ typedef struct smbios_memdevice_ext {
 #define	SMB_VERSION_35	0x0305		/* SMBIOS encoding for DMTF spec 3.5 */
 #define	SMB_VERSION_36	0x0306		/* SMBIOS encoding for DMTF spec 3.6 */
 #define	SMB_VERSION_37	0x0307		/* SMBIOS encoding for DMTF spec 3.7 */
-#define	SMB_VERSION	SMB_VERSION_37	/* SMBIOS latest version definitions */
+#define	SMB_VERSION_38	0x0308		/* SMBIOS encoding for DMTF spec 3.8 */
+#define	SMB_VERSION	SMB_VERSION_38	/* SMBIOS latest version definitions */
 
 #define	SMB_O_NOCKSUM	0x1		/* do not verify header checksums */
 #define	SMB_O_NOVERS	0x2		/* do not verify header versions */
@@ -2120,6 +2154,11 @@ extern int smbios_info_iprobe(smbios_hdl_t *, id_t, smbios_iprobe_t *);
 extern id_t smbios_info_boot(smbios_hdl_t *, smbios_boot_t *);
 extern id_t smbios_info_ipmi(smbios_hdl_t *, smbios_ipmi_t *);
 extern int smbios_info_powersup(smbios_hdl_t *, id_t, smbios_powersup_t *);
+extern int smbios_info_addinfo_nents(smbios_hdl_t *, id_t, uint_t *);
+extern int smbios_info_addinfo_ent(smbios_hdl_t *, id_t, uint_t,
+    smbios_addinfo_ent_t **);
+extern void smbios_info_addinfo_ent_free(smbios_hdl_t *,
+    smbios_addinfo_ent_t *);
 extern int smbios_info_pciexrc(smbios_hdl_t *, id_t, smbios_pciexrc_t *);
 extern int smbios_info_processor_info(smbios_hdl_t *, id_t,
     smbios_processor_info_t *);

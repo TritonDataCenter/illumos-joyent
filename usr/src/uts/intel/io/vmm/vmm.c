@@ -37,7 +37,7 @@
  *
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2018 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  */
 
@@ -1370,8 +1370,63 @@ vm_set_run_state(struct vm *vm, int vcpuid, uint32_t state, uint8_t sipi_vec)
 int
 vm_track_dirty_pages(struct vm *vm, uint64_t gpa, size_t len, uint8_t *bitmap)
 {
-	vmspace_t *vms = vm_get_vmspace(vm);
-	return (vmspace_track_dirty(vms, gpa, len, bitmap));
+	ASSERT0(gpa & PAGEOFFSET);
+	ASSERT0(len & PAGEOFFSET);
+
+	/*
+	 * The only difference in expectations between this legacy interface and
+	 * an equivalent call to vm_npt_do_operation() is the check for
+	 * dirty-page-tracking being enabled on the vmspace.
+	 */
+	if (!vmspace_get_tracking(vm->vmspace)) {
+		return (EPERM);
+	}
+
+	vmspace_bits_operate(vm->vmspace, gpa, len,
+	    VBO_RESET_DIRTY | VBO_FLAG_BITMAP_OUT, bitmap);
+	return (0);
+}
+
+int
+vm_npt_do_operation(struct vm *vm, uint64_t gpa, size_t len, uint32_t oper,
+    uint8_t *bitmap, int *rvalp)
+{
+	ASSERT0(gpa & PAGEOFFSET);
+	ASSERT0(len & PAGEOFFSET);
+
+	/*
+	 * For now, the bits defined in vmm_dev.h are meant to match up 1:1 with
+	 * those in vmm_vm.h
+	 */
+	CTASSERT(VNO_OP_RESET_DIRTY == VBO_RESET_DIRTY);
+	CTASSERT(VNO_OP_SET_DIRTY == VBO_SET_DIRTY);
+	CTASSERT(VNO_OP_GET_DIRTY == VBO_GET_DIRTY);
+	CTASSERT(VNO_FLAG_BITMAP_IN == VBO_FLAG_BITMAP_IN);
+	CTASSERT(VNO_FLAG_BITMAP_OUT == VBO_FLAG_BITMAP_OUT);
+
+	const uint32_t oper_only =
+	    oper & ~(VNO_FLAG_BITMAP_IN | VNO_FLAG_BITMAP_OUT);
+	switch (oper_only) {
+	case VNO_OP_RESET_DIRTY:
+	case VNO_OP_SET_DIRTY:
+	case VNO_OP_GET_DIRTY:
+		if (len == 0) {
+			break;
+		}
+		vmspace_bits_operate(vm->vmspace, gpa, len, oper, bitmap);
+		break;
+	case VNO_OP_GET_TRACK_DIRTY:
+		ASSERT3P(rvalp, !=, NULL);
+		*rvalp = vmspace_get_tracking(vm->vmspace) ? 1 : 0;
+		break;
+	case VNO_OP_EN_TRACK_DIRTY:
+		return (vmspace_set_tracking(vm->vmspace, true));
+	case VNO_OP_DIS_TRACK_DIRTY:
+		return (vmspace_set_tracking(vm->vmspace, false));
+	default:
+		return (EINVAL);
+	}
+	return (0);
 }
 
 static void
@@ -3594,6 +3649,12 @@ vcpu_ustate_change(struct vm *vm, int vcpuid, enum vcpu_ustate ustate)
 	vcpu->ustate = ustate;
 }
 
+void *
+vm_get_cookie(struct vm *vm)
+{
+	return (vm->cookie);
+}
+
 struct vmspace *
 vm_get_vmspace(struct vm *vm)
 {
@@ -3879,8 +3940,7 @@ vmm_kstat_update_vcpu(struct kstat *ksp, int rw)
 SET_DECLARE(vmm_data_version_entries, const vmm_data_version_entry_t);
 
 static int
-vmm_data_find(const vmm_data_req_t *req, int vcpuid,
-    const vmm_data_version_entry_t **resp)
+vmm_data_find(const vmm_data_req_t *req, const vmm_data_version_entry_t **resp)
 {
 	const vmm_data_version_entry_t **vdpp, *vdp;
 
@@ -3922,7 +3982,8 @@ vmm_data_find(const vmm_data_req_t *req, int vcpuid,
 			 * others expect vcpuid [0, VM_MAXCPU).
 			 */
 			const int llimit = vdp->vdve_vcpu_wildcard ? -1 : 0;
-			if (vcpuid < llimit || vcpuid >= VM_MAXCPU) {
+			if (req->vdr_vcpuid < llimit ||
+			    req->vdr_vcpuid >= VM_MAXCPU) {
 				return (EINVAL);
 			}
 		} else {
@@ -4827,6 +4888,14 @@ vmm_data_read_vmm_time(void *arg, const vmm_data_req_t *req)
 	struct vm *vm = arg;
 	struct vdi_time_info_v1 *out = req->vdr_data;
 
+	/*
+	 * Since write operations on VMM_TIME data are strict about vcpuid
+	 * (see: vmm_data_write_vmm_time()), read operations should be as well.
+	 */
+	if (req->vdr_vcpuid != -1) {
+		return (EINVAL);
+	}
+
 	/* Take a snapshot of this point in time */
 	uint64_t tsc;
 	hrtime_t hrtime;
@@ -4881,6 +4950,17 @@ vmm_data_write_vmm_time(void *arg, const vmm_data_req_t *req)
 
 	struct vm *vm = arg;
 	const struct vdi_time_info_v1 *src = req->vdr_data;
+
+	/*
+	 * While vcpuid values != -1 are tolerated by the vmm_data machinery for
+	 * VM-wide endpoints, the time-related data is more strict: It relies on
+	 * write-locking the VM (implied by the vcpuid -1) to prevent vCPUs or
+	 * other bits from observing inconsistent values while the state is
+	 * being written.
+	 */
+	if (req->vdr_vcpuid != -1) {
+		return (EINVAL);
+	}
 
 	/*
 	 * Platform-specific checks will verify the requested frequency against
@@ -5009,12 +5089,12 @@ static const vmm_data_version_entry_t versions_v1 = {
 VMM_DATA_VERSION(versions_v1);
 
 int
-vmm_data_read(struct vm *vm, int vcpuid, const vmm_data_req_t *req)
+vmm_data_read(struct vm *vm, const vmm_data_req_t *req)
 {
 	int err = 0;
 
 	const vmm_data_version_entry_t *entry = NULL;
-	err = vmm_data_find(req, vcpuid, &entry);
+	err = vmm_data_find(req, &entry);
 	if (err != 0) {
 		return (err);
 	}
@@ -5025,7 +5105,7 @@ vmm_data_read(struct vm *vm, int vcpuid, const vmm_data_req_t *req)
 
 		err = entry->vdve_readf(datap, req);
 	} else if (entry->vdve_vcpu_readf != NULL) {
-		err = entry->vdve_vcpu_readf(vm, vcpuid, req);
+		err = entry->vdve_vcpu_readf(vm, req->vdr_vcpuid, req);
 	} else {
 		err = EINVAL;
 	}
@@ -5042,12 +5122,12 @@ vmm_data_read(struct vm *vm, int vcpuid, const vmm_data_req_t *req)
 }
 
 int
-vmm_data_write(struct vm *vm, int vcpuid, const vmm_data_req_t *req)
+vmm_data_write(struct vm *vm, const vmm_data_req_t *req)
 {
 	int err = 0;
 
 	const vmm_data_version_entry_t *entry = NULL;
-	err = vmm_data_find(req, vcpuid, &entry);
+	err = vmm_data_find(req, &entry);
 	if (err != 0) {
 		return (err);
 	}
@@ -5058,7 +5138,7 @@ vmm_data_write(struct vm *vm, int vcpuid, const vmm_data_req_t *req)
 
 		err = entry->vdve_writef(datap, req);
 	} else if (entry->vdve_vcpu_writef != NULL) {
-		err = entry->vdve_vcpu_writef(vm, vcpuid, req);
+		err = entry->vdve_vcpu_writef(vm, req->vdr_vcpuid, req);
 	} else {
 		err = EINVAL;
 	}

@@ -36,7 +36,7 @@
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 /*
@@ -240,6 +240,28 @@
  * viona instances for a given netstack, and the unregistration for a netstack
  * instance occurs after all viona instances of the netstack instance have
  * been deleted.
+ *
+ * ------------------
+ * Metrics/Statistics
+ * -----------------
+ *
+ * During operation, Viona tracks certain metrics as certain events occur.
+ *
+ * One class of metrics, known as the "error stats", refer to abnormal
+ * conditions in ring processing which are likely the fault of a misbehaving
+ * guest.  These are tracked on a per-ring basis, and are not formally exposed
+ * to any consumer besides direct memory access through mdb.
+ *
+ * The other class of metrics tracked for an instance are the "transfer stats",
+ * which are the traditional packets/bytes/errors/drops figures.  These are
+ * counted per-ring, and then aggregated into link-wide values exposed via
+ * kstats.  Atomic operations are used to increment those per-ring stats during
+ * operation, and then when a ring is stopped, the values are consolidated into
+ * the link-wide values (to prevent loss when the ring is zeroed) under the
+ * protection of viona_link`l_stats_lock.  When the kstats are being updated,
+ * l_stats_lock is held to protect against a racing consolidation, with the
+ * existing per-ring values being added in at update time to provide an accurate
+ * figure.
  */
 
 #include <sys/conf.h>
@@ -254,7 +276,9 @@
 
 #define	VIONA_NAME		"Virtio Network Accelerator"
 #define	VIONA_CTL_MINOR		0
-#define	VIONA_CLI_NAME		"viona"		/* MAC client name */
+#define	VIONA_MODULE_NAME	"viona"
+#define	VIONA_KSTAT_CLASS	"misc"
+#define	VIONA_KSTAT_NAME	"viona_stat"
 
 
 /*
@@ -296,6 +320,8 @@ static int viona_ioc_delete(viona_soft_state_t *, boolean_t);
 
 static int viona_ioc_set_notify_ioport(viona_link_t *, uint16_t);
 static int viona_ioc_set_promisc(viona_link_t *, viona_promisc_t);
+static int viona_ioc_get_params(viona_link_t *, void *, int);
+static int viona_ioc_set_params(viona_link_t *, void *, int);
 static int viona_ioc_ring_init(viona_link_t *, void *, int);
 static int viona_ioc_ring_set_state(viona_link_t *, void *, int);
 static int viona_ioc_ring_get_state(viona_link_t *, void *, int);
@@ -305,6 +331,8 @@ static int viona_ioc_ring_pause(viona_link_t *, uint_t);
 static int viona_ioc_ring_set_msi(viona_link_t *, void *, int);
 static int viona_ioc_ring_intr_clear(viona_link_t *, uint_t);
 static int viona_ioc_intr_poll(viona_link_t *, void *, int, int *);
+
+static void viona_params_get_defaults(viona_link_params_t *);
 
 static struct cb_ops viona_cb_ops = {
 	viona_open,
@@ -496,6 +524,7 @@ viona_open(dev_t *devp, int flag, int otype, cred_t *credp)
 
 	ss = ddi_get_soft_state(viona_state, minor);
 	mutex_init(&ss->ss_lock, NULL, MUTEX_DEFAULT, NULL);
+	ss->ss_minor = minor;
 	*devp = makedevice(getmajor(*devp), minor);
 
 	return (0);
@@ -547,6 +576,13 @@ viona_ioctl(dev_t dev, int cmd, intptr_t data, int md, cred_t *cr, int *rv)
 	case VNA_IOC_VERSION:
 		*rv = VIONA_CURRENT_INTERFACE_VERSION;
 		return (0);
+	case VNA_IOC_DEFAULT_PARAMS:
+		/*
+		 * With a NULL link parameter, viona_ioc_get_params() will emit
+		 * the default parameters with the same error-handling behavior
+		 * as VNA_IOC_GET_PARAMS.
+		 */
+		return (viona_ioc_get_params(NULL, dptr, md));
 	default:
 		break;
 	}
@@ -617,6 +653,21 @@ viona_ioctl(dev_t dev, int cmd, intptr_t data, int md, cred_t *cr, int *rv)
 		break;
 	case VNA_IOC_SET_PROMISC:
 		err = viona_ioc_set_promisc(link, (viona_promisc_t)data);
+		break;
+	case VNA_IOC_GET_PARAMS:
+		err = viona_ioc_get_params(link, dptr, md);
+		break;
+	case VNA_IOC_SET_PARAMS:
+		err = viona_ioc_set_params(link, dptr, md);
+		break;
+	case VNA_IOC_GET_MTU:
+		*rv = (int)link->l_mtu;
+		break;
+	case VNA_IOC_SET_MTU:
+		if (data < VIONA_MIN_MTU || data > VIONA_MAX_MTU)
+			err = EINVAL;
+		else
+			link->l_mtu = (uint16_t)data;
 		break;
 	default:
 		err = ENOTTY;
@@ -696,6 +747,107 @@ viona_get_mac_capab(viona_link_t *link)
 }
 
 static int
+viona_kstat_update(kstat_t *ksp, int rw)
+{
+	viona_link_t *link = ksp->ks_private;
+	viona_kstats_t *vk = ksp->ks_data;
+
+	/*
+	 * Avoid the potential for mangled values due to a racing consolidation
+	 * of stats for a ring by performing the kstat update with l_stats_lock
+	 * held while adding up the central (link) and ring values.
+	 */
+	mutex_enter(&link->l_stats_lock);
+
+	const viona_transfer_stats_t *ring_stats =
+	    &link->l_vrings[VIONA_VQ_RX].vr_stats;
+	const viona_transfer_stats_t *link_stats = &link->l_stats.vls_rx;
+
+	vk->vk_rx_packets.value.ui64 =
+	    link_stats->vts_packets + ring_stats->vts_packets;
+	vk->vk_rx_bytes.value.ui64 =
+	    link_stats->vts_bytes + ring_stats->vts_bytes;
+	vk->vk_rx_errors.value.ui64 =
+	    link_stats->vts_errors + ring_stats->vts_errors;
+	vk->vk_rx_drops.value.ui64 =
+	    link_stats->vts_drops + ring_stats->vts_drops;
+
+	ring_stats = &link->l_vrings[VIONA_VQ_TX].vr_stats;
+	link_stats = &link->l_stats.vls_tx;
+
+	vk->vk_tx_packets.value.ui64 =
+	    link_stats->vts_packets + ring_stats->vts_packets;
+	vk->vk_tx_bytes.value.ui64 =
+	    link_stats->vts_bytes + ring_stats->vts_bytes;
+	vk->vk_tx_errors.value.ui64 =
+	    link_stats->vts_errors + ring_stats->vts_errors;
+	vk->vk_tx_drops.value.ui64 =
+	    link_stats->vts_drops + ring_stats->vts_drops;
+
+	mutex_exit(&link->l_stats_lock);
+
+	return (0);
+}
+
+static int
+viona_kstat_init(viona_soft_state_t *ss, const cred_t *cr)
+{
+	zoneid_t zid = crgetzoneid(cr);
+	kstat_t *ksp;
+
+	ASSERT(MUTEX_HELD(&ss->ss_lock));
+	ASSERT3P(ss->ss_kstat, ==, NULL);
+
+	ksp = kstat_create_zone(VIONA_MODULE_NAME, ss->ss_minor,
+	    VIONA_KSTAT_NAME, VIONA_KSTAT_CLASS, KSTAT_TYPE_NAMED,
+	    sizeof (viona_kstats_t) / sizeof (kstat_named_t), 0, zid);
+
+	if (ksp == NULL) {
+		/*
+		 * Without detail from kstat_create_zone(), assume that resource
+		 * exhaustion is to blame for the failure.
+		 */
+		return (ENOMEM);
+	}
+	ss->ss_kstat = ksp;
+
+	/*
+	 * If this instance is associated with a non-global zone, make its
+	 * kstats visible from the GZ.
+	 */
+	if (zid != GLOBAL_ZONEID) {
+		kstat_zone_add(ss->ss_kstat, GLOBAL_ZONEID);
+	}
+
+	viona_kstats_t *vk = ksp->ks_data;
+
+	kstat_named_init(&vk->vk_rx_packets, "rx_packets", KSTAT_DATA_UINT64);
+	kstat_named_init(&vk->vk_rx_bytes, "rx_bytes", KSTAT_DATA_UINT64);
+	kstat_named_init(&vk->vk_rx_errors, "rx_errors", KSTAT_DATA_UINT64);
+	kstat_named_init(&vk->vk_rx_drops, "rx_drops", KSTAT_DATA_UINT64);
+	kstat_named_init(&vk->vk_tx_packets, "tx_packets", KSTAT_DATA_UINT64);
+	kstat_named_init(&vk->vk_tx_bytes, "tx_bytes", KSTAT_DATA_UINT64);
+	kstat_named_init(&vk->vk_tx_errors, "tx_errors", KSTAT_DATA_UINT64);
+	kstat_named_init(&vk->vk_tx_drops, "tx_drops", KSTAT_DATA_UINT64);
+	ksp->ks_private = ss->ss_link;
+	ksp->ks_update = viona_kstat_update;
+
+	kstat_install(ss->ss_kstat);
+	return (0);
+}
+
+static void
+viona_kstat_fini(viona_soft_state_t *ss)
+{
+	ASSERT(MUTEX_HELD(&ss->ss_lock));
+
+	if (ss->ss_kstat != NULL) {
+		kstat_delete(ss->ss_kstat);
+		ss->ss_kstat = NULL;
+	}
+}
+
+static int
 viona_ioc_create(viona_soft_state_t *ss, void *dptr, int md, cred_t *cr)
 {
 	vioc_create_t	kvc;
@@ -707,6 +859,7 @@ viona_ioc_create(viona_soft_state_t *ss, void *dptr, int md, cred_t *cr)
 	viona_neti_t	*nip = NULL;
 	zoneid_t	zid;
 	mac_diag_t	mac_diag = MAC_DIAG_NONE;
+	boolean_t	rings_allocd = B_FALSE;
 
 	ASSERT(MUTEX_NOT_HELD(&ss->ss_lock));
 
@@ -745,6 +898,7 @@ viona_ioc_create(viona_soft_state_t *ss, void *dptr, int md, cred_t *cr)
 	link = kmem_zalloc(sizeof (viona_link_t), KM_SLEEP);
 	link->l_linkid = kvc.c_linkid;
 	link->l_vm_hold = hold;
+	link->l_mtu = VIONA_DEFAULT_MTU;
 
 	err = mac_open_by_linkid(link->l_linkid, &link->l_mh);
 	if (err != 0) {
@@ -752,8 +906,9 @@ viona_ioc_create(viona_soft_state_t *ss, void *dptr, int md, cred_t *cr)
 	}
 
 	viona_get_mac_capab(link);
+	viona_params_get_defaults(&link->l_params);
 
-	(void) snprintf(cli_name, sizeof (cli_name), "%s-%d", VIONA_CLI_NAME,
+	(void) snprintf(cli_name, sizeof (cli_name), "%s-%d", VIONA_MODULE_NAME,
 	    link->l_linkid);
 	err = mac_client_open(link->l_mh, &link->l_mch, cli_name, 0);
 	if (err != 0) {
@@ -768,6 +923,7 @@ viona_ioc_create(viona_soft_state_t *ss, void *dptr, int md, cred_t *cr)
 
 	viona_ring_alloc(link, &link->l_vrings[VIONA_VQ_RX]);
 	viona_ring_alloc(link, &link->l_vrings[VIONA_VQ_TX]);
+	rings_allocd = B_TRUE;
 
 	/*
 	 * Default to passing up all multicast traffic in addition to
@@ -777,14 +933,16 @@ viona_ioc_create(viona_soft_state_t *ss, void *dptr, int md, cred_t *cr)
 	 */
 	link->l_promisc = VIONA_PROMISC_MULTI;
 	if ((err = viona_rx_set(link, link->l_promisc)) != 0) {
-		viona_rx_clear(link);
-		viona_ring_free(&link->l_vrings[VIONA_VQ_RX]);
-		viona_ring_free(&link->l_vrings[VIONA_VQ_TX]);
 		goto bail;
 	}
 
 	link->l_neti = nip;
 	ss->ss_link = link;
+
+	if ((err = viona_kstat_init(ss, cr)) != 0) {
+		goto bail;
+	}
+
 	mutex_exit(&ss->ss_lock);
 
 	mutex_enter(&nip->vni_lock);
@@ -795,6 +953,7 @@ viona_ioc_create(viona_soft_state_t *ss, void *dptr, int md, cred_t *cr)
 
 bail:
 	if (link != NULL) {
+		viona_rx_clear(link);
 		if (link->l_mch != NULL) {
 			if (link->l_muh != NULL) {
 				VERIFY0(mac_unicast_remove(link->l_mch,
@@ -806,7 +965,12 @@ bail:
 		if (link->l_mh != NULL) {
 			mac_close(link->l_mh);
 		}
+		if (rings_allocd) {
+			viona_ring_free(&link->l_vrings[VIONA_VQ_RX]);
+			viona_ring_free(&link->l_vrings[VIONA_VQ_TX]);
+		}
 		kmem_free(link, sizeof (viona_link_t));
+		ss->ss_link = NULL;
 	}
 	if (hold != NULL) {
 		vmm_drv_rele(hold);
@@ -862,6 +1026,7 @@ viona_ioc_delete(viona_soft_state_t *ss, boolean_t on_close)
 	VERIFY0(viona_ring_reset(&link->l_vrings[VIONA_VQ_TX], B_FALSE));
 
 	mutex_enter(&ss->ss_lock);
+	viona_kstat_fini(ss);
 	if (link->l_mch != NULL) {
 		/* Unhook the receive callbacks and close out the client */
 		viona_rx_clear(link);
@@ -1120,6 +1285,217 @@ viona_ioc_set_promisc(viona_link_t *link, viona_promisc_t mode)
 
 	link->l_promisc = mode;
 	return (0);
+}
+
+#define	PARAM_NM_TX_COPY_DATA	"tx_copy_data"
+#define	PARAM_NM_TX_HEADER_PAD	"tx_header_pad"
+
+#define	PARAM_ERR_INVALID_TYPE	"invalid type"
+#define	PARAM_ERR_OUT_OF_RANGE	"value out of range"
+#define	PARAM_ERR_UNK_KEY	"unknown key"
+
+static nvlist_t *
+viona_params_to_nvlist(const viona_link_params_t *vlp)
+{
+	nvlist_t *nvl = fnvlist_alloc();
+
+	fnvlist_add_boolean_value(nvl, PARAM_NM_TX_COPY_DATA,
+	    vlp->vlp_tx_copy_data);
+	fnvlist_add_uint16(nvl, PARAM_NM_TX_HEADER_PAD,
+	    vlp->vlp_tx_header_pad);
+
+	return (nvl);
+}
+
+static nvlist_t *
+viona_params_from_nvlist(nvlist_t *nvl, viona_link_params_t *vlp)
+{
+	nvlist_t *nverr = fnvlist_alloc();
+	nvpair_t *nvp = NULL;
+
+	while ((nvp = nvlist_next_nvpair(nvl, nvp)) != NULL) {
+		const char *name = nvpair_name(nvp);
+		const data_type_t dtype = nvpair_type(nvp);
+
+		if (strcmp(name, PARAM_NM_TX_COPY_DATA) == 0) {
+			if (dtype == DATA_TYPE_BOOLEAN_VALUE) {
+				vlp->vlp_tx_copy_data =
+				    fnvpair_value_boolean_value(nvp);
+			} else {
+				fnvlist_add_string(nverr, name,
+				    PARAM_ERR_INVALID_TYPE);
+			}
+			continue;
+		}
+		if (strcmp(name, PARAM_NM_TX_HEADER_PAD) == 0) {
+			if (dtype == DATA_TYPE_UINT16) {
+				uint16_t value = fnvpair_value_uint16(nvp);
+
+				if (value > viona_max_header_pad) {
+					fnvlist_add_string(nverr, name,
+					    PARAM_ERR_OUT_OF_RANGE);
+				} else {
+					vlp->vlp_tx_header_pad = value;
+				}
+			} else {
+				fnvlist_add_string(nverr, name,
+				    PARAM_ERR_INVALID_TYPE);
+			}
+			continue;
+		}
+
+		/* Reject parameters we do not recognize */
+		fnvlist_add_string(nverr, name, PARAM_ERR_UNK_KEY);
+	}
+
+	if (!nvlist_empty(nverr)) {
+		return (nverr);
+	}
+
+	nvlist_free(nverr);
+	return (NULL);
+}
+
+static void
+viona_params_get_defaults(viona_link_params_t *vlp)
+{
+	vlp->vlp_tx_copy_data = viona_tx_copy_needed();
+	vlp->vlp_tx_header_pad = 0;
+}
+
+static int
+viona_ioc_get_params(viona_link_t *link, void *udata, int md)
+{
+	vioc_get_params_t vgp;
+	int err = 0;
+
+	if (ddi_copyin(udata, &vgp, sizeof (vgp), md) != 0) {
+		return (EFAULT);
+	}
+
+	nvlist_t *nvl = NULL;
+	if (link != NULL) {
+		nvl = viona_params_to_nvlist(&link->l_params);
+	} else {
+		viona_link_params_t vlp = { 0 };
+
+		viona_params_get_defaults(&vlp);
+		nvl = viona_params_to_nvlist(&vlp);
+	}
+
+	VERIFY(nvl != NULL);
+
+	size_t packed_sz;
+	void *packed = fnvlist_pack(nvl, &packed_sz);
+	nvlist_free(nvl);
+
+	if (packed_sz > vgp.vgp_param_sz) {
+		err = E2BIG;
+	}
+	/* Communicate size, even if the data will not fit */
+	vgp.vgp_param_sz = packed_sz;
+
+	if (err == 0 &&
+	    ddi_copyout(packed, vgp.vgp_param, packed_sz, md) != 0) {
+		err = EFAULT;
+	}
+	kmem_free(packed, packed_sz);
+
+	if (ddi_copyout(&vgp, udata, sizeof (vgp), md) != 0) {
+		if (err != 0) {
+			err = EFAULT;
+		}
+	}
+
+	return (err);
+}
+
+static int
+viona_ioc_set_params(viona_link_t *link, void *udata, int md)
+{
+	vioc_set_params_t vsp;
+	int err = 0;
+	nvlist_t *nverr = NULL;
+
+	if (ddi_copyin(udata, &vsp, sizeof (vsp), md) != 0) {
+		return (EFAULT);
+	}
+
+	if (vsp.vsp_param_sz > VIONA_MAX_PARAM_NVLIST_SZ) {
+		err = E2BIG;
+		goto done;
+	} else if (vsp.vsp_param_sz == 0) {
+		/*
+		 * There is no reason to make this ioctl call with no actual
+		 * parameters to be changed.
+		 */
+		err = EINVAL;
+		goto done;
+	}
+
+	const size_t packed_sz = vsp.vsp_param_sz;
+	void *packed = kmem_alloc(packed_sz, KM_SLEEP);
+	if (ddi_copyin(vsp.vsp_param, packed, packed_sz, md) != 0) {
+		kmem_free(packed, packed_sz);
+		err = EFAULT;
+		goto done;
+	}
+
+	nvlist_t *parsed = NULL;
+	if (nvlist_unpack(packed, packed_sz, &parsed, KM_SLEEP) == 0) {
+		/* Use the existing parameters as a starting point */
+		viona_link_params_t new_params;
+		bcopy(&link->l_params, &new_params,
+		    sizeof (new_params));
+
+		nverr = viona_params_from_nvlist(parsed, &new_params);
+		if (nverr == NULL) {
+			/*
+			 * Only apply the updated parameters if there
+			 * were no errors during parsing.
+			 */
+			bcopy(&new_params, &link->l_params,
+			    sizeof (new_params));
+		} else {
+			err = EINVAL;
+		}
+
+	} else {
+		err = EINVAL;
+	}
+	nvlist_free(parsed);
+	kmem_free(packed, packed_sz);
+
+done:
+	if (nverr != NULL) {
+		size_t err_packed_sz;
+		void *err_packed = fnvlist_pack(nverr, &err_packed_sz);
+
+		if (err_packed_sz > vsp.vsp_error_sz) {
+			if (err != 0) {
+				err = E2BIG;
+			}
+		} else if (ddi_copyout(err_packed, vsp.vsp_error,
+		    err_packed_sz, md) != 0 && err == 0) {
+			err = EFAULT;
+		}
+		vsp.vsp_error_sz = err_packed_sz;
+
+		nvlist_free(nverr);
+		kmem_free(err_packed, err_packed_sz);
+	} else {
+		/*
+		 * If there are no detailed per-field errors, it is important to
+		 * communicate that absense to userspace.
+		 */
+		vsp.vsp_error_sz = 0;
+	}
+
+	if (ddi_copyout(&vsp, udata, sizeof (vsp), md) != 0 && err == 0) {
+		err = EFAULT;
+	}
+
+	return (err);
 }
 
 static int

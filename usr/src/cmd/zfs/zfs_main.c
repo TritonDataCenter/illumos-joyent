@@ -54,6 +54,7 @@
 #include <signal.h>
 #include <sys/debug.h>
 #include <sys/list.h>
+#include <sys/sysmacros.h>
 #include <sys/mkdev.h>
 #include <sys/mntent.h>
 #include <sys/mnttab.h>
@@ -1007,6 +1008,31 @@ zfs_do_create(int argc, char **argv)
 		}
 	}
 
+	/*
+	 * if volsize is not a multiple of volblocksize, round it up to the
+	 * nearest multiple of the volblocksize
+	 */
+	if (type == ZFS_TYPE_VOLUME) {
+		uint64_t volblocksize;
+
+		if (nvlist_lookup_uint64(props,
+		    zfs_prop_to_name(ZFS_PROP_VOLBLOCKSIZE),
+		    &volblocksize) != 0)
+			volblocksize = ZVOL_DEFAULT_BLOCKSIZE;
+
+		if (volsize % volblocksize) {
+			volsize = P2ROUNDUP_TYPED(volsize, volblocksize,
+			    uint64_t);
+
+			if (nvlist_add_uint64(props,
+			    zfs_prop_to_name(ZFS_PROP_VOLSIZE), volsize) != 0) {
+				nvlist_free(props);
+				nomem();
+			}
+		}
+	}
+
+
 	if (type == ZFS_TYPE_VOLUME && !noreserve) {
 		uint64_t spa_version;
 		zfs_prop_t resv_prop;
@@ -1544,7 +1570,7 @@ zfs_do_destroy(int argc, char **argv)
 
 		if (cb.cb_verbose) {
 			char buf[16];
-			zfs_nicenum(cb.cb_snapused, buf, sizeof (buf));
+			zfs_nicebytes(cb.cb_snapused, buf, sizeof (buf));
 			if (cb.cb_parsable) {
 				(void) printf("reclaim\t%llu\n",
 				    cb.cb_snapused);
@@ -2332,7 +2358,7 @@ zfs_do_upgrade(int argc, char **argv)
 	boolean_t showversions = B_FALSE;
 	int ret = 0;
 	upgrade_cbdata_t cb = { 0 };
-	char c;
+	int c;
 	int flags = ZFS_ITER_ARGS_CAN_BE_PATHS;
 
 	/* check options */
@@ -2795,7 +2821,7 @@ userspace_cb(void *arg, const char *domain, uid_t rid, uint64_t space)
 		    prop == ZFS_PROP_USERQUOTA || prop == ZFS_PROP_GROUPQUOTA ||
 		    prop == ZFS_PROP_PROJECTUSED ||
 		    prop == ZFS_PROP_PROJECTQUOTA) {
-			zfs_nicenum(space, sizebuf, sizeof (sizebuf));
+			zfs_nicebytes(space, sizebuf, sizeof (sizebuf));
 		} else {
 			zfs_nicenum(space, sizebuf, sizeof (sizebuf));
 		}
@@ -2896,21 +2922,34 @@ print_us_node(boolean_t scripted, boolean_t parsable, int *fields, int types,
 			break;
 		case USFIELD_USED:
 		case USFIELD_QUOTA:
+			if (type == DATA_TYPE_UINT64) {
+				if (parsable) {
+					(void) sprintf(valstr, "%llu", val64);
+					strval = valstr;
+				} else if (field == USFIELD_QUOTA &&
+				    val64 == 0) {
+					strval = "none";
+				} else {
+					zfs_nicebytes(val64, valstr,
+					    sizeof (valstr));
+					strval = valstr;
+				}
+			}
+			break;
 		case USFIELD_OBJUSED:
 		case USFIELD_OBJQUOTA:
 			if (type == DATA_TYPE_UINT64) {
 				if (parsable) {
 					(void) sprintf(valstr, "%llu", val64);
+					strval = valstr;
+				} else if (field == USFIELD_OBJQUOTA &&
+				    val64 == 0) {
+					strval = "none";
 				} else {
 					zfs_nicenum(val64, valstr,
 					    sizeof (valstr));
-				}
-				if ((field == USFIELD_QUOTA ||
-				    field == USFIELD_OBJQUOTA) &&
-				    strcmp(valstr, "0") == 0)
-					strval = "none";
-				else
 					strval = valstr;
+				}
 			}
 			break;
 		}
@@ -3965,7 +4004,7 @@ static int
 zfs_do_snapshot(int argc, char **argv)
 {
 	int ret = 0;
-	char c;
+	int c;
 	nvlist_t *props;
 	snap_cbdata_t sd = { 0 };
 	boolean_t multiple_snaps = B_FALSE;
@@ -7375,9 +7414,10 @@ zfs_do_diff(int argc, char **argv)
 	if ((atp = strchr(copy, '@')) != NULL)
 		*atp = '\0';
 
-	if ((zhp = zfs_open(g_zfs, copy, ZFS_TYPE_FILESYSTEM)) == NULL)
+	if ((zhp = zfs_open(g_zfs, copy, ZFS_TYPE_FILESYSTEM)) == NULL) {
+		free(copy);
 		return (1);
-
+	}
 	free(copy);
 
 	/*
@@ -7537,7 +7577,7 @@ static int
 zfs_do_channel_program(int argc, char **argv)
 {
 	int ret, fd;
-	char c;
+	int c;
 	char *progbuf, *filename, *poolname;
 	size_t progsize, progread;
 	nvlist_t *outnvl = NULL;

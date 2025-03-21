@@ -33,7 +33,7 @@
 extern "C" {
 #endif
 
-#ifdef _KERNEL
+#if defined(_KERNEL) || defined(_FAKE_KERNEL)
 
 /*
  * The following union allows us to use C99's "designated initializer"
@@ -54,8 +54,8 @@ typedef union fs_func {
  * File systems use arrays of fs_operation_def structures to form
  * name/value pairs of operations.  These arrays get passed to:
  *
- * 	- vn_make_ops() to create vnodeops
- * 	- vfs_makefsops()/vfs_setfsops() to create vfsops.
+ *	- vn_make_ops() to create vnodeops
+ *	- vfs_makefsops()/vfs_setfsops() to create vfsops.
  */
 typedef struct fs_operation_def {
 	char *name;			/* name of operation (NULL at end) */
@@ -76,9 +76,9 @@ typedef struct fs_operation_def {
  */
 typedef struct fs_operation_trans_def {
 	char *name;			/* name of operation (NULL at end) */
-	int offset;			/* byte offset within ops vector */
+	size_t offset;			/* byte offset within ops vector */
 	fs_generic_func_p defaultFunc;	/* default function */
-	fs_generic_func_p errorFunc; 	/* error function */
+	fs_generic_func_p errorFunc;	/* error function */
 } fs_operation_trans_def_t;
 
 /*
@@ -105,7 +105,7 @@ int	vfs_makefsops(const fs_operation_def_t *, vfsops_t **);
 void	vfs_freevfsops(vfsops_t *);
 int	vfs_freevfsops_by_type(int);
 
-#endif /* _KERNEL */
+#endif /* _KERNEL || _FAKE_KERNEL */
 
 #ifdef	__cplusplus
 }

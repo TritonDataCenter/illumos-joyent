@@ -13,7 +13,7 @@
  * Copyright 2016 Nexenta Systems, Inc.
  * Copyright 2020 Joyent, Inc.
  * Copyright 2019 Western Digital Corporation
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
  */
 
@@ -22,6 +22,7 @@
 
 #include <sys/types.h>
 #include <sys/debug.h>
+#include <sys/stddef.h>
 
 #ifdef _KERNEL
 #include <sys/types32.h>
@@ -43,44 +44,703 @@ extern "C" {
  */
 
 #define	NVME_IOC			(('N' << 24) | ('V' << 16) | ('M' << 8))
+#define	NVME_IOC_CTRL_INFO		(NVME_IOC | 0)
 #define	NVME_IOC_IDENTIFY		(NVME_IOC | 1)
-#define	NVME_IOC_CAPABILITIES		(NVME_IOC | 3)
-#define	NVME_IOC_GET_LOGPAGE		(NVME_IOC | 4)
-#define	NVME_IOC_GET_FEATURES		(NVME_IOC | 5)
-#define	NVME_IOC_INTR_CNT		(NVME_IOC | 6)
-#define	NVME_IOC_VERSION		(NVME_IOC | 7)
-#define	NVME_IOC_FORMAT			(NVME_IOC | 8)
-#define	NVME_IOC_DETACH			(NVME_IOC | 9)
-#define	NVME_IOC_ATTACH			(NVME_IOC | 10)
-#define	NVME_IOC_FIRMWARE_DOWNLOAD	(NVME_IOC | 11)
-#define	NVME_IOC_FIRMWARE_COMMIT	(NVME_IOC | 12)
-#define	NVME_IOC_PASSTHRU		(NVME_IOC | 13)
-#define	NVME_IOC_NS_INFO		(NVME_IOC | 14)
+#define	NVME_IOC_GET_LOGPAGE		(NVME_IOC | 2)
+#define	NVME_IOC_GET_FEATURE		(NVME_IOC | 3)
+#define	NVME_IOC_FORMAT			(NVME_IOC | 4)
+#define	NVME_IOC_DETACH			(NVME_IOC | 5)
+#define	NVME_IOC_ATTACH			(NVME_IOC | 6)
+#define	NVME_IOC_FIRMWARE_DOWNLOAD	(NVME_IOC | 7)
+#define	NVME_IOC_FIRMWARE_COMMIT	(NVME_IOC | 8)
+#define	NVME_IOC_PASSTHRU		(NVME_IOC | 9)
+#define	NVME_IOC_NS_INFO		(NVME_IOC | 10)
+#define	NVME_IOC_LOCK			(NVME_IOC | 11)
+#define	NVME_IOC_UNLOCK			(NVME_IOC | 12)
 #define	NVME_IOC_MAX			NVME_IOC_NS_INFO
 
 #define	IS_NVME_IOC(x)			((x) > NVME_IOC && (x) <= NVME_IOC_MAX)
 #define	NVME_IOC_CMD(x)			((x) & 0xff)
 
-typedef struct {
-	size_t		n_len;
-	uintptr_t	n_buf;
-	uint64_t	n_arg;
-} nvme_ioctl_t;
-
-#ifdef _KERNEL
-typedef struct {
-	size32_t	n_len;
-	uintptr32_t	n_buf;
-	uint64_t	n_arg;
-} nvme_ioctl32_t;
-#endif
+/*
+ * This represents the set of all possible errors that can be returned from an
+ * ioctl. Our general rule of thumb is that we only will use an errno value to
+ * indicate that certain processing failed: a lack of privileges, bad minor, or
+ * failure to copy in and out the initial ioctl structure. However, if we get
+ * far enough that there is any other failure (including a failure to copy in
+ * and out nested data such as the identify command payload) then we will issue
+ * an error here. Put differently, our basic promise is that there should be a
+ * single straightforward meaning for any errno returned and instead all the
+ * nuance is here. Our goal is that no one should guess what of two dozen things
+ * an EINVAL might have referred to.
+ *
+ * When we are dealing with field parameters, there are three general classes of
+ * errors that we define that are common across all request structures:
+ *
+ *   <REQ>_<FIELD>_RANGE	RANGE class errors indicate that the value
+ *				passed in is outside the range that the device
+ *				supports. The range may vary based on the
+ *				specification. This is used both for issues like
+ *				bad alignment in a value (e.g. not 4-byte
+ *				aligned) or a value that is larger than the
+ *				maximum possible size. Because the namespace ID
+ *				is shared in every request in the controller and
+ *				is part of our standard ioctl handling, we use a
+ *				single set of errors for that.
+ *
+ *   <REQ>_<FIELD>_UNSUP	This indicates that the controller cannot
+ *				support any value in the given field. This is
+ *				either because the field was introduced in an
+ *				NVMe specification later than the controller
+ *				supports or because there is an explicit feature
+ *				bit that indicates whether or not this field is
+ *				valid. Entries here may or may not have a
+ *				namespace unsupported entry due to the fact that
+ *				this is command specific.
+ *
+ *  <REQ>_<FIELD>_UNUSE		This class is perhaps the weirdest. This
+ *				represents a case where a given field cannot be
+ *				set because it is not used based on the
+ *				specifics of the request. For example, if you're
+ *				getting the health log page, you may not set the
+ *				LSP or LSI for that log page, even if you have
+ *				an NVMe 1.4 controller that supports both fields
+ *				because they have no meaning. A similar example
+ *				would be setting a controller ID when it has no
+ *				meaning in a particular identify request.
+ *
+ * While every field will have a RANGE class error, some fields will not have an
+ * UNSUP or UNUSE class error depending on the specifics. A field that has
+ * always been present since NVMe 1.0 and is always valid, such as say the log
+ * page ID field for a get log page request or the length of a firmware download
+ * request, currently are always valid. It is possible that future revisions to
+ * the specification or our logic may change this.
+ */
+typedef enum {
+	/*
+	 * Indicates that the command actually completed successfully.
+	 */
+	NVME_IOCTL_E_OK	= 0,
+	/*
+	 * Indicates that the controller failed the command and the controller
+	 * specific (SC/SCT) are available. For all other errors, those fields
+	 * are reserved.
+	 */
+	NVME_IOCTL_E_CTRL_ERROR,
+	/*
+	 * Indicates that the controller is considered "dead" by the system and
+	 * therefore is unusable. Separately, the controller may have been
+	 * removed from the system due to hotplug or related. In that case, the
+	 * gone variant is used to distinguish this.
+	 */
+	NVME_IOCTL_E_CTRL_DEAD,
+	NVME_IOCTL_E_CTRL_GONE,
+	/*
+	 * Indicates that a bad namespace was requested. This would generally
+	 * happen when referring to a namespace that is outside of controller's
+	 * range.
+	 */
+	NVME_IOCTL_E_NS_RANGE,
+	/*
+	 * Indicates that a namespace is not usable in this context.
+	 */
+	NVME_IOCTL_E_NS_UNUSE,
+	/*
+	 * Indicates that the requested namespace could not be used because we
+	 * are operating on a namespace minor and asked to operate on a
+	 * different namespace.
+	 */
+	NVME_IOCTL_E_MINOR_WRONG_NS,
+	/*
+	 * Indicates that the requested ioctl can only operate on the controller
+	 * minor and we were on a namespace minor. This is not used for when a
+	 * namespace is incorrectly requested otherwise.
+	 */
+	NVME_IOCTL_E_NOT_CTRL,
+	/*
+	 * Indicates that we were asked to operate on the broadcast namespace
+	 * either because it was specified or that was how the request was
+	 * transformed and the broadcast namespace is not supported for this
+	 * operation.
+	 */
+	NVME_IOCTL_E_NO_BCAST_NS,
+	/*
+	 * Indicates that the operation failed because the operation requires a
+	 * controller or namespace write lock and the caller did not have it.
+	 */
+	NVME_IOCTL_E_NEED_CTRL_WRLOCK,
+	NVME_IOCTL_E_NEED_NS_WRLOCK,
+	/*
+	 * Indicates that the operation could not proceed because someone else
+	 * has exclusive access currently to the controller or namespace and
+	 * therefore this request (which does not require exclusive access)
+	 * could not proceed.
+	 */
+	NVME_IOCTL_E_CTRL_LOCKED,
+	NVME_IOCTL_E_NS_LOCKED,
+	/*
+	 * Indicates that a standard log page was requested that the kernel
+	 * doesn't know about.
+	 */
+	NVME_IOCTL_E_UNKNOWN_LOG_PAGE,
+	/*
+	 * Indicates that the controller does not support the requested log
+	 * page; however, the kernel knows about it.
+	 */
+	NVME_IOCTL_E_UNSUP_LOG_PAGE,
+	/*
+	 * Indicates that the log page's scope requires operating on something
+	 * that isn't what was requested. For example, trying to request the
+	 * firmware information page on a namespace.
+	 */
+	NVME_IOCTL_E_BAD_LOG_SCOPE,
+	/*
+	 * Log page fields with bad values.
+	 */
+	NVME_IOCTL_E_LOG_CSI_RANGE,
+	NVME_IOCTL_E_LOG_LID_RANGE,
+	NVME_IOCTL_E_LOG_LSP_RANGE,
+	NVME_IOCTL_E_LOG_LSI_RANGE,
+	NVME_IOCTL_E_LOG_RAE_RANGE,
+	NVME_IOCTL_E_LOG_SIZE_RANGE,
+	NVME_IOCTL_E_LOG_OFFSET_RANGE,
+	/*
+	 * Log page fields that may not be supported.
+	 */
+	NVME_IOCTL_E_LOG_CSI_UNSUP,
+	NVME_IOCTL_E_LOG_LSP_UNSUP,
+	NVME_IOCTL_E_LOG_LSI_UNSUP,
+	NVME_IOCTL_E_LOG_RAE_UNSUP,
+	NVME_IOCTL_E_LOG_OFFSET_UNSUP,
+	/*
+	 * Log page fields that may not be usable, depending on context.
+	 */
+	NVME_IOCTL_E_LOG_LSP_UNUSE,
+	NVME_IOCTL_E_LOG_LSI_UNUSE,
+	NVME_IOCTL_E_LOG_RAE_UNUSE,
+	/*
+	 * Indicates that no DMA memory was available for a request.
+	 */
+	NVME_IOCTL_E_NO_DMA_MEM,
+	/*
+	 * Indicates that there was no kernel memory avilable for the request.
+	 */
+	NVME_IOCTL_E_NO_KERN_MEM,
+	/*
+	 * Indicates that an error occurred while trying to fill out the DMA PRP
+	 */
+	NVME_IOCTL_E_BAD_PRP,
+	/*
+	 * Indicates that a pointer to user data to read from or write to was
+	 * not valid and generated a fault. Specifically this is for items that
+	 * an ioctl structure points to.
+	 */
+	NVME_IOCTL_E_BAD_USER_DATA,
+	/*
+	 * Indicates that the kernel does not know about the requested identify
+	 * command.
+	 */
+	NVME_IOCTL_E_UNKNOWN_IDENTIFY,
+	/*
+	 * Indicates that the controller does not support the requested identify
+	 * command.
+	 */
+	NVME_IOCTL_E_UNSUP_IDENTIFY,
+	/*
+	 * The following errors indicate either a bad value for a given identify
+	 * argument. This would happen because the value is outside the
+	 * supported range. There is no CNS or below as those are the
+	 * higher-level errors right above this.
+	 */
+	NVME_IOCTL_E_IDENTIFY_CTRLID_RANGE,
+	/*
+	 * Next, we have the unsupported and unusable pieces. The nsid was
+	 * supported starting in NVMe 1.0, therefore it is never unsupported.
+	 * However, the controller ID both requires controller support and is
+	 * not usable in several requests.
+	 */
+	NVME_IOCTL_E_IDENTIFY_CTRLID_UNSUP,
+	NVME_IOCTL_E_IDENTIFY_CTRLID_UNUSE,
+	/*
+	 * Indicates that the controller does not support the NVMe spec's
+	 * general vendor unique command format.
+	 */
+	NVME_IOCTL_E_CTRL_VUC_UNSUP,
+	/*
+	 * The following indicate bad values for given NVMe vendor unique
+	 * command fields. All of the cdw1[2-5] fields are not part of this
+	 * because there is nothing that we can validate.
+	 */
+	NVME_IOCTL_E_VUC_TIMEOUT_RANGE,
+	NVME_IOCTL_E_VUC_OPCODE_RANGE,
+	NVME_IOCTL_E_VUC_FLAGS_RANGE,
+	NVME_IOCTL_E_VUC_IMPACT_RANGE,
+	NVME_IOCTL_E_VUC_NDT_RANGE,
+	/*
+	 * These indicate that the VUC data and that the corresponding pair of
+	 * fields do not agree with each other.
+	 */
+	NVME_IOCTL_E_INCONSIST_VUC_FLAGS_NDT,
+	NVME_IOCTL_E_INCONSIST_VUC_BUF_NDT,
+	/*
+	 * Indicates that the operation in question did not succeed because
+	 * blkdev failed to detach. Most often this happens because the device
+	 * node is busy. Reasons the device node could be busy include that the
+	 * device is in a zpool, a file system is mounted, a process has the
+	 * block device open, etc.
+	 */
+	NVME_IOCTL_E_BLKDEV_DETACH,
+	/*
+	 * Indicates that the operation in question failed because we were
+	 * unable to create and online a new blkdev child.
+	 */
+	NVME_IOCTL_E_BLKDEV_ATTACH,
+	/*
+	 * Indicates that the namespace requested for an attach is not supported
+	 * by the system. This would happen due to properties of the namespace
+	 * itself (e.g. utilizing metadata sectors).
+	 */
+	NVME_IOCTL_E_UNSUP_ATTACH_NS,
+	/*
+	 * Indicates that the format operation is not supported by the
+	 * controller at all.
+	 */
+	NVME_IOCTL_E_CTRL_FORMAT_UNSUP,
+	/*
+	 * Indicates that the controller does not support the ability to perform
+	 * a cryptographic secure erase.
+	 */
+	NVME_IOCTL_E_CTRL_CRYPTO_SE_UNSUP,
+	/*
+	 * Indicates that a format operation is targeting a namespace, but
+	 * cannot be performed because it does not support formatting an
+	 * individual namespace or performing a secure-erase of an individual
+	 * namespace respectively.
+	 */
+	NVME_IOCTL_E_CTRL_NS_FORMAT_UNSUP,
+	NVME_IOCTL_E_CTRL_NS_SE_UNSUP,
+	/*
+	 * The following indicate bad values for a format NVM request.
+	 */
+	NVME_IOCTL_E_FORMAT_LBAF_RANGE,
+	NVME_IOCTL_E_FORMAT_SES_RANGE,
+	/*
+	 * Indicates that the requested LBA format is not supported due to its
+	 * use of metadata.
+	 */
+	NVME_IOCTL_E_UNSUP_LBAF_META,
+	/*
+	 * Indicates that the firmware commands are not supported by the
+	 * controller at all.
+	 */
+	NVME_IOCTL_E_CTRL_FW_UNSUP,
+	/*
+	 * Indicates that the controller has reported a firmware update
+	 * granularity that exceeds the calculated / driver supported maximum
+	 * DMA transfer size. As such we cannot perform this operation.
+	 */
+	NVME_IOCTL_E_FW_LOAD_IMPOS_GRAN,
+	/*
+	 * The following indicate bad values for a firmware load's length and
+	 * offset.
+	 */
+	NVME_IOCTL_E_FW_LOAD_LEN_RANGE,
+	NVME_IOCTL_E_FW_LOAD_OFFSET_RANGE,
+	/*
+	 * The following indicate bad values for a firmware commit's slot and
+	 * action.
+	 */
+	NVME_IOCTL_E_FW_COMMIT_SLOT_RANGE,
+	NVME_IOCTL_E_FW_COMMIT_ACTION_RANGE,
+	/*
+	 * Indicates that an explicit attempt was made to download an image into
+	 * a read-only slot. Note, some instances of this cannot be caught prior
+	 * to issuing a command to the controller (commit action 0b11 as it can
+	 * be used whether there is or isn't a staged image) and will result in
+	 * a controller error.
+	 */
+	NVME_IOCTL_E_RO_FW_SLOT,
+	/*
+	 * Indicates that the kernel doesn't know about the NVMe feature in
+	 * question and therefore cannot proceed.
+	 */
+	NVME_IOCTL_E_UNKNOWN_FEATURE,
+	/*
+	 * Indicates that while the system knows about the feature in question,
+	 * it is not supported by the controller.
+	 */
+	NVME_IOCTL_E_UNSUP_FEATURE,
+	/*
+	 * The following errors indicate a bad value for a given get feature
+	 * field. This would happen because the value is outside the supported
+	 * range.
+	 */
+	NVME_IOCTL_E_GET_FEAT_SEL_RANGE,
+	NVME_IOCTL_E_GET_FEAT_CDW11_RANGE,
+	NVME_IOCTL_E_GET_FEAT_DATA_RANGE,
+	/*
+	 * This set of errors indicate that the field is not supported. This can
+	 * happen because a given get feature command doesn't support setting
+	 * this value, the field isn't supported in this revision of the
+	 * controller, or similar issues.
+	 */
+	NVME_IOCTL_E_GET_FEAT_SEL_UNSUP,
+	/*
+	 * Fields that may be circumstantially unusable.
+	 */
+	NVME_IOCTL_E_GET_FEAT_CDW11_UNUSE,
+	NVME_IOCTL_E_GET_FEAT_DATA_UNUSE,
+	/*
+	 * The following errors indicate a bad lock type.
+	 */
+	NVME_IOCTL_E_BAD_LOCK_ENTITY,
+	NVME_IOCTL_E_BAD_LOCK_LEVEL,
+	NVME_IOCTL_E_BAD_LOCK_FLAGS,
+	/*
+	 * Indicates that a namespace open cannot lock or unlock a controller.
+	 */
+	NVME_IOCTL_E_NS_CANNOT_LOCK_CTRL,
+	NVME_IOCTL_E_NS_CANNOT_UNLOCK_CTRL,
+	/*
+	 * Indicates that this lock is already held by the caller.
+	 */
+	NVME_IOCTL_E_LOCK_ALREADY_HELD,
+	/*
+	 * Indicates that we cannot take the controller lock, because the
+	 * caller already has an active namespace lock.
+	 */
+	NVME_IOCTL_E_LOCK_NO_CTRL_WITH_NS,
+	/*
+	 * Indicates that we cannot take a namespace lock because a controller
+	 * write lock already exists.
+	 */
+	NVME_IOCTL_LOCK_NO_NS_WITH_CTRL_WRLOCK,
+	/*
+	 * Indicates that we cannot take a namespace lock because we already
+	 * have one.
+	 */
+	NVME_IOCTL_E_LOCK_NO_2ND_NS,
+	/*
+	 * Indicate that a blocking wait for a lock was interrupted due to a
+	 * signal.
+	 */
+	NVME_IOCTL_E_LOCK_WAIT_SIGNAL,
+	/*
+	 * Indicates that the lock could not be acquired because it was already
+	 * held and we were asked not to block on the lock.
+	 */
+	NVME_IOCTL_E_LOCK_WOULD_BLOCK,
+	/*
+	 * Indicates that the lock operation could not proceed because the minor
+	 * is already blocking on another lock operation.
+	 */
+	NVME_IOCTL_E_LOCK_PENDING,
+	/*
+	 * Indicates that the requested lock could not be unlocked because it is
+	 * not held. The minor may not hold the lock or it may be blocking for
+	 * acquisition.
+	 */
+	NVME_IOCTL_E_LOCK_NOT_HELD,
+	/*
+	 * Indicates that the requested lock could not be unlocked because the
+	 * namespace requested is not the namespace that is currently locked.
+	 */
+	NVME_IOCTL_E_LOCK_WRONG_NS,
+	/*
+	 * Indicates that the request could not proceed because a namespace is
+	 * attached to blkdev. This would block a format operation, a vendor
+	 * unique command that indicated that it would impact all namespaces,
+	 * etc.
+	 */
+	NVME_IOCTL_E_NS_BLKDEV_ATTACH,
+	/*
+	 * Indicates that the blkdev address somehow would have overflowed our
+	 * internal buffer.
+	 */
+	NVME_IOCTL_E_BD_ADDR_OVER
+} nvme_ioctl_errno_t;
 
 /*
- * NVMe capabilities
+ * This structure is embedded as the first item of every ioctl. It is also used
+ * directly for the attach (NVME_IOC_ATTACH) and detach (NVME_IOC_DETACH)
+ * ioctls.
  */
 typedef struct {
-	uint32_t mpsmax;		/* Memory Page Size Maximum */
-	uint32_t mpsmin;		/* Memory Page Size Minimum */
+	/*
+	 * This allows one to specify the namespace ID that the ioctl may
+	 * target, if it supports it. This field may be left to zero to indicate
+	 * that the current open device (whether the controller or a namespace)
+	 * should be targeted. If a namespace is open, a value other than 0 or
+	 * the current namespace's ID is invalid.
+	 */
+	uint32_t nioc_nsid;
+	/*
+	 * These next three values represent a possible error that may have
+	 * occurred. On every ioctl nioc_drv_err is set to a value from the
+	 * nvme_ioctl_errno_t enumeration. Anything other than NVME_IOCTL_E_OK
+	 * indicates a failure of some kind. Some error values will put
+	 * supplemental information in sct and sc. For example,
+	 * NVME_IOCTL_E_CTRL_ERROR uses that as a way to return the raw error
+	 * values from the controller for someone to inspect. Others may use
+	 * this for their own well-defined supplemental information.
+	 */
+	uint32_t nioc_drv_err;
+	uint32_t nioc_ctrl_sct;
+	uint32_t nioc_ctrl_sc;
+} nvme_ioctl_common_t;
+
+/*
+ * NVMe Identify Command (NVME_IOC_IDENTIFY).
+ */
+typedef struct {
+	nvme_ioctl_common_t nid_common;
+	uint32_t nid_cns;
+	uint32_t nid_ctrlid;
+	uintptr_t nid_data;
+} nvme_ioctl_identify_t;
+
+/*
+ * The following constants describe the maximum values that may be used in
+ * various identify requests.
+ */
+#define	NVME_IDENTIFY_MAX_CTRLID	0xffff
+#define	NVME_IDENTIFY_MAX_NSID		0xffffffff
+#define	NVME_IDENTIFY_MAX_CNS_1v2	0xff
+#define	NVME_IDENTIFY_MAX_CNS_1v1	0x3
+#define	NVME_IDENTIFY_MAX_CNS		0x1
+
+/*
+ * Get a specific feature (NVME_IOC_GET_FEATURE).
+ */
+typedef struct {
+	nvme_ioctl_common_t nigf_common;
+	uint32_t nigf_fid;
+	uint32_t nigf_sel;
+	uint32_t nigf_cdw11;
+	uintptr_t nigf_data;
+	uint64_t nigf_len;
+	uint32_t nigf_cdw0;
+} nvme_ioctl_get_feature_t;
+
+/*
+ * Feature maximums.
+ */
+#define	NVME_FEAT_MAX_FID	0xff
+#define	NVME_FEAT_MAX_SEL	0x3
+
+/*
+ * Get a specific log page (NVME_IOC_GET_LOGPAGE). By default, unused fields
+ * should be left at zero.  the input data length is specified by nigl_len, in
+ * bytes. The NVMe specification does not provide a way for a controller to
+ * write less bytes than requested for a log page. It is undefined behavior if a
+ * log page read requests more data than is supported. If this is successful,
+ * nigl_len bytes will be copied out.
+ */
+typedef struct {
+	nvme_ioctl_common_t nigl_common;
+	uint32_t nigl_csi;
+	uint32_t nigl_lid;
+	uint32_t nigl_lsp;
+	uint32_t nigl_lsi;
+	uint32_t nigl_rae;
+	uint64_t nigl_len;
+	uint64_t nigl_offset;
+	uintptr_t nigl_data;
+} nvme_ioctl_get_logpage_t;
+
+/*
+ * The following constants describe the maximum values for fields that used in
+ * the log page request. Note, some of these change with the version. These
+ * values are inclusive. The default max is the lowest common value. Larger
+ * values are included here. While these values are what the command set
+ * maximums are, the device driver may support smaller minimums (e.g. for size).
+ */
+#define	NVME_LOG_MAX_LID	0xff
+#define	NVME_LOG_MAX_LSP	0x0f
+#define	NVME_LOG_MAX_LSP_2v0	0x7f
+#define	NVME_LOG_MAX_LSI	0xffff
+#define	NVME_LOG_MAX_UUID	0x7f
+#define	NVME_LOG_MAX_CSI	0xff
+#define	NVME_LOG_MAX_RAE	0x1
+#define	NVME_LOG_MAX_OFFSET	UINT64_MAX
+
+/*
+ * These maximum size values are inclusive like the others. The fields are 12
+ * and 32-bits wide respectively, but are zero based. That is accounted for by
+ * the shifts below.
+ */
+#define	NVME_LOG_MAX_SIZE	((1ULL << 12ULL) * 4ULL)
+#define	NVME_LOG_MAX_SIZE_1v2	((1ULL << 32ULL) * 4ULL)
+
+/*
+ * Inject a vendor-specific admin command (NVME_IOC_PASSTHRU).
+ */
+typedef struct {
+	nvme_ioctl_common_t npc_common;	/* NSID and status */
+	uint32_t npc_opcode;	/* Command opcode. */
+	uint32_t npc_timeout;	/* Command timeout, in seconds. */
+	uint32_t npc_flags;	/* Flags for the command. */
+	uint32_t npc_impact;	/* Impact information */
+	uint32_t npc_cdw0;	/* Command-specific result DWord 0 */
+	uint32_t npc_cdw12;	/* Command-specific DWord 12 */
+	uint32_t npc_cdw13;	/* Command-specific DWord 13 */
+	uint32_t npc_cdw14;	/* Command-specific DWord 14 */
+	uint32_t npc_cdw15;	/* Command-specific DWord 15 */
+	uint64_t npc_buflen;	/* Size of npc_buf. */
+	uintptr_t npc_buf;	/* I/O source or destination */
+} nvme_ioctl_passthru_t;
+
+/*
+ * Constants for the passthru admin commands. Because the timeout is a kernel
+ * property, we don't include that here.
+ */
+#define	NVME_PASSTHRU_MIN_ADMIN_OPC	0xc0
+#define	NVME_PASSTHRU_MAX_ADMIN_OPC	0xff
+
+/* Flags for NVMe passthru commands. */
+#define	NVME_PASSTHRU_READ	0x1 /* Read from device */
+#define	NVME_PASSTHRU_WRITE	0x2 /* Write to device */
+
+/*
+ * Impact information for NVMe passthru commands. The current impact flags are
+ * defined as follows:
+ *
+ * NVME_IMPACT_NS	This implies that one or all of the namespaces may be
+ *			changed. This command will rescan all namespace after
+ *			this occurs and update our state as a result. However,
+ *			this requires that all such namespaces not be attached
+ *			to blkdev to continue.
+ */
+#define	NVME_IMPACT_NS		0x01
+
+
+/*
+ * Firmware download (NVME_IOC_FIRMWARE_DOWNLOAD).
+ */
+typedef struct {
+	nvme_ioctl_common_t fwl_common;
+	uintptr_t fwl_buf;
+	uint64_t fwl_len;
+	uint64_t fwl_off;
+} nvme_ioctl_fw_load_t;
+
+/*
+ * Firmware commit (NVME_IOC_FIRMWARE_COMMIT). This was previously called
+ * firmware activate in earlier specification revisions.
+ */
+typedef struct {
+	nvme_ioctl_common_t fwc_common;
+	uint32_t fwc_slot;
+	uint32_t fwc_action;
+} nvme_ioctl_fw_commit_t;
+
+/*
+ * Format NVM command (NVME_IOC_FORMAT)
+ */
+typedef struct {
+	nvme_ioctl_common_t nif_common;
+	uint32_t nif_lbaf;
+	uint32_t nif_ses;
+} nvme_ioctl_format_t;
+
+typedef enum {
+	NVME_LOCK_E_CTRL = 1,
+	NVME_LOCK_E_NS
+} nvme_lock_ent_t;
+
+typedef enum {
+	NVME_LOCK_L_READ	= 1,
+	NVME_LOCK_L_WRITE
+} nvme_lock_level_t;
+
+typedef enum {
+	NVME_LOCK_F_DONT_BLOCK	= 1 << 0
+} nvme_lock_flags_t;
+
+/*
+ * Lock structure (NVME_IOC_LOCK).
+ */
+typedef struct {
+	nvme_ioctl_common_t nil_common;
+	nvme_lock_ent_t nil_ent;
+	nvme_lock_level_t nil_level;
+	nvme_lock_flags_t nil_flags;
+} nvme_ioctl_lock_t;
+
+/*
+ * Unlock structure (NVME_IOC_UNLOCK).
+ */
+typedef struct {
+	nvme_ioctl_common_t niu_common;
+	nvme_lock_ent_t niu_ent;
+} nvme_ioctl_unlock_t;
+
+/*
+ * 32-bit ioctl structures. These must be packed to be 4 bytes to get the proper
+ * ILP32 sizing.
+ */
+#if defined(_KERNEL) && defined(_SYSCALL32)
+#pragma pack(4)
+typedef struct {
+	nvme_ioctl_common_t nid_common;
+	uint32_t nid_cns;
+	uint32_t nid_ctrlid;
+	uintptr32_t nid_data;
+} nvme_ioctl_identify32_t;
+
+typedef struct {
+	nvme_ioctl_common_t nigf_common;
+	uint32_t nigf_fid;
+	uint32_t nigf_sel;
+	uint32_t nigf_cdw11;
+	uintptr32_t nigf_data;
+	uint64_t nigf_len;
+	uint32_t nigf_cdw0;
+} nvme_ioctl_get_feature32_t;
+
+typedef struct {
+	nvme_ioctl_common_t nigl_common;
+	uint32_t nigl_csi;
+	uint32_t nigl_lid;
+	uint32_t nigl_lsp;
+	uint32_t nigl_lsi;
+	uint32_t nigl_rae;
+	uint64_t nigl_len;
+	uint64_t nigl_offset;
+	uintptr32_t nigl_data;
+} nvme_ioctl_get_logpage32_t;
+
+typedef struct {
+	nvme_ioctl_common_t npc_common;	/* NSID and status */
+	uint32_t npc_opcode;	/* Command opcode. */
+	uint32_t npc_timeout;	/* Command timeout, in seconds. */
+	uint32_t npc_flags;	/* Flags for the command. */
+	uint32_t npc_impact;	/* Impact information */
+	uint32_t npc_cdw0;	/* Command-specific result DWord 0 */
+	uint32_t npc_cdw12;	/* Command-specific DWord 12 */
+	uint32_t npc_cdw13;	/* Command-specific DWord 13 */
+	uint32_t npc_cdw14;	/* Command-specific DWord 14 */
+	uint32_t npc_cdw15;	/* Command-specific DWord 15 */
+	uint64_t npc_buflen;	/* Size of npc_buf. */
+	uintptr32_t npc_buf;	/* I/O source or destination */
+} nvme_ioctl_passthru32_t;
+
+typedef struct {
+	nvme_ioctl_common_t fwl_common;
+	uintptr32_t fwl_buf;
+	uint64_t fwl_len;
+	uint64_t fwl_off;
+} nvme_ioctl_fw_load32_t;
+#pragma pack()	/* pack(4) */
+#endif	/* _KERNEL && _SYSCALL32 */
+
+/*
+ * NVMe capabilities. This is a set of fields that come from the controller's
+ * PCIe register space.
+ */
+typedef struct {
+	uint32_t cap_mpsmax;		/* Memory Page Size Maximum */
+	uint32_t cap_mpsmin;		/* Memory Page Size Minimum */
 } nvme_capabilities_t;
 
 /*
@@ -99,6 +759,12 @@ typedef struct {
 	(((v)->v_major) > (maj) || \
 	((v)->v_major == (maj) && (v)->v_minor > (min)))
 
+/*
+ * NVMe Namespace related constants. The maximum NSID is determined by the
+ * identify controller data structure.
+ */
+#define	NVME_NSID_MIN	1
+#define	NVME_NSID_BCAST	0xffffffff
 
 #pragma pack(1)
 
@@ -162,6 +828,7 @@ typedef struct {
 
 #define	NVME_SERIAL_SZ	20
 #define	NVME_MODEL_SZ	40
+#define	NVME_FWVER_SZ	8
 
 /* NVMe Identify Controller Data Structure */
 typedef struct {
@@ -170,7 +837,7 @@ typedef struct {
 	uint16_t id_ssvid;		/* PCI subsystem vendor ID */
 	char id_serial[NVME_SERIAL_SZ];	/* Serial Number */
 	char id_model[NVME_MODEL_SZ];	/* Model Number */
-	char id_fwrev[8];		/* Firmware Revision */
+	char id_fwrev[NVME_FWVER_SZ];	/* Firmware Revision */
 	uint8_t id_rab;			/* Recommended Arbitration Burst */
 	uint8_t id_oui[3];		/* vendor IEEE OUI */
 	struct {			/* Multi-Interface Capabilities */
@@ -445,6 +1112,8 @@ typedef struct {
 	uint8_t lbaf_rsvd1:6;
 } nvme_idns_lbaf_t;
 
+#define	NVME_MAX_LBAF	16
+
 /* NVMe Identify Namespace Data Structure */
 typedef struct {
 	uint64_t id_nsize;		/* Namespace Size */
@@ -525,7 +1194,7 @@ typedef struct {
 	uint16_t id_endgid;		/* Endurance Group Identifier (1.4) */
 	uint8_t id_nguid[16];		/* Namespace GUID (1.2) */
 	uint8_t id_eui64[8];		/* IEEE Extended Unique Id (1.1) */
-	nvme_idns_lbaf_t id_lbaf[16];	/* LBA Formats */
+	nvme_idns_lbaf_t id_lbaf[NVME_MAX_LBAF];	/* LBA Formats */
 
 	uint8_t id_rsvd3[384 - 192];
 
@@ -601,11 +1270,62 @@ typedef struct {
 /*
  * NVMe Get Log Page
  */
-#define	NVME_LOGPAGE_ERROR	0x1	/* Error Information */
-#define	NVME_LOGPAGE_HEALTH	0x2	/* SMART/Health Information */
-#define	NVME_LOGPAGE_FWSLOT	0x3	/* Firmware Slot Information */
-#define	NVME_LOGPAGE_NSCHANGE	0x4	/* Changed namespace (1.2) */
+#define	NVME_LOGPAGE_SUP	0x00	/* Supported Logs (2.0) */
+#define	NVME_LOGPAGE_ERROR	0x01	/* Error Information */
+#define	NVME_LOGPAGE_HEALTH	0x02	/* SMART/Health Information */
+#define	NVME_LOGPAGE_FWSLOT	0x03	/* Firmware Slot Information */
+#define	NVME_LOGPAGE_NSCHANGE	0x04	/* Changed namespace (1.2) */
+#define	NVME_LOGPAGE_CMDSUP	0x05	/* Cmds. Supported and Effects (1.3) */
+#define	NVME_LOGPAGE_SELFTEST	0x06	/* Device self-test (1.3) */
+#define	NVME_LOGPAGE_TELMHOST	0x07	/* Telemetry Host-Initiated */
+#define	NVME_LOGPAGE_TELMCTRL	0x08	/* Telemetry Controller-Initiated */
+#define	NVME_LOGPAGE_ENDGRP	0x09	/* Endurance Group Information (1.4) */
+#define	NVME_LOGPAGE_PLATSET	0x0a	/* Predictable Lat. per NVM Set (1.4) */
+#define	NVME_LOGPAGE_PLATAGG	0x0b	/* Predictable Lat. Event Agg (1.4) */
+#define	NVME_LOGPAGE_ASYMNS	0x0c	/* Asymmetric Namespace Access (1.4) */
+#define	NVME_LOGPAGE_PEV	0x0d	/* Persistent Event Log (1.4) */
+#define	NVME_LOGPAGE_LBASTS	0x0e	/* LBA Status Information (1.4) */
+#define	NVME_LOGPAGE_ENDAGG	0x0f	/* Endurance Group Event Agg. (1.4) */
 
+#define	NVME_LOGPAGE_VEND_MIN	0xc0
+#define	NVME_LOGPAGE_VEND_MAX	0xff
+
+/*
+ * Supported Log Pages (2.0). There is one entry of an nvme_logsup_t that then
+ * exists on a per-log basis.
+ */
+
+/*
+ * The NVMe Log Identifier specific parameter field. Currently there is only one
+ * defined field for the persistent event log (pel).
+ */
+typedef union {
+	uint16_t nsl_lidsp;		/* Raw Value */
+	struct {			/* Persistent Event Log */
+		uint16_t nsl_ec512:1;
+		uint16_t nsl_pel_rsvd0p1:15;
+	} nsl_pel;
+} nvme_suplog_lidsp_t;
+
+typedef struct {
+	uint16_t ns_lsupp:1;
+	uint16_t ns_ios:1;
+	uint16_t ns_rsvd0p2:14;
+	nvme_suplog_lidsp_t ns_lidsp;
+} nvme_suplog_t;
+
+CTASSERT(sizeof (nvme_suplog_lidsp_t) == 2);
+CTASSERT(sizeof (nvme_suplog_t) == 4);
+
+typedef struct {
+	nvme_suplog_t	nl_logs[256];
+} nvme_suplog_log_t;
+
+CTASSERT(sizeof (nvme_suplog_log_t) == 1024);
+
+/*
+ * SMART / Health information
+ */
 typedef struct {
 	uint64_t el_count;		/* Error Count */
 	uint16_t el_sqid;		/* Submission Queue ID */
@@ -667,7 +1387,6 @@ typedef struct {
  * The NVMe spec allows for up to seven firmware slots.
  */
 #define	NVME_MAX_FWSLOTS	7
-#define	NVME_FWVER_SZ		8
 
 typedef struct {
 	/* Active Firmware Slot */
@@ -691,6 +1410,140 @@ typedef struct {
 typedef struct {
 	uint32_t	nscl_ns[NVME_NSCHANGE_LIST_SIZE];
 } nvme_nschange_list_t;
+
+/*
+ * Commands Supported and Effects log page and information structure. This was
+ * an optional log page added in NVMe 1.2.
+ */
+typedef struct {
+	uint8_t cmd_csupp:1;	/* Command supported */
+	uint8_t cmd_lbcc:1;	/* Logical block content change */
+	uint8_t cmd_ncc:1;	/* Namespace capability change */
+	uint8_t cmd_nic:1;	/* Namespace inventory change */
+	uint8_t cmd_ccc:1;	/* Controller capability change */
+	uint8_t cmd_rsvd0p5:3;
+	uint8_t cmd_rsvd1;
+	uint16_t cmd_cse:3;	/* Command submission and execution */
+	uint16_t cmd_uuid:1;	/* UUID select supported, 1.4 */
+	uint16_t cmd_csp:12;	/* Command Scope, 2.0 */
+} nvme_cmdeff_t;
+
+CTASSERT(sizeof (nvme_cmdeff_t) == 4);
+
+typedef enum {
+	NVME_CMDEFF_CSP_NS		= 1 << 0,
+	NVME_CMDEFF_CSP_CTRL		= 1 << 1,
+	NVME_CMDEFF_CSP_SET		= 1 << 2,
+	NVME_CMDEFF_CSP_ENDURANCE	= 1 << 3,
+	NVME_CMDEFF_CSP_DOMAIN		= 1 << 4,
+	NVME_CMDEFF_CSP_NVM		= 1 << 5
+} nvme_cmdeff_csp_t;
+
+typedef enum {
+	NVME_CMDEFF_CSE_NONE	= 0,
+	NVME_CMDEFF_CSE_NS,
+	NVME_CMDEFF_CSE_CTRL
+} nvme_cmdeff_cse_t;
+
+typedef struct {
+	nvme_cmdeff_t	cme_admin[256];
+	nvme_cmdeff_t	cme_io[256];
+	uint8_t		cme_rsvd2048[2048];
+} nvme_cmdeff_log_t;
+
+CTASSERT(sizeof (nvme_cmdeff_log_t) == 4096);
+CTASSERT(offsetof(nvme_cmdeff_log_t, cme_rsvd2048) == 2048);
+
+/*
+ * Persistent Event Log Header. This log was added in NVMe 1.4. It begins with a
+ * 512 byte header which is defined below. It uses the log specific parameter to
+ * determine how to access it. Internally the drive contains the notion of a
+ * context that must be released and accessed.
+ */
+typedef struct {
+	uint8_t		pel_lid;	/* Log Identifier */
+	uint8_t		pel_rsvd1[3];
+	uint32_t	pel_tnev;	/* Total Number of Events */
+	uint64_t	pel_tll;	/* Total Log Length */
+	uint8_t		pel_lrev;	/* Log Revision */
+	uint8_t		pel_rsvd17[1];
+	uint16_t	pel_lhl;	/* Log Header Length */
+	uint64_t	pel_tstmp;	/* Timestamp */
+	nvme_uint128_t	pel_poh;	/* Power on Hours */
+	uint64_t	pel_pwrcc;	/* Power Cycle Count */
+	uint16_t	pel_vid;	/* PCI Vendor ID */
+	uint16_t	pel_ssvid;	/* PCI Subsystem Vendor ID */
+	uint8_t		pel_sn[NVME_SERIAL_SZ];	/* Serial Number */
+	uint8_t		pel_mn[NVME_MODEL_SZ];	/* Model Number */
+	uint8_t		pel_subnqn[372 - 116];	/* NVM Subsystem Qual. Name */
+	uint16_t	pel_gnum;	/* Generation Number (2.0) */
+	struct {			/* Reporting Context Info (2.0) */
+		uint16_t pel_rcpid;	/* Port Identifier */
+		uint16_t pel_rcpit:2;	/* Port Identifier Type */
+		uint16_t pel_rce:1;	/* Reporting Context Exists */
+		uint16_t pel_rsvd19:13;
+	} pel_rci;
+	uint8_t		pel_rsvd378[480 - 378];
+	uint8_t		pel_seb[32];	/* Supported Events Bitmap */
+	uint8_t		pel_data[];
+} nvme_pev_log_t;
+
+/*
+ * This enum represents the bit index for various features in the supported
+ * events bitmap.
+ */
+typedef enum {
+	NVME_SEB_SHLSES	= 1,	/* SMART / Health Log */
+	NVME_SEB_FCES = 2,	/* Firmware Commit */
+	NVME_SEB_TCES = 3,	/* Timestamp Change */
+	NVME_SEB_PRES = 4,	/* Power-on or Reset */
+	NVME_SEB_NSHEES = 5,	/* NVM Subsystem Hardware Error */
+	NVME_SEB_CNES = 6,	/* Change Namespace */
+	NVME_SEB_FNSES = 7,	/* Format NVM Start */
+	NVME_SEB_FNCES = 8,	/* Format NVM Completion */
+	NVME_SEB_SSES = 9,	/* Sanitize Start */
+	NVME_SEB_SCES = 10,	/* Sanitize Completion */
+	NVME_SEB_SFES = 11,	/* Set Feature */
+	NVME_SEB_TLCES = 12,	/* Telemetry Log Create */
+	NVME_SEB_TEES = 13,	/* Thermal Excursion */
+	NVME_SEB_SMVES = 14,	/* Sanitize Media Verification (2.1) */
+	NVME_SEB_VSES = 222,	/* Vendor Specific */
+	NVME_SEB_TCG = 223	/* TCG */
+} nvme_pev_seb_t;
+
+/*
+ * Log specific fields for the persistent event log. These are required by the
+ * log.
+ */
+typedef enum {
+	/*
+	 * Read the persistent event log, presumes that a context has already
+	 * been established.
+	 */
+	NVME_PEV_LSP_READ	= 0,
+	/*
+	 * Establish a new context and then read a portion of the event log. Any
+	 * prior existing context must already have been released.
+	 */
+	NVME_PEV_LSP_EST_CTX_READ,
+	/*
+	 * Releases the persistent event log context. It is legal for this
+	 * context to already have been released.
+	 */
+	NVME_PEV_LSP_REL_CTX,
+	/*
+	 * This establishes a context and reads the fixed 512 bytes. The
+	 * controller is supposed to ignore any offset and length fields and
+	 * always read 512 bytes regardless. This is present starting in NVMe
+	 * 2.0.
+	 */
+	NVME_PEV_LSP_EST_CTX_READ_512
+} nvme_pev_log_lsp_t;
+
+#ifndef __CHECKER__
+CTASSERT(sizeof (nvme_pev_log_t) == 512);
+CTASSERT(offsetof(nvme_pev_log_t, pel_gnum) == 372);
+#endif
 
 /*
  * NVMe Format NVM
@@ -733,6 +1586,28 @@ typedef union {
 					/* (1.1) */
 
 #define	NVME_FEAT_PROGRESS	0x80	/* Software Progress Marker */
+
+/*
+ * This enumeration represents the capabilities in the Get Features select / Set
+ * Features save options. This was introduced in NVMe 1.1 and the values below
+ * match the specification. An optional feature in the identify controller data
+ * structure is set to indicate that this is supported (id_oncs.on_save).
+ */
+typedef enum {
+	NVME_FEATURE_SEL_CURRENT	= 0,
+	NVME_FEATURE_SEL_DEFAULT,
+	NVME_FEATURE_SEL_SAVED,
+	NVME_FEATURE_SEL_SUPPORTED
+} nvme_feature_sel_t;
+
+typedef union {
+	struct {
+		uint32_t gt_fid:8;	/* Feature ID */
+		uint32_t gt_sel:3;	/* Select */
+		uint32_t gt_rsvd:21;
+	} b;
+	uint32_t r;
+} nvme_get_features_dw10_t;
 
 /* Arbitration Feature */
 typedef union {
@@ -877,10 +1752,10 @@ typedef union {
 /* Autonomous Power State Transition Feature (1.1) */
 typedef union {
 	struct {
-		uint8_t	apst_apste:1;	/* APST enabled */
-		uint8_t apst_rsvd:7;
+		uint32_t apst_apste:1;	/* APST enabled */
+		uint32_t apst_rsvd:31;
 	} b;
-	uint8_t r;
+	uint32_t r;
 } nvme_auto_power_state_trans_t;
 
 typedef struct {
@@ -913,8 +1788,8 @@ typedef union {
  * Firmware slot number is only 3 bits, and zero is not allowed.
  * Valid range is 1 to 7.
  */
-#define	NVME_FW_SLOT_MIN	1	/* lowest allowable slot number ... */
-#define	NVME_FW_SLOT_MAX	7	/* ... and highest */
+#define	NVME_FW_SLOT_MIN	1U	/* lowest allowable slot number ... */
+#define	NVME_FW_SLOT_MAX	7U	/* ... and highest */
 
 /*
  * Some constants to make verification of DWORD variables and arguments easier.
@@ -925,10 +1800,12 @@ typedef union {
 #define	NVME_DWORD_MASK		(NVME_DWORD_SIZE - 1)
 
 /*
- * Maximum offset a firmware image can be load at is the number of
- * DWORDS in a 32 bit field. Expressed in bytes its is:
+ * The maximum offset a firmware image segment can be loaded at is the number
+ * of DWORDS in a 32 bit field. The maximum length of such a segment is the
+ * same. Expressed in bytes it is:
  */
 #define	NVME_FW_OFFSETB_MAX	((u_longlong_t)UINT32_MAX << NVME_DWORD_SHIFT)
+#define	NVME_FW_LENB_MAX	NVME_FW_OFFSETB_MAX
 
 typedef union {
 	struct {
@@ -945,7 +1822,18 @@ typedef union {
 #define	NVME_CQE_SCT_GENERIC	0	/* Generic Command Status */
 #define	NVME_CQE_SCT_SPECIFIC	1	/* Command Specific Status */
 #define	NVME_CQE_SCT_INTEGRITY	2	/* Media and Data Integrity Errors */
+#define	NVME_CQE_SCT_PATH	3	/* Path Related Status (1.4) */
 #define	NVME_CQE_SCT_VENDOR	7	/* Vendor Specific */
+
+/*
+ * Status code ranges
+ */
+#define	NVME_CQE_SC_GEN_MIN		0x00
+#define	NVME_CQE_SC_GEN_MAX		0x7f
+#define	NVME_CQE_SC_CSI_MIN		0x80
+#define	NVME_CQE_SC_CSI_MAX		0xbf
+#define	NVME_CQE_SC_VEND_MIN		0xc0
+#define	NVME_CQE_SC_VEND_MAX		0xff
 
 /* NVMe completion status code (generic) */
 #define	NVME_CQE_SC_GEN_SUCCESS		0x0	/* Successful Completion */
@@ -966,9 +1854,29 @@ typedef union {
 #define	NVME_CQE_SC_GEN_INV_DSGL_LEN	0xf	/* Data SGL Length Invalid */
 #define	NVME_CQE_SC_GEN_INV_MSGL_LEN	0x10	/* Metadata SGL Length Inval */
 #define	NVME_CQE_SC_GEN_INV_SGL_DESC	0x11	/* SGL Descriptor Type Inval */
+/* Added in NVMe 1.2 */
 #define	NVME_CQE_SC_GEN_INV_USE_CMB	0x12	/* Inval use of Ctrl Mem Buf */
 #define	NVME_CQE_SC_GEN_INV_PRP_OFF	0x13	/* PRP Offset Invalid */
 #define	NVME_CQE_SC_GEN_AWU_EXCEEDED	0x14	/* Atomic Write Unit Exceeded */
+#define	NVME_CQE_SC_GEN_OP_DENIED	0x15	/* Operation Denied */
+#define	NVME_CQE_SC_GEN_INV_SGL_OFF	0x16	/* SGL Offset Invalid */
+#define	NVME_CQE_SC_GEN_INV_SGL_ST	0x17	/* SGL Sub type Invalid */
+#define	NVME_CQE_SC_GEN_INCON_HOSTID	0x18	/* Host ID Inconsistent fmt */
+#define	NVME_CQE_SC_GEN_KA_EXP		0x19	/* Keep Alive Timer Expired */
+#define	NVME_CQE_SC_GEN_INV_KA_TO	0x1a	/* Keep Alive Timeout Invalid */
+/* Added in NVMe 1.3 */
+#define	NVME_CQE_SC_GEN_ABORT_PREEMPT	0x1b	/* Cmd aborted due to preempt */
+#define	NVME_CQE_SC_GEN_SANITIZE_FAIL	0x1c	/* Sanitize Failed */
+#define	NVME_CQE_SC_GEN_SANITIZING	0x1d	/* Sanitize in Progress */
+#define	NVME_CQE_SC_GEN_INV_SGL_GRAN	0x1e	/* SGL Data Block Gran. Inval */
+#define	NVME_CQE_SC_GEN_NO_CMD_Q_CMD	0x1f	/* Command not sup for CMB Q */
+/* Added in NVMe 1.4 */
+#define	NVME_CQE_SC_GEN_NS_RDONLY	0x20	/* Namespace is write prot. */
+#define	NVME_CQE_SC_GEN_CMD_INTR	0x21	/* Command Interrupted */
+#define	NVME_CQE_SC_GEN_TRANSIENT	0x22	/* Transient Transport Error */
+/* Added in NVMe 2.0 */
+#define	NVME_CQE_SC_GEN_CMD_LOCK	0x23	/* Command/Feature Lockdown */
+#define	NVME_CQE_SC_ADM_MEDIA_NR	0x24	/* Admin Cmd Media Not Ready */
 
 /* NVMe completion status code (generic NVM commands) */
 #define	NVME_CQE_SC_GEN_NVM_LBA_RANGE	0x80	/* LBA Out Of Range */
@@ -976,6 +1884,12 @@ typedef union {
 #define	NVME_CQE_SC_GEN_NVM_NS_NOTRDY	0x82	/* Namespace Not Ready */
 #define	NVME_CQE_SC_GEN_NVM_RSV_CNFLCT	0x83	/* Reservation Conflict */
 #define	NVME_CQE_SC_GEN_NVM_FORMATTING	0x84	/* Format in progress (1.2) */
+/* Added in NVMe 2.0 */
+#define	NVME_CQE_SC_GEN_KEY_INV_VAL	0x85	/* Invalid value size */
+#define	NVME_CQE_SC_GEN_KEY_INV_KEY	0x86	/* Invalid key size */
+#define	NVME_CQE_SC_GEN_KEY_ENOENT	0x87	/* KV Key Does Not Exist */
+#define	NVME_CQE_SC_GEN_KEY_UNRECOV	0x88	/* Unrecovered Error */
+#define	NVME_CQE_SC_GEN_KEY_EXISTS	0x89	/* Key already exists */
 
 /* NVMe completion status code (command specific) */
 #define	NVME_CQE_SC_SPC_INV_CQ		0x0	/* Completion Queue Invalid */
@@ -993,16 +1907,57 @@ typedef union {
 #define	NVME_CQE_SC_SPC_FEAT_SAVE	0xd	/* Feature Id Not Saveable */
 #define	NVME_CQE_SC_SPC_FEAT_CHG	0xe	/* Feature Not Changeable */
 #define	NVME_CQE_SC_SPC_FEAT_NS_SPEC	0xf	/* Feature Not Namespace Spec */
+/* Added in NVMe 1.2 */
 #define	NVME_CQE_SC_SPC_FW_NSSR		0x10	/* FW Application NSSR Reqd */
 #define	NVME_CQE_SC_SPC_FW_NEXT_RESET	0x11	/* FW Application Next Reqd */
 #define	NVME_CQE_SC_SPC_FW_MTFA		0x12	/* FW Application Exceed MTFA */
 #define	NVME_CQE_SC_SPC_FW_PROHIBITED	0x13	/* FW Application Prohibited */
 #define	NVME_CQE_SC_SPC_FW_OVERLAP	0x14	/* Overlapping FW ranges */
+#define	NVME_CQE_SC_SPC_NS_INSUF_CAP	0x15	/* NS Insufficient Capacity */
+#define	NVME_CQE_SC_SPC_NS_NO_ID	0x16	/* NS ID Unavailable */
+/* 0x17 is reserved */
+#define	NVME_CQE_SC_SPC_NS_ATTACHED	0x18	/* NS Already Attached */
+#define	NVME_CQE_SC_SPC_NS_PRIV		0x19	/* NS is private */
+#define	NVME_CQE_SC_SPC_NS_NOT_ATTACH	0x1a	/* NS Not Attached */
+#define	NVME_CQE_SC_SPC_THIN_ENOTSUP	0x1b	/* Thin Provisioning ENOTSUP */
+#define	NVME_CQE_SC_SPC_INV_CTRL_LIST	0x1c	/* Controller list invalid */
+/* Added in NVMe 1.3 */
+#define	NVME_CQE_SC_SPC_SELF_TESTING	0x1d	/* Self-test in progress */
+#define	NVME_CQE_SC_SPC_NO_BP_WRITE	0x1e	/* No Boot Partition Write */
+#define	NVME_CQE_SC_SPC_INV_CTRL_ID	0x1f	/* Invalid Controller Id */
+#define	NVME_CQE_SC_SPC_INV_SEC_CTRL	0x20	/* Invalid Sec. Ctrl state */
+#define	NVME_CQE_SC_SPC_INV_CTRL_NRSRC	0x21	/* Inv. # Ctrl Resources */
+#define	NVME_CQE_SC_SPC_INV_RSRC_ID	0x22	/* Inv. Resource ID */
+/* Added in NVMe 1.4 */
+#define	NVME_CQE_SC_SPC_NO_SAN_PMR	0x23	/* Sanitize prohib. w/ pmem */
+#define	NVME_CQE_SC_SPC_INV_ANA_GID	0x24	/* Invalid ANA group ID */
+#define	NVME_CQE_SC_SPC_ANA_ATTACH	0x25	/* ANA Attach Failed */
+/* Added in NVMe 2.0 */
+#define	NVME_CQE_SC_SPC_INSUF_CAP	0x26	/* Insufficient Capacity */
+#define	NVME_CQE_SC_SPC_NS_ATTACH_LIM	0x27	/* NS Attach Limit Exceeded */
+#define	NVME_CQE_SC_SPC_LOCKDOWN_UNSUP	0x28	/* Prohib Cmd Exec Not Sup */
+#define	NVME_CQE_SC_SPC_UNSUP_IO_CMD	0x29	/* I/O Command set not sup */
+#define	NVME_CQE_SC_SPC_DIS_IO_CMD	0x2a	/* I/O Command set not enab */
+#define	NVME_CQE_SC_SPC_INV_CMD_COMBO	0x2b	/* I/O command set combo rej */
+#define	NVME_CQE_SC_SPC_INV_IO_CMD	0x2c	/* Invalid I/O command set */
+#define	NVME_CQE_SC_SPC_UNAVAIL_ID	0x2d	/* Unavailable ID */
 
-/* NVMe completion status code (NVM command specific */
+
+/* NVMe completion status code (I/O command specific) */
 #define	NVME_CQE_SC_SPC_NVM_CNFL_ATTR	0x80	/* Conflicting Attributes */
 #define	NVME_CQE_SC_SPC_NVM_INV_PROT	0x81	/* Invalid Protection */
 #define	NVME_CQE_SC_SPC_NVM_READONLY	0x82	/* Write to Read Only Range */
+/* Added in 2.0 */
+#define	NVME_CQE_SC_SPC_IO_LIMIT	0x83	/* Cmd Size Limit Exceeded */
+/* 0x84 to 0xb7 are reserved */
+#define	NVME_CQE_SC_SPC_ZONE_BDRY_ERR	0xb8	/* Zoned Boundary Error */
+#define	NVME_CQE_SC_SPC_ZONE_FULL	0xb9	/* Zone is Full */
+#define	NVME_CQE_SC_SPC_ZONE_RDONLY	0xba	/* Zone is Read Only */
+#define	NVME_CQE_SC_SPC_ZONE_OFFLINE	0xbb	/* Zone is Offline */
+#define	NVME_CQE_SC_SPC_ZONE_INV_WRITE	0xbc	/* Zone Invalid Write */
+#define	NVME_CQE_SC_SPC_ZONE_ACT	0xbd	/* Too May Active Zones */
+#define	NVME_CQE_SC_SPC_ZONE_OPEN	0xbe	/* Too May Open Zones */
+#define	NVME_CQE_SC_SPC_INV_ZONE_TRANS	0xbf	/* Invalid Zone State Trans */
 
 /* NVMe completion status code (data / metadata integrity) */
 #define	NVME_CQE_SC_INT_NVM_WRITE	0x80	/* Write Fault */
@@ -1012,65 +1967,33 @@ typedef union {
 #define	NVME_CQE_SC_INT_NVM_REF_TAG	0x84	/* Reference Tag Check Err */
 #define	NVME_CQE_SC_INT_NVM_COMPARE	0x85	/* Compare Failure */
 #define	NVME_CQE_SC_INT_NVM_ACCESS	0x86	/* Access Denied */
+/* Added in 1.2 */
+#define	NVME_CQE_SC_INT_NVM_DEALLOC	0x87	/* Dealloc Log Block */
+/* Added in 2.0 */
+#define	NVME_CQE_SC_INT_NVM_TAG		0x88	/* End-to-End Storage Tag Err */
 
-/* Flags for NVMe passthru commands. */
-#define	NVME_PASSTHRU_READ	0x1 /* Read from device */
-#define	NVME_PASSTHRU_WRITE	0x2 /* Write to device */
-
-/* Error codes for NVMe passthru command validation. */
-/* Must be sizeof(nvme_passthru_cmd_t) */
-#define	NVME_PASSTHRU_ERR_CMD_SIZE	0x01
-#define	NVME_PASSTHRU_ERR_NOT_SUPPORTED	0x02	/* Not supported on device */
-#define	NVME_PASSTHRU_ERR_INVALID_OPCODE	0x03
-#define	NVME_PASSTHRU_ERR_READ_AND_WRITE	0x04	/* Must read ^ write */
-#define	NVME_PASSTHRU_ERR_INVALID_TIMEOUT	0x05
+/* NVMe completion status code (path related) */
+/* Added in NVMe 1.4 */
+#define	NVME_CQE_SC_PATH_INT_ERR	0x00	/* Internal Path Error */
+#define	NVME_CQE_SC_PATH_AA_PLOSS	0x01	/* Asym Access Pers Loss */
+#define	NVME_CQE_SC_PATH_AA_INACC	0x02	/* Asym Access Inaccessible */
+#define	NVME_CQE_SC_PATH_AA_TRANS	0x03	/* Asym Access Transition */
+#define	NVME_CQE_SC_PATH_CTRL_ERR	0x60	/* Controller Path Error */
+#define	NVME_CQE_SC_PATH_HOST_ERR	0x70	/* Host Path Error */
+#define	NVME_CQE_SC_PATH_HOST_ABRT	0x71	/* Cmd aborted by host */
 
 /*
- * Must be
- * - multiple of 4 bytes in length
- * - non-null iff length is non-zero
- * - null if neither reading nor writing
- * - non-null if either reading or writing
- * - <= `nvme_vendor_specific_admin_cmd_size` in length, 16 MiB
- * - <= UINT32_MAX in length
+ * Controller information (NVME_IOC_CTRL_INFO). This is a consolidation of misc.
+ * information that we want to know about a controller.
  */
-#define	NVME_PASSTHRU_ERR_INVALID_BUFFER	0x06
-
-
-/* Generic struct for passing through vendor-unique commands to a device. */
 typedef struct {
-	uint8_t npc_opcode;	/* Command opcode. */
-	uint8_t npc_status;	/* Command completion status code. */
-	uint8_t npc_err;	/* Error-code if validation fails. */
-	uint8_t npc_rsvd0;	/* Align to 4 bytes */
-	uint32_t npc_timeout;	/* Command timeout, in seconds. */
-	uint32_t npc_flags;	/* Flags for the command. */
-	uint32_t npc_cdw0;	/* Command-specific result DWord 0 */
-	uint32_t npc_cdw12;	/* Command-specific DWord 12 */
-	uint32_t npc_cdw13;	/* Command-specific DWord 13 */
-	uint32_t npc_cdw14;	/* Command-specific DWord 14 */
-	uint32_t npc_cdw15;	/* Command-specific DWord 15 */
-	size_t npc_buflen;	/* Size of npc_buf. */
-	uintptr_t npc_buf;	/* I/O source or destination */
-} nvme_passthru_cmd_t;
-
-#ifdef _KERNEL
-typedef struct {
-	uint8_t npc_opcode;	/* Command opcode. */
-	uint8_t npc_status;	/* Command completion status code. */
-	uint8_t npc_err;	/* Error-code if validation fails. */
-	uint8_t npc_rsvd0;	/* Align to 4 bytes */
-	uint32_t npc_timeout;	/* Command timeout, in seconds. */
-	uint32_t npc_flags;	/* Flags for the command. */
-	uint32_t npc_cdw0;	/* Command-specific result DWord 0 */
-	uint32_t npc_cdw12;	/* Command-specific DWord 12 */
-	uint32_t npc_cdw13;	/* Command-specific DWord 13 */
-	uint32_t npc_cdw14;	/* Command-specific DWord 14 */
-	uint32_t npc_cdw15;	/* Command-specific DWord 15 */
-	size32_t npc_buflen;	/* Size of npc_buf. */
-	uintptr32_t npc_buf;	/* I/O source or destination */
-} nvme_passthru_cmd32_t;
-#endif
+	nvme_ioctl_common_t nci_common;
+	nvme_identify_ctrl_t nci_ctrl_id;
+	nvme_identify_nsid_t nci_common_ns;
+	nvme_version_t nci_vers;
+	nvme_capabilities_t nci_caps;
+	uint32_t nci_nintrs;
+} nvme_ioctl_ctrl_info_t;
 
 /*
  * NVME namespace state flags.
@@ -1078,7 +2001,7 @@ typedef struct {
  * The values are defined entirely by the driver. Some states correspond to
  * namespace states described by the NVMe specification r1.3 section 6.1, others
  * are specific to the implementation of this driver. These are present in the
- * nvme_ns_info_t that is used with the NVME_IOC_NS_INFO ioctl.
+ * nvme_ns_kinfo_t that is used with the NVME_IOC_NS_INFO ioctl.
  *
  * The states are as follows:
  * - ALLOCATED: the namespace exists in the controller as per the NVMe spec
@@ -1108,11 +2031,26 @@ typedef enum {
  */
 #define	NVME_BLKDEV_NAMELEN	128
 
+/*
+ * Namespace Information (NVME_IOC_NS_INFO).
+ */
 typedef struct {
+	nvme_ioctl_common_t nni_common;
 	nvme_ns_state_t	nni_state;
 	char nni_addr[NVME_BLKDEV_NAMELEN];
 	nvme_identify_nsid_t nni_id;
-} nvme_ns_info_t;
+} nvme_ioctl_ns_info_t;
+
+/*
+ * NVMe Command Set Identifiers. This was added in NVMe 2.0, but in all the
+ * places it was required to be specified, the default value of 0 indicates the
+ * traditional NVM command set.
+ */
+typedef enum {
+	NVME_CSI_NVM	= 0,
+	NVME_CSI_KV,
+	NVME_CSI_ZNS
+} nvme_csi_t;
 
 #ifdef __cplusplus
 }

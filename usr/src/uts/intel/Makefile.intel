@@ -26,7 +26,7 @@
 # Copyright 2022 Garrett D'Amore <garrett@damore.org>
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2019 Peter Tribble.
-# Copyright 2022 Oxide Computer Company
+# Copyright 2024 Oxide Computer Company
 # Copyright 2023 Racktop Systems, Inc.
 #
 
@@ -355,7 +355,6 @@ DRV_KMODS	+= vnd
 DRV_KMODS	+= vnic
 DRV_KMODS	+= vscan
 DRV_KMODS	+= wc
-DRV_KMODS	+= winlock
 DRV_KMODS	+= wpi
 DRV_KMODS	+= xge
 DRV_KMODS	+= yge
@@ -402,6 +401,7 @@ DRV_KMODS	+= sfe
 DRV_KMODS	+= sfxge
 DRV_KMODS	+= amd8111s
 DRV_KMODS	+= igb
+DRV_KMODS	+= igc
 DRV_KMODS	+= ipmi
 DRV_KMODS	+= iprb
 DRV_KMODS	+= ixgbe
@@ -414,6 +414,7 @@ DRV_KMODS	+= vr
 DRV_KMODS	+= virtio
 DRV_KMODS	+= vioblk
 DRV_KMODS	+= vioif
+DRV_KMODS	+= viorand
 DRV_KMODS	+= vioscsi
 
 # Virtio 9P transport driver
@@ -771,3 +772,15 @@ DRV_KMODS	+= vmm_vtd
 # bhyve drv test interface
 #
 DRV_KMODS	+= vmm_drv_test
+
+#
+#	The kernel test driver.
+#
+DRV_KMODS	+= ktest
+
+#
+#	Test modules that can register with ktest.
+#
+MISC_KMODS	+= mac_ktest
+MISC_KMODS	+= ktest_ktest
+MISC_KMODS	+= stream_ktest

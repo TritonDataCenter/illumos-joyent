@@ -10,8 +10,9 @@
  */
 
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
+
 #include "ena.h"
 
 void
@@ -21,13 +22,18 @@ ena_free_tx_dma(ena_txq_t *txq)
 		for (uint_t i = 0; i < txq->et_sq_num_descs; i++) {
 			ena_tx_control_block_t *tcb = &txq->et_tcbs[i];
 			ena_dma_free(&tcb->etcb_dma);
+			if (tcb->etcb_mp != NULL)
+				freemsg(tcb->etcb_mp);
 		}
 
 		kmem_free(txq->et_tcbs,
 		    sizeof (*txq->et_tcbs) * txq->et_sq_num_descs);
+		kmem_free(txq->et_tcbs_freelist,
+		    sizeof (ena_tx_control_block_t *) * txq->et_sq_num_descs);
 
 		txq->et_tcbs = NULL;
-
+		txq->et_tcbs_freelist = NULL;
+		txq->et_tcbs_freelist_size = 0;
 	}
 
 	ena_dma_free(&txq->et_cq_dma);
@@ -46,7 +52,6 @@ ena_alloc_tx_dma(ena_txq_t *txq)
 	size_t cq_descs_sz;
 	size_t sq_descs_sz;
 	int err = 0;
-	ena_dma_conf_t conf;
 
 	ASSERT0(txq->et_state & ENA_TXQ_STATE_HOST_ALLOC);
 	ASSERT3P(ena, !=, NULL);
@@ -54,21 +59,22 @@ ena_alloc_tx_dma(ena_txq_t *txq)
 	cq_descs_sz = txq->et_cq_num_descs * sizeof (*txq->et_cq_descs);
 	sq_descs_sz = txq->et_sq_num_descs * sizeof (*txq->et_sq_descs);
 
-	conf = (ena_dma_conf_t) {
+	ena_dma_conf_t sq_conf = {
 		.edc_size = sq_descs_sz,
 		.edc_align = ENAHW_IO_SQ_DESC_BUF_ALIGNMENT,
 		.edc_sgl = 1,
 		.edc_endian = DDI_NEVERSWAP_ACC,
-		.edc_stream = B_FALSE,
+		.edc_stream = false,
 	};
 
-	if (!ena_dma_alloc(ena, &txq->et_sq_dma, &conf, sq_descs_sz)) {
+	if (!ena_dma_alloc(ena, &txq->et_sq_dma, &sq_conf, sq_descs_sz)) {
 		return (ENOMEM);
 	}
 
-	bzero(txq->et_sq_dma.edb_va, sq_descs_sz);
 	txq->et_sq_descs = (void *)txq->et_sq_dma.edb_va;
 	txq->et_tcbs = kmem_zalloc(sizeof (*txq->et_tcbs) *
+	    txq->et_sq_num_descs, KM_SLEEP);
+	txq->et_tcbs_freelist = kmem_zalloc(sizeof (ena_tx_control_block_t *) *
 	    txq->et_sq_num_descs, KM_SLEEP);
 
 	for (uint_t i = 0; i < txq->et_sq_num_descs; i++) {
@@ -78,7 +84,7 @@ ena_alloc_tx_dma(ena_txq_t *txq)
 			.edc_align = 1,
 			.edc_sgl = ena->ena_tx_sgl_max_sz,
 			.edc_endian = DDI_NEVERSWAP_ACC,
-			.edc_stream = B_TRUE,
+			.edc_stream = true,
 		};
 
 		if (!ena_dma_alloc(ena, &tcb->etcb_dma, &buf_conf,
@@ -86,22 +92,25 @@ ena_alloc_tx_dma(ena_txq_t *txq)
 			err = ENOMEM;
 			goto error;
 		}
-	}
 
-	conf = (ena_dma_conf_t) {
+		tcb->etcb_id = i;
+		txq->et_tcbs_freelist[i] = tcb;
+	}
+	txq->et_tcbs_freelist_size = txq->et_sq_num_descs;
+
+	ena_dma_conf_t cq_conf = {
 		.edc_size = cq_descs_sz,
 		.edc_align = ENAHW_IO_CQ_DESC_BUF_ALIGNMENT,
 		.edc_sgl = 1,
 		.edc_endian = DDI_NEVERSWAP_ACC,
-		.edc_stream = B_FALSE,
+		.edc_stream = false,
 	};
 
-	if (!ena_dma_alloc(ena, &txq->et_cq_dma, &conf, cq_descs_sz)) {
+	if (!ena_dma_alloc(ena, &txq->et_cq_dma, &cq_conf, cq_descs_sz)) {
 		err = ENOMEM;
 		goto error;
 	}
 
-	bzero(txq->et_cq_dma.edb_va, cq_descs_sz);
 	txq->et_cq_descs = (void *)txq->et_cq_dma.edb_va;
 	txq->et_state |= ENA_TXQ_STATE_HOST_ALLOC;
 	return (0);
@@ -111,13 +120,13 @@ error:
 	return (err);
 }
 
-boolean_t
+bool
 ena_alloc_txq(ena_txq_t *txq)
 {
 	int ret = 0;
 	ena_t *ena = txq->et_ena;
 	uint16_t cq_hw_idx, sq_hw_idx;
-	uint32_t *cq_unmask_addr, *cq_headdb, *cq_numanode;
+	uint32_t *cq_unmask_addr, *cq_numanode;
 	uint32_t *sq_db_addr;
 
 	ASSERT3U(txq->et_cq_num_descs, >, 0);
@@ -128,7 +137,7 @@ ena_alloc_txq(ena_txq_t *txq)
 	if ((ret = ena_alloc_tx_dma(txq)) != 0) {
 		ena_err(ena, "failed to allocate Tx queue %u data buffers: %d",
 		    txq->et_txqs_idx, ret);
-		return (B_FALSE);
+		return (false);
 	}
 
 	ASSERT(txq->et_state & ENA_TXQ_STATE_HOST_ALLOC);
@@ -137,20 +146,18 @@ ena_alloc_txq(ena_txq_t *txq)
 	 * Second, create the Completion Queue.
 	 */
 	ret = ena_create_cq(ena, txq->et_cq_num_descs,
-	    txq->et_cq_dma.edb_cookie->dmac_laddress, B_TRUE,
-	    txq->et_intr_vector, &cq_hw_idx, &cq_unmask_addr, &cq_headdb,
-	    &cq_numanode);
+	    txq->et_cq_dma.edb_cookie->dmac_laddress, true,
+	    txq->et_intr_vector, &cq_hw_idx, &cq_unmask_addr, &cq_numanode);
 
 	if (ret != 0) {
 		ena_err(ena, "failed to create Tx CQ %u: %d", txq->et_txqs_idx,
 		    ret);
-		return (B_FALSE);
+		return (false);
 	}
 
 	txq->et_cq_hw_idx = cq_hw_idx;
 	txq->et_cq_phase = 1;
 	txq->et_cq_unmask_addr = cq_unmask_addr;
-	txq->et_cq_head_db_addr = cq_headdb;
 	txq->et_cq_numa_addr = cq_numanode;
 	txq->et_state |= ENA_TXQ_STATE_CQ_CREATED;
 
@@ -165,13 +172,13 @@ ena_alloc_txq(ena_txq_t *txq)
 	ASSERT3U(txq->et_sq_num_descs, ==, txq->et_cq_num_descs);
 
 	ret = ena_create_sq(ena, txq->et_sq_num_descs,
-	    txq->et_sq_dma.edb_cookie->dmac_laddress, B_TRUE, cq_hw_idx,
+	    txq->et_sq_dma.edb_cookie->dmac_laddress, true, cq_hw_idx,
 	    &sq_hw_idx, &sq_db_addr);
 
 	if (ret != 0) {
 		ena_err(ena, "failed to create Tx SQ %u: %d", txq->et_txqs_idx,
 		    ret);
-		return (B_FALSE);
+		return (false);
 	}
 
 	txq->et_sq_hw_idx = sq_hw_idx;
@@ -179,24 +186,27 @@ ena_alloc_txq(ena_txq_t *txq)
 	/* The phase must always start on 1. */
 	txq->et_sq_phase = 1;
 	txq->et_sq_avail_descs = txq->et_sq_num_descs;
-	txq->et_blocked = B_FALSE;
+	txq->et_blocked = false;
+	txq->et_stall_watchdog = 0;
 	txq->et_state |= ENA_TXQ_STATE_SQ_CREATED;
 
-	return (B_TRUE);
+	return (true);
 }
 
 void
-ena_cleanup_txq(ena_txq_t *txq)
+ena_cleanup_txq(ena_txq_t *txq, bool resetting)
 {
 	int ret = 0;
 	ena_t *ena = txq->et_ena;
 
 	if ((txq->et_state & ENA_TXQ_STATE_SQ_CREATED) != 0) {
-		ret = ena_destroy_sq(ena, txq->et_sq_hw_idx, B_TRUE);
+		if (!resetting) {
+			ret = ena_destroy_sq(ena, txq->et_sq_hw_idx, true);
 
-		if (ret != 0) {
-			ena_err(ena, "failed to destroy Tx SQ %u: %d",
-			    txq->et_txqs_idx, ret);
+			if (ret != 0) {
+				ena_err(ena, "failed to destroy Tx SQ %u: %d",
+				    txq->et_txqs_idx, ret);
+			}
 		}
 
 		txq->et_sq_hw_idx = 0;
@@ -207,17 +217,18 @@ ena_cleanup_txq(ena_txq_t *txq)
 	}
 
 	if ((txq->et_state & ENA_TXQ_STATE_CQ_CREATED) != 0) {
-		ret = ena_destroy_cq(ena, txq->et_cq_hw_idx);
+		if (!resetting) {
+			ret = ena_destroy_cq(ena, txq->et_cq_hw_idx);
 
-		if (ret != 0) {
-			ena_err(ena, "failed to destroy Tx CQ %u: %d",
-			    txq->et_txqs_idx, ret);
+			if (ret != 0) {
+				ena_err(ena, "failed to destroy Tx CQ %u: %d",
+				    txq->et_txqs_idx, ret);
+			}
 		}
 
 		txq->et_cq_hw_idx = 0;
 		txq->et_cq_head_idx = 0;
 		txq->et_cq_phase = 0;
-		txq->et_cq_head_db_addr = NULL;
 		txq->et_cq_unmask_addr = NULL;
 		txq->et_cq_numa_addr = NULL;
 		txq->et_state &= ~ENA_TXQ_STATE_CQ_CREATED;
@@ -248,6 +259,8 @@ ena_ring_tx_start(mac_ring_driver_t rh, uint64_t gen_num)
 	ena_t *ena = txq->et_ena;
 	uint32_t intr_ctrl;
 
+	ena_dbg(ena, "ring_tx_start %p: state 0x%x", txq, txq->et_state);
+
 	mutex_enter(&txq->et_lock);
 	txq->et_m_gen_num = gen_num;
 	mutex_exit(&txq->et_lock);
@@ -258,8 +271,35 @@ ena_ring_tx_start(mac_ring_driver_t rh, uint64_t gen_num)
 	ENAHW_REG_INTR_UNMASK(intr_ctrl);
 	ena_hw_abs_write32(ena, txq->et_cq_unmask_addr, intr_ctrl);
 	txq->et_state |= ENA_TXQ_STATE_RUNNING;
+
 	return (0);
 }
+
+static ena_tx_control_block_t *
+ena_tcb_alloc(ena_txq_t *txq)
+{
+	ena_tx_control_block_t *tcb;
+
+	ASSERT(MUTEX_HELD(&txq->et_lock));
+
+	if (txq->et_tcbs_freelist_size == 0)
+		return (NULL);
+	txq->et_tcbs_freelist_size--;
+	tcb = txq->et_tcbs_freelist[txq->et_tcbs_freelist_size];
+	txq->et_tcbs_freelist[txq->et_tcbs_freelist_size] = NULL;
+
+	return (tcb);
+}
+
+static void
+ena_tcb_free(ena_txq_t *txq, ena_tx_control_block_t *tcb)
+{
+	ASSERT3P(tcb, !=, NULL);
+	ASSERT(MUTEX_HELD(&txq->et_lock));
+	ASSERT3U(txq->et_tcbs_freelist_size, <, txq->et_sq_num_descs);
+	txq->et_tcbs_freelist[txq->et_tcbs_freelist_size++] = tcb;
+}
+
 
 static void
 ena_tx_copy_fragment(ena_tx_control_block_t *tcb, const mblk_t *mp,
@@ -281,17 +321,16 @@ ena_tx_copy_fragment(ena_tx_control_block_t *tcb, const mblk_t *mp,
 	tcb->etcb_dma.edb_used_len += len;
 }
 
-ena_tx_control_block_t *
-ena_pull_tcb(const ena_txq_t *txq, mblk_t *mp)
+static void
+ena_tcb_pull(const ena_txq_t *txq, ena_tx_control_block_t *tcb, mblk_t *mp)
 {
 	mblk_t *nmp = mp;
 	ena_t *ena = txq->et_ena;
-	ena_tx_control_block_t *tcb = NULL;
-	const uint16_t tail_mod =
-	    txq->et_sq_tail_idx & (txq->et_sq_num_descs - 1);
 
 	ASSERT(MUTEX_HELD(&txq->et_lock));
 	VERIFY3U(msgsize(mp), <, ena->ena_tx_buf_sz);
+	ASSERT3P(tcb, !=, NULL);
+	VERIFY0(tcb->etcb_dma.edb_used_len);
 
 	while (nmp != NULL) {
 		const size_t nmp_len = MBLKL(nmp);
@@ -301,24 +340,19 @@ ena_pull_tcb(const ena_txq_t *txq, mblk_t *mp)
 			continue;
 		}
 
-		/* For now TCB is bound to SQ desc. */
-		if (tcb == NULL) {
-			tcb = &txq->et_tcbs[tail_mod];
-		}
-
 		ena_tx_copy_fragment(tcb, nmp, 0, nmp_len);
 		nmp = nmp->b_cont;
 	}
 
 	ENA_DMA_SYNC(tcb->etcb_dma, DDI_DMA_SYNC_FORDEV);
-	VERIFY3P(nmp, ==, NULL);
-	VERIFY3P(tcb, !=, NULL);
-	return (tcb);
+
+	VERIFY3P(tcb->etcb_mp, ==, NULL);
+	tcb->etcb_mp = mp;
 }
 
 static void
 ena_fill_tx_data_desc(ena_txq_t *txq, ena_tx_control_block_t *tcb,
-    uint16_t tail, uint8_t phase, enahw_tx_data_desc_t *desc,
+    uint16_t req_id, uint8_t phase, enahw_tx_data_desc_t *desc,
     mac_ether_offload_info_t *meo, size_t mlen)
 {
 	VERIFY3U(mlen, <=, ENAHW_TX_DESC_LENGTH_MASK);
@@ -335,8 +369,8 @@ ena_fill_tx_data_desc(ena_txq_t *txq, ena_tx_control_block_t *tcb,
 	bzero(desc, sizeof (*desc));
 	ENAHW_TX_DESC_FIRST_ON(desc);
 	ENAHW_TX_DESC_LENGTH(desc, mlen);
-	ENAHW_TX_DESC_REQID_HI(desc, tail);
-	ENAHW_TX_DESC_REQID_LO(desc, tail);
+	ENAHW_TX_DESC_REQID_HI(desc, req_id);
+	ENAHW_TX_DESC_REQID_LO(desc, req_id);
 	ENAHW_TX_DESC_PHASE(desc, phase);
 	ENAHW_TX_DESC_DF_ON(desc);
 	ENAHW_TX_DESC_LAST_ON(desc);
@@ -377,24 +411,28 @@ ena_ring_tx(void *arg, mblk_t *mp)
 	mac_ether_offload_info_t meo;
 	enahw_tx_data_desc_t *desc;
 	ena_tx_control_block_t *tcb;
-	const uint16_t tail_mod =
-	    txq->et_sq_tail_idx & (txq->et_sq_num_descs - 1);
+	const uint16_t modulo_mask = txq->et_sq_num_descs - 1;
+	uint16_t tail_mod;
 
 	VERIFY3P(mp->b_next, ==, NULL);
-	VERIFY(txq->et_blocked == B_FALSE);
 
 	/*
 	 * The ena_state value is written by atomic operations. The
 	 * et_state value is currently Write Once, but if that changes
 	 * it should also be written with atomics.
 	 */
-	if (!(ena->ena_state & ENA_STATE_RUNNING) ||
+	if (!(ena->ena_state & ENA_STATE_STARTED) ||
 	    !(txq->et_state & ENA_TXQ_STATE_RUNNING)) {
 		freemsg(mp);
 		return (NULL);
 	}
 
-	if (mac_ether_offload_info(mp, &meo) != 0) {
+	/*
+	 * Failing to parse the L2 header would be a surprise.  Until we wire up
+	 * other offloads, high level protocols are not a concern.
+	 */
+	mac_ether_offload_info(mp, &meo);
+	if ((meo.meoi_flags & MEOI_L2INFO_SET) == 0) {
 		freemsg(mp);
 		mutex_enter(&txq->et_stat_lock);
 		txq->et_stat.ets_hck_meoifail.value.ui64++;
@@ -405,13 +443,13 @@ ena_ring_tx(void *arg, mblk_t *mp)
 	mutex_enter(&txq->et_lock);
 
 	/*
-	 * For the moment there is a 1:1 mapping between Tx descs and
-	 * Tx contexts. Currently Tx is copy only, and each context
-	 * buffer is guaranteed to be as large as MTU + frame header,
-	 * see ena_update_buf_sizes().
+	 * For the moment there are an equal number of Tx descs and Tx
+	 * contexts. Currently Tx is copy only, and each context buffer is
+	 * guaranteed to be as large as MTU + frame header, see
+	 * ena_update_buf_sizes().
 	 */
-	if (txq->et_sq_avail_descs == 0) {
-		txq->et_blocked = B_TRUE;
+	if (txq->et_blocked || txq->et_sq_avail_descs == 0) {
+		txq->et_blocked = true;
 		mutex_enter(&txq->et_stat_lock);
 		txq->et_stat.ets_blocked.value.ui64++;
 		mutex_exit(&txq->et_stat_lock);
@@ -420,17 +458,24 @@ ena_ring_tx(void *arg, mblk_t *mp)
 	}
 
 	ASSERT3U(meo.meoi_len, <=, ena->ena_max_frame_total);
-	tcb = ena_pull_tcb(txq, mp);
+
+	/*
+	 * There are as many pre-allocated TCBs as there are Tx descs so we
+	 * should never fail to get one.
+	 */
+	tcb = ena_tcb_alloc(txq);
 	ASSERT3P(tcb, !=, NULL);
-	tcb->etcb_mp = mp;
-	txq->et_sq_avail_descs--;
+	ena_tcb_pull(txq, tcb, mp);
 
 	/* Fill in the Tx descriptor. */
-	desc = &(txq->et_sq_descs[tail_mod].etd_data);
-	ena_fill_tx_data_desc(txq, tcb, tail_mod, txq->et_sq_phase, desc, &meo,
-	    meo.meoi_len);
+	tail_mod = txq->et_sq_tail_idx & modulo_mask;
+	desc = &txq->et_sq_descs[tail_mod].etd_data;
+	ena_fill_tx_data_desc(txq, tcb, tcb->etcb_id, txq->et_sq_phase, desc,
+	    &meo, meo.meoi_len);
 	DTRACE_PROBE3(tx__submit, ena_tx_control_block_t *, tcb, uint16_t,
-	    tail_mod, enahw_tx_data_desc_t *, desc);
+	    tcb->etcb_id, enahw_tx_data_desc_t *, desc);
+
+	txq->et_sq_avail_descs--;
 
 	/*
 	 * Remember, we submit the raw tail value to the device, the
@@ -445,11 +490,11 @@ ena_ring_tx(void *arg, mblk_t *mp)
 	txq->et_stat.ets_bytes.value.ui64 += meo.meoi_len;
 	mutex_exit(&txq->et_stat_lock);
 
-	if ((txq->et_sq_tail_idx & (txq->et_sq_num_descs - 1)) == 0) {
-		txq->et_sq_phase = !txq->et_sq_phase;
-	}
+	if ((txq->et_sq_tail_idx & modulo_mask) == 0)
+		txq->et_sq_phase ^= 1;
 
 	mutex_exit(&txq->et_lock);
+
 	return (NULL);
 }
 
@@ -461,10 +506,12 @@ ena_tx_intr_work(ena_txq_t *txq)
 	ena_tx_control_block_t *tcb;
 	uint16_t req_id;
 	uint64_t recycled = 0;
-	boolean_t unblocked = B_FALSE;
+	bool unblocked = false;
+	const uint16_t modulo_mask = txq->et_cq_num_descs - 1;
+	ena_t *ena = txq->et_ena;
 
 	mutex_enter(&txq->et_lock);
-	head_mod = txq->et_cq_head_idx & (txq->et_cq_num_descs - 1);
+	head_mod = txq->et_cq_head_idx & modulo_mask;
 	ENA_DMA_SYNC(txq->et_cq_dma, DDI_DMA_SYNC_FORKERNEL);
 	cdesc = &txq->et_cq_descs[head_mod];
 
@@ -474,11 +521,11 @@ ena_tx_intr_work(ena_txq_t *txq)
 
 		/* Get the corresponding TCB. */
 		req_id = cdesc->etc_req_id;
-		/*
-		 * It would be nice to make this a device reset
-		 * instead.
-		 */
-		VERIFY3U(req_id, <=, txq->et_sq_num_descs);
+		if (req_id > txq->et_sq_num_descs) {
+			ena_err(ena, "invalid Tx request ID: 0x%x", req_id);
+			ena_trigger_reset(ena, ENAHW_RESET_INV_TX_REQ_ID);
+			break;
+		}
 		tcb = &txq->et_tcbs[req_id];
 		DTRACE_PROBE2(tx__complete, uint16_t, req_id,
 		    ena_tx_control_block_t *, tcb);
@@ -486,43 +533,35 @@ ena_tx_intr_work(ena_txq_t *txq)
 		/* Free the associated mblk. */
 		tcb->etcb_dma.edb_used_len = 0;
 		mp = tcb->etcb_mp;
-		/* Make this a device reset instead. */
+		tcb->etcb_mp = NULL;
 		VERIFY3P(mp, !=, NULL);
 		freemsg(mp);
-		tcb->etcb_mp = NULL;
 
 		/* Add this descriptor back to the free list. */
+		ena_tcb_free(txq, tcb);
 		txq->et_sq_avail_descs++;
+
+		/* Move on and check for phase rollover. */
 		txq->et_cq_head_idx++;
-
-		/* Check for phase rollover. */
-		head_mod = txq->et_cq_head_idx & (txq->et_cq_num_descs - 1);
-
-		if (head_mod == 0) {
-			txq->et_cq_phase = !txq->et_cq_phase;
-		}
+		head_mod = txq->et_cq_head_idx & modulo_mask;
+		if (head_mod == 0)
+			txq->et_cq_phase ^= 1;
 
 		if (txq->et_blocked) {
-			txq->et_blocked = B_FALSE;
-			unblocked = B_TRUE;
-			mac_tx_ring_update(txq->et_ena->ena_mh, txq->et_mrh);
+			txq->et_blocked = false;
+			txq->et_stall_watchdog = 0;
+			unblocked = true;
+			mac_tx_ring_update(ena->ena_mh, txq->et_mrh);
 		}
 
 		recycled++;
 		cdesc = &txq->et_cq_descs[head_mod];
 	}
 
-	/*
-	 * If the device provided a head doorbell register, then we
-	 * need to update it to let the device know we are done
-	 * reading these CQ entries.
-	 */
-	if (txq->et_cq_head_db_addr != NULL) {
-		ena_hw_abs_write32(txq->et_ena, txq->et_cq_head_db_addr,
-		    head_mod);
-	}
-
 	mutex_exit(&txq->et_lock);
+
+	if (recycled == 0)
+		return;
 
 	/* Update stats. */
 	mutex_enter(&txq->et_stat_lock);

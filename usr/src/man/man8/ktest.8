@@ -1,0 +1,276 @@
+.\"
+.\" This file and its contents are supplied under the terms of the
+.\" Common Development and Distribution License ("CDDL"), version 1.0.
+.\" You may only use this file in accordance with the terms of version
+.\" 1.0 of the CDDL.
+.\"
+.\" A full copy of the text of the CDDL should have accompanied this
+.\" source.  A copy of the CDDL is also available via the Internet at
+.\" http://www.illumos.org/license/CDDL.
+.\"
+.\"
+.\" Copyright 2025 Oxide Computer Company
+.\"
+.Dd February 12, 2025
+.Dt KTEST 8
+.Os
+.Sh NAME
+.Nm ktest
+.Nd list and run kernel tests
+.Sh SYNOPSIS
+.Nm ktest Cm help
+.Pp
+.Nm Cm list
+.Op Fl H
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar triple...
+.Pp
+.Nm Cm run
+.Op Fl H
+.Op Fl n
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op -i Ar input
+.Ar triple...
+.Pp
+.Nm Cm load
+.Op Fl a
+.Op Ar name
+.Nm Cm unload
+.Op Fl a
+.Op Ar name
+.Sh DESCRIPTION
+The
+.Nm
+facility provides in situ kernel testing by running test code in
+kernel context; essentially unit tests for the kernel.
+The
+.Nm
+command is used to list or run registered kernel tests.
+The
+.Nm
+command interacts with the in-kernel ktest facility by way of the
+.Pa /dev/ktest
+pseudo device.
+A process must run in the Global Zone and have the
+.Sy PRIV_SYS_DEVICES
+privilege in order to access the device.
+.Sh SUBCOMMANDS
+.Nm ktest help
+.Bd -ragged -offset 2m
+Print command usage.
+.Ed
+.Pp
+The
+.Cm list
+and
+.Cm run
+subcommands share the options described in
+.Sx OUTPUT OPTIONS .
+.Pp
+.Nm Cm list
+.Op Fl H
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Ar triple...
+.Bd -ragged -offset 2m
+List all registered tests.
+One or more triples may be specified to narrow the listing.
+.Pp
+.Ed
+.Pp
+.Nm Cm run
+.Op Fl H
+.Op Fl n
+.Op Oo Fl p Oc Fl o Ar field Ns Op ,...
+.Op Fl i Ar file
+.Ar triple...
+.Bd -ragged -offset 2m
+Run registered tests.
+One or more triples may be specified to limit which tests are run.
+At least one triple must be specified.
+.Bl -tag -width Ds
+.It Fl i Ar file
+Specify a
+.Ar file
+to act as the input stream for all tests requiring one.
+.It Fl n
+Omit tests which require input when none provided via
+.Fl i .
+.El
+.Ed
+.Pp
+.Nm Cm load
+.Op Fl a
+.Op Ar name
+.Bd -ragged -offset 2m
+Load one or more ktest modules to make their tests available to
+.Cm list
+and
+.Cm run .
+.Bl -tag -width Ds
+.It Fl a
+Load all available modules
+.It Ar name
+Load a specific module
+.El
+.Ed
+.Pp
+.Nm Cm unload
+.Op Fl a
+.Op Ar name
+.Bd -ragged -offset 2m
+Unload one or more ktest modules.
+.Bl -tag -width Ds
+.It Fl a
+Unload all modules
+.It Ar name
+Unoad a specific module
+.El
+.Ed
+.Sh OUTPUT
+Available tests and the results of running said tests are emitted by the
+.Cm list
+and
+.Cm run
+commands, respectively.
+.Ss OPTIONS
+Output from the
+.Cm list
+and
+.Cm run
+commands is controlled by the following options:
+.Bl -tag -width Ar
+.It Fl H
+Omit column headers when printing output.
+.It Fl o Ar field Ns Op ,...
+A case-insensitive, comma-separated list of output fields to display.
+.Pp
+The available fields and their contents are described in
+.Sx FIELDS
+section below.
+.It Fl p
+Display in a machine-parsable format and elide test stats output when
+executing the
+.Cm run
+command.
+.Pp
+The
+.Fl o
+option is required with
+.Fl p .
+.El
+.Ss FIELDS
+The following is a list of output fields used by the
+.Nm
+command along with their meanings.
+.Bl -tag -offset 4m -width 8m
+.It Sy MODULE
+The module name of the test.
+This is typically the same name as the module-under-test.
+.It Sy SUITE
+The suite name of the test.
+.It Sy TEST
+The name of the test.
+.It Sy INPUT
+For the
+.Sy list
+command this indicates if the test requires an input stream: [Y]es or [N]o.
+For the
+.Sy run
+command, it is the path to the input stream.
+.El
+The following fields are only applicable to the
+.Cm run
+command.
+.Bl -tag -offset 4m -width 8m
+.It Sy LINE
+The source code line number that produced the test
+.Sy RESULT .
+All
+.Sy PASS
+and
+.Sy NONE
+results have a value of 0.
+Upon detection of multiple results this value indicates the line that
+overwrote the previous result and the
+.Sy RESULT
+field contains a message with the line number of the previous result.
+.It Sy RESULT
+The test result.
+The
+.Sx TEST RESULTS
+section explains the different types of results.
+.It Sy REASON
+Additional context when the test result is one of
+.Sy FAIL ,
+.Sy ERROR ,
+or
+.Sy SKIP .
+.El
+.Ss TEST RESULTS
+The different types of results that a test can produce.
+.Bl -tag -offset 4m -width 8m
+.It Sy PASS
+The test passed.
+.It Sy FAIL
+The test had a logical failure (one of its assertions failed).
+.It Sy ERROR
+The test had an unexpected, non-logical error.
+This is typically caused by a failure to acquire resources or an error
+attempting some operation that is tangential to the logic under test.
+.It Sy SKIP
+The test decided to skip itself because it lacks the context required to run
+the test.
+For example, some type of missing resource or hardware.
+.It Sy NONE
+The test failed to produce a result.
+This is a bug in the test and should be fixed.
+.El
+.Sh EXIT STATUS
+The following exit values are returned:
+.Bl -tag -width indent
+.It 0
+Successful completion of the command.
+For the
+.Sy run
+command, this also indicates that all tests produced a PASS or SKIP result.
+.It 1
+An error occurred while executing the command.
+For the
+.Sy run
+command, this also indicates that one or more tests produced
+a result other than PASS or SKIP.
+.It 2
+An invalid combination of command line options or arguments were
+specified.
+.El
+.Sh EXAMPLES
+.Ss List all Tests
+List all tests registered with the ktest framework.
+.Bd -literal -offset ident
+ktest list
+.Ed
+.Ss Run all Tests
+Run all tests registered with the ktest framework.
+.Bd -literal -offset ident
+ktest run '*'
+.Ed
+.Ss Run specific test module
+This example runs only tests registered under the
+.Sy mac
+test module.
+This includes all suites under the
+.Sy mac
+module and all tests under each suite.
+.Bd -literal -offset ident
+ktest run 'mac::'
+.Ed
+.Ss Run a test with an input file
+Execute a specific test which requires an input stream.
+.Bd -literal -offset ident
+ktest run -i data.pcap mac:checksum:mac_sw_cksum_ipv4_snoop_test
+.Ed
+.Sh INTERFACE STABILITY
+The command syntax is
+.Sy Uncommitted .
+The output format is
+.Sy Uncommitted .

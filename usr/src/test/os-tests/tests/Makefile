@@ -14,26 +14,38 @@
 # Copyright 2020 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
-# Copyright 2023 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 #
 
-SUBDIRS_i386 = i386 imc zen_umc xsave
+SUBDIRS_i386 =		\
+	i386		\
+	imc		\
+	saveargs	\
+	xsave		\
+	zen_umc
 
 SUBDIRS =       \
 		cores \
 		ddi_ufm \
 		definit \
+		execvpe \
 		file-locking \
+		hexdump \
 		ilstr \
 		ksensor \
 		ksid \
+		ktest \
 		libtopo \
+		mac_test \
+		minttl \
+		oclo \
 		pf_key \
 		poll \
 		portfs \
 		regression \
 		sdevfs \
 		secflags \
+		secure_getenv \
 		signalfd \
 		sigqueue \
 		sockfs \
@@ -41,14 +53,17 @@ SUBDIRS =       \
 		stackalign \
 		stress \
 		syscall \
+		tcpsig \
 		timer \
 		tmpfs \
 		uccid \
+		vfs \
 		$(SUBDIRS_$(MACH))
 
 PROGS = \
 	clock_gettime \
 	eventfd \
+	fifo-tvnsec \
 	odirectory \
 	OS-6097 \
 	ucontext \
@@ -74,6 +89,9 @@ clock_gettime.32 :=	LDLIBS += -lproc
 clock_gettime.32 :=	CSTD = $(CSTD_GNU99)
 clock_gettime.64 :=	LDLIBS64 += -lproc
 clock_gettime.64 :=	CSTD = $(CSTD_GNU99)
+
+fifo-tvnsec.32 :=	CSTD = $(CSTD_GNU99)
+fifo-tvnsec.64 :=	CSTD = $(CSTD_GNU99)
 
 ucontext.32 :=		SMOFF += unreachable
 ucontext.64 :=		SMOFF += unreachable

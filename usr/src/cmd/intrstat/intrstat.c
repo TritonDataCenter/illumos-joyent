@@ -117,11 +117,12 @@ intr(int signo)
 }
 
 static void
-status(void)
-{}
+status(int signal __unused)
+{
+}
 
 static void
-set_width(void)
+set_width(int sig __unused)
 {
 	struct winsize win;
 
@@ -363,7 +364,7 @@ main(int argc, char **argv)
 	sigset_t set;
 	timer_t tid;
 	char *end, *p;
-	char c;
+	int c;
 	hrtime_t last, now;
 	dtrace_optval_t statustime;
 
@@ -387,7 +388,7 @@ main(int argc, char **argv)
 
 	act.sa_handler = set_width;
 	(void) sigaction(SIGWINCH, &act, NULL);
-	set_width();
+	set_width(0);
 
 	(void) sigemptyset(&set);
 	(void) sigaddset(&set, SIGUSR1);

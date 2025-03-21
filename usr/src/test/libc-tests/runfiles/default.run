@@ -11,11 +11,11 @@
 
 #
 # Copyright (c) 2012 by Delphix. All rights reserved.
-# Copyright 2014 Garrett D'Amore <garrett@damore.org>
+# Copyright 2015 Garrett D'Amore <garrett@damore.org>
 # Copyright 2019 Joyent, Inc.
 # Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2023 Bill Sommerfeld <sommerfeld@alum.mit.edu>
-# Copyright 2023 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 #
 
 [DEFAULT]
@@ -26,6 +26,7 @@ timeout = 120
 post =
 outputdir = /var/tmp/test_results
 
+[/opt/libc-tests/tests/fexecve_test]
 [/opt/libc-tests/tests/fpround_test]
 [/opt/libc-tests/tests/newlocale_test]
 [/opt/libc-tests/tests/nl_langinfo_test]
@@ -95,8 +96,9 @@ timeout = 600
 [/opt/libc-tests/tests/stdio/test_mbrtowc.32]
 [/opt/libc-tests/tests/stdio/test_mbrtowc.64]
 
-[/opt/libc-tests/tests/aligned_alloc.32]
-[/opt/libc-tests/tests/aligned_alloc.64]
+[/opt/libc-tests/tests/aligned_alloc]
+[/opt/libc-tests/tests/ascftime.32]
+[/opt/libc-tests/tests/ascftime.64]
 [/opt/libc-tests/tests/asprintf-14933.32]
 [/opt/libc-tests/tests/asprintf-14933.64]
 [/opt/libc-tests/tests/c11_threads.32]
@@ -105,6 +107,8 @@ timeout = 600
 [/opt/libc-tests/tests/c11_tss.64]
 [/opt/libc-tests/tests/call_once.32]
 [/opt/libc-tests/tests/call_once.64]
+[/opt/libc-tests/tests/clock_lock.32]
+[/opt/libc-tests/tests/clock_lock.64]
 [/opt/libc-tests/tests/closefrom.32]
 [/opt/libc-tests/tests/closefrom.64]
 [/opt/libc-tests/tests/catopen]
@@ -123,28 +127,44 @@ timeout = 600
 [/opt/libc-tests/tests/memchr.64]
 [/opt/libc-tests/tests/memset_s.32]
 [/opt/libc-tests/tests/memset_s.64]
+[/opt/libc-tests/tests/mutex-16200.32]
+[/opt/libc-tests/tests/mutex-16200.64]
 [/opt/libc-tests/tests/posix_memalign.32]
 [/opt/libc-tests/tests/posix_memalign.64]
+[/opt/libc-tests/tests/posix_spawn.32]
+[/opt/libc-tests/tests/posix_spawn.64]
 [/opt/libc-tests/tests/printf-15294.32]
 [/opt/libc-tests/tests/printf-15294.64]
 [/opt/libc-tests/tests/printf-6961.64]
 [/opt/libc-tests/tests/printf-9511.32]
 [/opt/libc-tests/tests/printf-9511.64]
+[/opt/libc-tests/tests/printf-intmax]
 [/opt/libc-tests/tests/priv_gettext]
 [/opt/libc-tests/tests/psignal]
+[/opt/libc-tests/tests/ptsname.32]
+[/opt/libc-tests/tests/ptsname.64]
 [/opt/libc-tests/tests/quick_exit]
 [/opt/libc-tests/tests/set_constraint_handler_s.32]
 [/opt/libc-tests/tests/set_constraint_handler_s.64]
-[/opt/libc-tests/tests/strerror]
+[/opt/libc-tests/tests/stdbit.32]
+[/opt/libc-tests/tests/stdbit.64]
+[/opt/libc-tests/tests/strerror.32]
+[/opt/libc-tests/tests/strerror.64]
 [/opt/libc-tests/tests/strtonum.32]
 [/opt/libc-tests/tests/strtonum.64]
 [/opt/libc-tests/tests/thread_name]
 [/opt/libc-tests/tests/timespec_get.32]
 [/opt/libc-tests/tests/timespec_get.64]
+[/opt/libc-tests/tests/timespec_getres.32]
+[/opt/libc-tests/tests/timespec_getres.64]
 [/opt/libc-tests/tests/uchar.32]
 [/opt/libc-tests/tests/uchar.64]
 [/opt/libc-tests/tests/utimes.32]
 [/opt/libc-tests/tests/utimes.64]
+[/opt/libc-tests/tests/wcslcat.32]
+[/opt/libc-tests/tests/wcslcat.64]
+[/opt/libc-tests/tests/wcslcpy.32]
+[/opt/libc-tests/tests/wcslcpy.64]
 
 #
 # root privs required for priority changes

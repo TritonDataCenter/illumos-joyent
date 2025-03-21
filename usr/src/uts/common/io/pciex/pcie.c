@@ -22,7 +22,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2019 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -537,9 +537,16 @@ ushort_t pcie_base_err_default =
     PCIE_DEVCTL_FE_REPORTING_EN |
     PCIE_DEVCTL_UR_REPORTING_EN;
 
-/* PCI-Express Device Control Register */
-uint16_t pcie_devctl_default = PCIE_DEVCTL_RO_EN |
-    PCIE_DEVCTL_MAX_READ_REQ_512;
+/*
+ * This contains default values and masks that are used to manipulate the device
+ * control register and ensure that it is in a normal state. The mask controls
+ * things that are managed by pcie_fabric_setup(), firmware, or other sources
+ * and therefore should be preserved unless we're explicitly trying to change
+ * it.
+ */
+uint16_t pcie_devctl_default = PCIE_DEVCTL_RO_EN | PCIE_DEVCTL_MAX_READ_REQ_512;
+uint16_t pcie_devctl_default_mask = PCIE_DEVCTL_MAX_READ_REQ_MASK |
+    PCIE_DEVCTL_MAX_PAYLOAD_MASK | PCIE_DEVCTL_EXT_TAG_FIELD_EN;
 
 /* PCI-Express AER Root Control Register */
 #define	PCIE_ROOT_SYS_ERR	(PCIE_ROOTCTL_SYS_ERR_ON_CE_EN | \
@@ -1072,7 +1079,6 @@ pcie_initchild(dev_info_t *cdip)
 {
 	uint16_t		tmp16, reg16;
 	pcie_bus_t		*bus_p;
-	uint32_t		devid, venid;
 
 	bus_p = PCIE_DIP2BUS(cdip);
 	if (bus_p == NULL) {
@@ -1084,29 +1090,6 @@ pcie_initchild(dev_info_t *cdip)
 
 	if (pcie_init_cfghdl(cdip) != DDI_SUCCESS)
 		return (DDI_FAILURE);
-
-	/*
-	 * Update pcie_bus_t with real Vendor Id Device Id.
-	 *
-	 * For assigned devices in IOV environment, the OBP will return
-	 * faked device id/vendor id on configration read and for both
-	 * properties in root domain. translate_devid() function will
-	 * update the properties with real device-id/vendor-id on such
-	 * platforms, so that we can utilize the properties here to get
-	 * real device-id/vendor-id and overwrite the faked ids.
-	 *
-	 * For unassigned devices or devices in non-IOV environment, the
-	 * operation below won't make a difference.
-	 *
-	 * The IOV implementation only supports assignment of PCIE
-	 * endpoint devices. Devices under pci-pci bridges don't need
-	 * operation like this.
-	 */
-	devid = ddi_prop_get_int(DDI_DEV_T_ANY, cdip, DDI_PROP_DONTPASS,
-	    "device-id", -1);
-	venid = ddi_prop_get_int(DDI_DEV_T_ANY, cdip, DDI_PROP_DONTPASS,
-	    "vendor-id", -1);
-	bus_p->bus_dev_ven_id = (devid << 16) | (venid & 0xffff);
 
 	/* Clear the device's status register */
 	reg16 = PCIE_GET(16, bus_p, PCI_CONF_STAT);
@@ -1164,13 +1147,14 @@ pcie_initchild(dev_info_t *cdip)
 	}
 
 	if (PCIE_IS_PCIE(bus_p)) {
-		/* Setup PCIe device control register */
+		/*
+		 * Get the device control register into an initial state that
+		 * makes sense. The maximum payload, tagging, and related will
+		 * be dealt with in pcie_fabric_setup().
+		 */
 		reg16 = PCIE_CAP_GET(16, bus_p, PCIE_DEVCTL);
-		/* note: MPS/MRRS are initialized in pcie_initchild_mps() */
-		tmp16 = (reg16 & (PCIE_DEVCTL_MAX_READ_REQ_MASK |
-		    PCIE_DEVCTL_MAX_PAYLOAD_MASK)) |
-		    (pcie_devctl_default & ~(PCIE_DEVCTL_MAX_READ_REQ_MASK |
-		    PCIE_DEVCTL_MAX_PAYLOAD_MASK));
+		tmp16 = (reg16 & pcie_devctl_default_mask) |
+		    (pcie_devctl_default & ~pcie_devctl_default_mask);
 		PCIE_CAP_PUT(16, bus_p, PCIE_DEVCTL, tmp16);
 		PCIE_DBG_CAP(cdip, bus_p, "DEVCTL", 16, PCIE_DEVCTL, reg16);
 
@@ -2340,11 +2324,9 @@ pcie_enable_errors(dev_info_t *dip)
 	 */
 	if ((reg16 = PCIE_CAP_GET(16, bus_p, PCIE_DEVCTL)) !=
 	    PCI_CAP_EINVAL16) {
-		tmp16 = (reg16 & (PCIE_DEVCTL_MAX_READ_REQ_MASK |
-		    PCIE_DEVCTL_MAX_PAYLOAD_MASK)) |
-		    (pcie_devctl_default & ~(PCIE_DEVCTL_MAX_READ_REQ_MASK |
-		    PCIE_DEVCTL_MAX_PAYLOAD_MASK)) |
-		    (pcie_base_err_default & (~PCIE_DEVCTL_CE_REPORTING_EN));
+		tmp16 = (reg16 & pcie_devctl_default_mask) |
+		    (pcie_devctl_default & ~pcie_devctl_default_mask) |
+		    (pcie_base_err_default & ~PCIE_DEVCTL_CE_REPORTING_EN);
 
 		PCIE_CAP_PUT(16, bus_p, PCIE_DEVCTL, tmp16);
 		PCIE_DBG_CAP(dip, bus_p, "DEVCTL", 16, PCIE_DEVCTL, reg16);
@@ -3252,6 +3234,7 @@ pcie_link_bw_intr(dev_info_t *dip)
 	pcie_bus_t *bus_p = PCIE_DIP2BUS(dip);
 	uint16_t linksts;
 	uint16_t flags = PCIE_LINKSTS_LINK_BW_MGMT | PCIE_LINKSTS_AUTO_BW;
+	hrtime_t now;
 
 	if ((bus_p->bus_lbw_state & PCIE_LBW_S_ENABLED) == 0) {
 		return (DDI_INTR_UNCLAIMED);
@@ -3262,6 +3245,8 @@ pcie_link_bw_intr(dev_info_t *dip)
 		return (DDI_INTR_UNCLAIMED);
 	}
 
+	now = gethrtime();
+
 	/*
 	 * Check if we've already dispatched this event. If we have already
 	 * dispatched it, then there's nothing else to do, we coalesce multiple
@@ -3269,6 +3254,7 @@ pcie_link_bw_intr(dev_info_t *dip)
 	 */
 	mutex_enter(&bus_p->bus_lbw_mutex);
 	bus_p->bus_lbw_nevents++;
+	bus_p->bus_lbw_last_ts = now;
 	if ((bus_p->bus_lbw_state & PCIE_LBW_S_DISPATCHED) == 0) {
 		if ((bus_p->bus_lbw_state & PCIE_LBW_S_RUNNING) == 0) {
 			taskq_dispatch_ent(pcie_link_tq, pcie_link_bw_taskq,

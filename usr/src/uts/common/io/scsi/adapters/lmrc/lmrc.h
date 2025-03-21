@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2023 Racktop Systems, Inc.
+ * Copyright 2024 Racktop Systems, Inc.
  */
 #ifndef _LMRC_H
 #define	_LMRC_H
@@ -19,6 +19,8 @@
 #include <sys/types.h>
 
 #include <sys/scsi/scsi.h>
+#include <sys/scsi/adapters/mfi/mfi_pd.h>
+
 #include <sys/taskq_impl.h>
 
 #if !defined(_LITTLE_ENDIAN) || !defined(_BIT_FIELDS_LTOH)
@@ -73,6 +75,8 @@ enum lmrc_init_level {
 	LMRC_INITLEVEL_MFICMDS =	(1 << 10),
 	LMRC_INITLEVEL_MPTCMDS =	(1 << 11),
 	LMRC_INITLEVEL_FW =		(1 << 12),
+	LMRC_INITLEVEL_RAID =		(1 << 13),
+	LMRC_INITLEVEL_PHYS =		(1 << 14),
 };
 
 #define	INITLEVEL_SET(_lmrc, name)				\
@@ -129,7 +133,7 @@ struct lmrc_mfi_cmd {
 	list_node_t		mfi_node;
 	lmrc_dma_t		mfi_frame_dma;
 
-	lmrc_mfi_frame_t	*mfi_frame;
+	mfi_frame_t		*mfi_frame;
 	uint32_t		mfi_idx;
 	uint16_t		mfi_smid;
 
@@ -158,7 +162,7 @@ struct lmrc_tgt {
 	uint8_t			tgt_type;
 	uint8_t			tgt_interconnect_type;
 	uint64_t		tgt_wwn;
-	lmrc_pd_info_t		*tgt_pd_info;
+	mfi_pd_info_t		*tgt_pd_info;
 	char			tgt_wwnstr[SCSI_WWN_BUFLEN];
 };
 
@@ -190,7 +194,7 @@ struct lmrc {
 	kcondvar_t		l_thread_cv;
 	boolean_t		l_thread_stop;
 
-	lmrc_ctrl_info_t	*l_ctrl_info;
+	mfi_ctrl_info_t		*l_ctrl_info;
 
 	ddi_intr_handle_t	*l_intr_htable;
 	size_t			l_intr_htable_size;
@@ -257,7 +261,7 @@ struct lmrc {
 	lmrc_fw_raid_map_t	*l_raidmap;
 
 	krwlock_t		l_pdmap_lock;
-	lmrc_pd_map_t		*l_pdmap;
+	mfi_pd_map_t		*l_pdmap;
 
 	lmrc_tgt_t		l_targets[LMRC_MAX_LD + LMRC_MAX_PD];
 
@@ -297,7 +301,7 @@ int lmrc_adapter_init(lmrc_t *);
 int lmrc_ioc_init(lmrc_t *);
 int lmrc_fw_init(lmrc_t *);
 
-void lmrc_tgt_init(lmrc_tgt_t *, uint16_t, char *, lmrc_pd_info_t *);
+void lmrc_tgt_init(lmrc_tgt_t *, uint16_t, char *, mfi_pd_info_t *);
 void lmrc_tgt_clear(lmrc_tgt_t *);
 lmrc_tgt_t *lmrc_tgt_find(lmrc_t *, struct scsi_device *);
 

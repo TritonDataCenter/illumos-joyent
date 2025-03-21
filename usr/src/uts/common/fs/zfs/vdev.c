@@ -339,7 +339,13 @@ vdev_count_leaves_impl(vdev_t *vd)
 int
 vdev_count_leaves(spa_t *spa)
 {
-	return (vdev_count_leaves_impl(spa->spa_root_vdev));
+	int rc;
+
+	spa_config_enter(spa, SCL_VDEV, FTAG, RW_READER);
+	rc = vdev_count_leaves_impl(spa->spa_root_vdev);
+	spa_config_exit(spa, SCL_VDEV, FTAG);
+
+	return (rc);
 }
 
 void
@@ -443,6 +449,18 @@ vdev_compact_children(vdev_t *pvd)
 	for (int c = newc = 0; c < oldc; c++)
 		if (pvd->vdev_child[c])
 			newc++;
+
+	/*
+	 * If there are no remaining children (possible if this is an indirect
+	 * vdev) just free the old child array and return to avoid a pointless
+	 * zero-byte alloc.
+	 */
+	if (newc == 0) {
+		kmem_free(pvd->vdev_child, oldc * sizeof (vdev_t *));
+		pvd->vdev_child = NULL;
+		pvd->vdev_children = newc;
+		return;
+	}
 
 	newchild = kmem_alloc(newc * sizeof (vdev_t *), KM_SLEEP);
 

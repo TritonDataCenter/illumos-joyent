@@ -23,6 +23,7 @@
  * Copyright 2016 Toomas Soome <tsoome@me.com>
  * Copyright (c) 2013, OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <errno.h>
@@ -62,6 +63,7 @@
 #include <atomic.h>
 #include <sys/acl.h>
 #include <sys/socket.h>
+#include <sys/fdsync.h>
 
 #include <s10_brand.h>
 #include <brand_misc.h>
@@ -726,8 +728,10 @@ s10_pwrite(sysret_t *rval, int fd, const void *bufferp, size_t num_bytes,
 {
 	int err;
 
-	if ((err = __systemcall(rval, SYS_fcntl + 1024, fd, F_GETFL)) != 0)
+	if ((err = __systemcall(rval, SYS_fcntl + 1024, fd, F_GETFL, 0, 0)) !=
+	    0) {
 		return (err);
+	}
 	if (rval->sys_rval1 & O_APPEND)
 		return (__systemcall(rval, SYS_write + 1024, fd, bufferp,
 		    num_bytes));
@@ -747,8 +751,10 @@ s10_pwrite64(sysret_t *rval, int fd, const void *bufferp, size32_t num_bytes,
 {
 	int err;
 
-	if ((err = __systemcall(rval, SYS_fcntl + 1024, fd, F_GETFL)) != 0)
+	if ((err = __systemcall(rval, SYS_fcntl + 1024, fd, F_GETFL, 0, 0)) !=
+	    0) {
 		return (err);
+	}
 	if (rval->sys_rval1 & O_APPEND)
 		return (__systemcall(rval, SYS_write + 1024, fd, bufferp,
 		    num_bytes));
@@ -1356,7 +1362,7 @@ s10_exec(sysret_t *rval, const char *fname, const char **argp)
 		return (err);
 
 	/* If an exec call succeeds, it never returns */
-	err = __systemcall(rval, SYS_execve + 1024, fname, argp, NULL);
+	err = __systemcall(rval, SYS_execve + 1024, fname, argp, NULL, 0);
 	brand_assert(err != 0);
 	return (err);
 }
@@ -1374,9 +1380,44 @@ s10_execve(sysret_t *rval, const char *fname, const char **argp,
 		return (err);
 
 	/* If an exec call succeeds, it never returns */
-	err = __systemcall(rval, SYS_execve + 1024, fname, argp, envp);
+	err = __systemcall(rval, SYS_execve + 1024, fname, argp, envp, 0);
 	brand_assert(err != 0);
 	return (err);
+}
+
+/*
+ * fcntl(2) added an additional argument which we need to pass as zero.
+ */
+int
+s10_fcntl(sysret_t *rval, int fd, int cmd, intptr_t arg)
+{
+	return (__systemcall(rval, SYS_fcntl + 1024, fd, cmd, arg, 0));
+}
+
+/*
+ * Interpose on the SYS_fdsync system call. The structure was chagned to use a
+ * distinct enum rather than passing a combination of the <sys/file.h> flags
+ * FSYNC and FDSYNC. The prior system call implementation only passed those two
+ * flags on to the VFS operation. The system call did not check if the 'flag'
+ * argument was zero or not; however, we know that in illumos it was always
+ * called with either FSYNC or FDSYNC explicitly. To try and fail open in a
+ * sense, we translate any call with no explicit level to a normal fsync(3C)
+ * style operation.
+ */
+static int
+s10_fdsync(sysret_t *rval, int fd, int flag)
+{
+	uint32_t level;
+
+	if ((flag & FSYNC) != 0) {
+		level = FDSYNC_FILE;
+	} else if ((flag & FDSYNC) != 0) {
+		level = FDSYNC_DATA;
+	} else {
+		level = FDSYNC_FILE;
+	}
+
+	return (__systemcall(rval, SYS_fdsync + 1024, fd, level));
 }
 
 /*
@@ -1960,11 +2001,11 @@ brand_sysent_table_t brand_sysent_table[] = {
 	NOSYS,					/*  55 */
 	NOSYS,					/*  56 */
 	NOSYS,					/*  57 */
-	NOSYS,					/*  58 */
+	EMULATE(s10_fdsync, 2 | RV_DEFAULT),	/*  58 */
 	EMULATE(s10_execve, 3 | RV_DEFAULT),	/*  59 */
 	NOSYS,					/*  60 */
 	NOSYS,					/*  61 */
-	NOSYS,					/*  62 */
+	EMULATE(s10_fcntl, 3 | RV_DEFAULT),	/*  62 */
 	NOSYS,					/*  63 */
 	NOSYS,					/*  64 */
 	NOSYS,					/*  65 */

@@ -59,9 +59,6 @@ INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 #
 #	Overrides.
 #
-MODSTUBS_DIR	 = $(OBJS_DIR)
-$(MODSTUBS_O)	:= AS_CPPFLAGS += -DSOCK_MODULE
-CLEANFILES	+= $(MODSTUBS_O)
 LDFLAGS         += -Ndrv/ip
 
 #
@@ -71,13 +68,6 @@ SRCDIR		 = $(UTSBASE)/common/fs/sockfs
 TOKGEN		 = $(SRCDIR)/nl7ctokgen
 DERIVED_FILES	 = nl7ctokgen.h
 CFLAGS		+= -I.
-
-CERRWARN	+= -_gcc=-Wno-unused-label
-CERRWARN	+= -_gcc=-Wno-unused-value
-CERRWARN	+= -_gcc=-Wno-unused-variable
-CERRWARN	+= -_gcc=-Wno-unused-function
-CERRWARN	+= -_gcc=-Wno-parentheses
-CERRWARN	+= $(CNOWARN_UNINIT)
 
 #
 #	Default build targets.

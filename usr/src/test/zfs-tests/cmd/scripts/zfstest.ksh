@@ -17,9 +17,10 @@
 # Copyright 2019 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
 # Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
-# Copyright 2022 MNX Cloud, Inc.
+# Copyright 2024 MNX Cloud, Inc.
 #
 
+export LC_ALL=C.UTF-8
 export PATH="/usr/bin"
 export NOINUSE_CHECK=1
 export STF_SUITE="/opt/zfs-tests"
@@ -50,7 +51,7 @@ function find_disks
 	typeset disk used avail_disks
 	for disk in $all_disks; do
 		for used in $used_disks; do
-			[[ "$disk" = "$used" ]] && continue 2
+			[[ "$disk" == "$used" ]] && continue 2
 		done
 		[[ -n $avail_disks ]] && avail_disks="$avail_disks $disk"
 		[[ -z $avail_disks ]] && avail_disks="$disk"
@@ -70,9 +71,9 @@ function find_runfile
 	typeset distro=
 	if [[ -d /opt/delphix && -h /etc/delphix/version ]]; then
 		distro=delphix
-	elif [[ 0 -ne $(grep -c OpenIndiana /etc/release 2>/dev/null) ]]; then
+	elif grep -qs OpenIndiana /etc/release; then
 		distro=openindiana
-	elif [[ 0 -ne $(grep -c OmniOS /etc/release 2>/dev/null) ]]; then
+	elif grep -qs OmniOS /etc/release; then
 		distro=omnios
 	elif [[ 0 -ne $(grep -c SmartOS /etc/release 2>/dev/null) ]]; then
 		distro=smartos
@@ -83,23 +84,48 @@ function find_runfile
 
 function verify_id
 {
-	[[ $(id -u) = "0" ]] && fail "This script must not be run as root."
+	[[ $(id -u) == "0" ]] && fail "This script must not be run as root."
 
-	sudo -k -n id >/dev/null 2>&1
-	[[ $? -eq 0 ]] || fail "User must be able to sudo without a password."
+	sudo -k -n id >/dev/null 2>&1 ||
+		fail "User must be able to sudo without a password."
 }
 
 function verify_disks
 {
 	typeset disk
 	typeset path
+	typeset -lu expected_size
+	typeset -lu size
+
+	# Ensure disks are large enough for the tests: no less than 10GB
+	# and large enough for a crash dump plus overheads: the disk partition
+	# table (about 34k), zpool with 4.5MB for pool label and 128k for pool
+	# data, so we round up pool data + labels to 5MB.
+	expected_size=$(sudo -k -n dumpadm -epH)
+	(( expected_size = expected_size + 5 * 1024 * 1024 ))
+
+	if (( expected_size < 10 * 1024 * 1024 * 1024 )); then
+		(( expected_size = 10 * 1024 * 1024 * 1024 ))
+	fi
+
 	for disk in $DISKS; do
 		case $disk in
 		/*) path=$disk;;
 		*) path=/dev/rdsk/${disk}s0
 		esac
-		sudo -k prtvtoc $path >/dev/null 2>&1
-		[[ $? -eq 0 ]] || return 1
+		set -A disksize $(sudo -k prtvtoc $path 2>&1 |
+			awk '$3 == "bytes/sector" ||
+			    ($3 == "accessible" && $4 == "sectors") {print $2}')
+
+		if [[ (-n "${disksize[0]}") && (-n "${disksize[1]}") ]]; then
+			(( size = disksize[0] * disksize[1] ))
+		else
+			return 1
+		fi
+		if (( size <  expected_size )); then
+			(( size = expected_size / 1024 / 1024 / 1024 ))
+			fail "$disk is too small, need at least ${size}GB"
+		fi
 	done
 	return 0
 }
@@ -136,10 +162,10 @@ function constrain_path
 	# SmartOS does not ship some required commands by default.
 	# Link to them in the package manager's namespace.
 	pkgsrc_bin=/opt/tools/bin
-	pkgsrc_packages="sudo truncate python base64 shuf sha256sum"
+	pkgsrc_packages="fio uuidgen md5sum sudo truncate python base64 shuf sha256sum"
 	for pkg in $pkgsrc_packages; do
 		if [[ ! -x $PATHDIR/$pkg ]]; then
-			rm $PATHDIR/$pkg &&
+			rm -f $PATHDIR/$pkg &&
 			    ln -s $pkgsrc_bin/$pkg $PATHDIR/$pkg ||
 			    fail "Couldn't link $pkg"
 		fi
@@ -205,7 +231,7 @@ export KEEP="^$(echo $KEEP | sed 's/ /$|^/g')\$"
 . $STF_SUITE/include/default.cfg
 
 num_disks=$(echo $DISKS | awk '{print NF}')
-[[ $num_disks -lt 3 ]] && fail "Not enough disks to run ZFS Test Suite"
+(( num_disks < 3 )) && fail "Not enough disks to run ZFS Test Suite"
 
 # Ensure user has only basic privileges.
 ppriv -s EIP=basic -e $runner -c $runfiles $xargs

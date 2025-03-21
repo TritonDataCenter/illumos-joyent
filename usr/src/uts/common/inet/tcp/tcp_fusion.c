@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2015 by Delphix. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -151,6 +152,16 @@ tcp_fuse(tcp_t *tcp, uchar_t *iphdr, tcpha_t *tcpha)
 		CONN_DEC_REF(peer_connp);
 		return;
 	}
+
+	/*
+	 * If we need to add MD5 Signature options, don't allow fusion.
+	 */
+	if (tcp->tcp_md5sig || peer_tcp->tcp_md5sig) {
+		TCP_STAT(tcps, tcp_fusion_unqualified);
+		CONN_DEC_REF(peer_connp);
+		return;
+	}
+
 	/*
 	 * Fuse the endpoints; we perform further checks against both
 	 * tcp endpoints to ensure that a fusion is allowed to happen.
@@ -463,6 +474,16 @@ tcp_fuse_output(tcp_t *tcp, mblk_t *mp, uint32_t send_size)
 	if (send_size == 0) {
 		freemsg(mp);
 		return (B_TRUE);
+	}
+
+	/*
+	 * Check enforcement of the minimum TTL policy differences in the
+	 * connection as this can change even after fusion. If we detect a
+	 * mismatch, unfuse and allow normal stack processing to handle this.
+	 */
+	if (peer_connp->conn_min_ttl != 0 && peer_connp->conn_min_ttl >
+	    connp->conn_xmit_ipp.ipp_unicast_hops) {
+		goto unfuse;
 	}
 
 	/*

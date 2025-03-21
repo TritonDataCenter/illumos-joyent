@@ -225,7 +225,7 @@
  *	* The timedwait times out, in which case it needs to run a global
  *	update, or
  *
- *	* someone cond_broadcast(3THR)s the umem_update_cv, in which case
+ *	* someone cond_broadcast(3C)s the umem_update_cv, in which case
  *	it needs to check if there are any caches in the Work Requested
  *	state.
  *
@@ -317,7 +317,7 @@
  *	to be invoked with status.  If multiple threads attempt to do
  *	this simultaneously, only one will call exit(2).
  *
- *	* Doing some kind of non-local exit (thr_exit(3thr), longjmp(3C),
+ *	* Doing some kind of non-local exit (thr_exit(3C), longjmp(3C),
  *	etc.)
  *
  * The default callback returns UMEM_CALLBACK_EXIT(255).
@@ -3563,5 +3563,8 @@ fail:
 void
 umem_setmtbf(uint32_t mtbf)
 {
+	extern uint32_t vmem_mtbf;
+
 	umem_mtbf = mtbf;
+	vmem_mtbf = mtbf;
 }

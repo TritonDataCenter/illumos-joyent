@@ -26,7 +26,7 @@
 /*
  * Copyright 2012 DEY Storage Systems, Inc.  All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <stdlib.h>
@@ -1690,7 +1690,7 @@ dump_prfdinfo(note_state_t *state, const char *title)
 {
 	const sl_prfdinfo_layout_t *layout = state->ns_arch->prfdinfo;
 	char buf[1024];
-	uint32_t fileflags, mode;
+	uint32_t fileflags, mode, fdflags;
 
 	indent_enter(state, title, &layout->pr_fd);
 
@@ -1718,7 +1718,9 @@ dump_prfdinfo(note_state_t *state, const char *title)
 	print_str(state, MSG_ORIG(MSG_CNOTE_T_PR_FILEFLAGS),
 	    conv_cnote_fileflags(fileflags, 0, buf, sizeof (buf)));
 
-	PRINT_DEC(MSG_ORIG(MSG_CNOTE_T_PR_FDFLAGS), pr_fdflags);
+	fdflags = extract_as_word(state, &layout->pr_fdflags);
+	print_str(state, MSG_ORIG(MSG_CNOTE_T_PR_FDFLAGS),
+	    conv_cnote_fdflags(fdflags, 0, buf, sizeof (buf)));
 
 	PRINT_STRBUF(MSG_ORIG(MSG_CNOTE_T_PR_PATH), pr_path);
 
@@ -1846,6 +1848,40 @@ dump_upanic(note_state_t *state, const char *title)
 			    &layout->pru_data);
 		}
 	}
+}
+
+static void
+dump_cwd(note_state_t *state, const char *title)
+{
+	const sl_prcwd_layout_t *layout = state->ns_arch->prcwd;
+
+	indent_enter(state, title, &layout->prcwd_fsid);
+
+	if (data_present(state, &layout->prcwd_fsid)) {
+		PRINT_HEX(MSG_ORIG(MSG_CNOTE_T_CWD_FSID), prcwd_fsid);
+	}
+
+	if (data_present(state, &layout->prcwd_fsname)) {
+		print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_CWD_FSNAME),
+		    &layout->prcwd_fsname);
+	}
+
+	if (data_present(state, &layout->prcwd_mntpt)) {
+		print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_CWD_MNTPT),
+		    &layout->prcwd_mntpt);
+	}
+
+	if (data_present(state, &layout->prcwd_mntspec)) {
+		print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_CWD_MNTSPEC),
+		    &layout->prcwd_mntspec);
+	}
+
+	if (data_present(state, &layout->prcwd_cwd)) {
+		print_strbuf(state, MSG_ORIG(MSG_CNOTE_T_CWD_CWD),
+		    &layout->prcwd_cwd);
+	}
+
+	indent_exit(state);
 }
 
 corenote_ret_t
@@ -2021,6 +2057,11 @@ corenote(Half mach, int do_swap, Word type,
 	case NT_UPANIC:
 		state.ns_vcol = 23;
 		dump_upanic(&state, MSG_ORIG(MSG_CNOTE_DESC_PRUPANIC_T));
+		return (CORENOTE_R_OK);
+
+	case NT_CWD:
+		state.ns_vcol = 23;
+		dump_cwd(&state, MSG_ORIG(MSG_CNOTE_DESC_PRCWD_T));
 		return (CORENOTE_R_OK);
 	}
 

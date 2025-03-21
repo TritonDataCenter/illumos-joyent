@@ -10,8 +10,9 @@
  */
 
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
+
 #include "ena.h"
 
 static void
@@ -20,7 +21,9 @@ ena_refill_rx(ena_rxq_t *rxq, uint16_t num)
 	VERIFY3P(rxq, !=, NULL);
 	ASSERT(MUTEX_HELD(&rxq->er_lock));
 	ASSERT3U(num, <=, rxq->er_sq_num_descs);
-	uint16_t tail_mod = rxq->er_sq_tail_idx & (rxq->er_sq_num_descs - 1);
+
+	const uint16_t modulo_mask = rxq->er_sq_num_descs - 1;
+	uint16_t tail_mod = rxq->er_sq_tail_idx & modulo_mask;
 
 	while (num != 0) {
 		enahw_rx_desc_t *desc = &rxq->er_sq_descs[tail_mod];
@@ -40,17 +43,18 @@ ena_refill_rx(ena_rxq_t *rxq, uint16_t num)
 		ena_set_dma_addr_values(rxq->er_ena,
 		    rcb->ercb_dma.edb_cookie->dmac_laddress,
 		    &desc->erd_buff_addr_lo, &desc->erd_buff_addr_hi);
+
+		ENAHW_RX_DESC_CLEAR_CTRL(desc);
 		ENAHW_RX_DESC_SET_PHASE(desc, phase);
 		ENAHW_RX_DESC_SET_FIRST(desc);
 		ENAHW_RX_DESC_SET_LAST(desc);
 		ENAHW_RX_DESC_SET_COMP_REQ(desc);
 		DTRACE_PROBE1(ena__refill__rx, enahw_rx_desc_t *, desc);
 		rxq->er_sq_tail_idx++;
-		tail_mod = rxq->er_sq_tail_idx & (rxq->er_sq_num_descs - 1);
+		tail_mod = rxq->er_sq_tail_idx & modulo_mask;
 
-		if (tail_mod == 0) {
-			rxq->er_sq_phase = !rxq->er_sq_phase;
-		}
+		if (tail_mod == 0)
+			rxq->er_sq_phase ^= 1;
 
 		num--;
 	}
@@ -92,20 +96,20 @@ ena_alloc_rx_dma(ena_rxq_t *rxq)
 	ena_t *ena = rxq->er_ena;
 	size_t cq_descs_sz;
 	size_t sq_descs_sz;
-	ena_dma_conf_t conf;
 	int err = 0;
 
 	cq_descs_sz = rxq->er_cq_num_descs * sizeof (*rxq->er_cq_descs);
 	sq_descs_sz = rxq->er_sq_num_descs * sizeof (*rxq->er_sq_descs);
-	conf = (ena_dma_conf_t) {
+
+	ena_dma_conf_t sq_conf = {
 		.edc_size = sq_descs_sz,
 		.edc_align = ENAHW_IO_SQ_DESC_BUF_ALIGNMENT,
 		.edc_sgl = 1,
 		.edc_endian = DDI_NEVERSWAP_ACC,
-		.edc_stream = B_FALSE,
+		.edc_stream = false,
 	};
 
-	if (!ena_dma_alloc(ena, &rxq->er_sq_dma, &conf, sq_descs_sz)) {
+	if (!ena_dma_alloc(ena, &rxq->er_sq_dma, &sq_conf, sq_descs_sz)) {
 		return (ENOMEM);
 	}
 
@@ -120,7 +124,7 @@ ena_alloc_rx_dma(ena_rxq_t *rxq)
 			.edc_align = 1,
 			.edc_sgl = ena->ena_rx_sgl_max_sz,
 			.edc_endian = DDI_NEVERSWAP_ACC,
-			.edc_stream = B_TRUE,
+			.edc_stream = true,
 		};
 
 		if (!ena_dma_alloc(ena, &rcb->ercb_dma, &buf_conf,
@@ -130,15 +134,15 @@ ena_alloc_rx_dma(ena_rxq_t *rxq)
 		}
 	}
 
-	conf = (ena_dma_conf_t) {
+	ena_dma_conf_t cq_conf = {
 		.edc_size = cq_descs_sz,
 		.edc_align = ENAHW_IO_CQ_DESC_BUF_ALIGNMENT,
 		.edc_sgl = 1,
 		.edc_endian = DDI_NEVERSWAP_ACC,
-		.edc_stream = B_FALSE,
+		.edc_stream = false,
 	};
 
-	if (!ena_dma_alloc(ena, &rxq->er_cq_dma, &conf, cq_descs_sz)) {
+	if (!ena_dma_alloc(ena, &rxq->er_cq_dma, &cq_conf, cq_descs_sz)) {
 		err = ENOMEM;
 		goto error;
 	}
@@ -152,13 +156,13 @@ error:
 	return (err);
 }
 
-boolean_t
+bool
 ena_alloc_rxq(ena_rxq_t *rxq)
 {
 	int ret = 0;
 	ena_t *ena = rxq->er_ena;
 	uint16_t cq_hw_idx, sq_hw_idx;
-	uint32_t *cq_unmask_addr, *cq_headdb, *cq_numanode;
+	uint32_t *cq_unmask_addr, *cq_numanode;
 	uint32_t *sq_db_addr;
 
 	/*
@@ -167,7 +171,7 @@ ena_alloc_rxq(ena_rxq_t *rxq)
 	if ((ret = ena_alloc_rx_dma(rxq)) != 0) {
 		ena_err(ena, "failed to allocate Rx queue %u data buffers: %d",
 		    rxq->er_rxqs_idx, ret);
-		return (B_FALSE);
+		return (false);
 	}
 
 	ASSERT(rxq->er_state & ENA_RXQ_STATE_HOST_ALLOC);
@@ -176,14 +180,13 @@ ena_alloc_rxq(ena_rxq_t *rxq)
 	 * Second, create the Completion Queue.
 	 */
 	ret = ena_create_cq(ena,  rxq->er_cq_num_descs,
-	    rxq->er_cq_dma.edb_cookie->dmac_laddress, B_FALSE,
-	    rxq->er_intr_vector, &cq_hw_idx, &cq_unmask_addr, &cq_headdb,
-	    &cq_numanode);
+	    rxq->er_cq_dma.edb_cookie->dmac_laddress, false,
+	    rxq->er_intr_vector, &cq_hw_idx, &cq_unmask_addr, &cq_numanode);
 
 	if (ret != 0) {
 		ena_err(ena, "failed to create Rx CQ %u: %d", rxq->er_rxqs_idx,
 		    ret);
-		return (B_FALSE);
+		return (false);
 	}
 
 	/* The phase must always start on 1. */
@@ -191,7 +194,6 @@ ena_alloc_rxq(ena_rxq_t *rxq)
 	rxq->er_cq_head_idx = 0;
 	rxq->er_cq_hw_idx = cq_hw_idx;
 	rxq->er_cq_unmask_addr = cq_unmask_addr;
-	rxq->er_cq_head_db_addr = cq_headdb;
 	rxq->er_cq_numa_addr = cq_numanode;
 	rxq->er_state |= ENA_RXQ_STATE_CQ_CREATED;
 
@@ -205,13 +207,13 @@ ena_alloc_rxq(ena_rxq_t *rxq)
 	 */
 	ASSERT3U(rxq->er_sq_num_descs, ==, rxq->er_cq_num_descs);
 	ret = ena_create_sq(ena, rxq->er_sq_num_descs,
-	    rxq->er_sq_dma.edb_cookie->dmac_laddress, B_FALSE, cq_hw_idx,
+	    rxq->er_sq_dma.edb_cookie->dmac_laddress, false, cq_hw_idx,
 	    &sq_hw_idx, &sq_db_addr);
 
 	if (ret != 0) {
 		ena_err(ena, "failed to create Rx SQ %u: %d", rxq->er_rxqs_idx,
 		    ret);
-		return (B_FALSE);
+		return (false);
 	}
 
 	ASSERT3P(sq_db_addr, !=, NULL);
@@ -224,21 +226,23 @@ ena_alloc_rxq(ena_rxq_t *rxq)
 	rxq->er_mode = ENA_RXQ_MODE_INTR;
 	rxq->er_state |= ENA_RXQ_STATE_SQ_CREATED;
 
-	return (B_TRUE);
+	return (true);
 }
 
 void
-ena_cleanup_rxq(ena_rxq_t *rxq)
+ena_cleanup_rxq(ena_rxq_t *rxq, bool resetting)
 {
 	int ret = 0;
 	ena_t *ena = rxq->er_ena;
 
 	if ((rxq->er_state & ENA_RXQ_STATE_SQ_CREATED) != 0) {
-		ret = ena_destroy_sq(ena, rxq->er_sq_hw_idx, B_FALSE);
+		if (!resetting) {
+			ret = ena_destroy_sq(ena, rxq->er_sq_hw_idx, false);
 
-		if (ret != 0) {
-			ena_err(ena, "failed to destroy Rx SQ %u: %d",
-			    rxq->er_rxqs_idx, ret);
+			if (ret != 0) {
+				ena_err(ena, "failed to destroy Rx SQ %u: %d",
+				    rxq->er_rxqs_idx, ret);
+			}
 		}
 
 		rxq->er_sq_hw_idx = 0;
@@ -246,20 +250,22 @@ ena_cleanup_rxq(ena_rxq_t *rxq)
 		rxq->er_sq_tail_idx = 0;
 		rxq->er_sq_phase = 0;
 		rxq->er_state &= ~ENA_RXQ_STATE_SQ_CREATED;
+		rxq->er_state &= ~ENA_RXQ_STATE_SQ_FILLED;
 	}
 
 	if ((rxq->er_state & ENA_RXQ_STATE_CQ_CREATED) != 0) {
-		ret = ena_destroy_cq(ena, rxq->er_cq_hw_idx);
+		if (!resetting) {
+			ret = ena_destroy_cq(ena, rxq->er_cq_hw_idx);
 
-		if (ret != 0) {
-			ena_err(ena, "failed to destroy Rx CQ %u: %d",
-			    rxq->er_rxqs_idx, ret);
+			if (ret != 0) {
+				ena_err(ena, "failed to destroy Rx CQ %u: %d",
+				    rxq->er_rxqs_idx, ret);
+			}
 		}
 
 		rxq->er_cq_hw_idx = 0;
 		rxq->er_cq_head_idx = 0;
 		rxq->er_cq_phase = 0;
-		rxq->er_cq_head_db_addr = NULL;
 		rxq->er_cq_unmask_addr = NULL;
 		rxq->er_cq_numa_addr = NULL;
 		rxq->er_state &= ~ENA_RXQ_STATE_CQ_CREATED;
@@ -290,8 +296,28 @@ ena_ring_rx_start(mac_ring_driver_t rh, uint64_t gen_num)
 	ena_t *ena = rxq->er_ena;
 	uint32_t intr_ctrl;
 
+	ena_dbg(ena, "ring_rx_start %p: state 0x%x", rxq, rxq->er_state);
+
 	mutex_enter(&rxq->er_lock);
-	ena_refill_rx(rxq, rxq->er_sq_num_descs);
+	if ((rxq->er_state & ENA_RXQ_STATE_SQ_FILLED) == 0) {
+		/*
+		 * The ENA controller gets upset and sets the fatal error bit
+		 * in its status register if we write a value to an RX SQ's
+		 * doorbell that is past its current head. This makes sense as
+		 * it would represent there being more descriptors available
+		 * than can fit in the ring. For this reason, we make sure that
+		 * we only fill the ring once, even if it is started multiple
+		 * times.
+		 * The `- 1` below is harder to explain. If we completely fill
+		 * the SQ ring, then at some time later that seems to be
+		 * independent of how many times we've been around the ring,
+		 * the ENA controller will set the fatal error bit and stop
+		 * responding. Leaving a gap prevents this somehow and it is
+		 * what the other open source drivers do.
+		 */
+		ena_refill_rx(rxq, rxq->er_sq_num_descs - 1);
+		rxq->er_state |= ENA_RXQ_STATE_SQ_FILLED;
+	}
 	rxq->er_m_gen_num = gen_num;
 	rxq->er_intr_limit = ena->ena_rxq_intr_limit;
 	mutex_exit(&rxq->er_lock);
@@ -309,11 +335,12 @@ mblk_t *
 ena_ring_rx(ena_rxq_t *rxq, int poll_bytes)
 {
 	ena_t *ena = rxq->er_ena;
-	uint16_t head_mod = rxq->er_cq_head_idx & (rxq->er_cq_num_descs - 1);
+	const uint16_t modulo_mask = rxq->er_cq_num_descs - 1;
+	uint16_t head_mod = rxq->er_cq_head_idx & modulo_mask;
 	uint64_t total_bytes = 0;
 	uint64_t num_frames = 0;
 	enahw_rx_cdesc_t *cdesc;
-	boolean_t polling = B_TRUE;
+	bool polling = true;
 	mblk_t *head = NULL;
 	mblk_t *tail = NULL;
 
@@ -321,7 +348,7 @@ ena_ring_rx(ena_rxq_t *rxq, int poll_bytes)
 	ENA_DMA_SYNC(rxq->er_cq_dma, DDI_DMA_SYNC_FORKERNEL);
 
 	if (poll_bytes == ENA_INTERRUPT_MODE) {
-		polling = B_FALSE;
+		polling = false;
 	}
 
 	cdesc = &rxq->er_cq_descs[head_mod];
@@ -329,13 +356,13 @@ ena_ring_rx(ena_rxq_t *rxq, int poll_bytes)
 	VERIFY3P(cdesc, <=, (rxq->er_cq_descs + rxq->er_cq_num_descs - 1));
 
 	while (ENAHW_RX_CDESC_PHASE(cdesc) == rxq->er_cq_phase) {
-		boolean_t first, last;
+		bool first, last;
 		ena_rx_ctrl_block_t *rcb;
 		uint16_t req_id;
 		mblk_t *mp;
 		enahw_io_l3_proto_t l3proto;
 		enahw_io_l4_proto_t l4proto;
-		boolean_t l4csum_checked;
+		bool l4csum_checked;
 		uint32_t hflags = 0;
 
 		VERIFY3U(head_mod, <, rxq->er_cq_num_descs);
@@ -424,7 +451,7 @@ ena_ring_rx(ena_rxq_t *rxq, int poll_bytes)
 		 */
 		if (ena->ena_rx_l3_ipv4_csum &&
 		    l3proto == ENAHW_IO_L3_PROTO_IPV4) {
-			boolean_t l3_csum_err =
+			bool l3_csum_err =
 			    ENAHW_RX_CDESC_L3_CSUM_ERR(cdesc);
 
 			if (l3_csum_err) {
@@ -440,7 +467,7 @@ ena_ring_rx(ena_rxq_t *rxq, int poll_bytes)
 
 		if (ena->ena_rx_l4_ipv4_csum && l4csum_checked &&
 		    l4proto == ENAHW_IO_L4_PROTO_TCP) {
-			boolean_t l4_csum_err =
+			bool l4_csum_err =
 			    ENAHW_RX_CDESC_L4_CSUM_ERR(cdesc);
 
 			if (l4_csum_err) {
@@ -467,15 +494,13 @@ next_desc:
 		 */
 		num_frames++;
 		rxq->er_cq_head_idx++;
-		head_mod = rxq->er_cq_head_idx & (rxq->er_cq_num_descs - 1);
+		head_mod = rxq->er_cq_head_idx & modulo_mask;
+		if (head_mod == 0)
+			rxq->er_cq_phase ^= 1;
 
-		if (head_mod == 0) {
-			rxq->er_cq_phase = !rxq->er_cq_phase;
-		}
-
-		if (polling && (total_bytes > poll_bytes)) {
+		if (polling && total_bytes > poll_bytes) {
 			break;
-		} else if (!polling && (num_frames >= rxq->er_intr_limit)) {
+		} else if (!polling && num_frames >= rxq->er_intr_limit) {
 			mutex_enter(&rxq->er_stat_lock);
 			rxq->er_stat.ers_intr_limit.value.ui64++;
 			mutex_exit(&rxq->er_stat_lock);
@@ -488,14 +513,17 @@ next_desc:
 		    (rxq->er_cq_descs + rxq->er_cq_num_descs - 1));
 	}
 
-	mutex_enter(&rxq->er_stat_lock);
-	rxq->er_stat.ers_packets.value.ui64 += num_frames;
-	rxq->er_stat.ers_bytes.value.ui64 += total_bytes;
-	mutex_exit(&rxq->er_stat_lock);
+	if (num_frames > 0) {
+		mutex_enter(&rxq->er_stat_lock);
+		rxq->er_stat.ers_packets.value.ui64 += num_frames;
+		rxq->er_stat.ers_bytes.value.ui64 += total_bytes;
+		mutex_exit(&rxq->er_stat_lock);
 
-	DTRACE_PROBE4(rx__frames, mblk_t *, head, boolean_t, polling, uint64_t,
-	    num_frames, uint64_t, total_bytes);
-	ena_refill_rx(rxq, num_frames);
+		DTRACE_PROBE5(rx__frames, ena_rxq_t *, rxq, mblk_t *, head,
+		    bool, polling, uint64_t, num_frames, uint64_t, total_bytes);
+		ena_refill_rx(rxq, num_frames);
+	}
+
 	return (head);
 }
 

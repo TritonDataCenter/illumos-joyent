@@ -23,7 +23,7 @@
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2022 Garrett D'Amore <garrett@damore.org>
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2023 Oxide Computer Company
  */
 
 #include <regex.h>
@@ -85,7 +85,7 @@ static devfsadm_create_t misc_cbt[] = {
 	{ "enclosure", DDI_NT_SCSI_ENCLOSURE, NULL,
 	    TYPE_EXACT, ILEVEL_0, ses_callback
 	},
-	{ "pseudo", "ddi_pseudo", "(^winlock$)|(^pm$)",
+	{ "pseudo", "ddi_pseudo", "(^pm$)",
 	    TYPE_EXACT | DRV_RE, ILEVEL_0, node_name
 	},
 	{ "pseudo", "ddi_pseudo", "conskbd",
@@ -209,8 +209,8 @@ static devfsadm_create_t misc_cbt[] = {
 	{ "pseudo", "ddi_pseudo", "fm",
 	    TYPE_EXACT | DRV_RE, ILEVEL_1, minor_name,
 	},
-	{ "pseudo", "ddi_pseudo", "smbsrv",
-	    TYPE_EXACT | DRV_EXACT, ILEVEL_1, minor_name,
+	{ "pseudo", "ddi_pseudo", "smbsrv1?",
+	    TYPE_EXACT | DRV_RE, ILEVEL_1, minor_name,
 	},
 	{ "pseudo", "ddi_pseudo", "tpm",
 	    TYPE_EXACT | DRV_EXACT, ILEVEL_0, minor_name
@@ -220,6 +220,9 @@ static devfsadm_create_t misc_cbt[] = {
 	},
 	{ "9p", "ddi_pseudo", "vio9p",
 	    TYPE_EXACT | DRV_EXACT, ILEVEL_0, vio9p_create,
+	},
+	{ "pseudo", "ddi_pseudo", "ktest",
+	    TYPE_EXACT | DRV_EXACT, ILEVEL_0, minor_name
 	},
 };
 

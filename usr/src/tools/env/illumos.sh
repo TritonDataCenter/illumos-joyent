@@ -25,7 +25,7 @@
 # Copyright 2016 RackTop Systems.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2020 Joyent, Inc.
-# Copyright 2023 Bill Sommerfeld
+# Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
 #
 # - This file is sourced by "bldenv" and "nightly" and should not
 #   be executed directly.
@@ -67,8 +67,8 @@ export CODEMGR_WS="${CODEMGR_WS:-`git rev-parse --show-toplevel`}"
 # used by Makefiles to guard options.
 #
 # for example:
-# export PRIMARY_CC=gcc4,/opt/gcc/4.4.4/bin/gcc,gnu
-# export PRIMARY_CCC=gcc4,/opt/gcc/4.4.4/bin/g++,gnu
+# export PRIMARY_CC=gcc10,/opt/gcc-10/bin/gcc,gnu
+# export PRIMARY_CCC=gcc10,/opt/gcc-10/bin/g++,gnu
 # export SHADOW_CCS=studio12,/opt/SUNWspro/bin/cc,sun
 # export SHADOW_CCCS=studio12,/opt/SUNWspro/bin/CC,sun
 #
@@ -80,8 +80,8 @@ export CODEMGR_WS="${CODEMGR_WS:-`git rev-parse --show-toplevel`}"
 export GNUC_ROOT=/usr/gcc/10
 export PRIMARY_CC=gcc10,$GNUC_ROOT/bin/gcc,gnu
 export PRIMARY_CCC=gcc10,$GNUC_ROOT/bin/g++,gnu
-export SHADOW_CCS=gcc7,/usr/gcc/7/bin/gcc,gnu
-export SHADOW_CCCS=gcc7,/usr/gcc/7/bin/g++,gnu
+export SHADOW_CCS=gcc14,/usr/gcc/14/bin/gcc,gnu
+export SHADOW_CCCS=gcc14,/usr/gcc/14/bin/g++,gnu
 
 # comment to disable smatch
 export ENABLE_SMATCH=1
@@ -133,6 +133,31 @@ export ENABLE_SMB_PRINTING=
 
 # Populates /etc/versions/build on each nightly run
 export BUILDVERSION_EXEC="git describe --all --long --dirty"
+
+# -----------------------------------------------------------------------------
+# When the 'n' option is not present in NIGHTLY_OPTIONS, nightly updates
+# the build workspace from the sources identified by the following
+# variables.  Defaults are set in nightly if the environment file
+# leaves them unset.
+# -----------------------------------------------------------------------------
+
+# SCM in use.  Defaults to "git"; others are undertested.
+#export BRINGOVER_SCM="git"
+
+# URL or pathname to source workspace.
+#export BRINGOVER_WS="${CLONE_WS}"
+
+# Branch within BRINGOVER_WS; must be specified if BRINGOVER_WS is a URL
+#export BRINGOVER_BRANCH=""
+
+# Short name to use within CODEMGR_WS for BRINGOVER_WS.
+# This is git-specific.
+#export BRINGOVER_REMOTE=nightly_bringover_ws
+
+# Command-line options to add to the clone operation that creates a new
+# workspace.   If git is in use, adding "--reference /path/to/local/illumos-gate"
+# can speed up clones and make them use less disk space.
+#export CLONE_OPTIONS=""
 
 # -----------------------------------------------------------------------------
 # You are less likely to need to modify parameters below.
@@ -231,7 +256,7 @@ export MULTI_PROTO="no"
 # when the release slips (nah) or you move an environment file to a new
 # release
 #
-export VERSION="${VERSION:-`git describe --long --all HEAD | cut -d/ -f2-`}"
+#export VERSION="${VERSION:-`git describe --long --all HEAD | cut -d/ -f2-`}"
 
 #
 # the RELEASE and RELEASE_DATE variables are set in Makefile.master;

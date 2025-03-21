@@ -39,12 +39,11 @@
 
 #include "lint.h"
 #include "thr_uberdata.h"
+#include "libc.h"
 #include "asyncio.h"
 #include <atomic.h>
 #include <sys/file.h>
 #include <sys/port.h>
-
-extern int __fdsync(int, int);
 
 cond_t	_aio_waitn_cv = DEFAULTCV;	/* wait for end of aio_waitn */
 
@@ -804,13 +803,13 @@ aio_fsync(int op, aiocb_t *aiocbp)
 	 * create a bunch of workers (via __uaio_init()).  If the number
 	 * of workers is zero then the number of pending asynchronous I/O
 	 * requests is zero.  In such a case only execute the standard
-	 * fsync(3C) or fdatasync(3RT) as appropriate.
+	 * fsync(3C) or fdatasync(3C) as appropriate.
 	 */
 	if (__rw_workerscnt == 0) {
 		if (op == O_DSYNC)
-			return (__fdsync(aiocbp->aio_fildes, FDSYNC));
+			return (__fdsync(aiocbp->aio_fildes, FDSYNC_DATA));
 		else
-			return (__fdsync(aiocbp->aio_fildes, FSYNC));
+			return (__fdsync(aiocbp->aio_fildes, FDSYNC_FILE));
 	}
 
 	/*
@@ -1661,13 +1660,13 @@ aio_fsync64(int op, aiocb64_t *aiocbp)
 	 * create a bunch of workers (via __uaio_init()).  If the number
 	 * of workers is zero then the number of pending asynchronous I/O
 	 * requests is zero.  In such a case only execute the standard
-	 * fsync(3C) or fdatasync(3RT) as appropriate.
+	 * fsync(3C) or fdatasync(3C) as appropriate.
 	 */
 	if (__rw_workerscnt == 0) {
 		if (op == O_DSYNC)
-			return (__fdsync(aiocbp->aio_fildes, FDSYNC));
+			return (__fdsync(aiocbp->aio_fildes, FDSYNC_DATA));
 		else
-			return (__fdsync(aiocbp->aio_fildes, FSYNC));
+			return (__fdsync(aiocbp->aio_fildes, FDSYNC_FILE));
 	}
 
 	/*

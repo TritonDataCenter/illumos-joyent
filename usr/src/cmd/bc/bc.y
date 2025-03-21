@@ -27,7 +27,7 @@
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 %{
 #include <stdio.h>
@@ -42,33 +42,8 @@ static int *bundle(int, ...);
 static void usage(void);
 
 int	cpeek(char, int, char, int, char);
-void	yyerror(char *);
+int	yyerror(const char *);
 
-%}
-%union {
-	int *iptr;
-	char *cptr;
-	int cc;
-	}
-%start start;
-%type <iptr> stat, def, slist, dlets, e
-%type <iptr> slist, re, fprefix, cargs, eora, cons, constant, lora
-%right '='
-%left '+' '-'
-%left '*' '/' '%'
-%right '^'
-%left UMINUS
-
-%token <cptr> LETTER
-%type <cptr> EQOP, CRS
-%token <cc> DIGIT, SQRT, LENGTH, _IF, FFF, EQ
-%token <cc> _WHILE _FOR NE LE GE INCR DECR
-%token <cc> _RETURN _BREAK _DEFINE BASE OBASE SCALE
-%token <cc> EQPL EQMI EQMUL EQDIV EQREM EQEXP
-%token <cptr> _AUTO DOT
-%token <cc> QSTR
-
-%{
 #define	STRING_SIZE	(BC_STRING_MAX + 3)	/* string plus quotes */
 						/* plus NULL */
 
@@ -94,14 +69,38 @@ char	*numb[15] = {
 int	*pre, *post;
 int	interact = 0;			/* talking to a tty? */
 %}
+
+%union {
+	int *iptr;
+	char *cptr;
+	int cc;
+	}
+%start start;
+%type <iptr> stat def slist dlets e
+%type <iptr> re fprefix cargs eora cons constant lora
+%right '='
+%left '+' '-'
+%left '*' '/' '%'
+%right '^'
+%left UMINUS
+
+%token <cptr> LETTER
+%type <cptr> EQOP CRS
+%token <cc> DIGIT SQRT LENGTH _IF FFF EQ
+%token <cc> _WHILE _FOR NE LE GE INCR DECR
+%token <cc> _RETURN _BREAK _DEFINE BASE OBASE SCALE
+%token <cc> EQPL EQMI EQMUL EQDIV EQREM EQEXP
+%token <cptr> _AUTO DOT
+%token <cc> QSTR
+
 %%
 start	:
 	| start stat tail
-		= {
+		{
 			output($2);
 		}
 	| start def dargs ')' '{' dlist slist '}'
-		= {
+		{
 			ttp = bundle(6, pre, $7, post, "0", numb[lev], "Q");
 			conout(ttp, (char *)$2);
 			rcrs = crs;
@@ -115,288 +114,452 @@ dlist	: tail
 	;
 
 stat	: e
-		= bundle(2, $1, "ps.");
+		{
+			bundle(2, $1, "ps.");
+		}
 	|
-		= bundle(1, "");
+		{
+			bundle(1, "");
+		}
 	| QSTR
-		= bundle(3, "[", $1, "]P");
+		{
+			bundle(3, "[", $1, "]P");
+		}
 	| LETTER '=' e
-		= bundle(3, $3, "s", $1);
+		{
+			bundle(3, $3, "s", $1);
+		}
 	| LETTER '[' e ']' '=' e
-		= bundle(4, $6, $3, ":", geta($1));
+		{
+			bundle(4, $6, $3, ":", geta($1));
+		}
 	| LETTER EQOP e
-		= bundle(6, "l", $1, $3, $2, "s", $1);
+		{
+			bundle(6, "l", $1, $3, $2, "s", $1);
+		}
 	| LETTER '[' e ']' EQOP e
-		= bundle(8, $3, ";", geta($1), $6, $5, $3, ":", geta($1));
+		{
+			bundle(8, $3, ";", geta($1), $6, $5, $3, ":", geta($1));
+		}
 	| _BREAK
-		= bundle(2, numb[lev-bstack[bindx-1]], "Q");
+		{
+			bundle(2, numb[lev-bstack[bindx-1]], "Q");
+		}
 	| _RETURN '(' e ')'
-		= bundle(4, $3, post, numb[lev], "Q");
+		{
+			bundle(4, $3, post, numb[lev], "Q");
+		}
 	| _RETURN '(' ')'
-		= bundle(4, "0", post, numb[lev], "Q");
+		{
+			bundle(4, "0", post, numb[lev], "Q");
+		}
 	| _RETURN
-		= bundle(4, "0", post, numb[lev], "Q");
+		{
+			bundle(4, "0", post, numb[lev], "Q");
+		}
 	| SCALE '=' e
-		= bundle(2, $3, "k");
+		{
+			bundle(2, $3, "k");
+		}
 	| SCALE EQOP e
-		= bundle(4, "K", $3, $2, "k");
+		{
+			bundle(4, "K", $3, $2, "k");
+		}
 	| BASE '=' e
-		= bundle(2, $3, "i");
+		{
+			bundle(2, $3, "i");
+		}
 	| BASE EQOP e
-		= bundle(4, "I", $3, $2, "i");
+		{
+			bundle(4, "I", $3, $2, "i");
+		}
 	| OBASE '=' e
-		= bundle(2, $3, "o");
+		{
+			bundle(2, $3, "o");
+		}
 	| OBASE EQOP e
-		= bundle(4, "O", $3, $2, "o");
+		{
+			bundle(4, "O", $3, $2, "o");
+		}
 	| '{' slist '}'
-		= {
+		{
 			$$ = $2;
 		}
 	| FFF
-		= bundle(1, "fY");
+		{
+			bundle(1, "fY");
+		}
 	| error
-		= bundle(1, "c");
+		{
+			bundle(1, "c");
+		}
 	| _IF CRS BLEV '(' re ')' stat
-		= {
+		{
 			conout($7, $2);
 			bundle(3, $5, $2, " ");
 		}
 	| _WHILE CRS '(' re ')' stat BLEV
-		= {
+		{
 			bundle(3, $6, $4, $2);
 			conout($$, $2);
 			bundle(3, $4, $2, " ");
 		}
 	| fprefix CRS re ';' e ')' stat BLEV
-		= {
+		{
 			bundle(5, $7, $5, "s.", $3, $2);
 			conout($$, $2);
 			bundle(5, $1, "s.", $3, $2, " ");
 		}
 	| '~' LETTER '=' e
-		= bundle(3, $4, "S", $2);
+		{
+			bundle(3, $4, "S", $2);
+		}
 	;
 
 EQOP	: EQPL
-		= {
+		{
 			$$ = "+";
 		}
 	| EQMI
-		= {
+		{
 			$$ = "-";
 		}
 	| EQMUL
-		= {
+		{
 			$$ = "*";
 		}
 	| EQDIV
-		= {
+		{
 			$$ = "/";
 		}
 	| EQREM
-		= {
+		{
 			$$ = "%%";
 		}
 	| EQEXP
-		= {
+		{
 			$$ = "^";
 		}
 	;
 
 fprefix	: _FOR '(' e ';'
-		= {
+		{
 			$$ = $3;
 		}
 	;
 
 BLEV	:
-		= --bindx;
+		{
+			--bindx;
+		}
 	;
 
 slist	: stat
 	| slist tail stat
-		= bundle(2, $1, $3);
+		{
+			bundle(2, $1, $3);
+		}
 	;
 
 tail	: '\n'
-		= {
+		{
 			ln++;
 		}
 	| ';'
 	;
 
 re	: e EQ e
-		= {
+		{
 			$$ = bundle(3, $1, $3, "=");
 		}
 	| e '<' e
-		= bundle(3, $1, $3, ">");
+		{
+			bundle(3, $1, $3, ">");
+		}
 	| e '>' e
-		= bundle(3, $1, $3, "<");
+		{
+			bundle(3, $1, $3, "<");
+		}
 	| e NE e
-		= bundle(3, $1, $3, "!=");
+		{
+			bundle(3, $1, $3, "!=");
+		}
 	| e GE e
-		= bundle(3, $1, $3, "!>");
+		{
+			bundle(3, $1, $3, "!>");
+		}
 	| e LE e
-		= bundle(3, $1, $3, "!<");
+		{
+			bundle(3, $1, $3, "!<");
+		}
 	| e
-		= bundle(2, $1, " 0!=");
+		{
+			bundle(2, $1, " 0!=");
+		}
 	;
 
 e	: e '+' e
-		= bundle(3, $1, $3, "+");
+		{
+			bundle(3, $1, $3, "+");
+		}
 	| e '-' e
-		= bundle(3, $1, $3, "-");
+		{
+			bundle(3, $1, $3, "-");
+		}
 	| '-' e		%prec UMINUS
-		= bundle(3, " 0", $2, "-");
+		{
+			bundle(3, " 0", $2, "-");
+		}
 	| e '*' e
-		= bundle(3, $1, $3, "*");
+		{
+			bundle(3, $1, $3, "*");
+		}
 	| e '/' e
-		= bundle(3, $1, $3, "/");
+		{
+			bundle(3, $1, $3, "/");
+		}
 	| e '%' e
-		= bundle(3, $1, $3, "%%");
+		{
+			bundle(3, $1, $3, "%%");
+		}
 	| e '^' e
-		= bundle(3, $1, $3, "^");
+		{
+			bundle(3, $1, $3, "^");
+		}
 	| LETTER '[' e ']'
-		= bundle(3, $3, ";", geta($1));
+		{
+			bundle(3, $3, ";", geta($1));
+		}
 	| LETTER INCR
-		= bundle(4, "l", $1, "d1+s", $1);
+		{
+			bundle(4, "l", $1, "d1+s", $1);
+		}
 	| INCR LETTER
-		= bundle(4, "l", $2, "1+ds", $2);
+		{
+			bundle(4, "l", $2, "1+ds", $2);
+		}
 	| DECR LETTER
-		= bundle(4, "l", $2, "1-ds", $2);
+		{
+			bundle(4, "l", $2, "1-ds", $2);
+		}
 	| LETTER DECR
-		= bundle(4, "l", $1, "d1-s", $1);
+		{
+			bundle(4, "l", $1, "d1-s", $1);
+		}
 	| LETTER '[' e ']' INCR
-		= bundle(7, $3, ";", geta($1), "d1+", $3, ":", geta($1));
+		{
+			bundle(7, $3, ";", geta($1), "d1+", $3, ":", geta($1));
+		}
 	| INCR LETTER '[' e ']'
-		= bundle(7, $4, ";", geta($2), "1+d", $4, ":", geta($2));
+		{
+			bundle(7, $4, ";", geta($2), "1+d", $4, ":", geta($2));
+		}
 	| LETTER '[' e ']' DECR
-		= bundle(7, $3, ";", geta($1), "d1-", $3, ":", geta($1));
+		{
+			 bundle(7, $3, ";", geta($1), "d1-", $3, ":", geta($1));
+		}
 	| DECR LETTER '[' e ']'
-		= bundle(7, $4, ";", geta($2), "1-d", $4, ":", geta($2));
+		{
+			bundle(7, $4, ";", geta($2), "1-d", $4, ":", geta($2));
+		}
 	| SCALE INCR
-		= bundle(1, "Kd1+k");
+		{
+			bundle(1, "Kd1+k");
+		}
 	| INCR SCALE
-		= bundle(1, "K1+dk");
+		{
+			bundle(1, "K1+dk");
+		}
 	| SCALE DECR
-		= bundle(1, "Kd1-k");
+		{
+			bundle(1, "Kd1-k");
+		}
 	| DECR SCALE
-		= bundle(1, "K1-dk");
+		{
+			bundle(1, "K1-dk");
+		}
 	| BASE INCR
-		= bundle(1, "Id1+i");
+		{
+			bundle(1, "Id1+i");
+		}
 	| INCR BASE
-		= bundle(1, "I1+di");
+		{
+			bundle(1, "I1+di");
+		}
 	| BASE DECR
-		= bundle(1, "Id1-i");
+		{
+			bundle(1, "Id1-i");
+		}
 	| DECR BASE
-		= bundle(1, "I1-di");
+		{
+			bundle(1, "I1-di");
+		}
 	| OBASE INCR
-		= bundle(1, "Od1+o");
+		{
+			bundle(1, "Od1+o");
+		}
 	| INCR OBASE
-		= bundle(1, "O1+do");
+		{
+			bundle(1, "O1+do");
+		}
 	| OBASE DECR
-		= bundle(1, "Od1-o");
+		{
+			bundle(1, "Od1-o");
+		}
 	| DECR OBASE
-		= bundle(1, "O1-do");
+		{
+			bundle(1, "O1-do");
+		}
 	| LETTER '(' cargs ')'
-		= bundle(4, $3, "l", getf($1), "x");
+		{
+			bundle(4, $3, "l", getf($1), "x");
+		}
 	| LETTER '(' ')'
-		= bundle(3, "l", getf($1), "x");
+		{
+			bundle(3, "l", getf($1), "x");
+		}
 	| cons
-		= bundle(2, " ", $1);
+		{
+			bundle(2, " ", $1);
+		}
 	| DOT cons
-		= bundle(2, " .", $2);
+		{
+			bundle(2, " .", $2);
+		}
 	| cons DOT cons
-		= bundle(4, " ", $1, ".", $3);
+		{
+			bundle(4, " ", $1, ".", $3);
+		}
 	| cons DOT
-		= bundle(3, " ", $1, ".");
+		{
+			bundle(3, " ", $1, ".");
+		}
 	| DOT
-		= {
+		{
 			$<cptr>$ = "l.";
 		}
 	| LETTER
-		= bundle(2, "l", $1);
+		{
+			bundle(2, "l", $1);
+		}
 	| LETTER '=' e
-		= bundle(3, $3, "ds", $1);
+		{
+			bundle(3, $3, "ds", $1);
+		}
 	| LETTER EQOP e		%prec '='
-		= bundle(6, "l", $1, $3, $2, "ds", $1);
+		{
+			bundle(6, "l", $1, $3, $2, "ds", $1);
+		}
 	| LETTER '[' e ']' '=' e
-		= bundle(5, $6, "d", $3, ":", geta($1));
+		{
+			bundle(5, $6, "d", $3, ":", geta($1));
+		}
 	| LETTER '[' e ']' EQOP e
-		= {
+		{
 			bundle(9, $3, ";", geta($1), $6, $5, "d", $3, ":",
 			    geta($1));
 		}
 	| LENGTH '(' e ')'
-		= bundle(2, $3, "Z");
+		{
+			bundle(2, $3, "Z");
+		}
 	| SCALE '(' e ')'
-		= bundle(2, $3, "X");	/* must be before '(' e ')' */
+		{
+			bundle(2, $3, "X");	/* must be before '(' e ')' */
+		}
 	| '(' e ')'
-		= {
+		{
 			$$ = $2;
 		}
 	| '?'
-		= bundle(1, "?");
+		{
+			bundle(1, "?");
+		}
 	| SQRT '(' e ')'
-		= bundle(2, $3, "v");
+		{
+			bundle(2, $3, "v");
+		}
 	| '~' LETTER
-		= bundle(2, "L", $2);
+		{
+			bundle(2, "L", $2);
+		}
 	| SCALE '=' e
-		= bundle(2, $3, "dk");
+		{
+			bundle(2, $3, "dk");
+		}
 	| SCALE EQOP e		%prec '='
-		= bundle(4, "K", $3, $2, "dk");
+		{
+			bundle(4, "K", $3, $2, "dk");
+		}
 	| BASE '=' e
-		= bundle(2, $3, "di");
+		{
+			bundle(2, $3, "di");
+		}
 	| BASE EQOP e		%prec '='
-		= bundle(4, "I", $3, $2, "di");
+		{
+			bundle(4, "I", $3, $2, "di");
+		}
 	| OBASE '=' e
-		= bundle(2, $3, "do");
+		{
+			bundle(2, $3, "do");
+		}
 	| OBASE EQOP e		%prec '='
-		= bundle(4, "O", $3, $2, "do");
+		{
+			bundle(4, "O", $3, $2, "do");
+		}
 	| SCALE
-		= bundle(1, "K");
+		{
+			bundle(1, "K");
+		}
 	| BASE
-		= bundle(1, "I");
+		{
+			bundle(1, "I");
+		}
 	| OBASE
-		= bundle(1, "O");
+		{
+			bundle(1, "O");
+		}
 	;
 
 cargs	: eora
 	| cargs ',' eora
-		= bundle(2, $1, $3);
+		{
+			bundle(2, $1, $3);
+		}
 	;
 eora	: e
 	| LETTER '[' ']'
-		= bundle(2, "l", geta($1));
+		{
+			bundle(2, "l", geta($1));
+		}
 	;
 
 cons	: constant
-		= {
+		{
 			*cp++ = '\0';
 		}
 
 constant: '_'
-		= {
+		{
 			checkbuffer();
 			$<cptr>$ = cp;
 			*cp++ = '_';
 		}
 	| DIGIT
-		= {
+		{
 			checkbuffer();
 			$<cptr>$ = cp;
 			*cp++ = $1;
 		}
 	| constant DIGIT
-		= {
+		{
 			checkbuffer();
 			*cp++ = $2;
 		}
 	;
 
 CRS	:
-		= {
+		{
 			checkbuffer();
 			$$ = cp;
 			*cp++ = crs++;
@@ -406,7 +569,7 @@ CRS	:
 			if (crs == 'a')
 				crs = '{';
 			if (crs >= 0241) {
-				yyerror("program too big");
+				(void) yyerror("program too big");
 				getout(1);
 			}
 			bstack[bindx++] = lev++;
@@ -414,7 +577,7 @@ CRS	:
 	;
 
 def	: _DEFINE LETTER '('
-		= {
+		{
 			$$ = getf($2);
 			pre = (int *)"";
 			post = (int *)"";
@@ -425,27 +588,31 @@ def	: _DEFINE LETTER '('
 
 dargs	:		/* empty */
 	| lora
-		= {
+		{
 			pp($1);
 		}
 	| dargs ',' lora
-		= {
+		{
 			pp($3);
 		}
 	;
 
 dlets	: lora
-		= tp($1);
+		{
+			tp($1);
+		}
 	| dlets ',' lora
-		= tp($3);
+		{
+			tp($3);
+		}
 	;
 
 lora	: LETTER
-		= {
+		{
 			$<cptr>$ = $1;
 		}
 	| LETTER '[' ']'
-		= {
+		{
 			$$ = geta($1);
 		}
 	;
@@ -663,7 +830,7 @@ gotit:
 		while ((c = getch()) != '"') {
 			*str++ = c;
 			if (str >= &string[STRING_SIZE-1]) {
-				yyerror("string space exceeded");
+				(void) yyerror("string space exceeded");
 				getout(1);
 			}
 		}
@@ -722,7 +889,7 @@ loop:
 		sargv[ifile]);
 	ln = -1;
 	ss = "command line";
-	yyerror(mbuf);
+	(void) yyerror(mbuf);
 	getout(1);
 	/*NOTREACHED*/
 }
@@ -745,7 +912,7 @@ bundle(int i, ...)
 		printf("bundle %d elements at %o\n", i, q);
 	while (i-- > 0) {
 		if (b_sp_nxt >= & b_space[b_sp_max])
-			yyerror("bundling space exceeded");
+			(void) yyerror("bundling space exceeded");
 		*b_sp_nxt++ = va_arg(ap, int);
 	}
 	* b_sp_nxt++ = 0;
@@ -788,8 +955,8 @@ conout(int *p, char *s)
 	lev--;
 }
 
-void
-yyerror(char *s)
+int
+yyerror(const char *s)
 {
 	if (ifile >= sargc)
 		ss = "teletype";
@@ -806,6 +973,7 @@ yyerror(char *s)
 	bindx = 0;
 	lev = 0;
 	b_sp_nxt = &b_space[0];
+	return (0);
 }
 
 void
@@ -813,7 +981,7 @@ checkbuffer(void)
 {
 	/* Do not exceed the last char in input line buffer */
 	if (cp >= cpend) {
-		yyerror("line too long\n");
+		(void) yyerror("line too long\n");
 		getout(1);
 	}
 }
@@ -854,7 +1022,7 @@ yyinit(int argc, char **argv)
 			sargv[0]);
 		ln = -1;
 		ss = "command line";
-		yyerror(mbuf);
+		(void) yyerror(mbuf);
 		getout(1);
 	}
 	ifile = 0;
@@ -890,7 +1058,7 @@ main(int argc, char **argv)
 	int	lflag = 0;
 	int	flag = 0;
 	char	**av;
-	int 	filecounter = 0;
+	int	filecounter = 0;
 
 	(void) setlocale(LC_ALL, "");
 #if !defined(TEXT_DOMAIN)		/* Should be defined by cc -D */

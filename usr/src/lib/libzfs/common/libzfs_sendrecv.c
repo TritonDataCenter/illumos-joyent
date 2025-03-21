@@ -1233,7 +1233,7 @@ send_progress_thread(void *arg)
 			    tm->tm_hour, tm->tm_min, tm->tm_sec,
 			    bytes, zhp->zfs_name);
 		} else {
-			zfs_nicenum(bytes, buf, sizeof (buf));
+			zfs_nicebytes(bytes, buf, sizeof (buf));
 			(void) fprintf(stderr, "%02d:%02d:%02d   %5s   %s\n",
 			    tm->tm_hour, tm->tm_min, tm->tm_sec,
 			    buf, zhp->zfs_name);
@@ -1278,7 +1278,7 @@ send_print_verbose(FILE *fout, const char *tosnap, const char *fromsnap,
 			    (longlong_t)size);
 		} else {
 			char buf[16];
-			zfs_nicenum(size, buf, sizeof (buf));
+			zfs_nicebytes(size, buf, sizeof (buf));
 			(void) fprintf(fout, dgettext(TEXT_DOMAIN,
 			    " estimated size is %s"), buf);
 		}
@@ -1307,7 +1307,8 @@ dump_snapshot(zfs_handle_t *zhp, void *arg)
 	if (!sdd->seenfrom && isfromsnap) {
 		gather_holds(zhp, sdd);
 		sdd->seenfrom = B_TRUE;
-		(void) strcpy(sdd->prevsnap, thissnap);
+		(void) strlcpy(sdd->prevsnap, thissnap,
+		    sizeof (sdd->prevsnap));
 		sdd->prevsnap_obj = zfs_prop_get_int(zhp, ZFS_PROP_OBJSETID);
 		zfs_close(zhp);
 		return (0);
@@ -1631,7 +1632,7 @@ zfs_send_resume_token_to_nvlist(libzfs_handle_t *hdl, const char *token)
 
 	/* verify checksum */
 	zio_cksum_t cksum;
-	fletcher_4_native(compressed, len, NULL, &cksum);
+	fletcher_4_native_varsize(compressed, len, &cksum);
 	if (cksum.zc_word[0] != checksum) {
 		free(compressed);
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
@@ -2078,7 +2079,7 @@ zfs_send(zfs_handle_t *zhp, const char *fromsnap, const char *tosnap,
 				    (longlong_t)sdd.size);
 			} else {
 				char buf[16];
-				zfs_nicenum(sdd.size, buf, sizeof (buf));
+				zfs_nicebytes(sdd.size, buf, sizeof (buf));
 				(void) fprintf(fout, dgettext(TEXT_DOMAIN,
 				    "total estimated size is %s\n"), buf);
 			}
@@ -4432,10 +4433,10 @@ zfs_receive_one(libzfs_handle_t *hdl, int infd, const char *tosnap,
 		time_t delta = time(NULL) - begin_time;
 		if (delta == 0)
 			delta = 1;
-		zfs_nicenum(bytes, buf1, sizeof (buf1));
-		zfs_nicenum(bytes/delta, buf2, sizeof (buf1));
+		zfs_nicebytes(bytes, buf1, sizeof (buf1));
+		zfs_nicebytes(bytes / delta, buf2, sizeof (buf2));
 
-		(void) printf("received %sB stream in %lu seconds (%sB/sec)\n",
+		(void) printf("received %s stream in %lu seconds (%s/sec)\n",
 		    buf1, delta, buf2);
 	}
 

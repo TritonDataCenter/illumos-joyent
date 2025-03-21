@@ -69,7 +69,7 @@ static	void	ndp_badflag(enum ndp_action);
 static	void	ndp_missingarg(char);
 
 static	void	ndp_run_in_child(ndp_void_f *);
-static	void	ndp_do_run(void);
+static	void	ndp_do_run(int);
 static	void	ndp_setup_handler(sigset_t *);
 static	void	ndp_start_timer(time_t period);
 static	void	ndp_run_periodically(time_t, ndp_void_f *);
@@ -250,7 +250,7 @@ ndp_run_in_child(ndp_void_f *func)
  * SIGALRM handler to schedule a run.
  */
 static void
-ndp_do_run(void)
+ndp_do_run(int signal __unused)
 {
 	ndp_run = B_TRUE;
 }
@@ -267,7 +267,7 @@ ndp_setup_handler(sigset_t *oset)
 
 	/*
 	 * Mask off SIGALRM so we only trigger the handler when we're ready
-	 * using sigsuspend(3C), in case the child process takes longer to
+	 * using sigsuspend(2), in case the child process takes longer to
 	 * run than the alarm interval.
 	 */
 	if (sigprocmask(0, NULL, oset) != 0) {

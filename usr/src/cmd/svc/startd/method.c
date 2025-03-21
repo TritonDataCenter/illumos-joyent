@@ -22,13 +22,14 @@
 /*
  * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*
  * method.c - method execution functions
  *
  * This file contains the routines needed to run a method:  a fork(2)-exec(2)
- * invocation monitored using either the contract filesystem or waitpid(2).
+ * invocation monitored using either the contract filesystem or waitpid(3C).
  * (Plain fork1(2) support is provided in fork.c.)
  *
  * Contract Transfer
@@ -467,7 +468,7 @@ exec_method(const restarter_inst_t *inst, int type, const char *method,
 
 	cmd = uu_msprintf("exec %s", method);
 
-	if (inst->ri_utmpx_prefix[0] != '\0' && inst->ri_utmpx_prefix != NULL)
+	if (inst->ri_utmpx_prefix != NULL && inst->ri_utmpx_prefix[0] != '\0')
 		(void) utmpx_mark_init(getpid(), inst->ri_utmpx_prefix);
 
 	setlog(inst->ri_logstem);
@@ -610,6 +611,9 @@ exec_method(const restarter_inst_t *inst, int type, const char *method,
 	log_preexec();
 
 	(void) execle(SBIN_SH, SBIN_SH, "-c", cmd, NULL, nenv);
+
+	(void) fprintf(stderr, "Failed to exec %s -c '%s': %s\n",
+	    SBIN_SH, cmd, strerror(errno));
 
 	exit(10);
 }
@@ -1004,8 +1008,7 @@ method_run(restarter_inst_t **instp, int type, int *exit_code)
 			goto contract_out;
 		}
 
-		if (!WIFEXITED(ret_status) &&
-		    WEXITSTATUS(ret_status) != SMF_EXIT_NODAEMON) {
+		if (!WIFEXITED(ret_status)) {
 			/*
 			 * If method didn't exit itself (it was killed by an
 			 * external entity, etc.), consider the entire
@@ -1035,7 +1038,8 @@ method_run(restarter_inst_t **instp, int type, int *exit_code)
 
 		*exit_code = WEXITSTATUS(ret_status);
 		if (*exit_code != SMF_EXIT_OK &&
-		    *exit_code != SMF_EXIT_NODAEMON) {
+		    *exit_code != SMF_EXIT_NODAEMON &&
+		    *exit_code != SMF_EXIT_MON_DEGRADE) {
 			log_error(LOG_WARNING,
 			    "%s: Method \"%s\" failed with exit status %d.\n",
 			    inst->ri_i.i_fmri, method, WEXITSTATUS(ret_status));
@@ -1045,8 +1049,10 @@ method_run(restarter_inst_t **instp, int type, int *exit_code)
 		    "%d.", mname, *exit_code);
 
 		/* Note: we will take this path for SMF_EXIT_NODAEMON */
-		if (*exit_code != SMF_EXIT_OK)
+		if (*exit_code != SMF_EXIT_OK &&
+		    *exit_code != SMF_EXIT_MON_DEGRADE) {
 			goto contract_out;
+		}
 
 		end_time = time(NULL);
 
@@ -1093,12 +1099,18 @@ assured_kill:
 contract_out:
 	/*
 	 * Abandon contracts for transient methods, methods that exit with
-	 * SMF_EXIT_NODAEMON & methods that fail.
+	 * SMF_EXIT_NODAEMON and methods that fail.
+	 * Non-transient degraded services are left alone here. If their
+	 * contract is or later becomes empty, then that will be handled in the
+	 * same way as for any other non-transient service.
 	 */
 	transient = method_is_transient(inst, type);
-	if ((transient || *exit_code != SMF_EXIT_OK || result != 0) &&
-	    (restarter_is_kill_method(method) < 0))
+	if ((transient ||
+	    (*exit_code != SMF_EXIT_OK && *exit_code != SMF_EXIT_MON_DEGRADE) ||
+	    result != 0) &&
+	    restarter_is_kill_method(method) < 0) {
 		method_remove_contract(inst, !transient, B_TRUE);
+	}
 
 out:
 	if (ctfd >= 0)
@@ -1193,7 +1205,8 @@ retry:
 	r = method_run(&inst, info->sf_method_type, &exit_code);
 
 	if (r == 0 &&
-	    (exit_code == SMF_EXIT_OK || exit_code == SMF_EXIT_NODAEMON)) {
+	    (exit_code == SMF_EXIT_OK || exit_code == SMF_EXIT_NODAEMON ||
+	    exit_code == SMF_EXIT_MON_DEGRADE)) {
 		/* Success! */
 		assert(inst->ri_i.i_next_state != RESTARTER_STATE_NONE);
 
@@ -1216,6 +1229,17 @@ retry:
 		 * For methods that exit with SMF_EXIT_NODAEMON, we already
 		 * called method_remove_contract in method_run.
 		 */
+
+		/*
+		 * When a start method returns with SMF_EXIT_MON_DEGRADE we
+		 * transition the service into degraded.
+		 */
+		if (info->sf_method_type == METHOD_START &&
+		    exit_code == SMF_EXIT_MON_DEGRADE) {
+			inst->ri_i.i_next_state = RESTARTER_STATE_DEGRADED;
+			info->sf_reason = restarter_str_method_failed;
+			log_transition(inst, START_FAILED_DEGRADED);
+		}
 
 		/*
 		 * We don't care whether the handle was rebound because this is

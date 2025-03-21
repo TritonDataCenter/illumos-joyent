@@ -37,7 +37,8 @@ extern void add_msg(int, int, char *, char *, int, int); /* from util.c */
 extern void set_msgid(int, int);
 extern int get_msgid(char *, int, int, char *);
 extern void warning(char *);
-extern void yyerror(char *);
+extern int yyerror(const char *);
+extern int yylex(void);
 
 static void do_catgets(int, int, char *);
 static char *add_qstring(char *, char *);
@@ -51,14 +52,14 @@ static char *add_qstring(char *, char *);
 %token CATGETS
 %token CONST
 %token CATD
-%token INT, CHAR, INC
+%token INT CHAR INC
 %token <str> STR
-%token <id> SETID, MSGID, DIGIT
+%token <id> SETID MSGID DIGIT
 %token <str> QSTR
 
-%type <id> cast_setid, setid, cast_msgid, msgid, cast_digit, digit
-%type <str> catd, arg_list, arg_def, arg_func, arg_exp, str,
-	cast_qstr, paren_qstr, qstr_list
+%type <id> cast_setid setid cast_msgid msgid cast_digit digit
+%type <str> catd arg_list arg_def arg_func arg_exp str
+%type <str> cast_qstr paren_qstr qstr_list
 
 %left '-' '+'
 %left '*' '/'
@@ -130,7 +131,7 @@ setid:		setid '+' setid		{ $$ = $1 + $3; }
 	|	setid '/' setid
 		{
 			if ($3 == 0) {
-				yyerror(gettext("zero divide"));
+				(void) yyerror(gettext("zero divide"));
 			} else {
 				$$ = $1 / $3;
 			}
@@ -151,7 +152,7 @@ msgid:		msgid '+' msgid		{ $$ = $1 + $3; }
 	|	msgid '/' msgid
 		{
 			if ($3 == 0) {
-				yyerror(gettext("zero devide"));
+				(void) yyerror(gettext("zero divide"));
 			} else {
 				$$ = $1 / $3;
 			}
@@ -172,7 +173,7 @@ digit:		digit '+' digit		{ $$ = $1 + $3; }
 	|	digit '/' digit
 		{
 			if ($3 == 0) {
-				yyerror(gettext("zero divide"));
+				(void) yyerror(gettext("zero divide"));
 			} else {
 				$$ = $1 / $3;
 			}

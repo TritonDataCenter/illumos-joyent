@@ -512,6 +512,7 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 	case VM_PPTDEV_DISABLE_MSIX:
 	case VM_DEVMEM_GETOFFSET:
 	case VM_TRACK_DIRTY_PAGES:
+	case VM_NPT_OPERATION:
 		vmm_read_lock(sc);
 		lock_type = LOCK_READ_HOLD;
 		break;
@@ -1725,6 +1726,82 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 
 		break;
 	}
+	case VM_NPT_OPERATION: {
+		struct vm_npt_operation vno;
+		uint8_t *bitmap = NULL;
+		uint64_t bitmap_size = 0;
+
+		if (ddi_copyin(datap, &vno, sizeof (vno), md) != 0) {
+			error = EFAULT;
+			break;
+		}
+		if ((vno.vno_gpa & PAGEOFFSET) != 0 ||
+		    (vno.vno_len & PAGEOFFSET) != 0) {
+			error = EINVAL;
+			break;
+		}
+		if ((UINT64_MAX - vno.vno_len) < vno.vno_gpa) {
+			error = EOVERFLOW;
+			break;
+		}
+
+		/*
+		 * Allocate a bitmap for the operation if it is specified as
+		 * part of the input or output.
+		 */
+		if ((vno.vno_operation &
+		    (VNO_FLAG_BITMAP_IN | VNO_FLAG_BITMAP_OUT)) != 0) {
+			/*
+			 * Operations expecting data to be copied in or out
+			 * should not have zero length.
+			 */
+			if (vno.vno_len == 0) {
+				error = EINVAL;
+				break;
+			}
+
+			/*
+			 * Maximum bitmap size of 8 pages results in 1 GiB of
+			 * coverage.
+			 */
+			const uint64_t max_bitmap_size = 8 * PAGESIZE;
+
+			bitmap_size = roundup(vno.vno_len / PAGESIZE, 8) / 8;
+			if (bitmap_size > max_bitmap_size) {
+				error = E2BIG;
+				break;
+			}
+			bitmap = kmem_zalloc(bitmap_size, KM_SLEEP);
+		}
+
+		if ((vno.vno_operation & VNO_FLAG_BITMAP_IN) != 0) {
+			ASSERT(bitmap != NULL);
+			if (ddi_copyin(vno.vno_bitmap, bitmap, bitmap_size,
+			    md) != 0) {
+				error = EFAULT;
+			}
+		}
+
+		if (error == 0) {
+			error = vm_npt_do_operation(sc->vmm_vm, vno.vno_gpa,
+			    vno.vno_len, vno.vno_operation, bitmap, rvalp);
+		}
+
+		if ((vno.vno_operation & VNO_FLAG_BITMAP_OUT) != 0 &&
+		    error == 0) {
+			ASSERT(bitmap != NULL);
+			if (ddi_copyout(bitmap, vno.vno_bitmap, bitmap_size,
+			    md) != 0) {
+				error = EFAULT;
+			}
+		}
+
+		if (bitmap != NULL) {
+			kmem_free(bitmap, bitmap_size);
+		}
+
+		break;
+	}
 	case VM_WRLOCK_CYCLE: {
 		/*
 		 * Present a test mechanism to acquire/release the write lock
@@ -1771,8 +1848,9 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 			.vdr_len = len,
 			.vdr_data = buf,
 			.vdr_result_len = &vdx.vdx_result_len,
+			.vdr_vcpuid = vdx.vdx_vcpuid,
 		};
-		error = vmm_data_read(sc->vmm_vm, vdx.vdx_vcpuid, &req);
+		error = vmm_data_read(sc->vmm_vm, &req);
 
 		if (error == 0 && buf != NULL) {
 			if (ddi_copyout(buf, vdx.vdx_data, len, md) != 0) {
@@ -1829,10 +1907,10 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 			.vdr_len = len,
 			.vdr_data = buf,
 			.vdr_result_len = &vdx.vdx_result_len,
+			.vdr_vcpuid = vdx.vdx_vcpuid,
 		};
 		if (vmm_allow_state_writes != 0) {
-			error = vmm_data_write(sc->vmm_vm, vdx.vdx_vcpuid,
-			    &req);
+			error = vmm_data_write(sc->vmm_vm, &req);
 		} else {
 			/*
 			 * Reject the write if somone has thrown the switch back

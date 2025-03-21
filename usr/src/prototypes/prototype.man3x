@@ -9,7 +9,7 @@
 .\" http://www.illumos.org/license/CDDL.
 .\"
 .\"
-.\" Copyright 2024 <contributor>
+.\" Copyright 2025 <contributor>
 .\"
 .Dd Month Day, Year
 .Dt MANUALPAGE 3SECTION
@@ -50,9 +50,9 @@ and <if errno is set describe it below>.
 .Sh EXAMPLES
 .Sh ERRORS
 The
-.fn funcname
+.Fn funcname
 functions will fail if:
-.Bl  -tag -width Er
+.Bl -tag -width Er
 .It Er ERRNO1
 A Reason why ERRNO1 could occur.
 .It Er ERRNO2
@@ -70,7 +70,7 @@ A Reason why ERRNO2 could occur.
 .\" .Sy Safe
 .\" .Sy Unsafe
 .\" .Sy MT-Safe
-.\" .Sy Aysnc-Signal-Safe
+.\" .Sy Async-Signal-Safe
 .Sh SEE ALSO
 .\" A list of mentioned manuals or others that are relevant to this
 .\" function. If there is a user command that exercises this, for

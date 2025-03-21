@@ -27,6 +27,7 @@
 /*
  * Copyright 2020 Joyent, Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 /*
@@ -1396,7 +1397,7 @@ lx_brandsys(int cmd, int64_t *rval, uintptr_t arg1, uintptr_t arg2,
 		VERIFY(p->p_zone->zone_brand == &lx_brand);
 		return (exec_common(
 		    (char *)arg1, (const char **)arg2, (const char **)arg3,
-		    EBA_BRAND));
+		    NULL, EBA_BRAND));
 	}
 
 	/* For all other operations this must be a branded process. */
@@ -1531,7 +1532,7 @@ lx_brandsys(int cmd, int64_t *rval, uintptr_t arg1, uintptr_t arg2,
 
 	case B_EXEC_NATIVE:
 		return (exec_common((char *)arg1, (const char **)arg2,
-		    (const char **)arg3, EBA_NATIVE));
+		    (const char **)arg3, NULL, EBA_NATIVE));
 
 	/*
 	 * The B_TRUSS_POINT subcommand is used so that we can make a no-op
@@ -2362,8 +2363,27 @@ lx_elfexec(struct vnode *vp, struct execa *uap, struct uarg *args,
 	 * library will ask us for this data later, when it is ready to set
 	 * things up for the lx executable.
 	 */
-	edp.ed_phdr = (uphdr_vaddr == -1) ? voffset + ehdr.e_phoff :
-	    voffset + uphdr_vaddr;
+	if (uphdr_vaddr == -1) {
+		edp.ed_phdr = voffset + ehdr.e_phoff;
+	} else if (ehdr.e_type == ET_EXEC && interp == NULL) {
+		/*
+		 * For statically linked executable, use vaddr from Phdr.
+		 */
+		edp.ed_phdr = uphdr_vaddr;
+	} else {
+		/*
+		 * Dynamic executable with found or determined Phdr.
+		 *
+		 *  - voffset is either address where exec file is mapped
+		 *   (for ET_DYN Type) or is zero.
+		 *
+		 * According to ELF format for PT_PHDR:
+		 *  - vaddr is the virtual address at which the first byte of
+		 *    the segment resides in memory.
+		 */
+		edp.ed_phdr = voffset + uphdr_vaddr;
+	}
+
 	edp.ed_entry = voffset + ehdr.e_entry;
 	edp.ed_phent = ehdr.e_phentsize;
 	edp.ed_phnum = ehdr.e_phnum;
@@ -2373,10 +2393,10 @@ lx_elfexec(struct vnode *vp, struct execa *uap, struct uarg *args,
 			/*
 			 * This is a shared object executable, so we need to
 			 * pick a reasonable place to put the heap. Just don't
-			 * use the first page.
+			 * use the first few pages.
 			 */
-			env.ex_brkbase = (caddr_t)PAGESIZE;
-			env.ex_bssbase = (caddr_t)PAGESIZE;
+			env.ex_brkbase = (caddr_t)(8 * PAGESIZE);
+			env.ex_bssbase = (caddr_t)(8 * PAGESIZE);
 		}
 
 		/*
@@ -2482,13 +2502,16 @@ lx_elfexec(struct vnode *vp, struct execa *uap, struct uarg *args,
 			 * misinterpret what we return from brk().
 			 *
 			 * It's probably not great, but we'll just set brkbase
-			 * to PAGESIZE. If there's something down there in the
-			 * way then libc/malloc should fall back to mmap() when
-			 * we fail to extend the brk for them.
+			 * to a small multiple of PAGESIZE, since some libraries
+			 * (e.g. procps 4.x) expect the first anonymous memory
+			 * region to begin at the 8th page or later. If there's
+			 * something down there in the way then libc/malloc
+			 * should fall back to mmap() when we fail to extend the
+			 * brk for them.
 			 */
 			if (ehdr.e_type == ET_DYN) {
-				env.ex_bssbase = (caddr_t)PAGESIZE;
-				env.ex_brkbase = (caddr_t)PAGESIZE;
+				env.ex_bssbase = (caddr_t)(8 * PAGESIZE);
+				env.ex_brkbase = (caddr_t)(8 * PAGESIZE);
 				env.ex_brksize = 0;
 			}
 		}

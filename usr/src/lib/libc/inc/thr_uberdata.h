@@ -58,9 +58,9 @@
 #include <thread_db.h>
 #include <setjmp.h>
 #include <sys/thread.h>
+#include <sys/debug.h>
 #include "libc_int.h"
 #include "tdb_agent.h"
-#include "thr_debug.h"
 
 /*
  * This is an implementation-specific include file for threading support.
@@ -419,7 +419,7 @@ typedef union {
 #define	qh_lock		qh_qh.q_lock
 #define	qh_qcnt		qh_qh.q_qcnt
 #define	qh_type		qh_qh.q_type
-#if defined(THREAD_DEBUG)
+#if defined(DEBUG)
 #define	qh_lockcount	qh_qh.q_lockcount
 #define	qh_qlen		qh_qh.q_qlen
 #define	qh_qmax		qh_qh.q_qmax
@@ -1277,9 +1277,9 @@ extern	greg_t		stkptr(void);
 extern	int	__nanosleep(const timespec_t *, timespec_t *);
 extern	void	getgregs(ulwp_t *, gregset_t);
 extern	void	setgregs(ulwp_t *, gregset_t);
-extern	void	thr_panic(const char *);
+extern	void	thr_panic(const char *) __NORETURN;
 #pragma rarely_called(thr_panic)
-extern	void	mutex_panic(mutex_t *, const char *);
+extern	void	mutex_panic(mutex_t *, const char *) __NORETURN;
 #pragma rarely_called(mutex_panic)
 extern	ulwp_t	*find_lwp(thread_t);
 extern	void	finish_init(void);
@@ -1329,6 +1329,10 @@ extern	void	_flush_windows(void);
 #endif
 extern	void	set_curthread(void *);
 extern	void	ssp_init(void);
+
+extern	int	sema_relclockwait(sema_t *, clockid_t, const timespec_t *);
+extern	int	sema_clockwait(sema_t *, clockid_t, const timespec_t *);
+
 
 /*
  * Utility function used when waking up many threads (more than MAXLWPS)
@@ -1498,7 +1502,8 @@ extern	int	mutex_unlock_internal(mutex_t *, int);
 
 /* not cancellation points: */
 extern	int	__cond_wait(cond_t *, mutex_t *);
-extern	int	__cond_timedwait(cond_t *, mutex_t *, const timespec_t *);
+extern	int	__cond_timedwait(cond_t *, mutex_t *, clockid_t,
+		    const timespec_t *);
 extern	int	__cond_reltimedwait(cond_t *, mutex_t *, const timespec_t *);
 
 extern	int	rw_read_held(rwlock_t *);

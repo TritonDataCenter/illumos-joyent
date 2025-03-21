@@ -785,9 +785,12 @@ file path=usr/share/man/man3c/posix_madvise.3c
 file path=usr/share/man/man3c/posix_memalign.3c
 file path=usr/share/man/man3c/posix_openpt.3c
 file path=usr/share/man/man3c/posix_spawn.3c
+file path=usr/share/man/man3c/posix_spawn_file_actions_addchdir.3c
 file path=usr/share/man/man3c/posix_spawn_file_actions_addclose.3c
 file path=usr/share/man/man3c/posix_spawn_file_actions_addclosefrom_np.3c
 file path=usr/share/man/man3c/posix_spawn_file_actions_adddup2.3c
+link path=usr/share/man/man3c/posix_spawn_file_actions_addfchdir.3c \
+    target=posix_spawn_file_actions_addchdir.3c
 link path=usr/share/man/man3c/posix_spawn_file_actions_addopen.3c \
     target=posix_spawn_file_actions_addclose.3c
 file path=usr/share/man/man3c/posix_spawn_file_actions_destroy.3c
@@ -900,9 +903,13 @@ file path=usr/share/man/man3c/pthread_cleanup_pop.3c
 file path=usr/share/man/man3c/pthread_cleanup_push.3c
 link path=usr/share/man/man3c/pthread_cond_broadcast.3c \
     target=pthread_cond_signal.3c
+link path=usr/share/man/man3c/pthread_cond_clockwait.3c \
+    target=pthread_cond_wait.3c
 link path=usr/share/man/man3c/pthread_cond_destroy.3c \
     target=pthread_cond_init.3c
 file path=usr/share/man/man3c/pthread_cond_init.3c
+link path=usr/share/man/man3c/pthread_cond_relclockwait_np.3c \
+    target=pthread_cond_wait.3c
 link path=usr/share/man/man3c/pthread_cond_reltimedwait_np.3c \
     target=pthread_cond_wait.3c
 file path=usr/share/man/man3c/pthread_cond_signal.3c
@@ -932,12 +939,16 @@ link path=usr/share/man/man3c/pthread_key_create_once_np.3c \
     target=pthread_key_create.3c
 file path=usr/share/man/man3c/pthread_key_delete.3c
 file path=usr/share/man/man3c/pthread_kill.3c
+link path=usr/share/man/man3c/pthread_mutex_clocklock.3c \
+    target=pthread_mutex_timedlock.3c
 file path=usr/share/man/man3c/pthread_mutex_consistent.3c
 link path=usr/share/man/man3c/pthread_mutex_destroy.3c \
     target=pthread_mutex_init.3c
 file path=usr/share/man/man3c/pthread_mutex_getprioceiling.3c
 file path=usr/share/man/man3c/pthread_mutex_init.3c
 file path=usr/share/man/man3c/pthread_mutex_lock.3c
+link path=usr/share/man/man3c/pthread_mutex_relclocklock_np.3c \
+    target=pthread_mutex_timedlock.3c
 link path=usr/share/man/man3c/pthread_mutex_reltimedlock_np.3c \
     target=pthread_mutex_timedlock.3c
 link path=usr/share/man/man3c/pthread_mutex_setprioceiling.3c \
@@ -966,10 +977,18 @@ link path=usr/share/man/man3c/pthread_mutexattr_setrobust.3c \
 link path=usr/share/man/man3c/pthread_mutexattr_settype.3c \
     target=pthread_mutexattr_gettype.3c
 file path=usr/share/man/man3c/pthread_once.3c
+link path=usr/share/man/man3c/pthread_rwlock_clockrdlock.3c \
+    target=pthread_rwlock_timedrdlock.3c
+link path=usr/share/man/man3c/pthread_rwlock_clockwrlock.3c \
+    target=pthread_rwlock_timedwrlock.3c
 link path=usr/share/man/man3c/pthread_rwlock_destroy.3c \
     target=pthread_rwlock_init.3c
 file path=usr/share/man/man3c/pthread_rwlock_init.3c
 file path=usr/share/man/man3c/pthread_rwlock_rdlock.3c
+link path=usr/share/man/man3c/pthread_rwlock_relclockrdlock_np.3c \
+    target=pthread_rwlock_timedrdlock.3c
+link path=usr/share/man/man3c/pthread_rwlock_relclockwrlock_np.3c \
+    target=pthread_rwlock_timedwrlock.3c
 link path=usr/share/man/man3c/pthread_rwlock_reltimedrdlock_np.3c \
     target=pthread_rwlock_timedrdlock.3c
 link path=usr/share/man/man3c/pthread_rwlock_reltimedwrlock_np.3c \
@@ -1010,6 +1029,7 @@ file path=usr/share/man/man3c/pthread_spin_unlock.3c
 file path=usr/share/man/man3c/pthread_testcancel.3c
 file path=usr/share/man/man3c/ptrace.3c
 file path=usr/share/man/man3c/ptsname.3c
+link path=usr/share/man/man3c/ptsname_r.3c target=ptsname.3c
 link path=usr/share/man/man3c/putc.3c target=fputc.3c
 link path=usr/share/man/man3c/putc_unlocked.3c target=fputc.3c
 link path=usr/share/man/man3c/putchar.3c target=fputc.3c
@@ -1112,15 +1132,18 @@ link path=usr/share/man/man3c/schedctl_lookup.3c target=schedctl_init.3c
 link path=usr/share/man/man3c/schedctl_start.3c target=schedctl_init.3c
 link path=usr/share/man/man3c/schedctl_stop.3c target=schedctl_init.3c
 link path=usr/share/man/man3c/seconvert.3c target=econvert.3c
+link path=usr/share/man/man3c/secure_getenv.3c target=getenv.3c
 link path=usr/share/man/man3c/seed48.3c target=drand48.3c
 file path=usr/share/man/man3c/seekdir.3c
 file path=usr/share/man/man3c/select.3c
+link path=usr/share/man/man3c/sem_clockwait.3c target=sem_timedwait.3c
 file path=usr/share/man/man3c/sem_close.3c
 file path=usr/share/man/man3c/sem_destroy.3c
 file path=usr/share/man/man3c/sem_getvalue.3c
 file path=usr/share/man/man3c/sem_init.3c
 file path=usr/share/man/man3c/sem_open.3c
 file path=usr/share/man/man3c/sem_post.3c
+link path=usr/share/man/man3c/sem_relclockwait_np.3c target=sem_timedwait.3c
 link path=usr/share/man/man3c/sem_reltimedwait_np.3c target=sem_timedwait.3c
 file path=usr/share/man/man3c/sem_timedwait.3c
 link path=usr/share/man/man3c/sem_trywait.3c target=sem_wait.3c
@@ -1197,6 +1220,135 @@ file path=usr/share/man/man3c/stack_getbounds.3c
 file path=usr/share/man/man3c/stack_inbounds.3c
 file path=usr/share/man/man3c/stack_setbounds.3c
 file path=usr/share/man/man3c/stack_violation.3c
+file path=usr/share/man/man3c/stdc_bit_ceil.3c
+link path=usr/share/man/man3c/stdc_bit_ceil_uc.3c target=stdc_bit_ceil.3c
+link path=usr/share/man/man3c/stdc_bit_ceil_ui.3c target=stdc_bit_ceil.3c
+link path=usr/share/man/man3c/stdc_bit_ceil_ul.3c target=stdc_bit_ceil.3c
+link path=usr/share/man/man3c/stdc_bit_ceil_ull.3c target=stdc_bit_ceil.3c
+link path=usr/share/man/man3c/stdc_bit_ceil_us.3c target=stdc_bit_ceil.3c
+file path=usr/share/man/man3c/stdc_bit_floor.3c
+link path=usr/share/man/man3c/stdc_bit_floor_uc.3c target=stdc_bit_floor.3c
+link path=usr/share/man/man3c/stdc_bit_floor_ui.3c target=stdc_bit_floor.3c
+link path=usr/share/man/man3c/stdc_bit_floor_ul.3c target=stdc_bit_floor.3c
+link path=usr/share/man/man3c/stdc_bit_floor_ull.3c target=stdc_bit_floor.3c
+link path=usr/share/man/man3c/stdc_bit_floor_us.3c target=stdc_bit_floor.3c
+file path=usr/share/man/man3c/stdc_bit_width.3c
+link path=usr/share/man/man3c/stdc_bit_width_uc.3c target=stdc_bit_width.3c
+link path=usr/share/man/man3c/stdc_bit_width_ui.3c target=stdc_bit_width.3c
+link path=usr/share/man/man3c/stdc_bit_width_ul.3c target=stdc_bit_width.3c
+link path=usr/share/man/man3c/stdc_bit_width_ull.3c target=stdc_bit_width.3c
+link path=usr/share/man/man3c/stdc_bit_width_us.3c target=stdc_bit_width.3c
+file path=usr/share/man/man3c/stdc_count_ones.3c
+link path=usr/share/man/man3c/stdc_count_ones_uc.3c target=stdc_count_ones.3c
+link path=usr/share/man/man3c/stdc_count_ones_ui.3c target=stdc_count_ones.3c
+link path=usr/share/man/man3c/stdc_count_ones_ul.3c target=stdc_count_ones.3c
+link path=usr/share/man/man3c/stdc_count_ones_ull.3c target=stdc_count_ones.3c
+link path=usr/share/man/man3c/stdc_count_ones_us.3c target=stdc_count_ones.3c
+file path=usr/share/man/man3c/stdc_count_zeros.3c
+link path=usr/share/man/man3c/stdc_count_zeros_uc.3c target=stdc_count_zeros.3c
+link path=usr/share/man/man3c/stdc_count_zeros_ui.3c target=stdc_count_zeros.3c
+link path=usr/share/man/man3c/stdc_count_zeros_ul.3c target=stdc_count_zeros.3c
+link path=usr/share/man/man3c/stdc_count_zeros_ull.3c target=stdc_count_zeros.3c
+link path=usr/share/man/man3c/stdc_count_zeros_us.3c target=stdc_count_zeros.3c
+file path=usr/share/man/man3c/stdc_first_leading_one.3c
+link path=usr/share/man/man3c/stdc_first_leading_one_uc.3c \
+    target=stdc_first_leading_one.3c
+link path=usr/share/man/man3c/stdc_first_leading_one_ui.3c \
+    target=stdc_first_leading_one.3c
+link path=usr/share/man/man3c/stdc_first_leading_one_ul.3c \
+    target=stdc_first_leading_one.3c
+link path=usr/share/man/man3c/stdc_first_leading_one_ull.3c \
+    target=stdc_first_leading_one.3c
+link path=usr/share/man/man3c/stdc_first_leading_one_us.3c \
+    target=stdc_first_leading_one.3c
+file path=usr/share/man/man3c/stdc_first_leading_zero.3c
+link path=usr/share/man/man3c/stdc_first_leading_zero_uc.3c \
+    target=stdc_first_leading_zero.3c
+link path=usr/share/man/man3c/stdc_first_leading_zero_ui.3c \
+    target=stdc_first_leading_zero.3c
+link path=usr/share/man/man3c/stdc_first_leading_zero_ul.3c \
+    target=stdc_first_leading_zero.3c
+link path=usr/share/man/man3c/stdc_first_leading_zero_ull.3c \
+    target=stdc_first_leading_zero.3c
+link path=usr/share/man/man3c/stdc_first_leading_zero_us.3c \
+    target=stdc_first_leading_zero.3c
+file path=usr/share/man/man3c/stdc_first_trailing_one.3c
+link path=usr/share/man/man3c/stdc_first_trailing_one_uc.3c \
+    target=stdc_first_trailing_one.3c
+link path=usr/share/man/man3c/stdc_first_trailing_one_ui.3c \
+    target=stdc_first_trailing_one.3c
+link path=usr/share/man/man3c/stdc_first_trailing_one_ul.3c \
+    target=stdc_first_trailing_one.3c
+link path=usr/share/man/man3c/stdc_first_trailing_one_ull.3c \
+    target=stdc_first_trailing_one.3c
+link path=usr/share/man/man3c/stdc_first_trailing_one_us.3c \
+    target=stdc_first_trailing_one.3c
+file path=usr/share/man/man3c/stdc_first_trailing_zero.3c
+link path=usr/share/man/man3c/stdc_first_trailing_zero_uc.3c \
+    target=stdc_first_trailing_zero.3c
+link path=usr/share/man/man3c/stdc_first_trailing_zero_ui.3c \
+    target=stdc_first_trailing_zero.3c
+link path=usr/share/man/man3c/stdc_first_trailing_zero_ul.3c \
+    target=stdc_first_trailing_zero.3c
+link path=usr/share/man/man3c/stdc_first_trailing_zero_ull.3c \
+    target=stdc_first_trailing_zero.3c
+link path=usr/share/man/man3c/stdc_first_trailing_zero_us.3c \
+    target=stdc_first_trailing_zero.3c
+file path=usr/share/man/man3c/stdc_has_single_bit.3c
+link path=usr/share/man/man3c/stdc_has_single_bit_uc.3c \
+    target=stdc_has_single_bit.3c
+link path=usr/share/man/man3c/stdc_has_single_bit_ui.3c \
+    target=stdc_has_single_bit.3c
+link path=usr/share/man/man3c/stdc_has_single_bit_ul.3c \
+    target=stdc_has_single_bit.3c
+link path=usr/share/man/man3c/stdc_has_single_bit_ull.3c \
+    target=stdc_has_single_bit.3c
+link path=usr/share/man/man3c/stdc_has_single_bit_us.3c \
+    target=stdc_has_single_bit.3c
+file path=usr/share/man/man3c/stdc_leading_ones.3c
+link path=usr/share/man/man3c/stdc_leading_ones_uc.3c \
+    target=stdc_leading_ones.3c
+link path=usr/share/man/man3c/stdc_leading_ones_ui.3c \
+    target=stdc_leading_ones.3c
+link path=usr/share/man/man3c/stdc_leading_ones_ul.3c \
+    target=stdc_leading_ones.3c
+link path=usr/share/man/man3c/stdc_leading_ones_ull.3c \
+    target=stdc_leading_ones.3c
+link path=usr/share/man/man3c/stdc_leading_ones_us.3c \
+    target=stdc_leading_ones.3c
+file path=usr/share/man/man3c/stdc_leading_zeros.3c
+link path=usr/share/man/man3c/stdc_leading_zeros_uc.3c \
+    target=stdc_leading_zeros.3c
+link path=usr/share/man/man3c/stdc_leading_zeros_ui.3c \
+    target=stdc_leading_zeros.3c
+link path=usr/share/man/man3c/stdc_leading_zeros_ul.3c \
+    target=stdc_leading_zeros.3c
+link path=usr/share/man/man3c/stdc_leading_zeros_ull.3c \
+    target=stdc_leading_zeros.3c
+link path=usr/share/man/man3c/stdc_leading_zeros_us.3c \
+    target=stdc_leading_zeros.3c
+file path=usr/share/man/man3c/stdc_trailing_ones.3c
+link path=usr/share/man/man3c/stdc_trailing_ones_uc.3c \
+    target=stdc_trailing_ones.3c
+link path=usr/share/man/man3c/stdc_trailing_ones_ui.3c \
+    target=stdc_trailing_ones.3c
+link path=usr/share/man/man3c/stdc_trailing_ones_ul.3c \
+    target=stdc_trailing_ones.3c
+link path=usr/share/man/man3c/stdc_trailing_ones_ull.3c \
+    target=stdc_trailing_ones.3c
+link path=usr/share/man/man3c/stdc_trailing_ones_us.3c \
+    target=stdc_trailing_ones.3c
+file path=usr/share/man/man3c/stdc_trailing_zeros.3c
+link path=usr/share/man/man3c/stdc_trailing_zeros_uc.3c \
+    target=stdc_trailing_zeros.3c
+link path=usr/share/man/man3c/stdc_trailing_zeros_ui.3c \
+    target=stdc_trailing_zeros.3c
+link path=usr/share/man/man3c/stdc_trailing_zeros_ul.3c \
+    target=stdc_trailing_zeros.3c
+link path=usr/share/man/man3c/stdc_trailing_zeros_ull.3c \
+    target=stdc_trailing_zeros.3c
+link path=usr/share/man/man3c/stdc_trailing_zeros_us.3c \
+    target=stdc_trailing_zeros.3c
 link path=usr/share/man/man3c/stderr.3c target=stdio.3c
 link path=usr/share/man/man3c/stdin.3c target=stdio.3c
 file path=usr/share/man/man3c/stdio.3c
@@ -1221,6 +1373,8 @@ link path=usr/share/man/man3c/strdupa.3c target=string.3c
 file path=usr/share/man/man3c/strerror.3c
 link path=usr/share/man/man3c/strerror_l.3c target=strerror.3c
 link path=usr/share/man/man3c/strerror_r.3c target=strerror.3c
+link path=usr/share/man/man3c/strerrordesc_np.3c target=strerror.3c
+link path=usr/share/man/man3c/strerrorname_np.3c target=strerror.3c
 file path=usr/share/man/man3c/strfmon.3c
 link path=usr/share/man/man3c/strfmon_l.3c target=strfmon.3c
 file path=usr/share/man/man3c/strftime.3c
@@ -1269,6 +1423,7 @@ link path=usr/share/man/man3c/swapcontext_extd.3c target=makecontext.3c
 link path=usr/share/man/man3c/swprintf.3c target=fwprintf.3c
 link path=usr/share/man/man3c/swscanf.3c target=fwscanf.3c
 file path=usr/share/man/man3c/sync_instruction_memory.3c
+file path=usr/share/man/man3c/syncfs.3c
 file path=usr/share/man/man3c/sysconf.3c
 file path=usr/share/man/man3c/syslog.3c
 file path=usr/share/man/man3c/system.3c
@@ -1333,6 +1488,7 @@ link path=usr/share/man/man3c/timerfd_settime.3c target=timerfd_create.3c
 link path=usr/share/man/man3c/timerisset.3c target=timeradd.3c
 link path=usr/share/man/man3c/timersub.3c target=timeradd.3c
 file path=usr/share/man/man3c/timespec_get.3c
+link path=usr/share/man/man3c/timespec_getres.3c target=timespec_get.3c
 file path=usr/share/man/man3c/tmpfile.3c
 file path=usr/share/man/man3c/tmpnam.3c
 link path=usr/share/man/man3c/tmpnam_r.3c target=tmpnam.3c
@@ -1453,6 +1609,8 @@ link path=usr/share/man/man3c/wcscspn.3c target=wcstring.3c
 file path=usr/share/man/man3c/wcsdup.3c
 link path=usr/share/man/man3c/wcsetno.3c target=cset.3c
 file path=usr/share/man/man3c/wcsftime.3c
+file path=usr/share/man/man3c/wcslcat.3c
+file path=usr/share/man/man3c/wcslcpy.3c
 file path=usr/share/man/man3c/wcslen.3c
 link path=usr/share/man/man3c/wcsncasecmp.3c target=wcscasecmp.3c
 link path=usr/share/man/man3c/wcsncasecmp_l.3c target=wcscasecmp.3c

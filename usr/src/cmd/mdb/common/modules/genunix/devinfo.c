@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2000, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2019, Joyent, Inc.
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -411,7 +412,7 @@ devinfo_walk_fini(mdb_walk_state_t *wsp)
 int
 devinfo2driver(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 {
-	char dname[MODMAXNAMELEN + 1];
+	char dname[MODMAXNAMELEN];
 	struct dev_info devi;
 
 
@@ -964,7 +965,7 @@ devinfo_print(uintptr_t addr, struct dev_info *dev, devinfo_cb_data_t *data)
 	 * We know the walker passes us extra data after the dev_info.
 	 */
 	char		binding_name[128];
-	char		dname[MODMAXNAMELEN + 1];
+	char		dname[MODMAXNAMELEN];
 	devinfo_node_t	*din = (devinfo_node_t *)dev;
 	ddi_prop_t	*global_props = NULL;
 	boolean_t	hdname = B_FALSE;
@@ -1378,7 +1379,7 @@ devnames(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	major_t major;
 	size_t i;
 
-	char name[MODMAXNAMELEN + 1];
+	char name[MODMAXNAMELEN];
 	struct devnames dn;
 
 	if ((i = mdb_getopts(argc, argv,
@@ -1406,10 +1407,7 @@ devnames(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 			return (DCMD_OK);
 		}
 
-		if (argp->a_type == MDB_TYPE_IMMEDIATE)
-			major = (major_t)argp->a_un.a_val;
-		else
-			major = (major_t)mdb_strtoull(argp->a_un.a_str);
+		major = (major_t)mdb_argtoull(argp);
 
 		if (major_to_addr(major, &addr) == -1)
 			return (DCMD_ERR);
@@ -1489,10 +1487,7 @@ getarg(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv,
 		*ret = addr;
 
 	} else if (argc == 1 && !(flags & DCMD_ADDRSPEC)) {
-		*ret = (argv[0].a_type == MDB_TYPE_IMMEDIATE) ?
-		    (uintptr_t)argv[0].a_un.a_val :
-		    (uintptr_t)mdb_strtoull(argv->a_un.a_str);
-
+		*ret = (uintptr_t)mdb_argtoull(&argv[0]);
 	} else {
 		return (-1);
 	}
@@ -1584,10 +1579,7 @@ softstate(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		return (DCMD_USAGE);
 	}
 
-	if (argv[0].a_type == MDB_TYPE_IMMEDIATE)
-		instance = argv[0].a_un.a_val;
-	else
-		instance = mdb_strtoull(argv->a_un.a_str);
+	instance = (int)mdb_argtoull(&argv[0]);
 
 	if (mdb_get_soft_state_byaddr(addr, instance, &statep, NULL, 0) == -1) {
 		if (errno == ENOENT) {

@@ -26,19 +26,30 @@ post =
 outputdir = /var/tmp/test_results
 
 [/opt/util-tests/tests/printf_test]
+
 [/opt/util-tests/tests/allowed-ips]
+user = root
+
 [/opt/util-tests/tests/set-linkprop]
+user = root
+
 [/opt/util-tests/tests/show-overlay-exit]
 [/opt/util-tests/tests/vnic-mtu]
 [/opt/util-tests/tests/bunyan/bunyan]
+[/opt/util-tests/tests/show-class-confusion]
+user = root
+
 [/opt/util-tests/tests/libsff/libsff]
-[/opt/util-tests/tests/libjedec_test.32]
+[/opt/util-tests/tests/libjedec_vendors.32]
 [/opt/util-tests/tests/libjedec_temp.32]
 [/opt/util-tests/tests/libjedec_spd.32]
-[/opt/util-tests/tests/libjedec_test.64]
+[/opt/util-tests/tests/libjedec_hex2spd.32]
+[/opt/util-tests/tests/libjedec_vendors.64]
 [/opt/util-tests/tests/libjedec_temp.64]
 [/opt/util-tests/tests/libjedec_spd.64]
-[/opt/util-tests/tests/smbios]
+[/opt/util-tests/tests/libjedec_hex2spd.64]
+[/opt/util-tests/tests/smbios.32]
+[/opt/util-tests/tests/smbios.64]
 
 user = root
 
@@ -73,7 +84,10 @@ timeout = 300
 
 [/opt/util-tests/tests/grep_test]
 [/opt/util-tests/tests/date_test]
+
 [/opt/util-tests/tests/chown_test]
+user = root
+
 [/opt/util-tests/tests/make_test]
 [/opt/util-tests/tests/head/head_test]
 
@@ -89,6 +103,9 @@ tests = ['custr_remove', 'custr_trunc']
 
 [/opt/util-tests/tests/find/findtest]
 
+[/opt/util-tests/tests/find/findroot]
+user=root
+
 [/opt/util-tests/tests/mdb/mdbtest]
 
 [/opt/util-tests/tests/sed]
@@ -99,8 +116,12 @@ tests = ['sed_addr', 'multi_test']
 [/opt/util-tests/tests/pcieadm-priv]
 user = root
 
-[/opt/util-tests/tests/svr4pkg_test]
-user = root
-
 [/opt/util-tests/tests/ar/artest]
 [/opt/util-tests/tests/cpio/cpio_test]
+
+#
+# This test ndeds to run as an explicitly unprivileged user to ensure that the
+# mv checks around permissions don't fire due to super-user privileges.
+#
+[/opt/util-tests/tests/cpmvln/overwrite]
+user = nobody

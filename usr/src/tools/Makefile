@@ -48,7 +48,9 @@ BOOT_SUBDIRS=		\
 	.WAIT		\
 	install.bin	\
 	.WAIT		\
-	ctf
+	ctf		\
+	yacc		\
+	lex
 
 COMMON_SUBDIRS=		\
 	codesign	\
@@ -64,7 +66,8 @@ COMMON_SUBDIRS=		\
 	protocmp	\
 	protolist	\
 	scripts		\
-	sgs
+	sgs		\
+	svc
 
 #
 #  special versions of commands for use only in build
@@ -112,6 +115,8 @@ ROOTDIRS=					\
 	$(ROOTONBLD)/etc			\
 	$(ROOTONBLD)/etc/exception_lists	\
 	$(ROOTONBLD)/share			\
+	$(ROOTONBLD)/share/lib			\
+	$(ROOTONBLD)/share/lib/ccs		\
 	$(ROOTONBLD)/man			\
 	$(ROOTONBLD)/man/man1onbld
 

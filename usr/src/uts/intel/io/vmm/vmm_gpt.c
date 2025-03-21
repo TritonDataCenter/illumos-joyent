@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -199,14 +199,15 @@ vmm_gpt_lvl_index(vmm_gpt_node_level_t level, uint64_t gpa)
 {
 	ASSERT(level < MAX_GPT_LEVEL);
 
-	const uint_t shifts[] = {
-		[LEVEL4] = 39,
-		[LEVEL3] = 30,
-		[LEVEL2] = 21,
-		[LEVEL1] = 12,
-	};
 	const uint16_t mask = (1U << 9) - 1;
-	return ((gpa >> shifts[level]) & mask);
+	switch (level) {
+	case LEVEL4: return ((gpa >> 39) & mask);
+	case LEVEL3: return ((gpa >> 30) & mask);
+	case LEVEL2: return ((gpa >> 21) & mask);
+	case LEVEL1: return ((gpa >> 12) & mask);
+	default:
+		panic("impossible level value");
+	};
 }
 
 /* Get mask for addresses of entries at a given table level. */
@@ -215,13 +216,14 @@ vmm_gpt_lvl_mask(vmm_gpt_node_level_t level)
 {
 	ASSERT(level < MAX_GPT_LEVEL);
 
-	const uint64_t gpa_mask[] = {
-		[LEVEL4] = 0xffffff8000000000ul, /* entries cover 512G */
-		[LEVEL3] = 0xffffffffc0000000ul, /* entries cover 1G */
-		[LEVEL2] = 0xffffffffffe00000ul, /* entries cover 2M */
-		[LEVEL1] = 0xfffffffffffff000ul, /* entries cover 4K */
+	switch (level) {
+	case LEVEL4: return (0xffffff8000000000ul);	/* entries cover 512G */
+	case LEVEL3: return (0xffffffffc0000000ul);	/* entries cover 1G */
+	case LEVEL2: return (0xffffffffffe00000ul);	/* entries cover 2M */
+	case LEVEL1: return (0xfffffffffffff000ul);	/* entries cover 4K */
+	default:
+		panic("impossible level value");
 	};
-	return (gpa_mask[level]);
 }
 
 /* Get length of GPA covered by entries at a given table level. */
@@ -230,13 +232,14 @@ vmm_gpt_lvl_len(vmm_gpt_node_level_t level)
 {
 	ASSERT(level < MAX_GPT_LEVEL);
 
-	const uint64_t gpa_len[] = {
-		[LEVEL4] = 0x8000000000ul,	/* entries cover 512G */
-		[LEVEL3] = 0x40000000ul,	/* entries cover 1G */
-		[LEVEL2] = 0x200000ul,		/* entries cover 2M */
-		[LEVEL1] = 0x1000ul,		/* entries cover 4K */
+	switch (level) {
+	case LEVEL4: return (0x8000000000ul);	/* entries cover 512G */
+	case LEVEL3: return (0x40000000ul);	/* entries cover 1G */
+	case LEVEL2: return (0x200000ul);	/* entries cover 2M */
+	case LEVEL1: return (0x1000ul);		/* entries cover 4K */
+	default:
+		panic("impossible level value");
 	};
-	return (gpa_len[level]);
 }
 
 /*
@@ -771,6 +774,9 @@ vmm_gpt_is_mapped(vmm_gpt_t *gpt, uint64_t *ptep, pfn_t *pfnp, uint_t *protp)
 {
 	uint64_t entry;
 
+	ASSERT(pfnp != NULL);
+	ASSERT(protp != NULL);
+
 	if (ptep == NULL) {
 		return (false);
 	}
@@ -808,6 +814,16 @@ vmm_gpt_reset_dirty(vmm_gpt_t *gpt, uint64_t *entry, bool on)
 }
 
 /*
+ * Query state from PTE pointed to by `entry`.
+ */
+bool
+vmm_gpt_query(vmm_gpt_t *gpt, uint64_t *entry, vmm_gpt_query_t query)
+{
+	ASSERT(entry != NULL);
+	return (gpt->vgpt_pte_ops->vpeo_query(entry, query));
+}
+
+/*
  * Get properly formatted PML4 (EPTP/nCR3) for GPT.
  */
 uint64_t
@@ -815,4 +831,13 @@ vmm_gpt_get_pmtp(vmm_gpt_t *gpt, bool track_dirty)
 {
 	const pfn_t root_pfn = gpt->vgpt_root->vgn_host_pfn;
 	return (gpt->vgpt_pte_ops->vpeo_get_pmtp(root_pfn, track_dirty));
+}
+
+/*
+ * Does the GPT hardware support dirty-page-tracking?
+ */
+bool
+vmm_gpt_can_track_dirty(vmm_gpt_t *gpt)
+{
+	return (gpt->vgpt_pte_ops->vpeo_hw_ad_supported());
 }

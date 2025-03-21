@@ -29,6 +29,7 @@
 
 #include "lint.h"
 #include "thr_uberdata.h"
+#include "libc.h"
 #include <stdarg.h>
 #include <poll.h>
 #include <stropts.h>
@@ -741,34 +742,48 @@ int
 fcntl(int fildes, int cmd, ...)
 {
 	extern int __fcntl(int, int, ...);
-	intptr_t arg;
+	intptr_t arg, arg1 = 0;
 	int rv;
 	va_list ap;
 
 	va_start(ap, cmd);
-	arg = va_arg(ap, intptr_t);
+	switch (cmd) {
+	case F_DUP3FD:
+		arg = va_arg(ap, int);
+		arg1 = va_arg(ap, int);
+		break;
+	default:
+		arg = va_arg(ap, intptr_t);
+		break;
+	}
 	va_end(ap);
 	if (cmd != F_SETLKW)
-		return (__fcntl(fildes, cmd, arg));
+		return (__fcntl(fildes, cmd, arg, arg1));
 	PERFORM(__fcntl(fildes, cmd, arg))
 }
 
 int
 fdatasync(int fildes)
 {
-	extern int __fdsync(int, int);
 	int rv;
 
-	PERFORM(__fdsync(fildes, FDSYNC))
+	PERFORM(__fdsync(fildes, FDSYNC_DATA))
 }
 
 int
 fsync(int fildes)
 {
-	extern int __fdsync(int, int);
 	int rv;
 
-	PERFORM(__fdsync(fildes, FSYNC))
+	PERFORM(__fdsync(fildes, FDSYNC_FILE))
+}
+
+int
+syncfs(int fildes)
+{
+	int rv;
+
+	PERFORM(__fdsync(fildes, FDSYNC_FS))
 }
 
 int

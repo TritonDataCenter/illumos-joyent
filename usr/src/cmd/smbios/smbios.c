@@ -22,7 +22,7 @@
 /*
  * Copyright 2015 OmniTI Computer Consulting, Inc.  All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
@@ -30,6 +30,7 @@
 #include <sys/sysmacros.h>
 #include <sys/param.h>
 #include <sys/bitext.h>
+#include <sys/hexdump.h>
 
 #include <smbios.h>
 #include <alloca.h>
@@ -69,8 +70,7 @@ smbios_vergteq(smbios_version_t *v, uint_t major, uint_t minor)
 	return (B_FALSE);
 }
 
-/*PRINTFLIKE2*/
-static void
+static void __PRINTFLIKE(2)
 smbios_warn(smbios_hdl_t *shp, const char *format, ...)
 {
 	va_list ap;
@@ -87,8 +87,7 @@ smbios_warn(smbios_hdl_t *shp, const char *format, ...)
 	(void) fprintf(stderr, "\n");
 }
 
-/*PRINTFLIKE2*/
-static void
+static void __PRINTFLIKE(2)
 oprintf(FILE *fp, const char *format, ...)
 {
 	va_list ap;
@@ -98,8 +97,7 @@ oprintf(FILE *fp, const char *format, ...)
 	va_end(ap);
 }
 
-/*PRINTFLIKE3*/
-static void
+static void __PRINTFLIKE(3)
 desc_printf(const char *d, FILE *fp, const char *format, ...)
 {
 	va_list ap;
@@ -688,6 +686,14 @@ print_processor(smbios_hdl_t *shp, id_t id, FILE *fp)
 	} else {
 		oprintf(fp, "  Threads Enabled: Unknown\n");
 	}
+
+	/*
+	 * The Socket Type string overlaps with the upgrade string. Only print
+	 * something if we have a valid value.
+	 */
+	if (*p.smbp_socktype != '\0') {
+		str_print(fp, "  Socket Type", p.smbp_socktype);
+	}
 }
 
 static void
@@ -1009,39 +1015,17 @@ print_evlog(smbios_hdl_t *shp, id_t id, FILE *fp)
 static void
 print_bytes(const uint8_t *data, size_t size, FILE *fp)
 {
-	size_t row, rows = P2ROUNDUP(size, 16) / 16;
-	size_t col, cols;
+	hexdump_t h;
 
-	char buf[17];
-	uint8_t x;
+	hexdump_init(&h);
+	hexdump_set_grouping(&h, 4);
+	hexdump_set_indent(&h, 2);
 
-	oprintf(fp, "\n  offset:   0 1 2 3  4 5 6 7  8 9 a b  c d e f  "
-	    "0123456789abcdef\n");
+	(void) fprintf(fp, "\n");
+	(void) hexdump_fileh(&h, data, size, HDF_DEFAULT, fp);
+	(void) fprintf(fp, "\n");
 
-	for (row = 0; row < rows; row++) {
-		oprintf(fp, "  %#6lx: ", (ulong_t)row * 16);
-		cols = MIN(size - row * 16, 16);
-
-		for (col = 0; col < cols; col++) {
-			if (col % 4 == 0)
-				oprintf(fp, " ");
-			x = *data++;
-			oprintf(fp, "%02x", x);
-			buf[col] = x <= ' ' || x > '~' ? '.' : x;
-		}
-
-		for (; col < 16; col++) {
-			if (col % 4 == 0)
-				oprintf(fp, " ");
-			oprintf(fp, "  ");
-			buf[col] = ' ';
-		}
-
-		buf[col] = '\0';
-		oprintf(fp, "  %s\n", buf);
-	}
-
-	oprintf(fp, "\n");
+	hexdump_fini(&h);
 }
 
 static void
@@ -1522,7 +1506,6 @@ print_iprobe(smbios_hdl_t *shp, id_t id, FILE *fp)
 	}
 }
 
-
 static void
 print_boot(smbios_hdl_t *shp, FILE *fp)
 {
@@ -1580,7 +1563,8 @@ print_powersup(smbios_hdl_t *shp, id_t id, FILE *fp)
 
 	oprintf(fp, "  Power Supply Group: %u\n", p.smbps_group);
 	if (p.smbps_maxout != 0x8000) {
-		oprintf(fp, "  Maximum Output: %llu mW\n", p.smbps_maxout);
+		oprintf(fp, "  Maximum Output: %" PRIu64 " mW\n",
+		    p.smbps_maxout);
 	} else {
 		oprintf(fp, "  Maximum Output: unknown\n");
 	}
@@ -1597,17 +1581,86 @@ print_powersup(smbios_hdl_t *shp, id_t id, FILE *fp)
 	    fp, "  Type: %u", p.smbps_pstype);
 
 	if (p.smbps_vprobe != 0xffff) {
-		oprintf(fp, "  Voltage Probe Handle: %lu\n", p.smbps_vprobe);
+		oprintf(fp, "  Voltage Probe Handle: %" _PRIuID "\n",
+		    p.smbps_vprobe);
 	}
 
 	if (p.smbps_cooldev != 0xffff) {
-		oprintf(fp, "  Cooling Device Handle: %lu\n", p.smbps_cooldev);
+		oprintf(fp, "  Cooling Device Handle: %" _PRIuID "\n",
+		    p.smbps_cooldev);
 	}
 
 	if (p.smbps_iprobe != 0xffff) {
-		oprintf(fp, "  Current Probe Handle: %lu\n", p.smbps_iprobe);
+		oprintf(fp, "  Current Probe Handle: %" _PRIuID "\n",
+		    p.smbps_iprobe);
 	}
 }
+
+static void
+print_addinfo(smbios_hdl_t *shp, id_t id, FILE *fp)
+{
+	uint_t nents, i;
+
+	if (smbios_info_addinfo_nents(shp, id, &nents) != 0) {
+		smbios_warn(shp, "failed to read additional information");
+		return;
+	}
+
+	oprintf(fp, "  Number of Additional Information Entries: %u\n", nents);
+	for (i = 0; i < nents; i++) {
+		smbios_addinfo_ent_t *ent;
+
+		oprintf(fp, "  Additional Information Entry %u\n", i);
+		if (smbios_info_addinfo_ent(shp, id, i, &ent) != 0) {
+			smbios_warn(shp, "failed to read additional "
+			    "information entry %u", i);
+			continue;
+		}
+
+		oprintf(fp, "    Referenced handle: %" _PRIuID "\n",
+		    ent->smbai_ref);
+		oprintf(fp, "    Handle offset: %u\n", ent->smbai_ref_off);
+		if (ent->smbai_str != NULL) {
+			str_print(fp, "    Information String", ent->smbai_str);
+		}
+
+		/*
+		 * As of SMBIOS 3.7, there are no extra data entries strictly
+		 * defined in the spec, but there may be something. If we find
+		 * something that's a standard integer size, then we'll
+		 * interpret it and print it as a hex value. In theory this is
+		 * supposed to refer back to some field, but hard to say how
+		 * this'll actually be used. The first time we encountered it
+		 * was just an additional string entry.
+		 */
+		if (ent->smbai_dlen > 0) {
+			oprintf(fp, "    Data Length: %u\n", ent->smbai_dlen);
+			switch (ent->smbai_dlen) {
+			case 1:
+				oprintf(fp, "    Data: 0x%x\n",
+				    *(uint8_t *)ent->smbai_data);
+				break;
+			case 2:
+				oprintf(fp, "    Data: 0x%x\n",
+				    *(uint16_t *)ent->smbai_data);
+				break;
+			case 4:
+				oprintf(fp, "    Data: 0x%x\n",
+				    *(uint32_t *)ent->smbai_data);
+				break;
+			case 8:
+				oprintf(fp, "    Data: 0x%" PRIx64 "\n",
+				    *(uint64_t *)ent->smbai_data);
+				break;
+			default:
+				break;
+			}
+		}
+
+		smbios_info_addinfo_ent_free(shp, ent);
+	}
+}
+
 
 static void
 print_processor_info_riscv(smbios_hdl_t *shp, id_t id, FILE *fp)
@@ -1713,7 +1766,7 @@ print_battery(smbios_hdl_t *shp, id_t id, FILE *fp)
 	if (bat.smbb_err != UINT8_MAX) {
 		oprintf(fp, "  Maximum Error: %u\n", bat.smbb_err);
 	} else {
-		oprintf(fp, "  Maximum Error: unknown\n", bat.smbb_err);
+		oprintf(fp, "  Maximum Error: unknown\n");
 	}
 	oprintf(fp, "  SBDS Serial Number: %04x\n", bat.smbb_ssn);
 	oprintf(fp, "  SBDS Manufacture Date: %u-%02u-%02u\n", bat.smbb_syear,
@@ -1916,7 +1969,7 @@ print_fwinfo(smbios_hdl_t *shp, id_t id, FILE *fp)
 
 	oprintf(fp, "\n  Component Handles:\n");
 	for (i = 0; i < ncomps; i++) {
-		oprintf(fp, "    %ld\n", comps[i]);
+		oprintf(fp, "    %" _PRIdID "\n", comps[i].smbfwe_id);
 	}
 }
 
@@ -2067,6 +2120,10 @@ print_struct(smbios_hdl_t *shp, const smbios_struct_t *sp, void *fp)
 	case SMB_TYPE_POWERSUP:
 		oprintf(fp, "\n");
 		print_powersup(shp, sp->smbstr_id, fp);
+		break;
+	case SMB_TYPE_ADDINFO:
+		oprintf(fp, "\n");
+		print_addinfo(shp, sp->smbstr_id, fp);
 		break;
 	case SMB_TYPE_OBDEVEXT:
 		oprintf(fp, "\n");

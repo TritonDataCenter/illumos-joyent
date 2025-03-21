@@ -24,6 +24,7 @@
  * Copyright (c) 2012, 2020 by Delphix. All rights reserved.
  * Copyright (c) 2017, Intel Corporation.
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 /*
@@ -621,6 +622,16 @@ vdev_config_generate(spa_t *spa, vdev_t *vd, boolean_t getstats,
 
 		ASSERT(!vd->vdev_ishole);
 
+		/*
+		 * Indirect vdevs store the remnants of a removed vdev;
+		 * they have no direct children, but are not leaf devices.
+		 * The content of an indirect device is stored elsewhere
+		 * in the pool.  We can avoid a pointless zero-length alloc
+		 * and return early here.
+		 */
+		if (vd->vdev_children == 0)
+			return (nv);
+
 		child = kmem_alloc(vd->vdev_children * sizeof (nvlist_t *),
 		    KM_SLEEP);
 
@@ -949,7 +960,7 @@ vdev_label_init(vdev_t *vd, uint64_t crtxg, vdev_labeltype_t reason)
 	char *buf;
 	size_t buflen;
 	int error;
-	uint64_t spare_guid = 0, l2cache_guid;
+	uint64_t spare_guid = 0, l2cache_guid = 0;
 	int flags = ZIO_FLAG_CONFIG_WRITER | ZIO_FLAG_CANFAIL;
 
 	ASSERT(spa_config_held(spa, SCL_ALL, RW_WRITER) == SCL_ALL);

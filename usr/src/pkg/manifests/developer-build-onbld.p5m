@@ -72,7 +72,6 @@ file path=opt/onbld/bin/$(ARCH)/protocmp mode=0555
 file path=opt/onbld/bin/$(ARCH)/protolist mode=0555
 file path=opt/onbld/bin/$(ARCH)/tic mode=0555
 file path=opt/onbld/bin/$(ARCH)/zic mode=0555
-file path=opt/onbld/bin/Install mode=0555
 file path=opt/onbld/bin/bldenv mode=0555
 file path=opt/onbld/bin/build_cscope mode=0555
 file path=opt/onbld/bin/cddlchk mode=0555 \
@@ -240,7 +239,6 @@ file \
     mode=0444
 dir  path=opt/onbld/man
 dir  path=opt/onbld/man/man1onbld
-file path=opt/onbld/man/man1onbld/Install.1onbld
 file path=opt/onbld/man/man1onbld/bldenv.1onbld
 $(i386_ONLY)file path=opt/onbld/man/man1onbld/btxld.1onbld
 file path=opt/onbld/man/man1onbld/cddlchk.1onbld
@@ -271,6 +269,8 @@ file path=opt/onbld/man/man1onbld/ws.1onbld
 file path=opt/onbld/man/man1onbld/wsdiff.1onbld
 file path=opt/onbld/man/man1onbld/xref.1onbld
 dir  path=opt/onbld/share
+dir  path=opt/onbld/share/lib
+dir  path=opt/onbld/share/lib/ccs
 file path=opt/onbld/share/make.rules mode=0444
 legacy pkg=SUNWonbld desc="tools used to build the OS-Net consolidation" \
     name="OS-Net Build Tools" version=11.11,REV=2009.10.22

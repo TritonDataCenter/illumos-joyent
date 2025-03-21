@@ -48,6 +48,8 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	fletcher_2_native;
 	fletcher_2_byteswap;
 	fletcher_4_native;
+	fletcher_4_init;
+	fletcher_4_fini;
 	fletcher_4_byteswap;
 	fletcher_4_incremental_native;
 	fletcher_4_incremental_byteswap;
@@ -71,12 +73,23 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	libzfs_mnttab_cache;
 	libzfs_print_on_error;
 	libzfs_set_cachedprops;
+$if _ELF64
 	spa_feature_table		{
 					  ASSERT = {
 						  TYPE = OBJECT;
 						  SIZE = addrsize[162];
 						};
 					};
+$elif _ELF32
+	spa_feature_table		{
+					  ASSERT = {
+						  TYPE = OBJECT;
+						  SIZE = addrsize[189];
+						};
+					};
+$else
+$error unknown ELFCLASS
+$endif
 	zfs_allocatable_devs;
 	zfs_asprintf;
 	zfs_bookmark_exists;

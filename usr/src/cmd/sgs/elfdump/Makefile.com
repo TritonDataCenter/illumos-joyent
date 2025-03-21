@@ -23,12 +23,14 @@
 # Copyright (c) 1997, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2018, Joyent, Inc.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2024 Oxide Computer Company
 #
 
 PROG=		elfdump
 
 include		$(SRC)/cmd/Makefile.cmd
 include		$(SRC)/cmd/sgs/Makefile.com
+include		$(SRC)/common/hexdump/Makefile.com
 
 COMOBJ =	main.o			corenote.o \
 		dwarf.o			struct_layout.o \
@@ -43,7 +45,10 @@ SGSCOMMONOBJ =	leb128.o
 
 BLTOBJ =	msg.o
 
-OBJS=		$(BLTOBJ) $(COMOBJ) $(COMOBJ32) $(COMOBJ64) $(SGSCOMMONOBJ)
+EXTOBJ =	$(HEXDUMP_OBJS)
+
+OBJS=		$(BLTOBJ) $(COMOBJ) $(COMOBJ32) $(COMOBJ64) $(SGSCOMMONOBJ) \
+		$(EXTOBJ)
 
 MAPFILE=	$(MAPFILE.NGB)
 MAPOPT=		$(MAPFILE:%=-Wl,-M%)

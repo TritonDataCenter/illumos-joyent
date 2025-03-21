@@ -72,6 +72,7 @@ GENUNIX_OBJS +=		\
 	getcontext.o	\
 	install_utrap.o	\
 	lwp_private.o	\
+	popcountdi2.o	\
 	prom_enter.o	\
 	prom_exit.o	\
 	sendsig.o	\
@@ -363,12 +364,6 @@ LX_BRAND_OBJS  =		\
 	lx_uname.o		\
 	lx_wait.o		\
 	lx_xattr.o
-
-#
-#	special files
-#
-MODSTUB_OBJ +=		\
-	modstubs.o
 
 BOOTDEV_OBJS +=		\
 	bootdev.o

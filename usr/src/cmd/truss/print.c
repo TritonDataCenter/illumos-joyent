@@ -23,7 +23,7 @@
  * Copyright (c) 1989, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2020 Joyent, Inc.
  * Copyright 2022 Garrett D'Amore
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
@@ -63,6 +63,7 @@
 #include <sys/aiocb.h>
 #include <sys/corectl.h>
 #include <sys/cpc_impl.h>
+#include <sys/execx.h>
 #include <sys/priocntl.h>
 #include <sys/tspriocntl.h>
 #include <sys/iapriocntl.h>
@@ -89,6 +90,8 @@
 #include <sys/fork.h>
 #include <sys/task.h>
 #include <sys/random.h>
+#include <sys/sysmacros.h>
+#include <sys/fdsync.h>
 #include "ramdata.h"
 #include "print.h"
 #include "proto.h"
@@ -378,26 +381,25 @@ prt_ioa(private_t *pri, int raw, long val)	/* print ioctl argument */
 void
 prt_pip(private_t *pri, int raw, long val)	/* print pipe code */
 {
-	const char *s = NULL;
+	int first = 1;
+	long flags = ~(O_CLOEXEC | O_CLOFORK | O_NONBLOCK);
 
-	if (!raw) {
-		switch (val) {
-		case O_CLOEXEC:
-			s = "O_CLOEXEC";
-			break;
-		case O_NONBLOCK:
-			s = "O_NONBLOCK";
-			break;
-		case O_CLOEXEC|O_NONBLOCK:
-			s = "O_CLOEXEC|O_NONBLOCK";
-			break;
-		}
+	if (raw != 0 || val == 0 || (val & flags) != 0) {
+		prt_dex(pri, 0, val);
+		return;
 	}
 
-	if (s == NULL)
-		prt_dex(pri, 0, val);
-	else
-		outstring(pri, s);
+	if (val & O_CLOEXEC) {
+		outstring(pri, "|O_CLOEXEC" + first);
+		first = 0;
+	}
+	if (val & O_CLOFORK) {
+		outstring(pri, "|O_CLOFORK" + first);
+		first = 0;
+	}
+	if (val & O_NONBLOCK) {
+		outstring(pri, "|O_NONBLOCK" + first);
+	}
 }
 
 void
@@ -1844,6 +1846,15 @@ prt_skt(private_t *pri, int raw, long val)
 		if ((val & SOCK_CLOEXEC) != 0) {
 			outstring(pri, "|SOCK_CLOEXEC");
 		}
+		if ((val & SOCK_CLOFORK) != 0) {
+			outstring(pri, "|SOCK_CLOFORK");
+		}
+		if ((val & SOCK_NDELAY) != 0) {
+			outstring(pri, "|SOCK_NDELAY");
+		}
+		if ((val & SOCK_NONBLOCK) != 0) {
+			outstring(pri, "|SOCK_NONBLOCK");
+		}
 	} else {
 		prt_dec(pri, 0, val);
 	}
@@ -1900,13 +1911,17 @@ prt_acf(private_t *pri, int raw, long val)
 {
 	int first = 1;
 	if (raw || !val ||
-	    (val & ~(SOCK_CLOEXEC|SOCK_NDELAY|SOCK_NONBLOCK))) {
+	    (val & ~(SOCK_CLOEXEC|SOCK_NDELAY|SOCK_NONBLOCK|SOCK_CLOFORK))) {
 		prt_dex(pri, 0, val);
 		return;
 	}
 
 	if (val & SOCK_CLOEXEC) {
 		outstring(pri, "|SOCK_CLOEXEC" + first);
+		first = 0;
+	}
+	if (val & SOCK_CLOFORK) {
+		outstring(pri, "|SOCK_CLOFORK" + first);
 		first = 0;
 	}
 	if (val & SOCK_NDELAY) {
@@ -2051,6 +2066,8 @@ tcp_optname(private_t *pri, long val)
 	case TCP_KEEPCNT:		return ("TCP_KEEPCNT");
 	case TCP_KEEPINTVL:		return ("TCP_KEEPINTVL");
 	case TCP_CONGESTION:		return ("TCP_CONGESTION");
+	case TCP_QUICKACK:		return ("TCP_QUICKACK");
+	case TCP_MD5SIG:		return ("TCP_MD5SIG");
 
 	default:			(void) snprintf(pri->code_buf,
 					    sizeof (pri->code_buf),
@@ -2143,6 +2160,7 @@ ip_optname(private_t *pri, long val)
 	/* IP_PKTINFO and IP_RECVPKTINFO share the same code */
 	case IP_PKTINFO:		return ("IP_PKTINFO/IP_RECVPKTINFO");
 	case IP_DONTFRAG:		return ("IP_DONTFRAG");
+	case IP_MINTTL:			return ("IP_MINTTL");
 	case IP_SEC_OPT:		return ("IP_SEC_OPT");
 	case MCAST_JOIN_GROUP:		return ("MCAST_JOIN_GROUP");
 	case MCAST_LEAVE_GROUP:		return ("MCAST_LEAVE_GROUP");
@@ -2213,6 +2231,7 @@ ipv6_optname(private_t *pri, long val)
 	case MCAST_UNBLOCK_SOURCE:	return ("MCAST_UNBLOCK_SOURCE");
 	case MCAST_JOIN_SOURCE_GROUP:	return ("MCAST_JOIN_SOURCE_GROUP");
 	case MCAST_LEAVE_SOURCE_GROUP:	return ("MCAST_LEAVE_SOURCE_GROUP");
+	case IPV6_MINHOPCOUNT:		return ("IPV6_MINHOPCOUNT");
 
 	default:			(void) snprintf(pri->code_buf,
 					    sizeof (pri->code_buf), "0x%lx",
@@ -2469,7 +2488,6 @@ prt_ffg(private_t *pri, int raw, long val)
 #define	CBSIZE	sizeof (pri->code_buf)
 	char *s = pri->code_buf;
 	size_t used = 1;
-	struct fcntl_flags *fp;
 
 	if (raw) {
 		(void) snprintf(s, CBSIZE, "0x%lx", val);
@@ -2482,8 +2500,54 @@ prt_ffg(private_t *pri, int raw, long val)
 	}
 
 	*s = '\0';
-	for (fp = fcntl_flags;
-	    fp < &fcntl_flags[sizeof (fcntl_flags) / sizeof (*fp)]; fp++) {
+	for (size_t i = 0; i < ARRAY_SIZE(fcntl_flags); i++) {
+		struct fcntl_flags *fp = &fcntl_flags[i];
+		if (val & fp->val) {
+			used = strlcat(s, fp->name, CBSIZE);
+			val &= ~fp->val;
+		}
+	}
+
+	if (val != 0 && used <= CBSIZE)
+		used += snprintf(s + used, CBSIZE - used, "|0x%lx", val);
+
+	if (used >= CBSIZE)
+		(void) snprintf(s + 1, CBSIZE-1, "0x%lx", val);
+	outstring(pri, s + 1);
+#undef CBSIZE
+}
+
+/*
+ * Print fcntl() F_GETFD/F_SETFD values
+ */
+static struct fcntl_fdflags {
+	long		val;
+	const char	*name;
+} fcntl_fdflags[] = {
+	{ FD_CLOEXEC, "|FD_CLOEXEC" },
+	{ FD_CLOFORK, "|FD_CLOFORK" }
+};
+
+void
+prt_ffd(private_t *pri, int raw, long val)
+{
+#define	CBSIZE	sizeof (pri->code_buf)
+	char *s = pri->code_buf;
+	size_t used = 1;
+
+	if (raw) {
+		(void) snprintf(s, CBSIZE, "0x%lx", val);
+		outstring(pri, s);
+		return;
+	}
+	if (val == 0) {
+		outstring(pri, "(no flags)");
+		return;
+	}
+
+	*s = '\0';
+	for (size_t i = 0; i < ARRAY_SIZE(fcntl_fdflags); i++) {
+		struct fcntl_fdflags *fp = &fcntl_fdflags[i];
 		if (val & fp->val) {
 			used = strlcat(s, fp->name, CBSIZE);
 			val &= ~fp->val;
@@ -3015,6 +3079,123 @@ prt_grf(private_t *pri, int raw, long val)
 	}
 }
 
+void
+prt_exc(private_t *pri, int raw, long val)
+{
+#define	CBSIZE	sizeof (pri->code_buf)
+	char *str = pri->code_buf;
+	size_t used = 0;
+
+	if (raw) {
+		prt_hex(pri, 0, val);
+		return;
+	}
+	if (val == 0) {
+		outstring(pri, "0");
+		return;
+	}
+
+	*str = '\0';
+	if (val & EXEC_DESCRIPTOR) {
+		used = strlcat(str, "|EXEC_DESCRIPTOR", CBSIZE);
+		val &= ~EXEC_DESCRIPTOR;
+	}
+
+	if (val != 0 && used <= CBSIZE)
+		used += snprintf(str + used, CBSIZE - used, "|0x%lx", val);
+
+	if (used >= CBSIZE)
+		(void) snprintf(str + 1, CBSIZE - 1, "0x%lx", val);
+
+	outstring(pri, str + 1);
+#undef CBSIZE
+}
+
+/*
+ * Print recv*(), send*() flags. This includes all the msg_flags data as well as
+ * they're the same namespace.
+ */
+static struct sendrecv_flags {
+	long		val;
+	const char	*name;
+} sendrecv_flags[] = {
+	{ MSG_OOB, "|MSG_OOB" },
+	{ MSG_PEEK, "|MSG_PEEK" },
+	{ MSG_DONTROUTE, "|MSG_DONTROUTE" },
+	{ MSG_CTRUNC, "|MSG_CTRUNC" },
+	{ MSG_TRUNC, "|MSG_TRUNC" },
+	{ MSG_WAITALL, "|MSG_WAITALL" },
+	{ MSG_DONTWAIT, "|MSG_DONTWAIT" },
+	{ MSG_NOTIFICATION, "|MSG_NOTIFICATION" },
+	{ MSG_NOSIGNAL, "|MSG_NOSIGNAL" },
+	{ MSG_DUPCTRL, "|MSG_DUPCTRL" },
+	{ MSG_CMSG_CLOEXEC, "|MSG_CMSG_CLOEXEC" },
+	{ MSG_CMSG_CLOFORK, "|MSG_CMSG_CLOFORK" },
+	{ MSG_XPG4_2, "|MSG_XPG4_2" }
+};
+
+void
+prt_srf(private_t *pri, int raw, long val)
+{
+#define	CBSIZE	sizeof (pri->code_buf)
+	char *s = pri->code_buf;
+	size_t used = 1;
+
+	if (raw) {
+		(void) snprintf(s, CBSIZE, "0x%lx", val);
+		outstring(pri, s);
+		return;
+	}
+	if (val == 0) {
+		outstring(pri, "(no flags)");
+		return;
+	}
+
+	*s = '\0';
+	for (size_t i = 0; i < ARRAY_SIZE(sendrecv_flags); i++) {
+		struct sendrecv_flags *fp = &sendrecv_flags[i];
+		if (val & fp->val) {
+			used = strlcat(s, fp->name, CBSIZE);
+			val &= ~fp->val;
+		}
+	}
+
+	if (val != 0 && used <= CBSIZE)
+		used += snprintf(s + used, CBSIZE - used, "|0x%lx", val);
+
+	if (used >= CBSIZE)
+		(void) snprintf(s + 1, CBSIZE-1, "0x%lx", val);
+	outstring(pri, s + 1);
+#undef CBSIZE
+}
+
+/*
+ * Print fdsync() internal argument.
+ */
+void
+prt_fds(private_t *pri, int raw, long val)
+{
+	if (raw) {
+		prt_hex(pri, 0, val);
+		return;
+	}
+
+	switch (val) {
+	case FDSYNC_FS:
+		outstring(pri, "FDSYNC_FS");
+		break;
+	case FDSYNC_FILE:
+		outstring(pri, "FDSYNC_FILE");
+		break;
+	case FDSYNC_DATA:
+		outstring(pri, "FDSYNC_DATA");
+		break;
+	default:
+		prt_hex(pri, 0, val);
+		break;
+	}
+}
+
 /*
  * Array of pointers to print functions, one for each format.
  */
@@ -3123,5 +3304,9 @@ void (* const Print[])() = {
 	prt_grf,	/* GRF -- print getrandom flags */
 	prt_psdelta,	/* PSDLT -- print psecflags(2) delta */
 	prt_psfw,	/* PSFW -- print psecflags(2) set */
+	prt_exc,	/* EXC -- print execvex() flags */
+	prt_ffd,	/* FFD -- print fcntl() F_SETFD flags */
+	prt_srf,	/* SRF -- print send*()/recv*() flags */
+	prt_fds,	/* FDS -- print fdsync() flags */
 	prt_dec,	/* HID -- hidden argument, make this the last one */
 };

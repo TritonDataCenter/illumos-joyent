@@ -36,7 +36,7 @@
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #ifndef	_VIONA_IMPL_H
@@ -67,6 +67,23 @@ typedef struct viona_desb viona_desb_t;
 struct viona_net;
 typedef struct viona_neti viona_neti_t;
 
+typedef struct viona_transfer_stats {
+	/* Packets transferred successfully */
+	uint64_t vts_packets;
+	/* Bytes transferred successfully */
+	uint64_t vts_bytes;
+	/*
+	 * Count of transfers which encountered errors, not including
+	 * insufficient space in ring.
+	 */
+	uint64_t vts_errors;
+	/*
+	 * Count of packets dropped due to insufficient space in the ring or by
+	 * order of associated hook.
+	 */
+	uint64_t vts_drops;
+} viona_transfer_stats_t;
+
 enum viona_ring_state {
 	VRS_RESET	= 0x0,	/* just allocated or reset */
 	VRS_SETUP	= 0x1,	/* addrs setup and starting worker thread */
@@ -81,6 +98,37 @@ enum viona_ring_state_flags {
 	VRSF_RENEW	= 0x8,	/* ring renewing lease */
 };
 
+typedef struct viona_vring_tx {
+	/*
+	 * Temporary store of kernel-virtual addresses of guest buffers in a
+	 * descriptor chain undergoing transmission.
+	 *
+	 * Length stored in vrt_iov_cnt.
+	 */
+	struct iovec	*vrt_iov;
+	/*
+	 * When device is configured to "loan" guest memory for transmitted
+	 * packets, rather than allocating and copying them in their entirety,
+	 * this holds a ring-sized array of viona_desb_t entries.
+	 *
+	 * In addition to the desballoc() accounting, those descriptors also
+	 * hold a pre-allocated buffer sized to receive the packet headers
+	 * (which must be copied despite for TOCTOU reasons).
+	 */
+	viona_desb_t	*vrt_desb;
+	/*
+	 * Length of vrt_iov
+	 */
+	uint_t		vrt_iov_cnt;
+	/*
+	 * Length in bytes to leave "empty" in front of the headers for each
+	 * transmitted packet.  This allows subsequent encapsulation (such as
+	 * vlans, VXLAN, etc) to use the space without requiring an additional
+	 * allocation and header copy.
+	 */
+	uint_t		vrt_header_pad;
+} viona_vring_tx_t;
+
 typedef struct viona_vring {
 	viona_link_t	*vr_link;
 
@@ -92,9 +140,8 @@ typedef struct viona_vring {
 	kthread_t	*vr_worker_thread;
 	vmm_lease_t	*vr_lease;
 
-	/* ring-sized resources for TX activity */
-	viona_desb_t	*vr_txdesb;
-	struct iovec	*vr_txiov;
+	/* Resources required for transmission on TX ring(s) */
+	struct viona_vring_tx vr_tx;
 
 	uint_t		vr_intr_enabled;
 	uint64_t	vr_msi_addr;
@@ -113,8 +160,11 @@ typedef struct viona_vring {
 	void		**vr_map_pages;
 	vmm_page_t	*vr_map_hold;
 
+	/* Per-ring general statistics */
+	struct viona_transfer_stats vr_stats;
+
 	/* Per-ring error condition statistics */
-	struct viona_ring_stats {
+	struct viona_ring_err_stats {
 		uint64_t	rs_ndesc_too_high;
 		uint64_t	rs_bad_idx;
 		uint64_t	rs_indir_bad_len;
@@ -123,6 +173,7 @@ typedef struct viona_vring {
 		uint64_t	rs_no_space;
 		uint64_t	rs_too_many_desc;
 		uint64_t	rs_desc_bad_len;
+		uint64_t	rs_len_overflow;
 
 		uint64_t	rs_bad_ring_addr;
 
@@ -135,13 +186,24 @@ typedef struct viona_vring {
 		uint64_t	rs_rx_merge_underrun;
 		uint64_t	rs_rx_pad_short;
 		uint64_t	rs_rx_mcast_check;
+		uint64_t	rs_rx_drop_over_mtu;
+		uint64_t	rs_rx_gro_fallback;
+		uint64_t	rs_rx_gro_fallback_fail;
 		uint64_t	rs_too_short;
 		uint64_t	rs_tx_absent;
+		uint64_t	rs_tx_gso_fail;
 
 		uint64_t	rs_rx_hookdrop;
 		uint64_t	rs_tx_hookdrop;
-	} vr_stats;
+	} vr_err_stats;
 } viona_vring_t;
+
+typedef struct viona_link_params {
+	/* Amount of free space to prepend to TX header mblk */
+	uint16_t	vlp_tx_header_pad;
+	/* Force copying of TX data, rather than "loaning" guest memory */
+	boolean_t	vlp_tx_copy_data;
+} viona_link_params_t;
 
 struct viona_link {
 	vmm_hold_t		*l_vm_hold;
@@ -152,6 +214,8 @@ struct viona_link {
 	uint32_t		l_features;
 	uint32_t		l_features_hw;
 	uint32_t		l_cap_csum;
+	viona_link_params_t	l_params;
+	uint16_t		l_mtu;
 
 	uint16_t		l_notify_ioport;
 	void			*l_notify_cookie;
@@ -166,6 +230,12 @@ struct viona_link {
 	pollhead_t		l_pollhead;
 
 	viona_neti_t		*l_neti;
+
+	kmutex_t		l_stats_lock;
+	struct viona_link_stats {
+		struct viona_transfer_stats vls_rx;
+		struct viona_transfer_stats vls_tx;
+	} l_stats;
 };
 
 typedef struct viona_nethook {
@@ -192,15 +262,46 @@ struct viona_neti {
 	list_t			vni_dev_list;	/* Protected by vni_lock */
 };
 
+typedef struct viona_kstats {
+	kstat_named_t	vk_rx_packets;
+	kstat_named_t	vk_rx_bytes;
+	kstat_named_t	vk_rx_errors;
+	kstat_named_t	vk_rx_drops;
+	kstat_named_t	vk_tx_packets;
+	kstat_named_t	vk_tx_bytes;
+	kstat_named_t	vk_tx_errors;
+	kstat_named_t	vk_tx_drops;
+} viona_kstats_t;
+
 typedef struct used_elem {
 	uint16_t	id;
 	uint32_t	len;
 } used_elem_t;
 
+/*
+ * Helper for performing copies from an array of iovec entries.
+ */
+typedef struct iov_bunch {
+	/*
+	 * Head of array of iovec entries, which have an iov_len sum covering
+	 * ib_remain bytes.
+	 */
+	struct iovec	*ib_iov;
+	/* Byte offset in current ib_iov entry */
+	uint32_t	ib_offset;
+	/*
+	 * Bytes remaining in entries covered by ib_iov entries, not including
+	 * the offset specified by ib_offset
+	 */
+	uint32_t	ib_remain;
+} iov_bunch_t;
+
 typedef struct viona_soft_state {
 	kmutex_t		ss_lock;
 	viona_link_t		*ss_link;
 	list_node_t		ss_node;
+	kstat_t			*ss_kstat;
+	minor_t			ss_minor;
 } viona_soft_state_t;
 
 #pragma pack(1)
@@ -259,9 +360,9 @@ struct virtio_net_hdr {
 #define	VIONA_PROBE_BAD_RING_ADDR(r, a)		\
 	VIONA_PROBE2(bad_ring_addr, viona_vring_t *, r, void *, (void *)(a))
 
+/* Increment one of the named ring error stats */
 #define	VIONA_RING_STAT_INCR(r, name)	\
-	(((r)->vr_stats.rs_ ## name)++)
-
+	(((r)->vr_err_stats.rs_ ## name)++)
 
 #define	VIONA_MAX_HDRS_LEN	(sizeof (struct ether_vlan_header) + \
 	IP_MAX_HDR_LENGTH + TCP_MAX_HDR_LENGTH)
@@ -290,6 +391,28 @@ struct virtio_net_hdr {
 #define	VIRTIO_F_RING_INDIRECT_DESC	(1 << 28)
 #define	VIRTIO_F_RING_EVENT_IDX		(1 << 29)
 
+/*
+ * Place an upper bound on the size of packets viona is willing to handle,
+ * particularly in the TX case, where guest behavior directs the sizing of
+ * buffer allocations.
+ * In the RX case, upper bounds are provided by the MTU (below) and a
+ * GRO-specific limit provided by the specification.
+ */
+#define	VIONA_MAX_PACKET_SIZE		UINT16_MAX
+#define	VIONA_GRO_MAX_PACKET_SIZE	65550
+
+/*
+ * Virtio v1.1+ allow the host to communicate its underlying MTU to the guest,
+ * which the guest uses to determine the maximum packet it is able to receive.
+ * Devices/drivers (legacy and otherwise) which do not negotiate this behave as
+ * though the MTU is 1500.
+ * The value for max MTU is part of the virtio spec (v1.0--1.3), and may need to
+ * change in future to account for IPv6 jumbograms (64 KiB..4GiB).
+ */
+#define	VIONA_MIN_MTU			68
+#define	VIONA_MAX_MTU			UINT16_MAX
+#define	VIONA_DEFAULT_MTU		1500
+
 struct viona_ring_params {
 	uint64_t	vrp_pa;
 	uint16_t	vrp_size;
@@ -309,7 +432,7 @@ bool vring_need_bail(const viona_vring_t *);
 int viona_ring_pause(viona_vring_t *);
 
 int vq_popchain(viona_vring_t *, struct iovec *, uint_t, uint16_t *,
-    vmm_page_t **);
+    vmm_page_t **, uint32_t *);
 void vq_pushchain(viona_vring_t *, uint32_t, uint16_t);
 void vq_pushchain_many(viona_vring_t *, uint_t, used_elem_t *);
 
@@ -319,6 +442,12 @@ void viona_ring_disable_notify(viona_vring_t *);
 void viona_ring_enable_notify(viona_vring_t *);
 uint16_t viona_ring_num_avail(viona_vring_t *);
 
+void viona_ring_stat_accept(viona_vring_t *, uint32_t);
+void viona_ring_stat_drop(viona_vring_t *);
+void viona_ring_stat_error(viona_vring_t *);
+
+bool iov_bunch_copy(iov_bunch_t *, void *, uint32_t);
+bool iov_bunch_next_chunk(iov_bunch_t *, caddr_t *, uint32_t *);
 
 void viona_rx_init(void);
 void viona_rx_fini(void);
@@ -327,6 +456,8 @@ void viona_rx_clear(viona_link_t *);
 void viona_worker_rx(viona_vring_t *, viona_link_t *);
 
 extern kmutex_t viona_force_copy_lock;
+extern uint_t viona_max_header_pad;
+boolean_t viona_tx_copy_needed(void);
 void viona_worker_tx(viona_vring_t *, viona_link_t *);
 void viona_tx_ring_alloc(viona_vring_t *, const uint16_t);
 void viona_tx_ring_free(viona_vring_t *, const uint16_t);

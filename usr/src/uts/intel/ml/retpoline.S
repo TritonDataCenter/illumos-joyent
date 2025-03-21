@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 	.file	"retpoline.s"
@@ -119,18 +120,23 @@
 	RETPOLINE_MKJUMP(r15)
 
 	/*
-	 * The x86_rsb_stuff function is called from pretty arbitrary
-	 * contexts. It's much easier for us to save and restore all the
-	 * registers we touch rather than clobber them for callers. You must
-	 * preserve this property or the system will panic at best.
+	 * The x86_rsb_stuff{,_vmexit} functions can be called from pretty
+	 * arbitrary contexts. It's much easier for us to save and restore all
+	 * the registers we touch rather than clobber them for callers. You
+	 * must preserve this property or the system will panic at best.
+	 *
+	 * The reason for two entry points is because the need to RSB stuff
+	 * on Intel depends greatly on factors that are different in the
+	 * VMEXIT case, vs. the other context-switching cases
+	 *
+	 * See cpuid.c's cpuid_patch_rsb() for where the two entry points'
+	 * NOPs actually get patched with one-byte RETs as need be, and the
+	 * rules we use to determine which gets disabled with a RET, and which
+	 * maintain their NOP to proceed to executing the stuffing sequence.
 	 */
-	ENTRY(x86_rsb_stuff)
-	/*
-	 * These nops are present so we can patch a ret instruction if we need
-	 * to disable RSB stuffing because enhanced IBRS is present or we're
-	 * disabling mitigations.
-	 */
+	ENTRY_NP(x86_rsb_stuff_vmexit)
 	nop
+	ALTENTRY(x86_rsb_stuff)
 	nop
 	pushq	%rdi
 	pushq	%rax
@@ -154,6 +160,61 @@ rsb_loop:
 	popq	%rdi
 	ret
 	SET_SIZE(x86_rsb_stuff)
+	SET_SIZE(x86_rsb_stuff_vmexit)
+
+	/*
+	 * The x86_bhb_clear() function is similar to x86_rsb_stuff(),
+	 * including its reasons for conservative register preservation, but
+	 * it clears branch-history with a software sequence from this
+	 * document (pardon the long URL):
+	 */
+	/* BEGIN CSTYLED */
+	/*
+	 * https://www.intel.com/content/www/us/en/developer/articles/technical/software-security-guidance/technical-documentation/branch-history-injection.html
+	 */
+	/* END CSTYLED */
+	/*
+	 * The patchable-spot is a NOP which can be patched with a RET if
+	 * the CPU is properly working (either too old, mitigated, or actually
+	 * fixed, see cpuid.c).
+	 */
+	ENTRY_NP(x86_bhb_clear)
+	nop
+	pushq   %rcx
+	pushq   %rax
+	pushq   %rbx
+	movq    %rsp, %rbx
+
+        /* INTEL-PROVIDED SEQUENCE START */
+	movl	$5, %ecx
+	call	1f
+	jmp	5f
+	.align	64
+1:
+	call	2f
+	ret
+	.align	64
+2:
+	movl	$5, %eax
+3:
+	jmp	4f
+	nop
+4:
+	sub	$1, %eax
+	jnz	3b
+	sub	$1, %ecx
+	jnz	1b
+	ret
+5:
+	lfence
+	/* INTEL-PROVIDED SEQUENCE FINISH */
+
+	movq	%rbx, %rsp
+	popq	%rbx
+	popq	%rax
+	popq	%rcx
+	ret
+	SET_SIZE(x86_bhb_clear)
 
 #elif defined(__i386)
 

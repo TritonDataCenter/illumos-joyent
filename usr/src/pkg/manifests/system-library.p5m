@@ -165,6 +165,8 @@ link path=lib/$(ARCH64)/libnsl.so target=libnsl.so.1
 file path=lib/$(ARCH64)/libnsl.so.1
 link path=lib/$(ARCH64)/libnvpair.so target=libnvpair.so.1
 file path=lib/$(ARCH64)/libnvpair.so.1
+link path=lib/$(ARCH64)/libnwam.so target=libnwam.so.1
+file path=lib/$(ARCH64)/libnwam.so.1
 link path=lib/$(ARCH64)/libofmt.so target=libofmt.so.1
 file path=lib/$(ARCH64)/libofmt.so.1
 link path=lib/$(ARCH64)/libpam.so target=libpam.so.1
@@ -1269,6 +1271,8 @@ license usr/src/common/mpi/THIRDPARTYLICENSE \
     license=usr/src/common/mpi/THIRDPARTYLICENSE
 license usr/src/common/util/THIRDPARTYLICENSE.multi3 \
     license=usr/src/common/util/THIRDPARTYLICENSE.multi3
+license usr/src/common/util/THIRDPARTYLICENSE.uiuc \
+    license=usr/src/common/util/THIRDPARTYLICENSE.uiuc
 license usr/src/lib/libbsdmalloc/THIRDPARTYLICENSE \
     license=usr/src/lib/libbsdmalloc/THIRDPARTYLICENSE
 license usr/src/lib/libc/THIRDPARTYLICENSE \

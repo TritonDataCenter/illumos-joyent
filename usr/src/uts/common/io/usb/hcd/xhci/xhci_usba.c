@@ -12,7 +12,7 @@
 /*
  * Copyright (c) 2018, Joyent, Inc.
  * Copyright (c) 2019 by Western Digital Corporation
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -159,12 +159,12 @@ xhci_hcdi_pipe_open(usba_pipe_handle_data_t *ph, usb_flags_t usb_flags)
 		 * The endpoint is already initialized but is not presently
 		 * open so we can take it over here.
 		 */
-		if ((ret = xhci_endpoint_reinit(xhcip, xd, xep, ph) != 0)) {
+		if ((ret = xhci_endpoint_reopen(xhcip, xd, xep, ph) != 0)) {
 			mutex_exit(&xhcip->xhci_lock);
 
 			kmem_free(pipe, sizeof (xhci_pipe_t));
 			xhci_log(xhcip, "!asked to reopen endpoint %d on "
-			    "slot %d and port %d, but reinit failed (%d)",
+			    "slot %d and port %d, but reopen failed (%d)",
 			    epid, xd->xd_slot, xd->xd_port, ret);
 			return (ret);
 		}
@@ -177,11 +177,11 @@ xhci_hcdi_pipe_open(usba_pipe_handle_data_t *ph, usb_flags_t usb_flags)
 		if ((ret = xhci_endpoint_quiesce(xhcip, xd, xep)) !=
 		    USB_SUCCESS) {
 			/*
-			 * If we could not quiesce the endpoint, release it so
+			 * If we could not quiesce the endpoint, close it so
 			 * that another open can try again.
 			 */
 			xep->xep_state &= ~XHCI_ENDPOINT_QUIESCE;
-			xhci_endpoint_release(xhcip, xep);
+			xhci_endpoint_close(xhcip, xep);
 			mutex_exit(&xhcip->xhci_lock);
 
 			kmem_free(pipe, sizeof (xhci_pipe_t));
@@ -203,7 +203,7 @@ xhci_hcdi_pipe_open(usba_pipe_handle_data_t *ph, usb_flags_t usb_flags)
 		    (ret = xhci_endpoint_ring(xhcip, xd, xep)) != 0) {
 			mutex_enter(&xhcip->xhci_lock);
 			xep->xep_state &= ~XHCI_ENDPOINT_QUIESCE;
-			xhci_endpoint_release(xhcip, xep);
+			xhci_endpoint_close(xhcip, xep);
 			mutex_exit(&xhcip->xhci_lock);
 
 			kmem_free(pipe, sizeof (xhci_pipe_t));
@@ -239,6 +239,12 @@ xhci_hcdi_pipe_open(usba_pipe_handle_data_t *ph, usb_flags_t usb_flags)
 	}
 	xep = xd->xd_endpoints[epid];
 
+	/*
+	 * At this point the endpoint is marked open and if it needs to be torn
+	 * down, xhci_endpoint_close() must be called before anything else to
+	 * clear that state.
+	 */
+
 	mutex_enter(&xd->xd_imtx);
 	mutex_exit(&xhcip->xhci_lock);
 
@@ -263,7 +269,17 @@ xhci_hcdi_pipe_open(usba_pipe_handle_data_t *ph, usb_flags_t usb_flags)
 	XHCI_DMA_SYNC(xd->xd_ictx, DDI_DMA_SYNC_FORDEV);
 	if (xhci_check_dma_handle(xhcip, &xd->xd_ictx) != DDI_FM_OK) {
 		mutex_exit(&xd->xd_imtx);
+
+		/*
+		 * Because this failure occured prior to the configure endpoint
+		 * command, the controller has no knowledge of it.  We must
+		 * immediately mark it closed and free it.
+		 */
+		mutex_enter(&xhcip->xhci_lock);
+		xhci_endpoint_close(xhcip, xep);
 		xhci_endpoint_fini(xd, epid);
+		mutex_exit(&xhcip->xhci_lock);
+
 		kmem_free(pipe, sizeof (xhci_pipe_t));
 		xhci_error(xhcip, "failed to open pipe on endpoint %d of "
 		    "device with slot %d and port %d: encountered fatal FM "
@@ -275,7 +291,23 @@ xhci_hcdi_pipe_open(usba_pipe_handle_data_t *ph, usb_flags_t usb_flags)
 
 	if ((ret = xhci_command_configure_endpoint(xhcip, xd)) != USB_SUCCESS) {
 		mutex_exit(&xd->xd_imtx);
+
+		xhci_error(xhcip, "failed to open pipe on endpoint %d of "
+		    "device with slot %d and port %d: configure endpoint "
+		    "command failed (%d)", epid, xd->xd_slot, xd->xd_port, ret);
+
+		/*
+		 * Because the configure endpoint command failed, we must
+		 * assume the controller still doesn't know anything about it
+		 * and immediately close and free the endpoint.  If we don't do
+		 * this, the endpoint will remain stuck in the open state until
+		 * it is removed and reinserted.
+		 */
+		mutex_enter(&xhcip->xhci_lock);
+		xhci_endpoint_close(xhcip, xep);
 		xhci_endpoint_fini(xd, epid);
+		mutex_exit(&xhcip->xhci_lock);
+
 		kmem_free(pipe, sizeof (xhci_pipe_t));
 		return (ret);
 	}
@@ -316,7 +348,10 @@ xhci_hcdi_periodic_free(xhci_t *xhcip, xhci_pipe_t *xp)
  * the ring to basically 'consume' everything. For periodic IN endpoints, we
  * need to handle this somewhat differently and actually close the original
  * request and not deallocate the related pieces as those exist for the lifetime
- * of the endpoint and are constantly reused.
+ * of the endpoint and are constantly reused. While interrupt IN endpoints are
+ * mostly seen as periodic, oneshot transfers on those endpoints still bear a
+ * USB request that must be completed, and are a special case where we must
+ * still free the transfer.
  */
 static void
 xhci_hcdi_pipe_flush(xhci_t *xhcip, xhci_endpoint_t *xep, int intr_code)
@@ -326,7 +361,8 @@ xhci_hcdi_pipe_flush(xhci_t *xhcip, xhci_endpoint_t *xep, int intr_code)
 	ASSERT(MUTEX_HELD(&xhcip->xhci_lock));
 
 	while ((xt = list_remove_head(&xep->xep_transfers)) != NULL) {
-		if (xhci_endpoint_is_periodic_in(xep) == B_FALSE) {
+		if (xhci_endpoint_is_periodic_in(xep) == B_FALSE ||
+		    XHCI_IS_ONESHOT_XFER(xt)) {
 			usba_hcdi_cb(xep->xep_pipe, xt->xt_usba_req,
 			    USB_CR_FLUSHED);
 			xhci_transfer_free(xhcip, xt);
@@ -534,8 +570,7 @@ xhci_hcdi_pipe_close(usba_pipe_handle_data_t *ph, usb_flags_t usb_flags)
 
 	/*
 	 * We clean up the endpoint by stopping it and cancelling any transfers
-	 * that were in flight at the time.  The endpoint is not unconfigured
-	 * until the device is torn down later.
+	 * that were in flight at the time.
 	 */
 	xhci_endpoint_timeout_cancel(xhcip, xep);
 	xep->xep_state |= XHCI_ENDPOINT_QUIESCE;
@@ -563,7 +598,38 @@ xhci_hcdi_pipe_close(usba_pipe_handle_data_t *ph, usb_flags_t usb_flags)
 		xhci_hcdi_periodic_free(xhcip, xp);
 	}
 
-	xhci_endpoint_release(xhcip, xep);
+	xhci_endpoint_close(xhcip, xep);
+
+	/*
+	 * The endpoint is now totally detached and inactive.  We leave bulk
+	 * and control endpoints configured (see endpoint management comments
+	 * in xhci.c).  Periodic endpoints maintain a bandwidth reservation
+	 * which inhibits the use of other devices, so we attempt to
+	 * unconfigure those here.
+	 */
+	if (xep->xep_type == USB_EP_ATTR_INTR ||
+	    xep->xep_type == USB_EP_ATTR_ISOCH) {
+		if ((ret = xhci_endpoint_unconfigure(xhcip, xd, xep)) ==
+		    USB_SUCCESS) {
+			/*
+			 * If we were able to unconfigure the endpoint from the
+			 * device we can free everything.  The endpoint will be
+			 * recreated if a pipe is opened again later.
+			 */
+			xhci_endpoint_fini(xd, epid);
+		} else {
+			/*
+			 * Report the error and keep the endpoint object around
+			 * as we do for a bulk endpoint.  From the USB
+			 * framework perspective the pipe is closed, so don't
+			 * fail the whole operation.
+			 */
+			xhci_error(xhcip, "failed to unconfigure periodic "
+			    "endpoint %u of device with slot %hhu and port %hd "
+			    "(%d)",
+			    epid, xd->xd_slot, xd->xd_port, ret);
+		}
+	}
 
 remove:
 	ph->p_hcd_private = NULL;
@@ -905,7 +971,7 @@ xhci_hcdi_pipe_bulk_xfer(usba_pipe_handle_data_t *ph, usb_bulk_req_t *ubrp,
 	epid = xhci_endpoint_pipe_to_epid(ph);
 	if (xd->xd_endpoints[epid] == NULL) {
 		mutex_exit(&xhcip->xhci_lock);
-		xhci_error(xhcip, "asked to do control transfer on slot %d, "
+		xhci_error(xhcip, "asked to do bulk transfer on slot %d, "
 		    "port %d, endpoint: %d, but no endpoint structure",
 		    xd->xd_slot, xd->xd_port, epid);
 		return (USB_FAILURE);

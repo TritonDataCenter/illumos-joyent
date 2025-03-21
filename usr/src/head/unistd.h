@@ -284,6 +284,13 @@ extern int execlp(const char *, const char *, ...);
 extern int execv(const char *, char *const *);
 extern int execve(const char *, char *const *, char *const *);
 extern int execvp(const char *, char *const *);
+#if defined(_XPG7) || !defined(_STRICT_SYMBOLS)
+extern int fexecve(int, char *const[], char *const[]);
+#endif
+#if !defined(_STRICT_SYMBOLS)
+extern int execvpe(const char *, char *const [], char *const []);
+extern int syncfs(int);
+#endif	/* !_STRICT_SYMBOLS */
 extern void _exit(int)
 	__NORETURN;
 /*

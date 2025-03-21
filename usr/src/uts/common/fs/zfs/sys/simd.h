@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #ifndef _SIMD_H
@@ -25,6 +26,7 @@
 #ifdef _KERNEL
 #include <sys/x86_archext.h>
 #include <sys/archsystm.h>
+#include <sys/systm.h>
 #include <sys/kfpu.h>
 #include <sys/proc.h>
 #include <sys/disp.h>
@@ -34,6 +36,14 @@ static inline int
 kfpu_allowed(void)
 {
 	extern int zfs_fpu_enabled;
+
+	/*
+	 * When panicking, play it safe and avoid kfpu use. This gives the best
+	 * chance of being able to dump successfully, particularly if the panic
+	 * occured around an FPU context switch.
+	 */
+	if (panicstr != NULL)
+		return (0);
 
 	return (zfs_fpu_enabled != 0 ? 1 : 0);
 }
@@ -98,6 +108,18 @@ static inline boolean_t
 zfs_avx2_available(void)
 {
 	return (is_x86_feature(x86_featureset, X86FSET_AVX2));
+}
+
+static inline boolean_t
+zfs_avx512f_available(void)
+{
+	return (is_x86_feature(x86_featureset, X86FSET_AVX512F));
+}
+
+static inline boolean_t
+zfs_avx512bw_available(void)
+{
+	return (is_x86_feature(x86_featureset, X86FSET_AVX512BW));
 }
 
 #else	/* ! _KERNEL */
@@ -165,6 +187,24 @@ zfs_avx2_available(void)
 
 	(void) getisax((uint32_t *)&u, 2);
 	return ((u[1] & AV_386_2_AVX2) != 0);
+}
+
+static inline boolean_t
+zfs_avx512f_available(void)
+{
+	uint32_t u[2] = { 0 };
+
+	(void) getisax((uint32_t *)&u, 2);
+	return ((u[1] & AV_386_2_AVX512F) != 0);
+}
+
+static inline boolean_t
+zfs_avx512bw_available(void)
+{
+	uint32_t u[2] = { 0 };
+
+	(void) getisax((uint32_t *)&u, 2);
+	return ((u[1] & AV_386_2_AVX512BW) != 0);
 }
 
 #endif	/* _KERNEL */

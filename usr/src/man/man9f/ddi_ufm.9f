@@ -11,7 +11,7 @@
 .\"
 .\" Copyright (c) 2019, Joyent, Inc.
 .\"
-.Dd Apr 30, 2019
+.Dd August 22, 2023
 .Dt DDI_UFM 9F
 .Os
 .Sh NAME
@@ -59,7 +59,7 @@ See
 .Xr ddi_ufm 9E
 for more information.
 .It Fa ufmp
-A pinter to the opaque handle returned from
+A pointer to the opaque handle returned from
 .Fn ddi_ufm_init .
 .It Fa ufmpp
 A pointer to store the opaque handle from
@@ -145,7 +145,7 @@ and
 functions are generally called from a device's
 .Xr attach 9E
 and
-.Xr fini 9E
+.Xr _fini 9E
 routines, though they may be called from
 .Sy user
 or
@@ -157,6 +157,6 @@ The
 function may be called from any context except a high-level interrupt
 handler above lock level.
 .Sh SEE ALSO
+.Xr _fini 9E ,
 .Xr attach 9E ,
-.Xr ddi_ufm 9E ,
-.Xr fini 9E
+.Xr ddi_ufm 9E

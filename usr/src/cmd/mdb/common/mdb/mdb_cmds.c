@@ -30,6 +30,7 @@
  * Copyright (c) 2013 Josef 'Jeff' Sipek <jeffpc@josefsipek.net>
  * Copyright (c) 2015, 2017 by Delphix. All rights reserved.
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include <sys/elf.h>
@@ -2022,6 +2023,7 @@ cmd_dis(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	int i;
 
 	uint_t opt_f = FALSE;		/* File-mode off by default */
+	uint_t opt_p = FALSE;		/* Physical mode off by default */
 	uint_t opt_w = FALSE;		/* Window mode off by default */
 	uint_t opt_a = FALSE;		/* Raw-address mode off by default */
 	uint_t opt_b = FALSE;		/* Address & symbols off by default */
@@ -2030,6 +2032,7 @@ cmd_dis(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 
 	i = mdb_getopts(argc, argv,
 	    'f', MDB_OPT_SETBITS, TRUE, &opt_f,
+	    'p', MDB_OPT_SETBITS, TRUE, &opt_p,
 	    'w', MDB_OPT_SETBITS, TRUE, &opt_w,
 	    'a', MDB_OPT_SETBITS, TRUE, &opt_a,
 	    'b', MDB_OPT_SETBITS, TRUE, &opt_b,
@@ -2092,11 +2095,26 @@ cmd_dis(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	/*
 	 * If the state is IDLE (i.e. no address space), turn on -f.
 	 */
-	if (mdb_tgt_status(tgt, &st) == 0 && st.st_state == MDB_TGT_IDLE)
+	if (mdb_tgt_status(tgt, &st) == 0 && st.st_state == MDB_TGT_IDLE) {
+		if (opt_p) {
+			mdb_warn("cannot use -p (physical address mode) when "
+			    "operating on a file\n");
+			return (DCMD_ERR);
+		}
 		opt_f = TRUE;
+	}
+
+	if (opt_f && opt_p) {
+		mdb_warn("-f (file mode) and -p (physical address mode) "
+		    "cannot be used together\n");
+		return (DCMD_ERR);
+	}
+
 
 	if (opt_f)
 		as = MDB_TGT_AS_FILE;
+	else if (opt_p)
+		as = MDB_TGT_AS_PHYS;
 	else
 		as = MDB_TGT_AS_VIRT_I;
 
@@ -2190,6 +2208,8 @@ dis_help(void)
 "values.\n"
 "  -f         Read instructions from the target's object file instead of the \n"
 "             target's virtual address space.\n"
+"  -p         Read instructions from the target's physical address space\n"
+"             rather than its virtual address space.\n"
 "  -n instr   Display 'instr' instructions before and after the given "
 "address.\n"
 "  -w         Force window behavior, even at the start of a function.\n"
@@ -3098,6 +3118,66 @@ dump_help(void)
 	    "      (default is 1, maximum is 16)\n");
 }
 
+static void
+bitx_help(void)
+{
+	mdb_printf(
+	    "Extract bits from an integer or, with the optional third\n"
+	    "argument, set the value in the provided bit range and show\n"
+	    "the result.\n\n"
+	    "Bit positions are inclusive and specified with the high bit\n"
+	    "first.\n");
+}
+
+static int
+cmd_bitx(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
+{
+	uint64_t val = addr;
+	uint8_t high, low;
+
+	if (!(flags & DCMD_ADDRSPEC))
+		return (DCMD_USAGE);
+
+	if (argc != 2 && argc != 3)
+		return (DCMD_USAGE);
+
+	high = (uint8_t)mdb_argtoull(&argv[0]);
+	low = (uint8_t)mdb_argtoull(&argv[1]);
+
+	if (high > 63 || low > 63) {
+		mdb_warn("bit positions must be in the range [0,%r]\n", 63);
+		return (DCMD_ERR);
+	}
+
+	if (high < low) {
+		mdb_warn("high bit must not be less than the low bit\n");
+		return (DCMD_ERR);
+	}
+
+	uint64_t mask = (1ULL << (high - low + 1)) - 1ULL;
+
+	if (argc == 3) {
+		uint64_t nval = (uint64_t)mdb_argtoull(&argv[2]);
+
+		if ((~mask & nval) != 0) {
+			mdb_warn(
+			    "value (%lr) too large for bit range [%r:%r]\n",
+			    nval, high, low);
+			return (DCMD_ERR);
+		}
+
+		val &= ~(mask << low);
+		val |= nval << low;
+
+		mdb_nv_set_value(mdb.m_dot, val);
+	} else {
+		val = ((val >> low) & mask);
+	}
+	mdb_printf("%lr\n", val);
+
+	return (DCMD_OK);
+}
+
 /*
  * Table of built-in dcmds associated with the root 'mdb' module.  Future
  * expansion of this program should be done here, or through the external
@@ -3148,12 +3228,14 @@ const mdb_dcmd_t mdb_dcmd_builtins[] = {
 	{ ":z", NULL, "delete all traced software events", cmd_zapall },
 	{ "array", ":[type count] [variable]", "print each array element's "
 	    "address", cmd_array },
+	{ "bitx", ":<high bit> <low bit> [new value]",
+	    "extract bits from, or set bits in, a value", cmd_bitx, bitx_help },
 	{ "bp", "?[+/-dDestT] [-c cmd] [-n count] sym ...", "breakpoint at the "
 	    "specified addresses or symbols", cmd_bp, bp_help },
 	{ "dcmds", "[[-n] pattern]",
 	    "list available debugger commands", cmd_dcmds, cmd_dcmds_help },
 	{ "delete", "?[id|all]", "delete traced software events", cmd_delete },
-	{ "dis", "?[-abfw] [-n cnt] [addr]", "disassemble near addr", cmd_dis,
+	{ "dis", "?[-abfpw] [-n cnt] [addr]", "disassemble near addr", cmd_dis,
 	    dis_help },
 	{ "disasms", NULL, "list available disassemblers", cmd_disasms },
 	{ "dismode", "[mode]", "get/set disassembly mode", cmd_dismode },

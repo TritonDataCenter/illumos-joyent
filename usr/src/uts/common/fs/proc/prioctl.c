@@ -439,8 +439,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(prp, cmaddr, sizeof (proc_t)))
 			error = EFAULT;
-		kmem_free(prp, sizeof (proc_t));
-		thing = NULL;
 		break;
 	}
 
@@ -453,8 +451,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(userp, cmaddr, sizeof (user_t)))
 			error = EFAULT;
-		kmem_free(userp, sizeof (user_t));
-		thing = NULL;
 		break;
 	}
 
@@ -557,7 +553,6 @@ startover:
 		}
 
 		idp = thing;
-		thing = NULL;
 		Bidp = idp;
 		if ((t = p->p_tlist) != NULL) {
 			do {
@@ -572,7 +567,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(Bidp, cmaddr, (Nlwp+1) * sizeof (id_t)))
 			error = EFAULT;
-		kmem_free(Bidp, (Nlwp+1) * sizeof (id_t));
 		break;
 	}
 
@@ -819,10 +813,6 @@ startover:
 			prunlock(pnp);
 			error = EINVAL;	/* No extra register support */
 		}
-		if (thing) {
-			kmem_free(thing, thingsize);
-			thing = NULL;
-		}
 		break;
 
 	case PIOCSTATUS:	/* get process/lwp status */
@@ -855,7 +845,6 @@ startover:
 		}
 
 		Bprsp = thing;
-		thing = NULL;
 		prsp = Bprsp;
 		oprgetstatus(t, prsp, VTOZONE(vp));
 		t = p->p_tlist;
@@ -870,7 +859,6 @@ startover:
 		if (copyout(Bprsp, cmaddr, (Nlwp+1) * sizeof (prstatus_t)))
 			error = EFAULT;
 
-		kmem_free(Bprsp, (Nlwp+1) * sizeof (prstatus_t));
 		break;
 	}
 
@@ -908,8 +896,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(sap, cmaddr, (nsig-1) * sizeof (struct sigaction)))
 			error = EFAULT;
-		kmem_free(sap, (nsig-1) * sizeof (struct sigaction));
-		thing = NULL;
 		break;
 	}
 
@@ -1192,8 +1178,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(Bupup, cmaddr, (Nlwp+1) * sizeof (prusage_t)))
 			error = EFAULT;
-		kmem_free(thing, thingsize);
-		thing = NULL;
 		break;
 	}
 
@@ -1260,7 +1244,6 @@ startover:
 		}
 
 		ssd = thing;
-		thing = NULL;
 		if (n != 0)
 			prgetldt(p, ssd);
 		mutex_exit(&p->p_ldtlock);
@@ -1271,7 +1254,6 @@ startover:
 		bzero(&ssd[n], sizeof (*ssd));
 		if (copyout(ssd, cmaddr, (n+1) * sizeof (*ssd)))
 			error = EFAULT;
-		kmem_free(ssd, (n+1) * sizeof (*ssd));
 		break;
 	}
 #endif	/* __x86 */
@@ -1289,8 +1271,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(gwp, cmaddr, sizeof (*gwp)))
 			error = EFAULT;
-		kmem_free(gwp, sizeof (gwindows_t));
-		thing = NULL;
 		break;
 	}
 #endif	/* __sparc */
@@ -1302,7 +1282,8 @@ startover:
 
 	}
 
-	ASSERT(thing == NULL);
+	if (thing != NULL)
+		kmem_free(thing, thingsize);
 	ASSERT(xpnp == NULL);
 	return (error);
 }
@@ -1444,6 +1425,7 @@ oprgetstatus32(kthread_t *t, prstatus32_t *sp, zone_t *zp)
 			sp->pr_sysarg[0] = 0;
 			sp->pr_sysarg[1] = (caddr32_t)up->u_argv;
 			sp->pr_sysarg[2] = (caddr32_t)up->u_envp;
+			sp->pr_sysarg[3] = 0;
 			for (i = 0, auxp = up->u_auxv;
 			    i < sizeof (up->u_auxv) / sizeof (up->u_auxv[0]);
 			    i++, auxp++) {
@@ -1975,8 +1957,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(prp, cmaddr, sizeof (proc_t)))
 			error = EFAULT;
-		kmem_free(prp, sizeof (proc_t));
-		thing = NULL;
 		break;
 	}
 
@@ -1989,8 +1969,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(userp, cmaddr, sizeof (user_t)))
 			error = EFAULT;
-		kmem_free(userp, sizeof (user_t));
-		thing = NULL;
 		break;
 	}
 
@@ -2115,7 +2093,6 @@ startover:
 		}
 
 		idp = thing;
-		thing = NULL;
 		Bidp = idp;
 		if ((t = p->p_tlist) != NULL) {
 			do {
@@ -2130,7 +2107,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(Bidp, cmaddr, (Nlwp+1) * sizeof (id_t)))
 			error = EFAULT;
-		kmem_free(Bidp, (Nlwp+1) * sizeof (id_t));
 		break;
 	}
 
@@ -2397,10 +2373,6 @@ startover:
 		if (error == 0 &&
 		    copyout(thing, cmaddr, thingsize))
 			error = EFAULT;
-		if (thing) {
-			kmem_free(thing, thingsize);
-			thing = NULL;
-		}
 		break;
 
 	case PIOCSTATUS:	/* get process/lwp status */
@@ -2424,10 +2396,6 @@ startover:
 
 		if (PROCESS_NOT_32BIT(p)) {
 			prunlock(pnp);
-			if (thing) {
-				kmem_free(thing, thingsize);
-				thing = NULL;
-			}
 			error = EOVERFLOW;
 			break;
 		}
@@ -2448,7 +2416,6 @@ startover:
 		}
 
 		Bprsp = (prstatus32_t *)thing;
-		thing = NULL;
 		prsp = Bprsp;
 		oprgetstatus32(t, prsp, VTOZONE(vp));
 		t = p->p_tlist;
@@ -2462,8 +2429,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(Bprsp, cmaddr, (Nlwp+1) * sizeof (prstatus32_t)))
 			error = EFAULT;
-
-		kmem_free(Bprsp, (Nlwp + 1) * sizeof (prstatus32_t));
 		break;
 	}
 
@@ -2506,8 +2471,6 @@ startover:
 		if (error == 0 &&
 		    copyout(sap, cmaddr, (nsig-1)*sizeof (struct sigaction32)))
 			error = EFAULT;
-		kmem_free(sap, (nsig-1)*sizeof (struct sigaction32));
-		thing = NULL;
 		break;
 	}
 
@@ -2793,8 +2756,6 @@ startover:
 		prunlock(pnp);
 		if (copyout(Bupup, cmaddr, (Nlwp+1) * sizeof (prusage32_t)))
 			error = EFAULT;
-		kmem_free(thing, thingsize);
-		thing = NULL;
 		break;
 	}
 
@@ -2871,7 +2832,6 @@ startover:
 		}
 
 		ssd = thing;
-		thing = NULL;
 		if (n != 0)
 			prgetldt(p, ssd);
 		mutex_exit(&p->p_ldtlock);
@@ -2882,7 +2842,6 @@ startover:
 		bzero(&ssd[n], sizeof (*ssd));
 		if (copyout(ssd, cmaddr, (n+1) * sizeof (*ssd)))
 			error = EFAULT;
-		kmem_free(ssd, (n+1) * sizeof (*ssd));
 		break;
 	}
 #endif	/* __i386_COMPAT */
@@ -2905,8 +2864,6 @@ startover:
 			if (copyout(gwp, cmaddr, sizeof (*gwp)))
 				error = EFAULT;
 		}
-		kmem_free(gwp, sizeof (*gwp));
-		thing = NULL;
 		break;
 	}
 #endif	/* __sparc */
@@ -2918,7 +2875,8 @@ startover:
 
 	}
 
-	ASSERT(thing == NULL);
+	if (thing != NULL)
+		kmem_free(thing, thingsize);
 	ASSERT(xpnp == NULL);
 	return (error);
 }
@@ -3252,6 +3210,7 @@ oprgetstatus(kthread_t *t, prstatus_t *sp, zone_t *zp)
 			sp->pr_sysarg[0] = 0;
 			sp->pr_sysarg[1] = (uintptr_t)up->u_argv;
 			sp->pr_sysarg[2] = (uintptr_t)up->u_envp;
+			sp->pr_sysarg[3] = 0;
 			for (i = 0, auxp = up->u_auxv;
 			    i < sizeof (up->u_auxv) / sizeof (up->u_auxv[0]);
 			    i++, auxp++) {

@@ -291,6 +291,7 @@ MANFILES=	__fbufsize.3c					\
 		posix_memalign.3c				\
 		posix_openpt.3c					\
 		posix_spawn.3c					\
+		posix_spawn_file_actions_addchdir.3c		\
 		posix_spawn_file_actions_addclose.3c		\
 		posix_spawn_file_actions_addclosefrom_np.3c	\
 		posix_spawn_file_actions_adddup2.3c		\
@@ -449,6 +450,20 @@ MANFILES=	__fbufsize.3c					\
 		stack_inbounds.3c				\
 		stack_setbounds.3c				\
 		stack_violation.3c				\
+		stdc_bit_ceil.3c				\
+		stdc_bit_floor.3c				\
+		stdc_bit_width.3c				\
+		stdc_count_ones.3c				\
+		stdc_count_zeros.3c				\
+		stdc_first_leading_one.3c			\
+		stdc_first_leading_zero.3c			\
+		stdc_first_trailing_one.3c			\
+		stdc_first_trailing_zero.3c			\
+		stdc_has_single_bit.3c				\
+		stdc_leading_ones.3c				\
+		stdc_leading_zeros.3c				\
+		stdc_trailing_ones.3c				\
+		stdc_trailing_zeros.3c				\
 		stdio.3c					\
 		str2sig.3c					\
 		strcoll.3c					\
@@ -468,6 +483,7 @@ MANFILES=	__fbufsize.3c					\
 		strxfrm.3c					\
 		swab.3c						\
 		sync_instruction_memory.3c			\
+		syncfs.3c					\
 		sysconf.3c					\
 		syslog.3c					\
 		system.3c					\
@@ -550,6 +566,8 @@ MANFILES=	__fbufsize.3c					\
 		wcscoll.3c					\
 		wcsdup.3c					\
 		wcsftime.3c					\
+		wcslcat.3c					\
+		wcslcpy.3c					\
 		wcslen.3c					\
 		wcsrtombs.3c					\
 		wcsstr.3c					\
@@ -1072,6 +1090,7 @@ MANLINKS=	FD_CLR.3c				\
 		port_dissociate.3c			\
 		port_getn.3c				\
 		port_sendn.3c				\
+		posix_spawn_file_actions_addfchdir.3c	\
 		posix_spawn_file_actions_addopen.3c	\
 		posix_spawn_file_actions_init.3c	\
 		posix_spawnattr_init.3c			\
@@ -1123,14 +1142,18 @@ MANLINKS=	FD_CLR.3c				\
 		pthread_barrierattr_init.3c		\
 		pthread_barrierattr_setpshared.3c	\
 		pthread_cond_broadcast.3c		\
+		pthread_cond_clockwait.3c		\
 		pthread_cond_destroy.3c			\
+		pthread_cond_relclockwait_np.3c		\
 		pthread_cond_reltimedwait_np.3c		\
 		pthread_cond_timedwait.3c		\
 		pthread_condattr_destroy.3c		\
 		pthread_condattr_setclock.3c		\
 		pthread_condattr_setpshared.3c		\
 		pthread_key_create_once_np.3c		\
+		pthread_mutex_clocklock.3c		\
 		pthread_mutex_destroy.3c		\
+		pthread_mutex_relclocklock_np.3c	\
 		pthread_mutex_reltimedlock_np.3c	\
 		pthread_mutex_setprioceiling.3c		\
 		pthread_mutex_trylock.3c		\
@@ -1141,8 +1164,12 @@ MANLINKS=	FD_CLR.3c				\
 		pthread_mutexattr_setpshared.3c		\
 		pthread_mutexattr_setrobust.3c		\
 		pthread_mutexattr_settype.3c		\
+		pthread_rwlock_clockrdlock.3c		\
+		pthread_rwlock_clockwrlock.3c		\
 		pthread_rwlock_destroy.3c		\
+		pthread_rwlock_relclockrdlock_np.3c	\
 		pthread_rwlock_reltimedrdlock_np.3c	\
+		pthread_rwlock_relclockwrlock_np.3c	\
 		pthread_rwlock_reltimedwrlock_np.3c	\
 		pthread_rwlock_tryrdlock.3c		\
 		pthread_rwlock_trywrlock.3c		\
@@ -1154,6 +1181,7 @@ MANLINKS=	FD_CLR.3c				\
 		pthread_setspecific.3c			\
 		pthread_spin_init.3c			\
 		pthread_spin_trylock.3c			\
+		ptsname_r.3c				\
 		putc.3c					\
 		putc_unlocked.3c			\
 		putchar.3c				\
@@ -1210,7 +1238,10 @@ MANLINKS=	FD_CLR.3c				\
 		schedctl_start.3c			\
 		schedctl_stop.3c			\
 		seconvert.3c				\
+		secure_getenv.3c			\
 		seed48.3c				\
+		sem_clockwait.3c			\
+		sem_relclockwait_np.3c			\
 		sem_reltimedwait_np.3c			\
 		sem_trywait.3c				\
 		sema_destroy.3c				\
@@ -1257,6 +1288,76 @@ MANLINKS=	FD_CLR.3c				\
 		srand48.3c				\
 		srandom.3c				\
 		sscanf.3c				\
+		stdc_bit_ceil_uc.3c			\
+		stdc_bit_ceil_us.3c			\
+		stdc_bit_ceil_ui.3c			\
+		stdc_bit_ceil_ul.3c			\
+		stdc_bit_ceil_ull.3c			\
+		stdc_bit_floor_uc.3c			\
+		stdc_bit_floor_us.3c			\
+		stdc_bit_floor_ui.3c			\
+		stdc_bit_floor_ul.3c			\
+		stdc_bit_floor_ull.3c			\
+		stdc_bit_width_uc.3c			\
+		stdc_bit_width_us.3c			\
+		stdc_bit_width_ui.3c			\
+		stdc_bit_width_ul.3c			\
+		stdc_bit_width_ull.3c			\
+		stdc_count_ones_uc.3c			\
+		stdc_count_ones_us.3c			\
+		stdc_count_ones_ui.3c			\
+		stdc_count_ones_ul.3c			\
+		stdc_count_ones_ull.3c			\
+		stdc_count_zeros_uc.3c			\
+		stdc_count_zeros_us.3c			\
+		stdc_count_zeros_ui.3c			\
+		stdc_count_zeros_ul.3c			\
+		stdc_count_zeros_ull.3c			\
+		stdc_first_leading_one_uc.3c		\
+		stdc_first_leading_one_us.3c		\
+		stdc_first_leading_one_ui.3c		\
+		stdc_first_leading_one_ul.3c		\
+		stdc_first_leading_one_ull.3c		\
+		stdc_first_leading_zero_uc.3c		\
+		stdc_first_leading_zero_us.3c		\
+		stdc_first_leading_zero_ui.3c		\
+		stdc_first_leading_zero_ul.3c		\
+		stdc_first_leading_zero_ull.3c		\
+		stdc_first_trailing_one_uc.3c		\
+		stdc_first_trailing_one_us.3c		\
+		stdc_first_trailing_one_ui.3c		\
+		stdc_first_trailing_one_ul.3c		\
+		stdc_first_trailing_one_ull.3c		\
+		stdc_first_trailing_zero_uc.3c		\
+		stdc_first_trailing_zero_us.3c		\
+		stdc_first_trailing_zero_ui.3c		\
+		stdc_first_trailing_zero_ul.3c		\
+		stdc_first_trailing_zero_ull.3c		\
+		stdc_has_single_bit_uc.3c		\
+		stdc_has_single_bit_us.3c		\
+		stdc_has_single_bit_ui.3c		\
+		stdc_has_single_bit_ul.3c		\
+		stdc_has_single_bit_ull.3c		\
+		stdc_leading_ones_uc.3c			\
+		stdc_leading_ones_us.3c			\
+		stdc_leading_ones_ui.3c			\
+		stdc_leading_ones_ul.3c			\
+		stdc_leading_ones_ull.3c		\
+		stdc_leading_zeros_uc.3c		\
+		stdc_leading_zeros_us.3c		\
+		stdc_leading_zeros_ui.3c		\
+		stdc_leading_zeros_ul.3c		\
+		stdc_leading_zeros_ull.3c		\
+		stdc_trailing_ones_uc.3c		\
+		stdc_trailing_ones_us.3c		\
+		stdc_trailing_ones_ui.3c		\
+		stdc_trailing_ones_ul.3c		\
+		stdc_trailing_ones_ull.3c		\
+		stdc_trailing_zeros_uc.3c		\
+		stdc_trailing_zeros_us.3c		\
+		stdc_trailing_zeros_ui.3c		\
+		stdc_trailing_zeros_ul.3c		\
+		stdc_trailing_zeros_ull.3c		\
 		stderr.3c				\
 		stdin.3c				\
 		stdout.3c				\
@@ -1277,6 +1378,8 @@ MANLINKS=	FD_CLR.3c				\
 		strdupa.3c				\
 		strerror_l.3c				\
 		strerror_r.3c				\
+		strerrordesc_np.3c			\
+		strerrorname_np.3c			\
 		strfmon_l.3c				\
 		strftime_l.3c				\
 		strlcat.3c				\
@@ -1331,6 +1434,7 @@ MANLINKS=	FD_CLR.3c				\
 		timerfd_settime.3c			\
 		timerisset.3c				\
 		timersub.3c				\
+		timespec_getres.3c			\
 		tmpnam_r.3c				\
 		tolower_l.3c				\
 		toupper_l.3c				\
@@ -1845,6 +1949,8 @@ wscanf.3c				:= LINKSRC = fwscanf.3c
 
 gethomelgroup.3c			:= LINKSRC = getcpuid.3c
 
+secure_getenv.3c			:= LINKSRC = getenv.3c
+
 endgrent.3c				:= LINKSRC = getgrnam.3c
 fgetgrent.3c				:= LINKSRC = getgrnam.3c
 fgetgrent_r.3c				:= LINKSRC = getgrnam.3c
@@ -2134,6 +2240,7 @@ port_sendn.3c				:= LINKSRC = port_send.3c
 
 posix_spawnp.3c				:= LINKSRC = posix_spawn.3c
 
+posix_spawn_file_actions_addfchdir.3c	:= LINKSRC = posix_spawn_file_actions_addchdir.3c
 posix_spawn_file_actions_addopen.3c	:= LINKSRC = posix_spawn_file_actions_addclose.3c
 posix_spawn_file_actions_init.3c	:= LINKSRC = posix_spawn_file_actions_destroy.3c
 
@@ -2216,6 +2323,8 @@ pthread_cond_destroy.3c			:= LINKSRC = pthread_cond_init.3c
 
 pthread_cond_broadcast.3c		:= LINKSRC = pthread_cond_signal.3c
 
+pthread_cond_clockwait.3c		:= LINKSRC = pthread_cond_wait.3c
+pthread_cond_relclockwait_np.3c		:= LINKSRC = pthread_cond_wait.3c
 pthread_cond_reltimedwait_np.3c		:= LINKSRC = pthread_cond_wait.3c
 pthread_cond_timedwait.3c		:= LINKSRC = pthread_cond_wait.3c
 
@@ -2242,6 +2351,8 @@ pthread_mutex_destroy.3c		:= LINKSRC = pthread_mutex_init.3c
 pthread_mutex_trylock.3c		:= LINKSRC = pthread_mutex_lock.3c
 pthread_mutex_unlock.3c			:= LINKSRC = pthread_mutex_lock.3c
 
+pthread_mutex_clocklock.3c		:= LINKSRC = pthread_mutex_timedlock.3c
+pthread_mutex_relclocklock_np.3c	:= LINKSRC = pthread_mutex_timedlock.3c
 pthread_mutex_reltimedlock_np.3c	:= LINKSRC = pthread_mutex_timedlock.3c
 
 pthread_mutexattr_setprioceiling.3c	:= LINKSRC = pthread_mutexattr_getprioceiling.3c
@@ -2260,8 +2371,12 @@ pthread_rwlock_destroy.3c		:= LINKSRC = pthread_rwlock_init.3c
 
 pthread_rwlock_tryrdlock.3c		:= LINKSRC = pthread_rwlock_rdlock.3c
 
+pthread_rwlock_clockrdlock.3c		:= LINKSRC = pthread_rwlock_timedrdlock.3c
+pthread_rwlock_relclockrdlock_np.3c	:= LINKSRC = pthread_rwlock_timedrdlock.3c
 pthread_rwlock_reltimedrdlock_np.3c	:= LINKSRC = pthread_rwlock_timedrdlock.3c
 
+pthread_rwlock_clockwrlock.3c		:= LINKSRC = pthread_rwlock_timedwrlock.3c
+pthread_rwlock_relclockwrlock_np.3c	:= LINKSRC = pthread_rwlock_timedwrlock.3c
 pthread_rwlock_reltimedwrlock_np.3c	:= LINKSRC = pthread_rwlock_timedwrlock.3c
 
 pthread_rwlock_trywrlock.3c		:= LINKSRC = pthread_rwlock_wrlock.3c
@@ -2273,6 +2388,8 @@ pthread_rwlockattr_destroy.3c		:= LINKSRC = pthread_rwlockattr_init.3c
 pthread_spin_init.3c			:= LINKSRC = pthread_spin_destroy.3c
 
 pthread_spin_trylock.3c			:= LINKSRC = pthread_spin_lock.3c
+
+ptsname_r.3c				:= LINKSRC = ptsname.3c
 
 fputs.3c				:= LINKSRC = puts.3c
 
@@ -2339,6 +2456,8 @@ FD_SET.3c				:= LINKSRC = select.3c
 FD_ZERO.3c				:= LINKSRC = select.3c
 pselect.3c				:= LINKSRC = select.3c
 
+sem_clockwait.3c			:= LINKSRC = sem_timedwait.3c
+sem_relclockwait_np.3c			:= LINKSRC = sem_timedwait.3c
 sem_reltimedwait_np.3c			:= LINKSRC = sem_timedwait.3c
 
 sem_trywait.3c				:= LINKSRC = sem_wait.3c
@@ -2376,6 +2495,90 @@ sigtimedwait.3c				:= LINKSRC = sigwaitinfo.3c
 
 gsignal.3c				:= LINKSRC = ssignal.3c
 
+stdc_bit_ceil_uc.3c			:= LINKSRC = stdc_bit_ceil.3c
+stdc_bit_ceil_us.3c			:= LINKSRC = stdc_bit_ceil.3c
+stdc_bit_ceil_ui.3c			:= LINKSRC = stdc_bit_ceil.3c
+stdc_bit_ceil_ul.3c			:= LINKSRC = stdc_bit_ceil.3c
+stdc_bit_ceil_ull.3c			:= LINKSRC = stdc_bit_ceil.3c
+
+stdc_bit_floor_uc.3c			:= LINKSRC = stdc_bit_floor.3c
+stdc_bit_floor_us.3c			:= LINKSRC = stdc_bit_floor.3c
+stdc_bit_floor_ui.3c			:= LINKSRC = stdc_bit_floor.3c
+stdc_bit_floor_ul.3c			:= LINKSRC = stdc_bit_floor.3c
+stdc_bit_floor_ull.3c			:= LINKSRC = stdc_bit_floor.3c
+
+stdc_bit_width_uc.3c			:= LINKSRC = stdc_bit_width.3c
+stdc_bit_width_us.3c			:= LINKSRC = stdc_bit_width.3c
+stdc_bit_width_ui.3c			:= LINKSRC = stdc_bit_width.3c
+stdc_bit_width_ul.3c			:= LINKSRC = stdc_bit_width.3c
+stdc_bit_width_ull.3c			:= LINKSRC = stdc_bit_width.3c
+
+stdc_count_ones_uc.3c			:= LINKSRC = stdc_count_ones.3c
+stdc_count_ones_us.3c			:= LINKSRC = stdc_count_ones.3c
+stdc_count_ones_ui.3c			:= LINKSRC = stdc_count_ones.3c
+stdc_count_ones_ul.3c			:= LINKSRC = stdc_count_ones.3c
+stdc_count_ones_ull.3c			:= LINKSRC = stdc_count_ones.3c
+
+stdc_count_zeros_uc.3c			:= LINKSRC = stdc_count_zeros.3c
+stdc_count_zeros_us.3c			:= LINKSRC = stdc_count_zeros.3c
+stdc_count_zeros_ui.3c			:= LINKSRC = stdc_count_zeros.3c
+stdc_count_zeros_ul.3c			:= LINKSRC = stdc_count_zeros.3c
+stdc_count_zeros_ull.3c			:= LINKSRC = stdc_count_zeros.3c
+
+stdc_first_leading_one_uc.3c		:= LINKSRC = stdc_first_leading_one.3c
+stdc_first_leading_one_us.3c		:= LINKSRC = stdc_first_leading_one.3c
+stdc_first_leading_one_ui.3c		:= LINKSRC = stdc_first_leading_one.3c
+stdc_first_leading_one_ul.3c		:= LINKSRC = stdc_first_leading_one.3c
+stdc_first_leading_one_ull.3c		:= LINKSRC = stdc_first_leading_one.3c
+
+stdc_first_leading_zero_uc.3c		:= LINKSRC = stdc_first_leading_zero.3c
+stdc_first_leading_zero_us.3c		:= LINKSRC = stdc_first_leading_zero.3c
+stdc_first_leading_zero_ui.3c		:= LINKSRC = stdc_first_leading_zero.3c
+stdc_first_leading_zero_ul.3c		:= LINKSRC = stdc_first_leading_zero.3c
+stdc_first_leading_zero_ull.3c		:= LINKSRC = stdc_first_leading_zero.3c
+
+stdc_first_trailing_one_uc.3c		:= LINKSRC = stdc_first_trailing_one.3c
+stdc_first_trailing_one_us.3c		:= LINKSRC = stdc_first_trailing_one.3c
+stdc_first_trailing_one_ui.3c		:= LINKSRC = stdc_first_trailing_one.3c
+stdc_first_trailing_one_ul.3c		:= LINKSRC = stdc_first_trailing_one.3c
+stdc_first_trailing_one_ull.3c		:= LINKSRC = stdc_first_trailing_one.3c
+
+stdc_first_trailing_zero_uc.3c		:= LINKSRC = stdc_first_trailing_zero.3c
+stdc_first_trailing_zero_us.3c		:= LINKSRC = stdc_first_trailing_zero.3c
+stdc_first_trailing_zero_ui.3c		:= LINKSRC = stdc_first_trailing_zero.3c
+stdc_first_trailing_zero_ul.3c		:= LINKSRC = stdc_first_trailing_zero.3c
+stdc_first_trailing_zero_ull.3c		:= LINKSRC = stdc_first_trailing_zero.3c
+
+stdc_has_single_bit_uc.3c		:= LINKSRC = stdc_has_single_bit.3c
+stdc_has_single_bit_us.3c		:= LINKSRC = stdc_has_single_bit.3c
+stdc_has_single_bit_ui.3c		:= LINKSRC = stdc_has_single_bit.3c
+stdc_has_single_bit_ul.3c		:= LINKSRC = stdc_has_single_bit.3c
+stdc_has_single_bit_ull.3c		:= LINKSRC = stdc_has_single_bit.3c
+
+stdc_leading_ones_uc.3c			:= LINKSRC = stdc_leading_ones.3c
+stdc_leading_ones_us.3c			:= LINKSRC = stdc_leading_ones.3c
+stdc_leading_ones_ui.3c			:= LINKSRC = stdc_leading_ones.3c
+stdc_leading_ones_ul.3c			:= LINKSRC = stdc_leading_ones.3c
+stdc_leading_ones_ull.3c		:= LINKSRC = stdc_leading_ones.3c
+
+stdc_leading_zeros_uc.3c		:= LINKSRC = stdc_leading_zeros.3c
+stdc_leading_zeros_us.3c		:= LINKSRC = stdc_leading_zeros.3c
+stdc_leading_zeros_ui.3c		:= LINKSRC = stdc_leading_zeros.3c
+stdc_leading_zeros_ul.3c		:= LINKSRC = stdc_leading_zeros.3c
+stdc_leading_zeros_ull.3c		:= LINKSRC = stdc_leading_zeros.3c
+
+stdc_trailing_ones_uc.3c		:= LINKSRC = stdc_trailing_ones.3c
+stdc_trailing_ones_us.3c		:= LINKSRC = stdc_trailing_ones.3c
+stdc_trailing_ones_ui.3c		:= LINKSRC = stdc_trailing_ones.3c
+stdc_trailing_ones_ul.3c		:= LINKSRC = stdc_trailing_ones.3c
+stdc_trailing_ones_ull.3c		:= LINKSRC = stdc_trailing_ones.3c
+
+stdc_trailing_zeros_uc.3c		:= LINKSRC = stdc_trailing_zeros.3c
+stdc_trailing_zeros_us.3c		:= LINKSRC = stdc_trailing_zeros.3c
+stdc_trailing_zeros_ui.3c		:= LINKSRC = stdc_trailing_zeros.3c
+stdc_trailing_zeros_ul.3c		:= LINKSRC = stdc_trailing_zeros.3c
+stdc_trailing_zeros_ull.3c		:= LINKSRC = stdc_trailing_zeros.3c
+
 stderr.3c				:= LINKSRC = stdio.3c
 stdin.3c				:= LINKSRC = stdio.3c
 stdout.3c				:= LINKSRC = stdio.3c
@@ -2386,6 +2589,8 @@ strcoll_l.3c				:= LINKSRC = strcoll.3c
 
 strerror_l.3c				:= LINKSRC = strerror.3c
 strerror_r.3c				:= LINKSRC = strerror.3c
+strerrordesc_np.3c			:= LINKSRC = strerror.3c
+strerrorname_np.3c			:= LINKSRC = strerror.3c
 
 strfmon_l.3c				:= LINKSRC = strfmon.3c
 
@@ -2481,6 +2686,8 @@ timersub.3c				:= LINKSRC = timeradd.3c
 
 timerfd_gettime.3c			:= LINKSRC = timerfd_create.3c
 timerfd_settime.3c			:= LINKSRC = timerfd_create.3c
+
+timespec_getres.3c			:= LINKSRC = timespec_get.3c
 
 tempnam.3c				:= LINKSRC = tmpnam.3c
 tmpnam_r.3c				:= LINKSRC = tmpnam.3c

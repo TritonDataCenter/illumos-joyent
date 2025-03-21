@@ -159,6 +159,7 @@ SUBDIRS +=				\
 	libkmf		\
 	libkrb5		\
 	libkstat	\
+	libktest	\
 	libkvm		\
 	libldap5	\
 	liblgrp		\
@@ -175,6 +176,7 @@ SUBDIRS +=				\
 	libndmp		\
 	libnisdb	\
 	libnls		\
+	libnvme		\
 	libnwam		\
 	libofmt		\
 	libpam		\
@@ -420,6 +422,7 @@ HDRSUBDIRS=				\
 	libiscsit	\
 	libkrb5		\
 	libkstat	\
+	libktest	\
 	libkvm		\
 	libmail		\
 	libmapid	\
@@ -428,6 +431,7 @@ HDRSUBDIRS=				\
 	libmtmalloc	\
 	libndmp		\
 	libnsl		\
+	libnvme		\
 	libnvpair	\
 	libnwam		\
 	libofmt		\
@@ -579,7 +583,7 @@ brand:		libzonecfg libmapmalloc libipadm libcustr libproc librpcsvc
 cfgadm_plugins:	libdevice libdevinfo libhotplug librcm hbaapi libkstat libscf
 fm:		libexacct libipmi libzfs scsi libdevinfo libdevid libcfgadm \
 		libcontract libsysevent ../cmd/sgs/libelf libdladm libsff \
-		libpcidb libdiskmgt libjedec
+		libpcidb libdiskmgt libjedec libnvme
 $(SPARC_BLD)fm:	libpri
 gss_mechs/mech_dh: libgss
 gss_mechs/mech_dummy: libgss
@@ -640,12 +644,14 @@ libipsecutil:	libtecla libtsol libkmf
 libiscsit:	libstmf libuuid
 libhotplug:	libnvpair
 libkmf:		libcryptoutil pkcs11 libcustr
+libktest:	libnvpair
 libkvm:		../cmd/sgs/libelf
 libldap5:	libsasl
 libmapid:	libresolv2 libscf
 libmlrpc:	libsmbfs libuuid
 libndmp:	libscf
 libnisdb:	libldap5
+libnvme:	libdevinfo libnvpair
 libnwam:	libscf libbsm libdladm libipadm
 libpcp:		libumem libdevinfo
 libpctx:	libproc

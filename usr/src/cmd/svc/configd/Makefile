@@ -27,108 +27,35 @@
 # Copyright 2020 Joyent, Inc.
 #
 
-MYPROG = svc.configd
-MYOBJS = \
-	backend.o \
-	configd.o \
-	client.o \
-	file_object.o \
-	maindoor.o \
-	object.o \
-	rc_node.o \
-	snapshot.o
+include Makefile.shared.com
 
-PROG = $(MYPROG)
-OBJS = $(MYOBJS)
-
-SRCS = $(MYOBJS:%.o=%.c)
-
-include ../../Makefile.cmd
-include ../../Makefile.ctf
-
-NATIVE_BUILD=$(POUND_SIGN)
-$(NATIVE_BUILD)PROG = $(MYPROG:%=%-native)
-$(NATIVE_BUILD)OBJS = $(MYOBJS:%.o=%-native.o)
-
-MYCPPFLAGS = -I. -I../common -I../../../common/svc \
+CPPFLAGS += -I. -I../common -I$(SRC)/common/svc \
 	-I$(ROOT)/usr/include/sqlite-sys -D_REENTRANT
-CPPFLAGS += $(MYCPPFLAGS)
-CFLAGS	+= $(CCVERBOSE)
-CERRWARN += -_gcc=-Wno-parentheses
-CERRWARN += -_gcc=-Wno-type-limits
-CERRWARN += -_gcc=-Wno-unused-label
-CERRWARN += -_gcc=-Wno-unused-variable
-CERRWARN += -_gcc=-Wno-unused-function
-CERRWARN += $(CNOWARN_UNINIT)
 
-# strange false positive
-SMOFF += free
-
-MYLDLIBS = -lumem -luutil
-LDLIBS	+= -lsecdb -lbsm $(MYLDLIBS)
-
-CLOBBERFILES +=	$(MYPROG:%=%-native)
-
-LIBUUTIL	= $(SRC)/lib/libuutil
-LIBSCF		= $(SRC)/lib/libscf
+LDLIBS += -lsecdb -lbsm -lumem -luutil -lsqlite-sys
 
 SCRIPTFILE	= restore_repository
 ROOTSCRIPTFILE	= $(ROOTLIBSVCBIN)/$(SCRIPTFILE)
 
-#
-# Native variant (used in ../seed).
-#
-$(NATIVE_BUILD)NATIVE_LIBS += libumem.so libc.so
-$(NATIVE_BUILD)CC =	$(NATIVECC)
-$(NATIVE_BUILD)LD =	$(NATIVELD)
-$(NATIVE_BUILD)CFLAGS =	$(NATIVE_CFLAGS)
-$(NATIVE_BUILD)CPPFLAGS = $(MYCPPFLAGS) -I$(LIBUUTIL)/common -I$(LIBSCF)/inc
-$(NATIVE_BUILD)CPPFLAGS += -DNATIVE_BUILD
-$(NATIVE_BUILD)LDFLAGS = $(BDIRECT)
-$(NATIVE_BUILD)LDLIBS = -L$(ADJUNCT_PROTO)/usr/lib -R$(ADJUNCT_PROTO)/usr/lib \
-			-L$(LIBUUTIL)/native -R $(LIBUUTIL)/native $(MYLDLIBS)
-
-DIRMODE = 0755
-FILEMODE = 0555
-
-OBJSQLITE =
-LIBSQLITE = -lsqlite-sys
-$(NATIVE_BUILD)OBJSQLITE = $(ROOT)/lib/libsqlite-native.o
-$(NATIVE_BUILD)LIBSQLITE =
-
-OBJS += $(OBJSQLITE)
-LDLIBS += $(LIBSQLITE)
-
-install := TARGET = install
-clobber := TARGET = clobber
-
 .KEEP_STATE:
-.PARALLEL: $(MYOBJS) $(MYOBJS:%.o=%-native.o)
+.PARALLEL: $(OBJS)
 
 all: $(PROG)
-
-native: FRC
-	@cd $(LIBUUTIL)/native; pwd; $(MAKE) install
-	@NATIVE_BUILD= $(MAKE) all
 
 $(PROG): $(OBJS)
 	$(LINK.c) -o $@ $(OBJS) $(LDLIBS)
 	$(POST_PROCESS)
-
-%-native.o: %.c
-	$(COMPILE.c) -o $@ $<
-	$(POST_PROCESS_O)
 
 $(ROOTLIBSVCBIN)/%: %.sh
 	$(INS.rename)
 
 install: all $(ROOTLIBSVCBINPROG) $(ROOTVARSADMFILE) $(ROOTSCRIPTFILE)
 
-clean: FRC
-	$(RM) $(MYOBJS) $(MYOBJS:%.o=%-native.o)
+clean:
+	$(RM) $(OBJS)
 
-clobber:
+clobber: clean
 
-include ../../Makefile.targ
+include $(SRC)/cmd/Makefile.targ
 
 FRC:

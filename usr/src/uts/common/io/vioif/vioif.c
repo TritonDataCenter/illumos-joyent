@@ -1029,10 +1029,10 @@ vioif_reclaim_used_tx(vioif_t *vif)
 			do_update = B_TRUE;
 		}
 
+		mutex_exit(&vif->vif_mutex);
 		if (do_update) {
 			mac_tx_update(vif->vif_mac_handle);
 		}
-		mutex_exit(&vif->vif_mutex);
 	}
 
 	return (num_reclaimed);
@@ -1318,10 +1318,7 @@ vioif_send(vioif_t *vif, mblk_t *mp)
 		mblk_t *pullmp = NULL;
 		tcpha_t *tcpha;
 
-		if (mac_ether_offload_info(mp, &meo) != 0) {
-			goto fail;
-		}
-
+		mac_ether_offload_info(mp, &meo);
 		needed = MEOI_L2INFO_SET | MEOI_L3INFO_SET | MEOI_L4INFO_SET;
 		if ((meo.meoi_flags & needed) != needed) {
 			goto fail;

@@ -34,17 +34,18 @@ extern "C" {
 #endif
 
 /*
- * Very primitive printf. We mark this as PRINTFLIKE so we can use %z
+ * Very primitive printf. This only understands the following simple formats:
+ *        %%, %b, %c, %d, %o, %p, %s, %x and size specifiers l, ll, j, z
  */
 extern void dboot_printf(char *fmt, ...)
-    __PRINTFLIKE(1);
+    __KPRINTFLIKE(1);
 
 /*
  * Primitive version of panic, prints a message, waits for a keystroke,
  * then resets the system
  */
 extern void dboot_panic(char *fmt, ...)
-    __NORETURN __PRINTFLIKE(1);
+    __KPRINTFLIKE(1) __NORETURN;
 
 
 #ifdef	__cplusplus

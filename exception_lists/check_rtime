@@ -29,6 +29,7 @@
 # Copyright 2020 Oxide Computer Company
 # Copyright 2022 Garrett D'Amore <garrett@damore.org>
 # Copyright 2022 Tintri by DDN, Inc. All rights reserved.
+# Copyright 2024 RackTop Systems, Inc.
 #
 
 # This file provides exceptions to the usual rules applied to ELF objects by
@@ -72,6 +73,10 @@ SKIP		^usr/lib/sysevent/modules/picl_slm.so$
 #
 SKIP		^opt/libc-tests/tests/stdio/
 
+# The libsec tests interpose on all referenced libidmap functions,
+# causing false positives for the unref. checks for libsec.
+SKIP		^opt/libsec-tests/bin/
+
 # Objects that are allowed to have executable data segments
 EXEC_DATA	^MACH(lib)/ld\.so\.1$
 EXEC_DATA	^lib/libc\.so\.1$	# 6524709, 32-bit, needed for x86 only
@@ -113,7 +118,7 @@ UNREF_OBJ	unreferenced object=.*/libnetsnmphelpers\.so\..*
 # so that the underlying libraries use that implementation for memory
 # management. Since ksh itself doesn't perform any memory allocations in
 # the stub, ldd -U determines that libumem is an unreferenced object.
-UNREF_OBJ	/libumem\.so\.1.*/usr/bin/(i86|amd64)/r?ksh(93)?\b
+UNREF_OBJ	/libumem\.so\.1.*/usr/bin/(i86/)?r?ksh(93)?\b
 
 # Unused runpaths due to dlopen() use
 UNUSED_RPATH	/usr/lib/fs/autofs.*\ from\ .automountd

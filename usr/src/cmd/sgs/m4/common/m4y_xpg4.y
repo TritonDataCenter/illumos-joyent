@@ -28,7 +28,7 @@
  */
 
 /*	Copyright (c) 1988 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 %{
 extern long	evalval;
@@ -50,35 +50,35 @@ extern long	evalval;
 %right '!' '~' UMINUS
 %%
 
-s	: e	= { evalval = $1; }
-	|	= { evalval = 0; }
+s	: e	{ evalval = $1; }
+	|	{ evalval = 0; }
 	;
 
-e	: e OROR e	= { $$ = ($1 != 0 || $3 != 0) ? 1 : 0; }
-	| e ANDAND e	= { $$ = ($1 != 0 && $3 != 0) ? 1 : 0; }
-	| '!' e		= { $$ = $2 == 0; }
-	| '~' e		= { $$ = ~$2; }
-	| e EQ e	= { $$ = $1 == $3; }
-	| e NE e	= { $$ = $1 != $3; }
-	| e GT e	= { $$ = $1 > $3; }
-	| e GE e	= { $$ = $1 >= $3; }
-	| e LT e	= { $$ = $1 < $3; }
-	| e LE e	= { $$ = $1 <= $3; }
-	| e LSHIFT e	= { $$ = $1 << $3; }
-	| e RSHIFT e	= { $$ = $1 >> $3; }
-	| e '|' e	= { $$ = ($1 | $3); }
-	| e '&' e	= { $$ = ($1 & $3); }
-	| e '^' e	= { $$ = ($1 ^ $3); }
-	| e '+' e	= { $$ = ($1 + $3); }
-	| e '-' e	= { $$ = ($1 - $3); }
-	| e '*' e	= { $$ = ($1 * $3); }
-	| e '/' e	= { $$ = ($1 / $3); }
-	| e '%' e	= { $$ = ($1 % $3); }
-	| '(' e ')'	= { $$ = ($2); }
-	| e POWER e	= { for ($$ = 1; $3-- > 0; $$ *= $1); }
-	| '-' e %prec UMINUS	= { $$ = $2-1; $$ = -$2; }
-	| '+' e %prec UMINUS	= { $$ = $2-1; $$ = $2; }
-	| DIGITS	= { $$ = evalval; }
+e	: e OROR e	{ $$ = ($1 != 0 || $3 != 0) ? 1 : 0; }
+	| e ANDAND e	{ $$ = ($1 != 0 && $3 != 0) ? 1 : 0; }
+	| '!' e		{ $$ = $2 == 0; }
+	| '~' e		{ $$ = ~$2; }
+	| e EQ e	{ $$ = $1 == $3; }
+	| e NE e	{ $$ = $1 != $3; }
+	| e GT e	{ $$ = $1 > $3; }
+	| e GE e	{ $$ = $1 >= $3; }
+	| e LT e	{ $$ = $1 < $3; }
+	| e LE e	{ $$ = $1 <= $3; }
+	| e LSHIFT e	{ $$ = $1 << $3; }
+	| e RSHIFT e	{ $$ = $1 >> $3; }
+	| e '|' e	{ $$ = ($1 | $3); }
+	| e '&' e	{ $$ = ($1 & $3); }
+	| e '^' e	{ $$ = ($1 ^ $3); }
+	| e '+' e	{ $$ = ($1 + $3); }
+	| e '-' e	{ $$ = ($1 - $3); }
+	| e '*' e	{ $$ = ($1 * $3); }
+	| e '/' e	{ $$ = ($1 / $3); }
+	| e '%' e	{ $$ = ($1 % $3); }
+	| '(' e ')'	{ $$ = ($2); }
+	| e POWER e	{ for ($$ = 1; $3-- > 0; $$ *= $1); }
+	| '-' e %prec UMINUS	{ $$ = $2-1; $$ = -$2; }
+	| '+' e %prec UMINUS	{ $$ = $2-1; $$ = $2; }
+	| DIGITS	{ $$ = evalval; }
 	;
 
 %%
@@ -179,8 +179,8 @@ peek3(char c1, int rc1, char c2, int rc2, int rc3)
 	return (rc3);
 }
 
-/*ARGSUSED*/
-static void
-yyerror(YYCONST char *msg)
+static int
+yyerror(const char *msg __unused)
 {
+	return (0);
 }

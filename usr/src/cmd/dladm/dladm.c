@@ -27,6 +27,8 @@
  * Copyright 2020 Peter Tribble.
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2021 RackTop Systems, Inc.
+ * Copyright 2024 H. William Welliver <william@welliver.org>
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <stdio.h>
@@ -268,14 +270,14 @@ static void	show_ether_xprop(void *, dladm_ether_info_t *);
 static boolean_t	link_is_ether(const char *, datalink_id_t *);
 
 static boolean_t str2int(const char *, int *);
-static void	die(const char *, ...);
+static void	die(const char *, ...) __PRINTFLIKE(1);
 static void	die_optdup(int);
 static void	die_opterr(int, int, const char *);
-static void	die_dlerr(dladm_status_t, const char *, ...);
+static void	die_dlerr(dladm_status_t, const char *, ...) __PRINTFLIKE(2);
 static void	die_dlerrlist(dladm_status_t, dladm_errlist_t *,
-    const char *, ...);
-static void	warn(const char *, ...);
-static void	warn_dlerr(dladm_status_t, const char *, ...);
+    const char *, ...) __PRINTFLIKE(3);
+static void	warn(const char *, ...) __PRINTFLIKE(1);
+static void	warn_dlerr(dladm_status_t, const char *, ...) __PRINTFLIKE(2);
 static void	warn_dlerrlist(dladm_errlist_t *);
 
 typedef struct	cmd {
@@ -4255,7 +4257,7 @@ do_modify_iptun(int argc, char *argv[], const char *use)
 static void
 do_show_iptun(int argc, char *argv[], const char *use)
 {
-	char		option;
+	int		option;
 	datalink_id_t	linkid;
 	uint32_t	flags = DLADM_OPT_ACTIVE;
 	char		*name = NULL;
@@ -4724,9 +4726,17 @@ do_show_vlan(int argc, char *argv[], const char *use)
 
 	/* get link name (optional last argument) */
 	if (optind == (argc-1)) {
+		datalink_class_t	class;
+		char			classbuf[DLADM_STRSIZE];
 		if ((status = dladm_name2info(handle, argv[optind], &linkid,
-		    NULL, NULL, NULL)) != DLADM_STATUS_OK) {
+		    NULL, &class, NULL)) != DLADM_STATUS_OK) {
 			die_dlerr(status, "link %s is not valid", argv[optind]);
+		}
+
+		if (class != DATALINK_CLASS_VLAN) {
+			(void) dladm_class2str(class, classbuf);
+			die("datalink %s is not a vlan: found class %s",
+			    argv[optind], classbuf);
 		}
 	} else if (optind != argc) {
 		usage();
@@ -5361,12 +5371,27 @@ do_show_vnic_common(int argc, char *argv[], const char *use,
 
 	/* get vnic ID (optional last argument) */
 	if (optind == (argc - 1)) {
+		datalink_class_t	class;
+		char			classbuf[DLADM_STRSIZE];
+
 		status = dladm_zname2info(handle, zonename, argv[optind],
-		    &linkid, NULL, NULL, NULL);
+		    &linkid, NULL, &class, NULL);
 		if (status != DLADM_STATUS_OK) {
-			die_dlerr(status, "invalid vnic name '%s'",
+			die_dlerr(status, "invalid %s name '%s'",
+			    etherstub ? "etherstub" : "vnic",
 			    argv[optind]);
 		}
+
+		if (etherstub && class != DATALINK_CLASS_ETHERSTUB) {
+			(void) dladm_class2str(class, classbuf);
+			die("datalink %s is not an etherstub: found class %s",
+			    argv[optind], classbuf);
+		} else if (!etherstub && class != DATALINK_CLASS_VNIC) {
+			(void) dladm_class2str(class, classbuf);
+			die("datalink %s is not a vnic: found class %s",
+			    argv[optind], classbuf);
+		}
+
 		(void) strlcpy(state.vs_vnic, argv[optind], MAXLINKNAMELEN);
 	} else if (optind != argc) {
 		usage();
@@ -5506,6 +5531,7 @@ do_create_simnet(int argc, char *argv[], const char *use)
 	uint32_t flags;
 	char *altroot = NULL;
 	char *media = NULL;
+	char *maddr = NULL;
 	uint32_t mtype = DL_ETHER;
 	int option;
 	dladm_status_t status;
@@ -5515,7 +5541,7 @@ do_create_simnet(int argc, char *argv[], const char *use)
 	flags = DLADM_OPT_ACTIVE | DLADM_OPT_PERSIST;
 
 	opterr = 0;
-	while ((option = getopt_long(argc, argv, ":tR:m:",
+	while ((option = getopt_long(argc, argv, ":tR:m:u:",
 	    simnet_lopts, NULL)) != -1) {
 		switch (option) {
 		case 't':
@@ -5527,31 +5553,37 @@ do_create_simnet(int argc, char *argv[], const char *use)
 		case 'm':
 			media = optarg;
 			break;
+		case 'u':
+			maddr = optarg;
+			break;
 		default:
 			die_opterr(optopt, option, use);
 		}
 	}
-
 	/* the simnet id is the required operand */
 	if (optind != (argc - 1))
 		usage();
 
 	if (strlcpy(name, argv[optind], MAXLINKNAMELEN) >= MAXLINKNAMELEN)
-		die("link name too long '%s'", argv[optind]);
+		die_dlerr(DLADM_STATUS_LINKINVAL,
+		    "link name too long '%s'", argv[optind]);
 
 	if (!dladm_valid_linkname(name))
-		die("invalid link name '%s'", name);
+		die_dlerr(DLADM_STATUS_LINKINVAL,
+		    "invalid link name '%s'", name);
 
 	if (media != NULL) {
 		mtype = dladm_str2media(media);
 		if (mtype != DL_ETHER && mtype != DL_WIFI)
-			die("media type '%s' is not supported", media);
+			die_dlerr(DLADM_STATUS_NOTSUP,
+			    "media type '%s' is not supported", media);
 	}
 
 	if (altroot != NULL)
 		altroot_cmd(altroot, argc, argv);
 
-	status = dladm_simnet_create(handle, name, mtype, flags);
+	status = dladm_simnet_create(handle, name, mtype, maddr, flags);
+
 	if (status != DLADM_STATUS_OK)
 		die_dlerr(status, "simnet creation failed");
 }
@@ -8171,7 +8203,7 @@ do_add_bridge(int argc, char **argv, const char *use)
 static void
 do_delete_bridge(int argc, char **argv, const char *use)
 {
-	char			option;
+	int			option;
 	char			*altroot = NULL;
 	uint32_t		flags = DLADM_OPT_ACTIVE | DLADM_OPT_PERSIST;
 	dladm_status_t		status;
@@ -8204,7 +8236,7 @@ do_delete_bridge(int argc, char **argv, const char *use)
 static void
 do_remove_bridge(int argc, char **argv, const char *use)
 {
-	char		option;
+	int		option;
 	uint_t		n, nlink;
 	char		*links[MAXPORT];
 	datalink_id_t	linkids[MAXPORT];
@@ -8484,7 +8516,6 @@ static int
 show_bridge(dladm_handle_t handle, datalink_id_t linkid, void *arg)
 {
 	show_brstate_t	*brstate = arg;
-	void *buf;
 
 	if (brstate->show_stats) {
 		bridge_statfields_buf_t bbuf;
@@ -8492,17 +8523,17 @@ show_bridge(dladm_handle_t handle, datalink_id_t linkid, void *arg)
 		bzero(&bbuf, sizeof (bbuf));
 		brstate->state.ls_status = print_bridge_stats(&brstate->state,
 		    linkid, &bbuf);
-		buf = &bbuf;
+		if (brstate->state.ls_status == DLADM_STATUS_OK)
+			ofmt_print(brstate->state.ls_ofmt, &bbuf);
 	} else {
 		bridge_fields_buf_t bbuf;
 
 		bzero(&bbuf, sizeof (bbuf));
 		brstate->state.ls_status = print_bridge(&brstate->state, linkid,
 		    &bbuf);
-		buf = &bbuf;
+		if (brstate->state.ls_status == DLADM_STATUS_OK)
+			ofmt_print(brstate->state.ls_ofmt, &bbuf);
 	}
-	if (brstate->state.ls_status == DLADM_STATUS_OK)
-		ofmt_print(brstate->state.ls_ofmt, buf);
 	return (DLADM_WALK_CONTINUE);
 }
 
@@ -8669,25 +8700,23 @@ bls_out:
 static void
 show_bridge_link(datalink_id_t linkid, show_brstate_t *brstate)
 {
-	void *buf;
-
 	if (brstate->show_stats) {
 		bridge_link_statfields_buf_t bbuf;
 
 		bzero(&bbuf, sizeof (bbuf));
 		brstate->state.ls_status = print_bridge_link_stats(
 		    &brstate->state, linkid, &bbuf);
-		buf = &bbuf;
+		if (brstate->state.ls_status == DLADM_STATUS_OK)
+			ofmt_print(brstate->state.ls_ofmt, &bbuf);
 	} else {
 		bridge_link_fields_buf_t bbuf;
 
 		bzero(&bbuf, sizeof (bbuf));
 		brstate->state.ls_status = print_bridge_link(&brstate->state,
 		    linkid, &bbuf);
-		buf = &bbuf;
+		if (brstate->state.ls_status == DLADM_STATUS_OK)
+			ofmt_print(brstate->state.ls_ofmt, &bbuf);
 	}
-	if (brstate->state.ls_status == DLADM_STATUS_OK)
-		ofmt_print(brstate->state.ls_ofmt, buf);
 }
 
 /* ARGSUSED */
@@ -10097,7 +10126,7 @@ print_overlay_value(char *outbuf, uint_t bufsize, uint_t type, const void *pbuf,
 		break;
 	case OVERLAY_PROP_T_IP:
 		if (psize != sizeof (struct in6_addr)) {
-			warn("malformed overlay IP property: %d bytes\n",
+			warn("malformed overlay IP property: %zd bytes\n",
 			    psize);
 			(void) snprintf(outbuf, bufsize, "--");
 			break;

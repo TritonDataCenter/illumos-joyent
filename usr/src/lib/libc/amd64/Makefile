@@ -22,10 +22,11 @@
 #
 # Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2013, OmniTI Computer Consulting, Inc. All rights reserved.
-# Copyright 2013 Garrett D'Amore <garrett@damore.org>
+# Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2019 Joyent, Inc.
 # Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2025 Oxide Computer Company
 #
 
 LIBCBASE=	.
@@ -105,6 +106,7 @@ COMOBJS=			\
 	explicit_bzero.o	\
 	memmem.o		\
 	qsort.o			\
+	popcountdi2.o		\
 	strtol.o		\
 	strtoul.o		\
 	strtoll.o		\
@@ -122,7 +124,6 @@ GENOBJS=			\
 	cuexit.o		\
 	ecvt.o			\
 	endian.o		\
-	errlst.o		\
 	amd64_data.o		\
 	ldivide.o		\
 	lock.o			\
@@ -193,7 +194,7 @@ COMSYSOBJS=			\
 	chroot.o		\
 	cladm.o			\
 	close.o			\
-	execve.o		\
+	execvex.o		\
 	exit.o			\
 	facl.o			\
 	fchdir.o		\
@@ -584,7 +585,7 @@ PORTGEN=			\
 	tfind.o			\
 	time_data.o		\
 	time_gdata.o		\
-	timespec_get.o		\
+	timespec_cstd.o		\
 	tls_data.o		\
 	truncate.o		\
 	tsdalloc.o		\
@@ -701,6 +702,8 @@ PORTI18N=			\
 	putwchar.o		\
 	putws.o			\
 	strtows.o		\
+	wcslcat.o		\
+	wcslcpy.o		\
 	wcsnlen.o		\
 	wcsstr.o		\
 	wcstoimax.o		\
@@ -906,8 +909,10 @@ PORTSYS=			\
 	execl.o			\
 	execle.o		\
 	execv.o			\
+	execve.o		\
 	eventfd.o		\
 	fcntl.o			\
+	fexecve.o		\
 	getpagesizes.o		\
 	getpeerucred.o		\
 	inotify.o		\
@@ -969,6 +974,9 @@ PORTREGEX=			\
 VALUES=				\
 	values-Xa.o
 
+BITOBJS=			\
+	stdbit.o
+
 MOSTOBJS=			\
 	$(STRETS)		\
 	$(CRTOBJS)		\
@@ -1010,7 +1018,8 @@ MOSTOBJS=			\
 	$(SYSOBJS)		\
 	$(COMSYSOBJS64)		\
 	$(SYSOBJS64)		\
-	$(VALUES)
+	$(VALUES)		\
+	$(BITOBJS)
 
 TRACEOBJS=			\
 	plockstat.o
@@ -1050,11 +1059,11 @@ $(RELEASE_BUILD)CERRWARN += -_gcc=-Wno-unused
 # not linted
 SMATCH=off
 
-# Setting THREAD_DEBUG = -DTHREAD_DEBUG (make THREAD_DEBUG=-DTHREAD_DEBUG ...)
-# enables ASSERT() checking in the threads portion of the library.
+# Setting THREAD_DEBUG = -DDEBUG (make THREAD_DEBUG=-DDEBUG ...)
+# enables ASSERT() checking in the library.
 # This is automatically enabled for DEBUG builds, not for non-debug builds.
 THREAD_DEBUG =
-$(NOT_RELEASE_BUILD)THREAD_DEBUG = -DTHREAD_DEBUG
+$(NOT_RELEASE_BUILD)THREAD_DEBUG = -DDEBUG
 
 ALTPICS= $(TRACEOBJS:%=pics/%)
 
@@ -1104,7 +1113,6 @@ BUILD.AR= $(RM) $@ ; \
 
 # extra files for the clean target
 CLEANFILES +=			\
-	$(LIBCDIR)/port/gen/errlst.c	\
 	$(LIBCDIR)/port/gen/new_list.c	\
 	assym.h			\
 	genassym		\
@@ -1194,10 +1202,7 @@ $(ASSYMDEP_OBJS:%=pics/%): assym.h
 GENASSYM_C = genassym.c
 
 # derived C source and related explicit dependencies
-$(LIBCDIR)/port/gen/errlst.c + \
 $(LIBCDIR)/port/gen/new_list.c: $(LIBCDIR)/port/gen/errlist $(LIBCDIR)/port/gen/errlist.awk
 	cd $(LIBCDIR)/port/gen; pwd; $(AWK) -f errlist.awk < errlist
-
-pics/errlst.o: $(LIBCDIR)/port/gen/errlst.c
 
 pics/new_list.o: $(LIBCDIR)/port/gen/new_list.c

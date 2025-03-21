@@ -9,6 +9,7 @@
 # http://www.illumos.org/license/CDDL.
 #
 # Copyright 2021 Joyent, Inc.
+# Copyright 2024 MNX Cloud, Inc.
 #
 
 #
@@ -18,6 +19,7 @@
 #
 TEST_IPS_MANIFEST_FILES = \
     developer-build-make.p5m \
+    driver-ktest.p5m \
     system-bhyve-tests.p5m \
     system-dtrace-tests.p5m \
     system-file-system-zfs-tests.p5m \
@@ -25,7 +27,10 @@ TEST_IPS_MANIFEST_FILES = \
     system-test-cryptotest.p5m \
     system-test-elftest.p5m \
     system-test-libctest.p5m \
+    system-test-libproctest.p5m \
+    system-test-libsectest.p5m \
     system-test-nettest.p5m \
+    system-test-nvmetest.p5m \
     system-test-ostest.p5m \
     system-test-smbclient.p5m \
     system-test-testrunner.p5m \
@@ -33,4 +38,3 @@ TEST_IPS_MANIFEST_FILES = \
     system-test-vndtest.p5m \
     system-test-smartostest.p5m \
     system-test-zfstest.p5m
-

@@ -27,12 +27,13 @@
  * Copyright (c) 1992, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2012 Milan Jurik. All rights reserved.
  * Copyright (c) 2016 by Delphix. All rights reserved.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
+ * Copyright 2024 Hans Rosenfeld
  */
 
 
 /*
- * Serial I/O driver for 8250/16450/16550A/16650/16750 chips.
+ * Serial I/O driver for 8250/16450/16550A/16650/16750/16950 chips.
  */
 
 #include <sys/param.h>
@@ -64,18 +65,19 @@
 #include <sys/pci.h>
 #include <sys/asy.h>
 #include <sys/policy.h>
+#include <sys/sysmacros.h>
 
 /*
  * set the RX FIFO trigger_level to half the RX FIFO size for now
  * we may want to make this configurable later.
  */
-static	int asy_trig_level = FIFO_TRIG_8;
+static	int asy_trig_level = ASY_FCR_RHR_TRIG_8;
 
 int asy_drain_check = 15000000;		/* tunable: exit drain check time */
 int asy_min_dtr_low = 500000;		/* tunable: minimum DTR down time */
 int asy_min_utbrk = 100000;		/* tunable: minumum untimed brk time */
 
-int asymaxchip = ASY16750;	/* tunable: limit chip support we look for */
+int asymaxchip = ASY_MAXCHIP;	/* tunable: limit chip support we look for */
 
 /*
  * Just in case someone has a chip with broken loopback mode, we provide a
@@ -130,14 +132,17 @@ typedef enum {
 #define	ASY_DEBUG_IOCTL	0x1000	/* Output msgs about ioctl messages. */
 #define	ASY_DEBUG_CHIP	0x2000	/* Output msgs about chip identification. */
 #define	ASY_DEBUG_SFLOW	0x4000	/* Output msgs when S/W flowcontrol is active */
-#define	ASY_DEBUG(x) (debug & (x))
-static	int debug  = 0;
-#else
-#define	ASY_DEBUG(x) B_FALSE
-#endif
 
-/* pnpISA compressed device ids */
-#define	pnpMTS0219 0xb6930219	/* Multitech MT5634ZTX modem */
+static	int debug  = 0;
+
+#define	ASY_DEBUG(asy, x) (asy->asy_debug & (x))
+#define	ASY_DPRINTF(asy, fac, format, ...) \
+	if (ASY_DEBUG(asy, fac)) \
+		asyerror(asy, CE_CONT, "!%s: " format, __func__, ##__VA_ARGS__)
+#else
+#define	ASY_DEBUG(asy, x) B_FALSE
+#define	ASY_DPRINTF(asy, fac, format, ...)
+#endif
 
 /*
  * PPS (Pulse Per Second) support.
@@ -160,10 +165,35 @@ static struct ppsclockev asy_ppsev;
 #define	LED_OFF
 #endif
 
-static	int max_asy_instance = -1;
+static void	asy_put_idx(const struct asycom *, asy_reg_t, uint8_t);
+static uint8_t	asy_get_idx(const struct asycom *, asy_reg_t);
 
-static	uint_t	asysoftintr(caddr_t intarg);
-static	uint_t	asyintr(caddr_t argasy);
+static void	asy_put_add(const struct asycom *, asy_reg_t, uint8_t);
+static uint8_t	asy_get_add(const struct asycom *, asy_reg_t);
+
+static void	asy_put_ext(const struct asycom *, asy_reg_t, uint8_t);
+static uint8_t	asy_get_ext(const struct asycom *, asy_reg_t);
+
+static void	asy_put_reg(const struct asycom *, asy_reg_t, uint8_t);
+static uint8_t	asy_get_reg(const struct asycom *, asy_reg_t);
+
+static void	asy_put(const struct asycom *, asy_reg_t, uint8_t);
+static uint8_t	asy_get(const struct asycom *, asy_reg_t);
+
+static void	asy_set(const struct asycom *, asy_reg_t, uint8_t);
+static void	asy_clr(const struct asycom *, asy_reg_t, uint8_t);
+
+static void	asy_enable_interrupts(const struct asycom *, uint8_t);
+static void	asy_disable_interrupts(const struct asycom *, uint8_t);
+static void	asy_set_baudrate(const struct asycom *, int);
+static void	asy_wait_baudrate(struct asycom *);
+
+#define	BAUDINDEX(cflg)	(((cflg) & CBAUDEXT) ? \
+	    (((cflg) & CBAUD) + CBAUD + 1) : ((cflg) & CBAUD))
+
+static void	asysetsoft(struct asycom *);
+static uint_t	asysoftintr(caddr_t, caddr_t);
+static uint_t	asyintr(caddr_t, caddr_t);
 
 static boolean_t abort_charseq_recognize(uchar_t ch);
 
@@ -178,7 +208,6 @@ static void	async_reioctl(void *unit);
 static void	async_iocdata(queue_t *q, mblk_t *mp);
 static void	async_restart(void *arg);
 static void	async_start(struct asyncline *async);
-static void	async_nstart(struct asyncline *async, int mode);
 static void	async_resume(struct asyncline *async);
 static void	asy_program(struct asycom *asy, int mode);
 static void	asyinit(struct asycom *asy);
@@ -189,9 +218,9 @@ static boolean_t	asyischar(cons_polledio_arg_t);
 
 static int	asymctl(struct asycom *, int, int);
 static int	asytodm(int, int);
-static int	dmtoasy(int);
-/*PRINTFLIKE2*/
-static void	asyerror(int level, const char *fmt, ...) __KPRINTFLIKE(2);
+static int	dmtoasy(struct asycom *, int);
+static void	asyerror(const struct asycom *, int, const char *, ...)
+	__KPRINTFLIKE(3);
 static void	asy_parse_mode(dev_info_t *devi, struct asycom *asy);
 static void	asy_soft_state_free(struct asycom *);
 static char	*asy_hw_name(struct asycom *asy);
@@ -200,6 +229,7 @@ static void	async_resume_utbrk(struct asyncline *async);
 static void	async_dtr_free(struct asyncline *async);
 static int	asy_identify_chip(dev_info_t *devi, struct asycom *asy);
 static void	asy_reset_fifo(struct asycom *asy, uchar_t flags);
+static void	asy_carrier_check(struct asycom *);
 static int	asy_getproperty(dev_info_t *devi, struct asycom *asy,
 		    const char *property);
 static boolean_t	async_flowcontrol_sw_input(struct asycom *asy,
@@ -237,42 +267,112 @@ boolean_t	asy_nosuspend = B_FALSE;
 
 /*
  * Baud rate table. Indexed by #defines found in sys/termios.h
+ *
+ * The default crystal frequency is 1.8432 MHz. The 8250A used a fixed /16
+ * prescaler and a 16bit divisor, split in two registers (DLH and DLL).
+ *
+ * The 16950 adds TCR and CKS registers. The TCR can be used to set the
+ * prescaler from /4 to /16. The CKS can be used, among other things, to
+ * select a isochronous 1x mode, effectively disabling the prescaler.
+ * This would theoretically allow a baud rate of 1843200 driven directly
+ * by the default crystal frequency, although the highest termios.h-defined
+ * baud rate we can support is half of that, 921600 baud.
  */
-ushort_t asyspdtab[] = {
-	0,	/* 0 baud rate */
-	0x900,	/* 50 baud rate */
-	0x600,	/* 75 baud rate */
-	0x417,	/* 110 baud rate (%0.026) */
-	0x359,	/* 134 baud rate (%0.058) */
-	0x300,	/* 150 baud rate */
-	0x240,	/* 200 baud rate */
-	0x180,	/* 300 baud rate */
-	0x0c0,	/* 600 baud rate */
-	0x060,	/* 1200 baud rate */
-	0x040,	/* 1800 baud rate */
-	0x030,	/* 2400 baud rate */
-	0x018,	/* 4800 baud rate */
-	0x00c,	/* 9600 baud rate */
-	0x006,	/* 19200 baud rate */
-	0x003,	/* 38400 baud rate */
-
-	0x002,	/* 57600 baud rate */
-	0x0,	/* 76800 baud rate not supported */
-	0x001,	/* 115200 baud rate */
-	0x0,	/* 153600 baud rate not supported */
-	0x0,	/* 0x8002 (SMC chip) 230400 baud rate not supported */
-	0x0,	/* 307200 baud rate not supported */
-	0x0,	/* 0x8001 (SMC chip) 460800 baud rate not supported */
-	0x0,	/* 921600 baud rate not supported */
-	0x0,	/* 1000000 baud rate not supported */
-	0x0,	/* 1152000 baud rate not supported */
-	0x0,	/* 1500000 baud rate not supported */
-	0x0,	/* 2000000 baud rate not supported */
-	0x0,	/* 2500000 baud rate not supported */
-	0x0,	/* 3000000 baud rate not supported */
-	0x0,	/* 3500000 baud rate not supported */
-	0x0,	/* 4000000 baud rate not supported */
+#define	UNSUPPORTED	0x00, 0x00, 0x00
+static struct {
+	uint8_t asy_dlh;
+	uint8_t asy_dll;
+	uint8_t asy_tcr;
+} asy_baud_tab[] = {
+	[B0] =		{ UNSUPPORTED },	/* 0 baud */
+	[B50] =		{ 0x09, 0x00, 0x00 },	/* 50 baud */
+	[B75] =		{ 0x06, 0x00, 0x00 },	/* 75 baud */
+	[B110] =	{ 0x04, 0x17, 0x00 },	/* 110 baud (0.026% error) */
+	[B134] =	{ 0x03, 0x59, 0x00 },	/* 134 baud (0.058% error) */
+	[B150] =	{ 0x03, 0x00, 0x00 },	/* 150 baud */
+	[B200] =	{ 0x02, 0x40, 0x00 },	/* 200 baud */
+	[B300] =	{ 0x01, 0x80, 0x00 },	/* 300 baud */
+	[B600] =	{ 0x00, 0xc0, 0x00 },	/* 600 baud */
+	[B1200] =	{ 0x00, 0x60, 0x00 },	/* 1200 baud */
+	[B1800] =	{ 0x00, 0x40, 0x00 },	/* 1800 baud */
+	[B2400] =	{ 0x00, 0x30, 0x00 },	/* 2400 baud */
+	[B4800] =	{ 0x00, 0x18, 0x00 },	/* 4800 baud */
+	[B9600] =	{ 0x00, 0x0c, 0x00 },	/* 9600 baud */
+	[B19200] =	{ 0x00, 0x06, 0x00 },	/* 19200 baud */
+	[B38400] =	{ 0x00, 0x03, 0x00 },	/* 38400 baud */
+	[B57600] =	{ 0x00, 0x02, 0x00 },	/* 57600 baud */
+	[B76800] =	{ 0x00, 0x06, 0x04 },	/* 76800 baud (16950) */
+	[B115200] =	{ 0x00, 0x01, 0x00 },	/* 115200 baud */
+	[B153600] =	{ 0x00, 0x03, 0x04 },	/* 153600 baud (16950) */
+	[B230400] =	{ 0x00, 0x02, 0x04 },	/* 230400 baud (16950) */
+	[B307200] =	{ 0x00, 0x01, 0x06 },	/* 307200 baud (16950) */
+	[B460800] =	{ 0x00, 0x01, 0x04 },	/* 460800 baud (16950) */
+	[B921600] =	{ 0x00, 0x02, 0x01 },	/* 921600 baud (16950) */
+	[B1000000] =	{ UNSUPPORTED },	/* 1000000 baud */
+	[B1152000] =	{ UNSUPPORTED },	/* 1152000 baud */
+	[B1500000] =	{ UNSUPPORTED },	/* 1500000 baud */
+	[B2000000] =	{ UNSUPPORTED },	/* 2000000 baud */
+	[B2500000] =	{ UNSUPPORTED },	/* 2500000 baud */
+	[B3000000] =	{ UNSUPPORTED },	/* 3000000 baud */
+	[B3500000] =	{ UNSUPPORTED },	/* 3500000 baud */
+	[B4000000] =	{ UNSUPPORTED },	/* 4000000 baud */
 };
+
+/*
+ * Register table. For each logical register, we define the minimum hwtype, the
+ * register offset, and function pointers for reading and writing the register.
+ * A NULL pointer indicates the register cannot be read from or written to,
+ * respectively.
+ */
+static struct {
+	int asy_min_hwtype;
+	int8_t asy_reg_off;
+	uint8_t (*asy_get_reg)(const struct asycom *, asy_reg_t);
+	void (*asy_put_reg)(const struct asycom *, asy_reg_t, uint8_t);
+} asy_reg_table[] = {
+	[ASY_ILLEGAL] = { 0, -1, NULL, NULL },
+	/* 8250 / 16450 / 16550 registers */
+	[ASY_THR] =   { ASY_8250A,  0, NULL,	    asy_put_reg },
+	[ASY_RHR] =   { ASY_8250A,  0, asy_get_reg, NULL },
+	[ASY_IER] =   { ASY_8250A,  1, asy_get_reg, asy_put_reg },
+	[ASY_FCR] =   { ASY_16550,  2, NULL,	    asy_put_reg },
+	[ASY_ISR] =   { ASY_8250A,  2, asy_get_reg, NULL },
+	[ASY_LCR] =   { ASY_8250A,  3, asy_get_reg, asy_put_reg },
+	[ASY_MCR] =   { ASY_8250A,  4, asy_get_reg, asy_put_reg },
+	[ASY_LSR] =   { ASY_8250A,  5, asy_get_reg, NULL },
+	[ASY_MSR] =   { ASY_8250A,  6, asy_get_reg, NULL },
+	[ASY_SPR] =   { ASY_8250A,  7, asy_get_reg, asy_put_reg },
+	[ASY_DLL] =   { ASY_8250A,  0, asy_get_reg, asy_put_reg },
+	[ASY_DLH] =   { ASY_8250A,  1, asy_get_reg, asy_put_reg },
+	/* 16750 extended register */
+	[ASY_EFR] =   { ASY_16750,  2, asy_get_ext, asy_put_ext },
+	/* 16650 extended registers */
+	[ASY_XON1] =  { ASY_16650,  4, asy_get_ext, asy_put_ext },
+	[ASY_XON2] =  { ASY_16650,  5, asy_get_ext, asy_put_ext },
+	[ASY_XOFF1] = { ASY_16650,  6, asy_get_ext, asy_put_ext },
+	[ASY_XOFF2] = { ASY_16650,  7, asy_get_ext, asy_put_ext },
+	/* 16950 additional registers */
+	[ASY_ASR] =   { ASY_16950,  1, asy_get_add, asy_put_add },
+	[ASY_RFL] =   { ASY_16950,  3, asy_get_add, NULL },
+	[ASY_TFL] =   { ASY_16950,  4, asy_get_add, NULL },
+	[ASY_ICR] =   { ASY_16950,  5, asy_get_reg, asy_put_reg },
+	/* 16950 indexed registers */
+	[ASY_ACR] =   { ASY_16950,  0, asy_get_idx, asy_put_idx },
+	[ASY_CPR] =   { ASY_16950,  1, asy_get_idx, asy_put_idx },
+	[ASY_TCR] =   { ASY_16950,  2, asy_get_idx, asy_put_idx },
+	[ASY_CKS] =   { ASY_16950,  3, asy_get_idx, asy_put_idx },
+	[ASY_TTL] =   { ASY_16950,  4, asy_get_idx, asy_put_idx },
+	[ASY_RTL] =   { ASY_16950,  5, asy_get_idx, asy_put_idx },
+	[ASY_FCL] =   { ASY_16950,  6, asy_get_idx, asy_put_idx },
+	[ASY_FCH] =   { ASY_16950,  7, asy_get_idx, asy_put_idx },
+	[ASY_ID1] =   { ASY_16950,  8, asy_get_idx, NULL },
+	[ASY_ID2] =   { ASY_16950,  9, asy_get_idx, NULL },
+	[ASY_ID3] =   { ASY_16950, 10, asy_get_idx, NULL },
+	[ASY_REV] =   { ASY_16950, 11, asy_get_idx, NULL },
+	[ASY_CSR] =   { ASY_16950, 12, NULL,	    asy_put_idx },
+	[ASY_NMR] =   { ASY_16950, 13, asy_get_idx, asy_put_idx },
+};
+
 
 static int asyrsrv(queue_t *q);
 static int asyopen(queue_t *rq, dev_t *dev, int flag, int sflag, cred_t *cr);
@@ -315,6 +415,15 @@ struct streamtab asy_str_info = {
 	NULL,
 	NULL
 };
+
+static void asy_intr_free(struct asycom *);
+static int asy_intr_setup(struct asycom *, int);
+
+static void asy_softintr_free(struct asycom *);
+static int asy_softintr_setup(struct asycom *);
+
+static int asy_suspend(struct asycom *);
+static int asy_resume(dev_info_t *);
 
 static int asyinfo(dev_info_t *dip, ddi_info_cmd_t infocmd, void *arg,
 		void **result);
@@ -379,9 +488,12 @@ _init(void)
 		if ((i = mod_install(&modlinkage)) != 0) {
 			mutex_destroy(&asy_glob_lock);
 			ddi_soft_state_fini(&asy_soft_state);
+#ifdef DEBUG
 		} else {
-			DEBUGCONT2(ASY_DEBUG_INIT, "%s, debug = %x\n",
-			    modldrv.drv_linkinfo, debug);
+			if (debug & ASY_DEBUG_INIT)
+				cmn_err(CE_NOTE, "!%s, debug = %x",
+				    modldrv.drv_linkinfo, debug);
+#endif
 		}
 	}
 	return (i);
@@ -393,9 +505,11 @@ _fini(void)
 	int i;
 
 	if ((i = mod_remove(&modlinkage)) == 0) {
-		DEBUGCONT1(ASY_DEBUG_INIT, "%s unloading\n",
-		    modldrv.drv_linkinfo);
-		ASSERT(max_asy_instance == -1);
+#ifdef DEBUG
+		if (debug & ASY_DEBUG_INIT)
+			cmn_err(CE_NOTE, "!%s unloading",
+			    modldrv.drv_linkinfo);
+#endif
 		mutex_destroy(&asy_glob_lock);
 		/* free "motherboard-serial-ports" property if allocated */
 		if (com_ports != NULL && com_ports != (int *)standard_com_ports)
@@ -410,6 +524,330 @@ int
 _info(struct modinfo *modinfop)
 {
 	return (mod_info(&modlinkage, modinfop));
+}
+
+static void
+asy_put_idx(const struct asycom *asy, asy_reg_t reg, uint8_t val)
+{
+	ASSERT(asy->asy_hwtype >= ASY_16950);
+
+	ASSERT(reg >= ASY_ACR);
+	ASSERT(reg <= ASY_NREG);
+
+	/*
+	 * The last value written to LCR must not have been the magic value for
+	 * EFR access. Every time the driver writes that magic value to access
+	 * EFR, XON1, XON2, XOFF1, and XOFF2, the driver restores the original
+	 * value of LCR, so we should be good here.
+	 *
+	 * I'd prefer to ASSERT this, but I'm not sure it's worth the hassle.
+	 */
+
+	/* Write indexed register offset to SPR. */
+	asy_put(asy, ASY_SPR, asy_reg_table[reg].asy_reg_off);
+
+	/* Write value to ICR. */
+	asy_put(asy, ASY_ICR, val);
+}
+
+static uint8_t
+asy_get_idx(const struct asycom *asy, asy_reg_t reg)
+{
+	uint8_t val;
+
+	ASSERT(asy->asy_hwtype >= ASY_16950);
+
+	ASSERT(reg >= ASY_ACR);
+	ASSERT(reg <= ASY_NREG);
+
+	/* Enable access to ICR in ACR. */
+	asy_put(asy, ASY_ACR, ASY_ACR_ICR | asy->asy_acr);
+
+	/* Write indexed register offset to SPR. */
+	asy_put(asy, ASY_SPR, asy_reg_table[reg].asy_reg_off);
+
+	/* Read value from ICR. */
+	val = asy_get(asy, ASY_ICR);
+
+	/* Restore ACR. */
+	asy_put(asy, ASY_ACR, asy->asy_acr);
+
+	return (val);
+}
+
+static void
+asy_put_add(const struct asycom *asy, asy_reg_t reg, uint8_t val)
+{
+	ASSERT(asy->asy_hwtype >= ASY_16950);
+
+	/* Only ASR is writable, RFL and TFL are read-only. */
+	ASSERT(reg == ASY_ASR);
+
+	/*
+	 * Only ASR[0] (Transmitter Disabled) and ASR[1] (Remote Transmitter
+	 * Disabled) are writable.
+	 */
+	ASSERT((val & ~(ASY_ASR_TD | ASY_ASR_RTD)) == 0);
+
+	/* Enable access to ASR in ACR. */
+	asy_put(asy, ASY_ACR, ASY_ACR_ASR | asy->asy_acr);
+
+	/* Write value to ASR. */
+	asy_put_reg(asy, reg, val);
+
+	/* Restore ACR. */
+	asy_put(asy, ASY_ACR, asy->asy_acr);
+}
+
+static uint8_t
+asy_get_add(const struct asycom *asy, asy_reg_t reg)
+{
+	uint8_t val;
+
+	ASSERT(asy->asy_hwtype >= ASY_16950);
+
+	ASSERT(reg >= ASY_ASR);
+	ASSERT(reg <= ASY_TFL);
+
+	/*
+	 * The last value written to LCR must not have been the magic value for
+	 * EFR access. Every time the driver writes that magic value to access
+	 * EFR, XON1, XON2, XOFF1, and XOFF2, the driver restores the original
+	 * value of LCR, so we should be good here.
+	 *
+	 * I'd prefer to ASSERT this, but I'm not sure it's worth the hassle.
+	 */
+
+	/* Enable access to ASR in ACR. */
+	asy_put(asy, ASY_ACR, ASY_ACR_ASR | asy->asy_acr);
+
+	/* Read value from register. */
+	val = asy_get_reg(asy, reg);
+
+	/* Restore ACR. */
+	asy_put(asy, ASY_ACR, 0 | asy->asy_acr);
+
+	return (val);
+}
+
+static void
+asy_put_ext(const struct asycom *asy, asy_reg_t reg, uint8_t val)
+{
+	uint8_t lcr;
+
+	/*
+	 * On the 16750, EFR can be accessed when LCR[7]=1 (DLAB).
+	 * Only two bits are assigned for auto RTS/CTS, which we don't support
+	 * yet.
+	 *
+	 * So insist we have a 16650 or up.
+	 */
+	ASSERT(asy->asy_hwtype >= ASY_16650);
+
+	ASSERT(reg >= ASY_EFR);
+	ASSERT(reg <= ASY_XOFF2);
+
+	/* Save LCR contents. */
+	lcr = asy_get(asy, ASY_LCR);
+
+	/* Enable extended register access. */
+	asy_put(asy, ASY_LCR, ASY_LCR_EFRACCESS);
+
+	/* Write extended register */
+	asy_put_reg(asy, reg, val);
+
+	/* Restore previous LCR contents, disabling extended register access. */
+	asy_put(asy, ASY_LCR, lcr);
+}
+
+static uint8_t
+asy_get_ext(const struct asycom *asy, asy_reg_t reg)
+{
+	uint8_t lcr, val;
+
+	/*
+	 * On the 16750, EFR can be accessed when LCR[7]=1 (DLAB).
+	 * Only two bits are assigned for auto RTS/CTS, which we don't support
+	 * yet.
+	 *
+	 * So insist we have a 16650 or up.
+	 */
+	ASSERT(asy->asy_hwtype >= ASY_16650);
+
+	ASSERT(reg >= ASY_EFR);
+	ASSERT(reg <= ASY_XOFF2);
+
+	/* Save LCR contents. */
+	lcr = asy_get(asy, ASY_LCR);
+
+	/* Enable extended register access. */
+	asy_put(asy, ASY_LCR, ASY_LCR_EFRACCESS);
+
+	/* Read extended register */
+	val = asy_get_reg(asy, reg);
+
+	/* Restore previous LCR contents, disabling extended register access. */
+	asy_put(asy, ASY_LCR, lcr);
+
+	return (val);
+}
+
+static void
+asy_put_reg(const struct asycom *asy, asy_reg_t reg, uint8_t val)
+{
+	ASSERT(asy->asy_hwtype >= asy_reg_table[reg].asy_min_hwtype);
+
+	ddi_put8(asy->asy_iohandle,
+	    asy->asy_ioaddr + asy_reg_table[reg].asy_reg_off, val);
+}
+
+static uint8_t
+asy_get_reg(const struct asycom *asy, asy_reg_t reg)
+{
+	ASSERT(asy->asy_hwtype >= asy_reg_table[reg].asy_min_hwtype);
+
+	return (ddi_get8(asy->asy_iohandle,
+	    asy->asy_ioaddr + asy_reg_table[reg].asy_reg_off));
+}
+
+static void
+asy_put(const struct asycom *asy, asy_reg_t reg, uint8_t val)
+{
+	ASSERT(mutex_owned(&asy->asy_excl_hi));
+
+	ASSERT(reg > ASY_ILLEGAL);
+	ASSERT(reg < ASY_NREG);
+
+	ASSERT(asy->asy_hwtype >= asy_reg_table[reg].asy_min_hwtype);
+	ASSERT(asy_reg_table[reg].asy_put_reg != NULL);
+
+	asy_reg_table[reg].asy_put_reg(asy, reg, val);
+}
+
+static uint8_t
+asy_get(const struct asycom *asy, asy_reg_t reg)
+{
+	uint8_t val;
+
+	ASSERT(mutex_owned(&asy->asy_excl_hi));
+
+	ASSERT(reg > ASY_ILLEGAL);
+	ASSERT(reg < ASY_NREG);
+
+	ASSERT(asy->asy_hwtype >= asy_reg_table[reg].asy_min_hwtype);
+	ASSERT(asy_reg_table[reg].asy_get_reg != NULL);
+
+	val = asy_reg_table[reg].asy_get_reg(asy, reg);
+
+	return (val);
+}
+
+static void
+asy_set(const struct asycom *asy, asy_reg_t reg, uint8_t bits)
+{
+	uint8_t val = asy_get(asy, reg);
+
+	asy_put(asy, reg, val | bits);
+}
+
+static void
+asy_clr(const struct asycom *asy, asy_reg_t reg, uint8_t bits)
+{
+	uint8_t val = asy_get(asy, reg);
+
+	asy_put(asy, reg, val & ~bits);
+}
+
+static void
+asy_enable_interrupts(const struct asycom *asy, uint8_t intr)
+{
+	/* Don't touch any IER bits we don't support. */
+	intr &= ASY_IER_ALL;
+
+	asy_set(asy, ASY_IER, intr);
+}
+
+static void
+asy_disable_interrupts(const struct asycom *asy, uint8_t intr)
+{
+	/* Don't touch any IER bits we don't support. */
+	intr &= ASY_IER_ALL;
+
+	asy_clr(asy, ASY_IER, intr);
+}
+
+static void
+asy_set_baudrate(const struct asycom *asy, int baudrate)
+{
+	uint8_t tcr;
+
+	if (baudrate == 0)
+		return;
+
+	if (baudrate >= ARRAY_SIZE(asy_baud_tab))
+		return;
+
+	tcr = asy_baud_tab[baudrate].asy_tcr;
+
+	if (tcr != 0 && asy->asy_hwtype < ASY_16950)
+		return;
+
+	if (asy->asy_hwtype >= ASY_16950) {
+		if (tcr == 0x01) {
+			/* Isochronous 1x mode is selected in CKS, not TCR. */
+			asy_put(asy, ASY_CKS,
+			    ASY_CKS_RCLK_1X | ASY_CKS_TCLK_1X);
+			asy_put(asy, ASY_TCR, 0);
+		} else {
+			/* Reset CKS in case it was set to 1x mode. */
+			asy_put(asy, ASY_CKS, 0);
+
+			ASSERT(tcr == 0x00 || tcr >= 0x04 || tcr <= 0x0f);
+			asy_put(asy, ASY_TCR, tcr);
+		}
+		ASY_DPRINTF(asy, ASY_DEBUG_IOCTL,
+		    "setting baudrate %d, CKS 0x%02x, TCR 0x%02x",
+		    baudrate, asy_get(asy, ASY_CKS), asy_get(asy, ASY_TCR));
+	}
+
+	ASY_DPRINTF(asy, ASY_DEBUG_IOCTL,
+	    "setting baudrate %d, divisor 0x%02x%02x",
+	    baudrate, asy_baud_tab[baudrate].asy_dlh,
+	    asy_baud_tab[baudrate].asy_dll);
+
+	asy_set(asy, ASY_LCR, ASY_LCR_DLAB);
+
+	asy_put(asy, ASY_DLL, asy_baud_tab[baudrate].asy_dll);
+	asy_put(asy, ASY_DLH, asy_baud_tab[baudrate].asy_dlh);
+
+	asy_clr(asy, ASY_LCR, ASY_LCR_DLAB);
+}
+
+/*
+ * Loop until the TSR is empty.
+ *
+ * The wait period is clock / (baud * 16) * 16 * 2.
+ */
+static void
+asy_wait_baudrate(struct asycom *asy)
+{
+	struct asyncline *async = asy->asy_priv;
+	int rate = BAUDINDEX(async->async_ttycommon.t_cflag);
+	clock_t usec =
+	    ((((clock_t)asy_baud_tab[rate].asy_dlh) << 8) |
+	    ((clock_t)asy_baud_tab[rate].asy_dll)) * 16 * 2;
+
+	ASSERT(mutex_owned(&asy->asy_excl));
+	ASSERT(mutex_owned(&asy->asy_excl_hi));
+
+	while ((asy_get(asy, ASY_LSR) & ASY_LSR_TEMT) == 0) {
+		mutex_exit(&asy->asy_excl_hi);
+		mutex_exit(&asy->asy_excl);
+		drv_usecwait(usec);
+		mutex_enter(&asy->asy_excl);
+		mutex_enter(&asy->asy_excl_hi);
+	}
+	asy_set(asy, ASY_LCR, ASY_LCR_SETBRK);
 }
 
 void
@@ -468,28 +906,30 @@ async_process_suspq(struct asycom *asy)
 static int
 asy_get_bus_type(dev_info_t *devinfo)
 {
-	char	parent_type[16];
-	int	parentlen;
+	char *prop;
+	int bustype;
 
-	parentlen = sizeof (parent_type);
-
-	if (ddi_prop_op(DDI_DEV_T_ANY, devinfo, PROP_LEN_AND_VAL_BUF, 0,
-	    "device_type", (caddr_t)parent_type, &parentlen)
-	    != DDI_PROP_SUCCESS && ddi_prop_op(DDI_DEV_T_ANY, devinfo,
-	    PROP_LEN_AND_VAL_BUF, 0, "bus-type", (caddr_t)parent_type,
-	    &parentlen) != DDI_PROP_SUCCESS) {
-			cmn_err(CE_WARN,
-			    "asy: can't figure out device type for"
-			    " parent \"%s\"",
-			    ddi_get_name(ddi_get_parent(devinfo)));
-			return (ASY_BUS_UNKNOWN);
+	if (ddi_prop_lookup_string(DDI_DEV_T_ANY, devinfo, 0, "device_type",
+	    &prop) != DDI_PROP_SUCCESS &&
+	    ddi_prop_lookup_string(DDI_DEV_T_ANY, devinfo, 0, "bus-type",
+	    &prop) != DDI_PROP_SUCCESS) {
+		dev_err(devinfo, CE_WARN,
+		    "!%s: can't figure out device type for parent \"%s\"",
+		    __func__, ddi_get_name(ddi_get_parent(devinfo)));
+		return (ASY_BUS_UNKNOWN);
 	}
-	if (strcmp(parent_type, "isa") == 0)
-		return (ASY_BUS_ISA);
-	else if (strcmp(parent_type, "pci") == 0)
+
+	if (strcmp(prop, "isa") == 0)
+		bustype = ASY_BUS_ISA;
+	else if (strcmp(prop, "pci") == 0)
+		bustype = ASY_BUS_PCI;
+	else if (strcmp(prop, "pciex") == 0)
 		return (ASY_BUS_PCI);
 	else
-		return (ASY_BUS_UNKNOWN);
+		bustype = ASY_BUS_UNKNOWN;
+
+	ddi_prop_free(prop);
+	return (bustype);
 }
 
 static int
@@ -502,17 +942,10 @@ asy_get_io_regnum_pci(dev_info_t *devi, struct asycom *asy)
 
 	if (ddi_getlongprop(DDI_DEV_T_ANY, devi, DDI_PROP_DONTPASS,
 	    "reg", (caddr_t)&reglist, &reglen) != DDI_PROP_SUCCESS) {
-		cmn_err(CE_WARN, "asy_get_io_regnum_pci: reg property"
-		    " not found in devices property list");
+		dev_err(devi, CE_WARN, "!%s: reg property"
+		    " not found in devices property list", __func__);
 		return (-1);
 	}
-
-	/*
-	 * PCI devices are assumed to not have broken FIFOs;
-	 * Agere/Lucent Venus PCI modem chipsets are an example
-	 */
-	if (asy)
-		asy->asy_flags2 |= ASY2_NO_LOOPBACK;
 
 	regnum = -1;
 	nregs = reglen / sizeof (*reglist);
@@ -542,8 +975,8 @@ asy_get_io_regnum_pci(dev_info_t *devi, struct asycom *asy)
 static int
 asy_get_io_regnum_isa(dev_info_t *devi, struct asycom *asy)
 {
+	int regnum = -1;
 	int reglen, nregs;
-	int regnum, i;
 	struct {
 		uint_t bustype;
 		int base;
@@ -552,27 +985,19 @@ asy_get_io_regnum_isa(dev_info_t *devi, struct asycom *asy)
 
 	if (ddi_getlongprop(DDI_DEV_T_ANY, devi, DDI_PROP_DONTPASS,
 	    "reg", (caddr_t)&reglist, &reglen) != DDI_PROP_SUCCESS) {
-		cmn_err(CE_WARN, "asy_get_io_regnum: reg property not found "
-		    "in devices property list");
+		dev_err(devi, CE_WARN, "!%s: reg property not found "
+		    "in devices property list", __func__);
 		return (-1);
 	}
 
-	regnum = -1;
 	nregs = reglen / sizeof (*reglist);
-	for (i = 0; i < nregs; i++) {
-		switch (reglist[i].bustype) {
-		case 1:			/* I/O bus reg property */
-			if (regnum == -1) /* only use the first one */
-				regnum = i;
-			break;
 
-		case pnpMTS0219:	/* Multitech MT5634ZTX modem */
-			/* Venus chipset can't do loopback test */
-			if (asy)
-				asy->asy_flags2 |= ASY2_NO_LOOPBACK;
-			break;
-
-		default:
+	/*
+	 * Find the first I/O bus in the "reg" property.
+	 */
+	for (int i = 0; i < nregs && regnum == -1; i++) {
+		if (reglist[i].bustype == 1) {
+			regnum = i;
 			break;
 		}
 	}
@@ -580,7 +1005,9 @@ asy_get_io_regnum_isa(dev_info_t *devi, struct asycom *asy)
 	/* check for valid count of registers */
 	if ((regnum < 0) || (reglist[regnum].size < 8))
 		regnum = -1;
+
 	kmem_free(reglist, reglen);
+
 	return (regnum);
 }
 
@@ -597,124 +1024,372 @@ asy_get_io_regnum(dev_info_t *devinfo, struct asycom *asy)
 	}
 }
 
+static void
+asy_intr_free(struct asycom *asy)
+{
+	int i;
+
+	for (i = 0; i < asy->asy_intr_cnt; i++) {
+		if (asy->asy_inth[i] == NULL)
+			break;
+
+		if ((asy->asy_intr_cap & DDI_INTR_FLAG_BLOCK) != 0)
+			(void) ddi_intr_block_disable(&asy->asy_inth[i], 1);
+		else
+			(void) ddi_intr_disable(asy->asy_inth[i]);
+
+		(void) ddi_intr_remove_handler(asy->asy_inth[i]);
+		(void) ddi_intr_free(asy->asy_inth[i]);
+	}
+
+	kmem_free(asy->asy_inth, asy->asy_inth_sz);
+	asy->asy_inth = NULL;
+	asy->asy_inth_sz = 0;
+}
+
+static int
+asy_intr_setup(struct asycom *asy, int intr_type)
+{
+	int nintrs, navail, count;
+	int ret;
+	int i;
+
+	if (asy->asy_intr_types == 0) {
+		ret = ddi_intr_get_supported_types(asy->asy_dip,
+		    &asy->asy_intr_types);
+		if (ret != DDI_SUCCESS) {
+			asyerror(asy, CE_WARN,
+			    "ddi_intr_get_supported_types failed");
+			return (ret);
+		}
+	}
+
+	if ((asy->asy_intr_types & intr_type) == 0)
+		return (DDI_FAILURE);
+
+	ret = ddi_intr_get_nintrs(asy->asy_dip, intr_type, &nintrs);
+	if (ret != DDI_SUCCESS) {
+		asyerror(asy, CE_WARN, "ddi_intr_get_nintrs failed, type %d",
+		    intr_type);
+		return (ret);
+	}
+
+	if (nintrs < 1) {
+		asyerror(asy, CE_WARN, "no interrupts of type %d", intr_type);
+		return (DDI_FAILURE);
+	}
+
+	ret = ddi_intr_get_navail(asy->asy_dip, intr_type, &navail);
+	if (ret != DDI_SUCCESS) {
+		asyerror(asy, CE_WARN, "ddi_intr_get_navail failed, type %d",
+		    intr_type);
+		return (ret);
+	}
+
+	if (navail < 1) {
+		asyerror(asy, CE_WARN, "no available interrupts, type %d",
+		    intr_type);
+		return (DDI_FAILURE);
+	}
+
+	/*
+	 * Some PCI(e) RS232 adapters seem to support more than one interrupt,
+	 * but the asy driver really doesn't.
+	 */
+	asy->asy_inth_sz = sizeof (ddi_intr_handle_t);
+	asy->asy_inth = kmem_zalloc(asy->asy_inth_sz, KM_SLEEP);
+	ret = ddi_intr_alloc(asy->asy_dip, asy->asy_inth, intr_type, 0, 1,
+	    &count, 0);
+	if (ret != DDI_SUCCESS) {
+		asyerror(asy, CE_WARN, "ddi_intr_alloc failed, count %d, "
+		    "type %d", navail, intr_type);
+		goto fail;
+	}
+
+	if (count != 1) {
+		asyerror(asy, CE_WARN, "ddi_intr_alloc returned not 1 but %d "
+		    "interrupts of type %d", count, intr_type);
+		goto fail;
+	}
+
+	asy->asy_intr_cnt = count;
+
+	ret = ddi_intr_get_pri(asy->asy_inth[0], &asy->asy_intr_pri);
+	if (ret != DDI_SUCCESS) {
+		asyerror(asy, CE_WARN, "ddi_intr_get_pri failed, type %d",
+		    intr_type);
+		goto fail;
+	}
+
+	for (i = 0; i < count; i++) {
+		ret = ddi_intr_add_handler(asy->asy_inth[i], asyintr,
+		    (void *)asy, (void *)(uintptr_t)i);
+		if (ret != DDI_SUCCESS) {
+			asyerror(asy, CE_WARN, "ddi_intr_add_handler failed, "
+			    "int %d, type %d", i, intr_type);
+			goto fail;
+		}
+	}
+
+	(void) ddi_intr_get_cap(asy->asy_inth[0], &asy->asy_intr_cap);
+
+	for (i = 0; i < count; i++) {
+		if (asy->asy_intr_cap & DDI_INTR_FLAG_BLOCK)
+			ret = ddi_intr_block_enable(&asy->asy_inth[i], 1);
+		else
+			ret = ddi_intr_enable(asy->asy_inth[i]);
+
+		if (ret != DDI_SUCCESS) {
+			asyerror(asy, CE_WARN,
+			    "enabling interrupt %d failed, type %d",
+			    i, intr_type);
+			goto fail;
+		}
+	}
+
+	asy->asy_intr_type = intr_type;
+	return (DDI_SUCCESS);
+
+fail:
+	asy_intr_free(asy);
+	return (ret);
+}
+
+static void
+asy_softintr_free(struct asycom *asy)
+{
+	(void) ddi_intr_remove_softint(asy->asy_soft_inth);
+}
+
+static int
+asy_softintr_setup(struct asycom *asy)
+{
+	int ret;
+
+	ret = ddi_intr_add_softint(asy->asy_dip, &asy->asy_soft_inth,
+	    ASY_SOFT_INT_PRI, asysoftintr, asy);
+	if (ret != DDI_SUCCESS) {
+		asyerror(asy, CE_WARN, "ddi_intr_add_softint failed");
+		return (ret);
+	}
+
+	/*
+	 * This may seem pointless since we specified ASY_SOFT_INT_PRI above,
+	 * but then it's probably a good idea to consider the soft interrupt
+	 * priority an opaque value and don't hardcode any assumptions about
+	 * its actual value here.
+	 */
+	ret = ddi_intr_get_softint_pri(asy->asy_soft_inth,
+	    &asy->asy_soft_intr_pri);
+	if (ret != DDI_SUCCESS) {
+		asyerror(asy, CE_WARN, "ddi_intr_get_softint_pri failed");
+		return (ret);
+	}
+
+	return (DDI_SUCCESS);
+}
+
+
+static int
+asy_resume(dev_info_t *devi)
+{
+	struct asyncline *async;
+	struct asycom *asy;
+	int instance = ddi_get_instance(devi);	/* find out which unit */
+
+#ifdef	DEBUG
+	if (asy_nosuspend)
+		return (DDI_SUCCESS);
+#endif
+	asy = ddi_get_soft_state(asy_soft_state, instance);
+	if (asy == NULL)
+		return (DDI_FAILURE);
+
+	mutex_enter(&asy->asy_soft_sr);
+	mutex_enter(&asy->asy_excl);
+	mutex_enter(&asy->asy_excl_hi);
+
+	async = asy->asy_priv;
+	asy_disable_interrupts(asy, ASY_IER_ALL);
+	if (asy_identify_chip(devi, asy) != DDI_SUCCESS) {
+		mutex_exit(&asy->asy_excl_hi);
+		mutex_exit(&asy->asy_excl);
+		mutex_exit(&asy->asy_soft_sr);
+		asyerror(asy, CE_WARN, "Cannot identify UART chip at %p",
+		    (void *)asy->asy_ioaddr);
+		return (DDI_FAILURE);
+	}
+	asy->asy_flags &= ~ASY_DDI_SUSPENDED;
+	if (async->async_flags & ASYNC_ISOPEN) {
+		asy_program(asy, ASY_INIT);
+		/* Kick off output */
+		if (async->async_ocnt > 0) {
+			async_resume(async);
+		} else {
+			mutex_exit(&asy->asy_excl_hi);
+			if (async->async_xmitblk)
+				freeb(async->async_xmitblk);
+			async->async_xmitblk = NULL;
+			async_start(async);
+			mutex_enter(&asy->asy_excl_hi);
+		}
+		asysetsoft(asy);
+	}
+	mutex_exit(&asy->asy_excl_hi);
+	mutex_exit(&asy->asy_excl);
+	mutex_exit(&asy->asy_soft_sr);
+
+	mutex_enter(&asy->asy_excl);
+	if (async->async_flags & ASYNC_RESUME_BUFCALL) {
+		async->async_wbufcid = bufcall(async->async_wbufcds,
+		    BPRI_HI, (void (*)(void *)) async_reioctl,
+		    (void *)(intptr_t)async->async_common->asy_unit);
+		async->async_flags &= ~ASYNC_RESUME_BUFCALL;
+	}
+	async_process_suspq(asy);
+	mutex_exit(&asy->asy_excl);
+	return (DDI_SUCCESS);
+}
+
+static int
+asy_suspend(struct asycom *asy)
+{
+	struct asyncline *async = asy->asy_priv;
+	unsigned i;
+	uchar_t lsr;
+
+#ifdef	DEBUG
+	if (asy_nosuspend)
+		return (DDI_SUCCESS);
+#endif
+	mutex_enter(&asy->asy_excl);
+
+	ASSERT(async->async_ops >= 0);
+	while (async->async_ops > 0)
+		cv_wait(&async->async_ops_cv, &asy->asy_excl);
+
+	async->async_flags |= ASYNC_DDI_SUSPENDED;
+
+	/* Wait for timed break and delay to complete */
+	while ((async->async_flags & (ASYNC_BREAK|ASYNC_DELAY))) {
+		if (cv_wait_sig(&async->async_flags_cv, &asy->asy_excl) == 0) {
+			async_process_suspq(asy);
+			mutex_exit(&asy->asy_excl);
+			return (DDI_FAILURE);
+		}
+	}
+
+	/* Clear untimed break */
+	if (async->async_flags & ASYNC_OUT_SUSPEND)
+		async_resume_utbrk(async);
+
+	mutex_exit(&asy->asy_excl);
+
+	mutex_enter(&asy->asy_soft_sr);
+	mutex_enter(&asy->asy_excl);
+	if (async->async_wbufcid != 0) {
+		bufcall_id_t bcid = async->async_wbufcid;
+		async->async_wbufcid = 0;
+		async->async_flags |= ASYNC_RESUME_BUFCALL;
+		mutex_exit(&asy->asy_excl);
+		unbufcall(bcid);
+		mutex_enter(&asy->asy_excl);
+	}
+	mutex_enter(&asy->asy_excl_hi);
+
+	asy_disable_interrupts(asy, ASY_IER_ALL);
+	asy->asy_flags |= ASY_DDI_SUSPENDED;
+
+	/*
+	 * Hardware interrupts are disabled we can drop our high level
+	 * lock and proceed.
+	 */
+	mutex_exit(&asy->asy_excl_hi);
+
+	/* Process remaining RX characters and RX errors, if any */
+	lsr = asy_get(asy, ASY_LSR);
+	async_rxint(asy, lsr);
+
+	/* Wait for TX to drain */
+	for (i = 1000; i > 0; i--) {
+		lsr = asy_get(asy, ASY_LSR);
+		if ((lsr & (ASY_LSR_TEMT | ASY_LSR_THRE)) ==
+		    (ASY_LSR_TEMT | ASY_LSR_THRE))
+			break;
+		delay(drv_usectohz(10000));
+	}
+	if (i == 0)
+		asyerror(asy, CE_WARN, "transmitter wasn't drained before "
+		    "driver was suspended");
+
+	mutex_exit(&asy->asy_excl);
+	mutex_exit(&asy->asy_soft_sr);
+
+	return (DDI_SUCCESS);
+}
+
 static int
 asydetach(dev_info_t *devi, ddi_detach_cmd_t cmd)
 {
 	int instance;
 	struct asycom *asy;
-	struct asyncline *async;
 
 	instance = ddi_get_instance(devi);	/* find out which unit */
 
 	asy = ddi_get_soft_state(asy_soft_state, instance);
 	if (asy == NULL)
 		return (DDI_FAILURE);
-	async = asy->asy_priv;
 
 	switch (cmd) {
 	case DDI_DETACH:
-		DEBUGNOTE2(ASY_DEBUG_INIT, "asy%d: %s shutdown.",
-		    instance, asy_hw_name(asy));
+		break;
 
+	case DDI_SUSPEND:
+		return (asy_suspend(asy));
+
+	default:
+		return (DDI_FAILURE);
+	}
+
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "%s shutdown", asy_hw_name(asy));
+
+	/*
+	 * Ensure that interrupts are disabled prior to destroying data and
+	 * mutexes that they depend on.
+	 */
+	if ((asy->asy_progress & ASY_PROGRESS_INT) != 0)
+		asy_intr_free(asy);
+
+	if ((asy->asy_progress & ASY_PROGRESS_SOFTINT) != 0)
+		asy_softintr_free(asy);
+
+	if ((asy->asy_progress & ASY_PROGRESS_ASYNC) != 0) {
+		struct asyncline *async = asy->asy_priv;
+
+		asy->asy_priv = NULL;
 		/* cancel DTR hold timeout */
 		if (async->async_dtrtid != 0) {
 			(void) untimeout(async->async_dtrtid);
 			async->async_dtrtid = 0;
 		}
+		cv_destroy(&async->async_flags_cv);
+		kmem_free(async, sizeof (struct asyncline));
+	}
 
-		/* remove all minor device node(s) for this device */
+	if ((asy->asy_progress & ASY_PROGRESS_MINOR) != 0)
 		ddi_remove_minor_node(devi, NULL);
 
+	if ((asy->asy_progress & ASY_PROGRESS_MUTEX) != 0) {
 		mutex_destroy(&asy->asy_excl);
 		mutex_destroy(&asy->asy_excl_hi);
-		cv_destroy(&async->async_flags_cv);
-		ddi_remove_intr(devi, 0, asy->asy_iblock);
-		ddi_regs_map_free(&asy->asy_iohandle);
-		ddi_remove_softintr(asy->asy_softintr_id);
 		mutex_destroy(&asy->asy_soft_lock);
-		asy_soft_state_free(asy);
-		DEBUGNOTE1(ASY_DEBUG_INIT, "asy%d: shutdown complete",
-		    instance);
-		break;
-	case DDI_SUSPEND:
-		{
-		unsigned i;
-		uchar_t lsr;
-
-#ifdef	DEBUG
-		if (asy_nosuspend)
-			return (DDI_SUCCESS);
-#endif
-		mutex_enter(&asy->asy_excl);
-
-		ASSERT(async->async_ops >= 0);
-		while (async->async_ops > 0)
-			cv_wait(&async->async_ops_cv, &asy->asy_excl);
-
-		async->async_flags |= ASYNC_DDI_SUSPENDED;
-
-		/* Wait for timed break and delay to complete */
-		while ((async->async_flags & (ASYNC_BREAK|ASYNC_DELAY))) {
-			if (cv_wait_sig(&async->async_flags_cv, &asy->asy_excl)
-			    == 0) {
-				async_process_suspq(asy);
-				mutex_exit(&asy->asy_excl);
-				return (DDI_FAILURE);
-			}
-		}
-
-		/* Clear untimed break */
-		if (async->async_flags & ASYNC_OUT_SUSPEND)
-			async_resume_utbrk(async);
-
-		mutex_exit(&asy->asy_excl);
-
-		mutex_enter(&asy->asy_soft_sr);
-		mutex_enter(&asy->asy_excl);
-		if (async->async_wbufcid != 0) {
-			bufcall_id_t bcid = async->async_wbufcid;
-			async->async_wbufcid = 0;
-			async->async_flags |= ASYNC_RESUME_BUFCALL;
-			mutex_exit(&asy->asy_excl);
-			unbufcall(bcid);
-			mutex_enter(&asy->asy_excl);
-		}
-		mutex_enter(&asy->asy_excl_hi);
-
-		/* Disable interrupts from chip */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR, 0);
-		asy->asy_flags |= ASY_DDI_SUSPENDED;
-
-		/*
-		 * Hardware interrupts are disabled we can drop our high level
-		 * lock and proceed.
-		 */
-		mutex_exit(&asy->asy_excl_hi);
-
-		/* Process remaining RX characters and RX errors, if any */
-		lsr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LSR);
-		async_rxint(asy, lsr);
-
-		/* Wait for TX to drain */
-		for (i = 1000; i > 0; i--) {
-			lsr = ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + LSR);
-			if ((lsr & (XSRE | XHRE)) == (XSRE | XHRE))
-				break;
-			delay(drv_usectohz(10000));
-		}
-		if (i == 0)
-			cmn_err(CE_WARN,
-			    "asy: transmitter wasn't drained before "
-			    "driver was suspended");
-
-		mutex_exit(&asy->asy_excl);
-		mutex_exit(&asy->asy_soft_sr);
-		break;
 	}
-	default:
-		return (DDI_FAILURE);
-	}
+
+	if ((asy->asy_progress & ASY_PROGRESS_REGS) != 0)
+		ddi_regs_map_free(&asy->asy_iohandle);
+
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "shutdown complete");
+	asy_soft_state_free(asy);
 
 	return (DDI_SUCCESS);
 }
@@ -747,104 +1422,22 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 	char name[ASY_MINOR_LEN];
 	int status;
 	static ddi_device_acc_attr_t ioattr = {
-		DDI_DEVICE_ATTR_V0,
-		DDI_NEVERSWAP_ACC,
-		DDI_STRICTORDER_ACC,
+		.devacc_attr_version = DDI_DEVICE_ATTR_V1,
+		.devacc_attr_endian_flags = DDI_NEVERSWAP_ACC,
+		.devacc_attr_dataorder = DDI_STRICTORDER_ACC,
+		.devacc_attr_access = DDI_DEFAULT_ACC
 	};
-
-	instance = ddi_get_instance(devi);	/* find out which unit */
 
 	switch (cmd) {
 	case DDI_ATTACH:
 		break;
+
 	case DDI_RESUME:
-	{
-		struct asyncline *async;
+		return (asy_resume(devi));
 
-#ifdef	DEBUG
-		if (asy_nosuspend)
-			return (DDI_SUCCESS);
-#endif
-		asy = ddi_get_soft_state(asy_soft_state, instance);
-		if (asy == NULL)
-			return (DDI_FAILURE);
-
-		mutex_enter(&asy->asy_soft_sr);
-		mutex_enter(&asy->asy_excl);
-		mutex_enter(&asy->asy_excl_hi);
-
-		async = asy->asy_priv;
-		/* Disable interrupts */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR, 0);
-		if (asy_identify_chip(devi, asy) != DDI_SUCCESS) {
-			mutex_exit(&asy->asy_excl_hi);
-			mutex_exit(&asy->asy_excl);
-			mutex_exit(&asy->asy_soft_sr);
-			cmn_err(CE_WARN, "!Cannot identify UART chip at %p\n",
-			    (void *)asy->asy_ioaddr);
-			return (DDI_FAILURE);
-		}
-		asy->asy_flags &= ~ASY_DDI_SUSPENDED;
-		if (async->async_flags & ASYNC_ISOPEN) {
-			asy_program(asy, ASY_INIT);
-			/* Kick off output */
-			if (async->async_ocnt > 0) {
-				async_resume(async);
-			} else {
-				mutex_exit(&asy->asy_excl_hi);
-				if (async->async_xmitblk)
-					freeb(async->async_xmitblk);
-				async->async_xmitblk = NULL;
-				async_start(async);
-				mutex_enter(&asy->asy_excl_hi);
-			}
-			ASYSETSOFT(asy);
-		}
-		mutex_exit(&asy->asy_excl_hi);
-		mutex_exit(&asy->asy_excl);
-		mutex_exit(&asy->asy_soft_sr);
-
-		mutex_enter(&asy->asy_excl);
-		if (async->async_flags & ASYNC_RESUME_BUFCALL) {
-			async->async_wbufcid = bufcall(async->async_wbufcds,
-			    BPRI_HI, (void (*)(void *)) async_reioctl,
-			    (void *)(intptr_t)async->async_common->asy_unit);
-			async->async_flags &= ~ASYNC_RESUME_BUFCALL;
-		}
-		async_process_suspq(asy);
-		mutex_exit(&asy->asy_excl);
-		return (DDI_SUCCESS);
-	}
 	default:
 		return (DDI_FAILURE);
 	}
-
-	ret = ddi_soft_state_zalloc(asy_soft_state, instance);
-	if (ret != DDI_SUCCESS)
-		return (DDI_FAILURE);
-	asy = ddi_get_soft_state(asy_soft_state, instance);
-	ASSERT(asy != NULL);	/* can't fail - we only just allocated it */
-	asy->asy_unit = instance;
-	mutex_enter(&asy_glob_lock);
-	if (instance > max_asy_instance)
-		max_asy_instance = instance;
-	mutex_exit(&asy_glob_lock);
-
-	regnum = asy_get_io_regnum(devi, asy);
-
-	if (regnum < 0 ||
-	    ddi_regs_map_setup(devi, regnum, (caddr_t *)&asy->asy_ioaddr,
-	    (offset_t)0, (offset_t)0, &ioattr, &asy->asy_iohandle)
-	    != DDI_SUCCESS) {
-		cmn_err(CE_WARN, "asy%d: could not map UART registers @ %p",
-		    instance, (void *)asy->asy_ioaddr);
-
-		asy_soft_state_free(asy);
-		return (DDI_FAILURE);
-	}
-
-	DEBUGCONT2(ASY_DEBUG_INIT, "asy%dattach: UART @ %p\n",
-	    instance, (void *)asy->asy_ioaddr);
 
 	mutex_enter(&asy_glob_lock);
 	if (com_ports == NULL) {	/* need to initialize com_ports */
@@ -860,11 +1453,38 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 			/* We run out of single digits for device properties */
 			num_com_ports = 10;
 			cmn_err(CE_WARN,
-			    "More than %d motherboard-serial-ports",
-			    num_com_ports);
+			    "%s: more than %d motherboard-serial-ports",
+			    asy_info.mi_idname, num_com_ports);
 		}
 	}
 	mutex_exit(&asy_glob_lock);
+
+	instance = ddi_get_instance(devi);	/* find out which unit */
+	ret = ddi_soft_state_zalloc(asy_soft_state, instance);
+	if (ret != DDI_SUCCESS)
+		return (DDI_FAILURE);
+	asy = ddi_get_soft_state(asy_soft_state, instance);
+
+	asy->asy_dip = devi;
+#ifdef DEBUG
+	asy->asy_debug = debug;
+#endif
+	asy->asy_unit = instance;
+
+	regnum = asy_get_io_regnum(devi, asy);
+
+	if (regnum < 0 ||
+	    ddi_regs_map_setup(devi, regnum, (caddr_t *)&asy->asy_ioaddr,
+	    (offset_t)0, (offset_t)0, &ioattr, &asy->asy_iohandle)
+	    != DDI_SUCCESS) {
+		asyerror(asy, CE_WARN, "could not map UART registers @ %p",
+		    (void *)asy->asy_ioaddr);
+		goto fail;
+	}
+
+	asy->asy_progress |= ASY_PROGRESS_REGS;
+
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "UART @ %p", (void *)asy->asy_ioaddr);
 
 	/*
 	 * Lookup the i/o address to see if this is a standard COM port
@@ -873,7 +1493,6 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 	 * will be assigned /dev/term/[0123...] in some rather arbitrary
 	 * fashion.
 	 */
-
 	for (i = 0; i < num_com_ports; i++) {
 		if (asy->asy_ioaddr == (uint8_t *)(uintptr_t)com_ports[i]) {
 			asy->asy_com_port = i + 1;
@@ -882,18 +1501,28 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 	}
 
 	/*
-	 * It appears that there was async hardware that on reset
-	 * did not clear ICR.  Hence when we get to
-	 * ddi_get_iblock_cookie below, this hardware would cause
-	 * the system to hang if there was input available.
+	 * It appears that there was async hardware that on reset did not clear
+	 * IER.  Hence when we enable interrupts, this hardware would cause the
+	 * system to hang if there was input available.
+	 *
+	 * Don't use asy_disable_interrupts() as the mutexes haven't been
+	 * initialized yet.
 	 */
+	ddi_put8(asy->asy_iohandle,
+	    asy->asy_ioaddr + asy_reg_table[ASY_IER].asy_reg_off, 0);
 
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR, 0x00);
+	/*
+	 * Establish default settings:
+	 * - use RTS/DTR after open
+	 * - 8N1 data format
+	 * - 9600 baud
+	 */
+	asy->asy_mcr |= ASY_MCR_RTS | ASY_MCR_DTR;
+	asy->asy_lcr = ASY_LCR_STOP1 | ASY_LCR_BITS8;
+	asy->asy_bidx = B9600;
+	asy->asy_fifo_buf = 1;
+	asy->asy_use_fifo = ASY_FCR_FIFO_OFF;
 
-	/* establish default usage */
-	asy->asy_mcr |= RTS|DTR;		/* do use RTS/DTR after open */
-	asy->asy_lcr = STOP1|BITS8;		/* default to 1 stop 8 bits */
-	asy->asy_bidx = B9600;			/* default to 9600  */
 #ifdef DEBUG
 	asy->asy_msint_cnt = 0;			/* # of times in async_msint */
 #endif
@@ -907,8 +1536,8 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 		 */
 		switch (asy_getproperty(devi, asy, "ignore-cd")) {
 		case 0:				/* *-ignore-cd=False */
-			DEBUGCONT1(ASY_DEBUG_MODEM,
-			    "asy%dattach: clear ASY_IGNORE_CD\n", instance);
+			ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+			    "clear ASY_IGNORE_CD");
 			asy->asy_flags &= ~ASY_IGNORE_CD; /* wait for cd */
 			break;
 		case 1:				/* *-ignore-cd=True */
@@ -919,9 +1548,8 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 			 * and DTR/RTS raised here because it might be that
 			 * one of the motherboard ports is the system console.
 			 */
-			DEBUGCONT1(ASY_DEBUG_MODEM,
-			    "asy%dattach: set ASY_IGNORE_CD, set RTS & DTR\n",
-			    instance);
+			ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+			    "set ASY_IGNORE_CD, set RTS & DTR");
 			mcr = asy->asy_mcr;		/* rts/dtr on */
 			asy->asy_flags |= ASY_IGNORE_CD;	/* ignore cd */
 			break;
@@ -932,9 +1560,8 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 		case 0:				/* *-rts-dtr-off=False */
 			asy->asy_flags |= ASY_RTS_DTR_OFF;	/* OFF */
 			mcr = asy->asy_mcr;		/* rts/dtr on */
-			DEBUGCONT1(ASY_DEBUG_MODEM, "asy%dattach: "
-			    "ASY_RTS_DTR_OFF set and DTR & RTS set\n",
-			    instance);
+			ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+			    "ASY_RTS_DTR_OFF set and DTR & RTS set");
 			break;
 		case 1:				/* *-rts-dtr-off=True */
 			/*FALLTHRU*/
@@ -945,122 +1572,66 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 		/* Parse property for tty modes */
 		asy_parse_mode(devi, asy);
 	} else {
-		DEBUGCONT1(ASY_DEBUG_MODEM,
-		    "asy%dattach: clear ASY_IGNORE_CD, clear RTS & DTR\n",
-		    instance);
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+		    "clear ASY_IGNORE_CD, clear RTS & DTR");
 		asy->asy_flags &= ~ASY_IGNORE_CD;	/* wait for cd */
 	}
 
 	/*
-	 * Initialize the port with default settings.
+	 * Install per instance software interrupt handler.
 	 */
+	if (asy_softintr_setup(asy) != DDI_SUCCESS) {
+		asyerror(asy, CE_WARN, "Cannot set soft interrupt");
+		goto fail;
+	}
 
-	asy->asy_fifo_buf = 1;
-	asy->asy_use_fifo = FIFO_OFF;
+	asy->asy_progress |= ASY_PROGRESS_SOFTINT;
 
 	/*
-	 * Get icookie for mutexes initialization
+	 * Install interrupt handler for this device.
 	 */
-	if ((ddi_get_iblock_cookie(devi, 0, &asy->asy_iblock) !=
-	    DDI_SUCCESS) ||
-	    (ddi_get_soft_iblock_cookie(devi, DDI_SOFTINT_MED,
-	    &asy->asy_soft_iblock) != DDI_SUCCESS)) {
-		ddi_regs_map_free(&asy->asy_iohandle);
-		cmn_err(CE_CONT,
-		    "asy%d: could not hook interrupt for UART @ %p\n",
-		    instance, (void *)asy->asy_ioaddr);
-		asy_soft_state_free(asy);
-		return (DDI_FAILURE);
+	if ((asy_intr_setup(asy, DDI_INTR_TYPE_MSIX) != DDI_SUCCESS) &&
+	    (asy_intr_setup(asy, DDI_INTR_TYPE_MSI) != DDI_SUCCESS) &&
+	    (asy_intr_setup(asy, DDI_INTR_TYPE_FIXED) != DDI_SUCCESS)) {
+		asyerror(asy, CE_WARN, "Cannot set device interrupt");
+		goto fail;
 	}
+
+	asy->asy_progress |= ASY_PROGRESS_INT;
 
 	/*
 	 * Initialize mutexes before accessing the hardware
 	 */
 	mutex_init(&asy->asy_soft_lock, NULL, MUTEX_DRIVER,
-	    (void *)asy->asy_soft_iblock);
+	    DDI_INTR_PRI(asy->asy_soft_intr_pri));
+	mutex_init(&asy->asy_soft_sr, NULL, MUTEX_DRIVER,
+	    DDI_INTR_PRI(asy->asy_soft_intr_pri));
+
 	mutex_init(&asy->asy_excl, NULL, MUTEX_DRIVER, NULL);
 	mutex_init(&asy->asy_excl_hi, NULL, MUTEX_DRIVER,
-	    (void *)asy->asy_iblock);
-	mutex_init(&asy->asy_soft_sr, NULL, MUTEX_DRIVER,
-	    (void *)asy->asy_soft_iblock);
+	    DDI_INTR_PRI(asy->asy_intr_pri));
+
+	asy->asy_progress |= ASY_PROGRESS_MUTEX;
+
 	mutex_enter(&asy->asy_excl);
 	mutex_enter(&asy->asy_excl_hi);
 
 	if (asy_identify_chip(devi, asy) != DDI_SUCCESS) {
-		mutex_exit(&asy->asy_excl_hi);
-		mutex_exit(&asy->asy_excl);
-		mutex_destroy(&asy->asy_soft_lock);
-		mutex_destroy(&asy->asy_excl);
-		mutex_destroy(&asy->asy_excl_hi);
-		mutex_destroy(&asy->asy_soft_sr);
-		ddi_regs_map_free(&asy->asy_iohandle);
-		cmn_err(CE_CONT, "!Cannot identify UART chip at %p\n",
+		asyerror(asy, CE_WARN, "Cannot identify UART chip at %p",
 		    (void *)asy->asy_ioaddr);
-		asy_soft_state_free(asy);
-		return (DDI_FAILURE);
+		goto fail;
 	}
 
-	/* disable all interrupts */
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR, 0);
-	/* select baud rate generator */
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR, DLAB);
-	/* Set the baud rate to 9600 */
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + (DAT+DLL),
-	    asyspdtab[asy->asy_bidx] & 0xff);
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + (DAT+DLH),
-	    (asyspdtab[asy->asy_bidx] >> 8) & 0xff);
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR, asy->asy_lcr);
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR, mcr);
-
-	mutex_exit(&asy->asy_excl_hi);
-	mutex_exit(&asy->asy_excl);
-
-	/*
-	 * Set up the other components of the asycom structure for this port.
-	 */
-	asy->asy_dip = devi;
-
-	/*
-	 * Install per instance software interrupt handler.
-	 */
-	if (ddi_add_softintr(devi, DDI_SOFTINT_MED,
-	    &(asy->asy_softintr_id), NULL, 0, asysoftintr,
-	    (caddr_t)asy) != DDI_SUCCESS) {
-		mutex_destroy(&asy->asy_soft_lock);
-		mutex_destroy(&asy->asy_excl);
-		mutex_destroy(&asy->asy_excl_hi);
-		ddi_regs_map_free(&asy->asy_iohandle);
-		cmn_err(CE_CONT,
-		    "Can not set soft interrupt for ASY driver\n");
-		asy_soft_state_free(asy);
-		return (DDI_FAILURE);
-	}
-
-	mutex_enter(&asy->asy_excl);
-	mutex_enter(&asy->asy_excl_hi);
-
-	/*
-	 * Install interrupt handler for this device.
-	 */
-	if (ddi_add_intr(devi, 0, NULL, 0, asyintr,
-	    (caddr_t)asy) != DDI_SUCCESS) {
-		mutex_exit(&asy->asy_excl_hi);
-		mutex_exit(&asy->asy_excl);
-		ddi_remove_softintr(asy->asy_softintr_id);
-		mutex_destroy(&asy->asy_soft_lock);
-		mutex_destroy(&asy->asy_excl);
-		mutex_destroy(&asy->asy_excl_hi);
-		ddi_regs_map_free(&asy->asy_iohandle);
-		cmn_err(CE_CONT,
-		    "Can not set device interrupt for ASY driver\n");
-		asy_soft_state_free(asy);
-		return (DDI_FAILURE);
-	}
+	asy_disable_interrupts(asy, ASY_IER_ALL);
+	asy_put(asy, ASY_LCR, asy->asy_lcr);
+	asy_set_baudrate(asy, asy->asy_bidx);
+	asy_put(asy, ASY_MCR, mcr);
 
 	mutex_exit(&asy->asy_excl_hi);
 	mutex_exit(&asy->asy_excl);
 
 	asyinit(asy);	/* initialize the asyncline structure */
+	asy->asy_progress |= ASY_PROGRESS_ASYNC;
 
 	/* create minor device nodes for this device */
 	if (asy->asy_com_port != 0) {
@@ -1087,20 +1658,10 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 		    DDI_NT_SERIAL_DO, 0);
 	}
 
-	if (status != DDI_SUCCESS) {
-		struct asyncline *async = asy->asy_priv;
+	if (status != DDI_SUCCESS)
+		goto fail;
 
-		ddi_remove_minor_node(devi, NULL);
-		ddi_remove_intr(devi, 0, asy->asy_iblock);
-		ddi_remove_softintr(asy->asy_softintr_id);
-		mutex_destroy(&asy->asy_soft_lock);
-		mutex_destroy(&asy->asy_excl);
-		mutex_destroy(&asy->asy_excl_hi);
-		cv_destroy(&async->async_flags_cv);
-		ddi_regs_map_free(&asy->asy_iohandle);
-		asy_soft_state_free(asy);
-		return (DDI_FAILURE);
-	}
+	asy->asy_progress |= ASY_PROGRESS_MINOR;
 
 	/*
 	 * Fill in the polled I/O structure.
@@ -1114,13 +1675,16 @@ asyattach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 	asy->polledio.cons_polledio_exit = NULL;
 
 	ddi_report_dev(devi);
-	DEBUGCONT1(ASY_DEBUG_INIT, "asy%dattach: done\n", instance);
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "done");
 	return (DDI_SUCCESS);
+
+fail:
+	(void) asydetach(devi, DDI_DETACH);
+	return (DDI_FAILURE);
 }
 
-/*ARGSUSED*/
 static int
-asyinfo(dev_info_t *dip, ddi_info_cmd_t infocmd, void *arg,
+asyinfo(dev_info_t *dip __unused, ddi_info_cmd_t infocmd, void *arg,
     void **result)
 {
 	dev_t dev = (dev_t)arg;
@@ -1192,17 +1756,6 @@ asy_getproperty(dev_info_t *devi, struct asycom *asy, const char *property)
 static void
 asy_soft_state_free(struct asycom *asy)
 {
-	mutex_enter(&asy_glob_lock);
-	/* If we were the max_asy_instance, work out new value */
-	if (asy->asy_unit == max_asy_instance) {
-		while (--max_asy_instance >= 0) {
-			if (ddi_get_soft_state(asy_soft_state,
-			    max_asy_instance) != NULL)
-				break;
-		}
-	}
-	mutex_exit(&asy_glob_lock);
-
 	if (asy->asy_priv != NULL) {
 		kmem_free(asy->asy_priv, sizeof (struct asyncline));
 		asy->asy_priv = NULL;
@@ -1214,51 +1767,93 @@ static char *
 asy_hw_name(struct asycom *asy)
 {
 	switch (asy->asy_hwtype) {
-	case ASY8250A:
+	case ASY_8250A:
 		return ("8250A/16450");
-	case ASY16550:
+	case ASY_16550:
 		return ("16550");
-	case ASY16550A:
+	case ASY_16550A:
 		return ("16550A");
-	case ASY16650:
+	case ASY_16650:
 		return ("16650");
-	case ASY16750:
+	case ASY_16750:
 		return ("16750");
-	default:
-		DEBUGNOTE2(ASY_DEBUG_INIT,
-		    "asy%d: asy_hw_name: unknown asy_hwtype: %d",
-		    asy->asy_unit, asy->asy_hwtype);
-		return ("?");
+	case ASY_16950:
+		return ("16950");
 	}
+
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "unknown asy_hwtype: %d",
+	    asy->asy_hwtype);
+	return ("?");
+}
+
+static boolean_t
+asy_is_devid(struct asycom *asy, char *venprop, char *devprop,
+    int venid, int devid)
+{
+	if (ddi_prop_get_int(DDI_DEV_T_ANY, asy->asy_dip, DDI_PROP_DONTPASS,
+	    venprop, 0) != venid) {
+		return (B_FALSE);
+	}
+
+	if (ddi_prop_get_int(DDI_DEV_T_ANY, asy->asy_dip, DDI_PROP_DONTPASS,
+	    devprop, 0) != devid) {
+		return (B_FALSE);
+	}
+
+	return (B_FALSE);
+}
+
+static void
+asy_check_loopback(struct asycom *asy)
+{
+	if (asy_get_bus_type(asy->asy_dip) != ASY_BUS_PCI)
+		return;
+
+	/* Check if this is a Agere/Lucent Venus PCI modem chipset. */
+	if (asy_is_devid(asy, "vendor-id", "device-id", 0x11c1, 0x0480) ||
+	    asy_is_devid(asy, "subsystem-vendor-id", "subsystem-id", 0x11c1,
+	    0x0480))
+		asy->asy_flags2 |= ASY2_NO_LOOPBACK;
 }
 
 static int
 asy_identify_chip(dev_info_t *devi, struct asycom *asy)
 {
-	int ret;
-	int mcr;
+	int isr, lsr, mcr, spr;
 	dev_t dev;
 	uint_t hwtype;
 
+	/*
+	 * Initially, we'll assume we have the highest supported chip model
+	 * until we find out what we actually have.
+	 */
+	asy->asy_hwtype = ASY_MAXCHIP;
+
+	/*
+	 * First, see if we can even do the loopback check, which may not work
+	 * on certain hardware.
+	 */
+	asy_check_loopback(asy);
+
 	if (asy_scr_test) {
-		/* Check scratch register works. */
+		/* Check that the scratch register works. */
 
 		/* write to scratch register */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + SCR, SCRTEST);
+		asy_put(asy, ASY_SPR, ASY_SPR_TEST);
 		/* make sure that pattern doesn't just linger on the bus */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + FIFOR, 0x00);
+		asy_put(asy, ASY_FCR, 0x00);
 		/* read data back from scratch register */
-		ret = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + SCR);
-		if (ret != SCRTEST) {
+		spr = asy_get(asy, ASY_SPR);
+		if (spr != ASY_SPR_TEST) {
 			/*
 			 * Scratch register not working.
 			 * Probably not an async chip.
 			 * 8250 and 8250B don't have scratch registers,
 			 * but only worked in ancient PC XT's anyway.
 			 */
-			cmn_err(CE_CONT, "!asy%d: UART @ %p "
-			    "scratch register: expected 0x5a, got 0x%02x\n",
-			    asy->asy_unit, (void *)asy->asy_ioaddr, ret);
+			asyerror(asy, CE_WARN, "UART @ %p "
+			    "scratch register: expected 0x5a, got 0x%02x",
+			    (void *)asy->asy_ioaddr, spr);
 			return (DDI_FAILURE);
 		}
 	}
@@ -1266,23 +1861,14 @@ asy_identify_chip(dev_info_t *devi, struct asycom *asy)
 	 * Use 16550 fifo reset sequence specified in NS application
 	 * note. Disable fifos until chip is initialized.
 	 */
-	ddi_put8(asy->asy_iohandle,
-	    asy->asy_ioaddr + FIFOR, 0x00);	/* clear */
-	ddi_put8(asy->asy_iohandle,
-	    asy->asy_ioaddr + FIFOR, FIFO_ON);	/* enable */
-	ddi_put8(asy->asy_iohandle,
-	    asy->asy_ioaddr + FIFOR, FIFO_ON | FIFORXFLSH);
-						/* reset */
-	if (asymaxchip >= ASY16650 && asy_scr_test) {
+	asy_put(asy, ASY_FCR, 0x00);				 /* disable */
+	asy_put(asy, ASY_FCR, ASY_FCR_FIFO_EN);			 /* enable */
+	asy_put(asy, ASY_FCR, ASY_FCR_FIFO_EN | ASY_FCR_RHR_FL); /* reset */
+	if (asymaxchip >= ASY_16650 && asy_scr_test) {
 		/*
 		 * Reset 16650 enhanced regs also, in case we have one of these
 		 */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    EFRACCESS);
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + EFR,
-		    0);
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    STOP1|BITS8);
+		asy_put(asy, ASY_EFR, 0);
 	}
 
 	/*
@@ -1291,66 +1877,77 @@ asy_identify_chip(dev_info_t *devi, struct asycom *asy)
 	 */
 
 	asy->asy_fifor = 0;
-	asy->asy_hwtype = asymaxchip; /* just for asy_reset_fifo() */
-	if (asymaxchip >= ASY16550A)
+	if (asymaxchip >= ASY_16550A)
 		asy->asy_fifor |=
-		    FIFO_ON | FIFODMA | (asy_trig_level & 0xff);
-	if (asymaxchip >= ASY16650)
-		asy->asy_fifor |= FIFOEXTRA1 | FIFOEXTRA2;
+		    ASY_FCR_FIFO_EN | ASY_FCR_DMA | (asy_trig_level & 0xff);
 
-	asy_reset_fifo(asy, FIFOTXFLSH | FIFORXFLSH);
+	/*
+	 * On the 16750, FCR[5] enables the 64 byte FIFO. FCR[5] can only be set
+	 * while LCR[7] = 1 (DLAB), which is taken care of by asy_reset_fifo().
+	 */
+	if (asymaxchip >= ASY_16750)
+		asy->asy_fifor |= ASY_FCR_FIFO64;
 
-	mcr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + MCR);
-	ret = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + ISR);
-	DEBUGCONT4(ASY_DEBUG_CHIP,
-	    "asy%d: probe fifo FIFOR=0x%02x ISR=0x%02x MCR=0x%02x\n",
-	    asy->asy_unit, asy->asy_fifor | FIFOTXFLSH | FIFORXFLSH,
-	    ret, mcr);
-	switch (ret & 0xf0) {
-	case 0x40:
-		hwtype = ASY16550; /* 16550 with broken FIFO */
+	asy_reset_fifo(asy, ASY_FCR_THR_FL | ASY_FCR_RHR_FL);
+
+	mcr = asy_get(asy, ASY_MCR);
+	isr = asy_get(asy, ASY_ISR);
+
+	/*
+	 * Note we get 0xff if chip didn't return us anything,
+	 * e.g. if there's no chip there.
+	 */
+	if (isr == 0xff) {
+		asyerror(asy, CE_WARN, "UART @ %p interrupt register: got 0xff",
+		    (void *)asy->asy_ioaddr);
+		return (DDI_FAILURE);
+	}
+
+	ASY_DPRINTF(asy, ASY_DEBUG_CHIP,
+	    "probe fifo FIFOR=0x%02x ISR=0x%02x MCR=0x%02x",
+	    asy->asy_fifor | ASY_FCR_THR_FL | ASY_FCR_RHR_FL, isr, mcr);
+
+	/*
+	 * Detect the chip type by comparing ISR[7,6] and ISR[5].
+	 *
+	 * When the FIFOs are enabled by setting FCR[0], ISR[7,6] read as 1.
+	 * Additionally on a 16750, the 64 byte FIFOs are enabled by setting
+	 * FCR[5], and ISR[5] will read as 1, too.
+	 *
+	 * We will check later whether we have a 16650, which requires EFR[4]=1
+	 * to enable its deeper FIFOs and extra features. It does not use FCR[5]
+	 * and ISR[5] to enable deeper FIFOs like the 16750 does.
+	 */
+	switch (isr & (ASY_ISR_FIFOEN | ASY_ISR_FIFO64)) {
+	case 0x40:				/* 16550 with broken FIFOs */
+		hwtype = ASY_16550;
 		asy->asy_fifor = 0;
 		break;
-	case 0xc0:
-		hwtype = ASY16550A;
+
+	case ASY_ISR_FIFOEN:			/* 16550A with working FIFOs */
+		hwtype = ASY_16550A;
 		asy->asy_fifo_buf = 16;
-		asy->asy_use_fifo = FIFO_ON;
-		asy->asy_fifor &= ~(FIFOEXTRA1 | FIFOEXTRA2);
+		asy->asy_use_fifo = ASY_FCR_FIFO_EN;
+		asy->asy_fifor &= ~ASY_FCR_FIFO64;
 		break;
-	case 0xe0:
-		hwtype = ASY16650;
-		asy->asy_fifo_buf = 32;
-		asy->asy_use_fifo = FIFO_ON;
-		asy->asy_fifor &= ~(FIFOEXTRA1);
-		break;
-	case 0xf0:
-		/*
-		 * Note we get 0xff if chip didn't return us anything,
-		 * e.g. if there's no chip there.
-		 */
-		if (ret == 0xff) {
-			cmn_err(CE_CONT, "asy%d: UART @ %p "
-			    "interrupt register: got 0xff\n",
-			    asy->asy_unit, (void *)asy->asy_ioaddr);
-			return (DDI_FAILURE);
-		}
-		/*FALLTHRU*/
-	case 0xd0:
-		hwtype = ASY16750;
+
+	case ASY_ISR_FIFOEN | ASY_ISR_FIFO64:	/* 16750 with 64byte FIFOs */
+		hwtype = ASY_16750;
 		asy->asy_fifo_buf = 64;
-		asy->asy_use_fifo = FIFO_ON;
+		asy->asy_use_fifo = ASY_FCR_FIFO_EN;
 		break;
-	default:
-		hwtype = ASY8250A; /* No FIFO */
+
+	default:				/* 8250A/16450 without FIFOs */
+		hwtype = ASY_8250A;
 		asy->asy_fifor = 0;
 	}
 
 	if (hwtype > asymaxchip) {
-		cmn_err(CE_CONT, "asy%d: UART @ %p "
+		asyerror(asy, CE_WARN, "UART @ %p "
 		    "unexpected probe result: "
-		    "FIFOR=0x%02x ISR=0x%02x MCR=0x%02x\n",
-		    asy->asy_unit, (void *)asy->asy_ioaddr,
-		    asy->asy_fifor | FIFOTXFLSH | FIFORXFLSH, ret, mcr);
+		    "FCR=0x%02x ISR=0x%02x MCR=0x%02x",
+		    (void *)asy->asy_ioaddr,
+		    asy->asy_fifor | ASY_FCR_THR_FL | ASY_FCR_RHR_FL, isr, mcr);
 		return (DDI_FAILURE);
 	}
 
@@ -1361,38 +1958,146 @@ asy_identify_chip(dev_info_t *devi, struct asycom *asy)
 	 * the more advanced features we specifically want downgraded.
 	 */
 	asy_reset_fifo(asy, 0);
-	asy->asy_hwtype = hwtype;
 
 	/*
-	 * Check for Exar/Startech ST16C650, which will still look like a
-	 * 16550A until we enable its enhanced mode.
+	 * Check for Exar/Startech ST16C650 or newer, which will still look like
+	 * a 16550A until we enable its enhanced mode.
 	 */
-	if (asy->asy_hwtype == ASY16550A && asymaxchip >= ASY16650 &&
+	if (hwtype >= ASY_16550A && asymaxchip >= ASY_16650 &&
 	    asy_scr_test) {
-		/* Enable enhanced mode register access */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    EFRACCESS);
-		/* zero scratch register (not scratch register if enhanced) */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + SCR, 0);
-		/* Disable enhanced mode register access */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    STOP1|BITS8);
+		/*
+		 * Write the XOFF2 register, which shadows SPR on the 16650.
+		 * On other chips, SPR will be overwritten.
+		 */
+		asy_put(asy, ASY_XOFF2, 0);
+
 		/* read back scratch register */
-		ret = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + SCR);
-		if (ret == SCRTEST) {
+		spr = asy_get(asy, ASY_SPR);
+
+		if (spr == ASY_SPR_TEST) {
 			/* looks like we have an ST16650 -- enable it */
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-			    EFRACCESS);
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + EFR,
-			    ENHENABLE);
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-			    STOP1|BITS8);
-			asy->asy_hwtype = ASY16650;
-			asy->asy_fifo_buf = 32;
-			asy->asy_fifor |= 0x10; /* 24 byte txfifo trigger */
+			hwtype = ASY_16650;
+			asy_put(asy, ASY_EFR, ASY_EFR_ENH_EN);
+
+			/*
+			 * Some 16650-compatible chips are also compatible with
+			 * the 16750 and have deeper FIFOs, which we may have
+			 * detected above. Don't downgrade the FIFO size.
+			 */
+			if (asy->asy_fifo_buf < 32)
+				asy->asy_fifo_buf = 32;
+
+			/*
+			 * Use a 24 byte transmit FIFO trigger only if were
+			 * allowed to use >16 transmit FIFO depth by the
+			 * global tunable.
+			 */
+			if (asy_max_tx_fifo >= asy->asy_fifo_buf)
+				asy->asy_fifor |= ASY_FCR_THR_TRIG_24;
 			asy_reset_fifo(asy, 0);
 		}
 	}
+
+	/*
+	 * If we think we got a 16650, we may actually have a 16950, so check
+	 * for that.
+	 */
+	if (hwtype >= ASY_16650 && asymaxchip >= ASY_16950) {
+		uint8_t ier, asr;
+
+		/*
+		 * First, clear IER and read it back. That should be a no-op as
+		 * either asyattach() or asy_resume() disabled all interrupts
+		 * before we were called.
+		 */
+		asy_put(asy, ASY_IER, 0);
+		ier = asy_get(asy, ASY_IER);
+		if (ier != 0) {
+			dev_err(asy->asy_dip, CE_WARN, "!%s: UART @ %p "
+			    "interrupt enable register: got 0x%02x", __func__,
+			    (void *)asy->asy_ioaddr, ier);
+			return (DDI_FAILURE);
+		}
+
+		/*
+		 * Next, try to read ASR, which shares the register offset with
+		 * IER. ASR can only be read if the ASR enable bit is set in
+		 * ACR, which itself is an indexed registers. This is taken care
+		 * of by asy_get().
+		 *
+		 * There are a few bits in ASR which should be 1 at this point,
+		 * definitely the TX idle bit (ASR[7]) and also the FIFO size
+		 * bit (ASR[6]) since we've done everything we can to enable any
+		 * deeper FIFO support.
+		 *
+		 * Thus if we read back ASR as 0, we failed to read it, and this
+		 * isn't the chip we're looking for.
+		 */
+		asr = asy_get(asy, ASY_ASR);
+
+		if (asr != ier) {
+			hwtype = ASY_16950;
+
+			if ((asr & ASY_ASR_FIFOSZ) != 0)
+				asy->asy_fifo_buf = 128;
+			else
+				asy->asy_fifo_buf = 16;
+
+			asy_reset_fifo(asy, 0);
+
+			/*
+			 * Enable 16950 specific trigger level registers. Set
+			 * DTR pin to be compatible to 16450, 16550, and 16750.
+			 */
+			asy->asy_acr = ASY_ACR_TRIG | ASY_ACR_DTR_NORM;
+			asy_put(asy, ASY_ACR, asy->asy_acr);
+
+			/* Set half the FIFO size as receive trigger level. */
+			asy_put(asy, ASY_RTL, asy->asy_fifo_buf/2);
+
+			/*
+			 * Set the transmit trigger level to 1.
+			 *
+			 * While one would expect that any transmit trigger
+			 * level would work (the 16550 uses a hardwired level
+			 * of 16), in my tests with a 16950 compatible chip
+			 * (MosChip 9912) I would never see a TX interrupt
+			 * on any transmit trigger level > 1.
+			 */
+			asy_put(asy, ASY_TTL, 1);
+
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "ASR 0x%02x", asr);
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "RFL 0x%02x",
+			    asy_get(asy, ASY_RFL));
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "TFL 0x%02x",
+			    asy_get(asy, ASY_TFL));
+
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "ACR 0x%02x",
+			    asy_get(asy, ASY_ACR));
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "CPR 0x%02x",
+			    asy_get(asy, ASY_CPR));
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "TCR 0x%02x",
+			    asy_get(asy, ASY_TCR));
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "CKS 0x%02x",
+			    asy_get(asy, ASY_CKS));
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "TTL 0x%02x",
+			    asy_get(asy, ASY_TTL));
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "RTL 0x%02x",
+			    asy_get(asy, ASY_RTL));
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "FCL 0x%02x",
+			    asy_get(asy, ASY_FCL));
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "FCH 0x%02x",
+			    asy_get(asy, ASY_FCH));
+
+			ASY_DPRINTF(asy, ASY_DEBUG_CHIP,
+			    "Chip ID: %02x%02x%02x,%02x",
+			    asy_get(asy, ASY_ID1), asy_get(asy, ASY_ID2),
+			    asy_get(asy, ASY_ID3), asy_get(asy, ASY_REV));
+
+		}
+	}
+
+	asy->asy_hwtype = hwtype;
 
 	/*
 	 * If we think we might have a FIFO larger than 16 characters,
@@ -1401,28 +2106,20 @@ asy_identify_chip(dev_info_t *devi, struct asycom *asy)
 	if (asy_fifo_test > 0 &&
 	    !(asy->asy_flags2 & ASY2_NO_LOOPBACK) &&
 	    (asy->asy_fifo_buf > 16 ||
-	    (asy_fifo_test > 1 && asy->asy_use_fifo == FIFO_ON) ||
-	    ASY_DEBUG(ASY_DEBUG_CHIP))) {
+	    (asy_fifo_test > 1 && asy->asy_use_fifo == ASY_FCR_FIFO_EN) ||
+	    ASY_DEBUG(asy, ASY_DEBUG_CHIP))) {
 		int i;
 
 		/* Set baud rate to 57600 (fairly arbitrary choice) */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    DLAB);
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + DAT,
-		    asyspdtab[B57600] & 0xff);
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR,
-		    (asyspdtab[B57600] >> 8) & 0xff);
+		asy_set_baudrate(asy, B57600);
 		/* Set 8 bits, 1 stop bit */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    STOP1|BITS8);
+		asy_put(asy, ASY_LCR, ASY_LCR_STOP1 | ASY_LCR_BITS8);
 		/* Set loopback mode */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR,
-		    DTR | RTS | ASY_LOOP | OUT1 | OUT2);
+		asy_put(asy, ASY_MCR, ASY_MCR_LOOPBACK);
 
 		/* Overfill fifo */
 		for (i = 0; i < asy->asy_fifo_buf * 2; i++) {
-			ddi_put8(asy->asy_iohandle,
-			    asy->asy_ioaddr + DAT, i);
+			asy_put(asy, ASY_THR, i);
 		}
 		/*
 		 * Now there's an interesting question here about which
@@ -1451,17 +2148,15 @@ asy_identify_chip(dev_info_t *devi, struct asycom *asy)
 
 		/* Now see how many characters we can read back */
 		for (i = 0; i < asy->asy_fifo_buf * 3; i++) {
-			ret = ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + LSR);
-			if (!(ret & RCA))
+			lsr = asy_get(asy, ASY_LSR);
+			if (!(lsr & ASY_LSR_DR))
 				break;	/* FIFO emptied */
-			(void) ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + DAT); /* lose another */
+			(void) asy_get(asy, ASY_RHR); /* lose another */
 		}
 
-		DEBUGCONT3(ASY_DEBUG_CHIP,
-		    "asy%d FIFO size: expected=%d, measured=%d\n",
-		    asy->asy_unit, asy->asy_fifo_buf, i);
+		ASY_DPRINTF(asy, ASY_DEBUG_CHIP,
+		    "FIFO size: expected=%d, measured=%d",
+		    asy->asy_fifo_buf, i);
 
 		hwtype = asy->asy_hwtype;
 		if (i < asy->asy_fifo_buf) {
@@ -1475,18 +2170,26 @@ asy_identify_chip(dev_info_t *devi, struct asycom *asy)
 			 */
 			if (i >= 16 && asy->asy_fifo_buf >= 16) {
 				/* fall back to a 16550A */
-				hwtype = ASY16550A;
+				hwtype = ASY_16550A;
 				asy->asy_fifo_buf = 16;
-				asy->asy_fifor &= ~(FIFOEXTRA1 | FIFOEXTRA2);
+				asy->asy_fifor &=
+				    ~(ASY_FCR_THR_TR0 | ASY_FCR_THR_TR1);
 			} else {
 				/* fall back to no FIFO at all */
-				hwtype = ASY16550;
+				hwtype = ASY_16550;
 				asy->asy_fifo_buf = 1;
-				asy->asy_use_fifo = FIFO_OFF;
-				asy->asy_fifor &=
-				    ~(FIFO_ON | FIFOEXTRA1 | FIFOEXTRA2);
+				asy->asy_use_fifo = ASY_FCR_FIFO_OFF;
+				asy->asy_fifor = 0;
 			}
+		} else if (i > asy->asy_fifo_buf) {
+			/*
+			 * The FIFO is larger than expected. Use it if it is
+			 * a power of 2.
+			 */
+			if (ISP2(i))
+				asy->asy_fifo_buf = i;
 		}
+
 		/*
 		 * We will need to reprogram the FIFO if we changed
 		 * our mind about how to drive it above, and in any
@@ -1495,31 +2198,26 @@ asy_identify_chip(dev_info_t *devi, struct asycom *asy)
 		 * Again as earlier above, we must call asy_reset_fifo()
 		 * before any possible downgrade of asy->asy_hwtype.
 		 */
-		if (asy->asy_hwtype >= ASY16650 && hwtype < ASY16650) {
+		if (asy->asy_hwtype >= ASY_16650 && hwtype < ASY_16650) {
 			/* Disable 16650 enhanced mode */
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-			    EFRACCESS);
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + EFR,
-			    0);
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-			    STOP1|BITS8);
+			asy_put(asy, ASY_EFR, 0);
 		}
-		asy_reset_fifo(asy, FIFOTXFLSH | FIFORXFLSH);
+		asy_reset_fifo(asy, ASY_FCR_THR_FL | ASY_FCR_RHR_FL);
 		asy->asy_hwtype = hwtype;
 
 		/* Clear loopback mode and restore DTR/RTS */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR, mcr);
+		asy_put(asy, ASY_MCR, mcr);
 	}
 
-	DEBUGNOTE3(ASY_DEBUG_CHIP, "asy%d %s @ %p",
-	    asy->asy_unit, asy_hw_name(asy), (void *)asy->asy_ioaddr);
+	ASY_DPRINTF(asy, ASY_DEBUG_CHIP, "%s @ %p",
+	    asy_hw_name(asy), (void *)asy->asy_ioaddr);
 
 	/* Make UART type visible in device tree for prtconf, etc */
 	dev = makedevice(DDI_MAJOR_T_UNKNOWN, asy->asy_unit);
 	(void) ddi_prop_update_string(dev, devi, "uart", asy_hw_name(asy));
 
-	if (asy->asy_hwtype == ASY16550)	/* for broken 16550's, */
-		asy->asy_hwtype = ASY8250A;	/* drive them as 8250A */
+	if (asy->asy_hwtype == ASY_16550)	/* for broken 16550's, */
+		asy->asy_hwtype = ASY_8250A;	/* drive them as 8250A */
 
 	return (DDI_SUCCESS);
 }
@@ -1541,22 +2239,20 @@ asyinit(struct asycom *asy)
 	mutex_exit(&asy->asy_excl);
 }
 
-/*ARGSUSED3*/
 static int
-asyopen(queue_t *rq, dev_t *dev, int flag, int sflag, cred_t *cr)
+asyopen(queue_t *rq, dev_t *dev, int flag, int sflag __unused, cred_t *cr)
 {
 	struct asycom	*asy;
 	struct asyncline *async;
-	int		mcr;
 	int		unit;
 	int		len;
 	struct termios	*termiosp;
 
 	unit = UNIT(*dev);
-	DEBUGCONT1(ASY_DEBUG_CLOSE, "asy%dopen\n", unit);
 	asy = ddi_get_soft_state(asy_soft_state, unit);
 	if (asy == NULL)
 		return (ENXIO);		/* unit not configured */
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "enter");
 	async = asy->asy_priv;
 	mutex_enter(&asy->asy_excl);
 
@@ -1579,9 +2275,10 @@ again:
 		    len == sizeof (struct termios)) {
 			async->async_ttycommon.t_cflag = termiosp->c_cflag;
 			kmem_free(termiosp, len);
-		} else
-			cmn_err(CE_WARN,
-			    "asy: couldn't get ttymodes property!");
+		} else {
+			asyerror(asy, CE_WARN,
+			    "couldn't get ttymodes property");
+		}
 		mutex_enter(&asy->asy_excl_hi);
 
 		/* eeprom mode support - respect properties */
@@ -1600,9 +2297,8 @@ again:
 		async->async_startc = CSTART;
 		async->async_stopc = CSTOP;
 		asy_program(asy, ASY_INIT);
-	} else
-		if ((async->async_ttycommon.t_flags & TS_XCLUDE) &&
-		    secpolicy_excl_open(cr) != 0) {
+	} else if ((async->async_ttycommon.t_flags & TS_XCLUDE) &&
+	    secpolicy_excl_open(cr) != 0) {
 		mutex_exit(&asy->asy_excl_hi);
 		mutex_exit(&asy->asy_excl);
 		return (EBUSY);
@@ -1617,51 +2313,42 @@ again:
 
 	/* Raise DTR on every open, but delay if it was just lowered. */
 	while (async->async_flags & ASYNC_DTR_DELAY) {
-		DEBUGCONT1(ASY_DEBUG_MODEM,
-		    "asy%dopen: waiting for the ASYNC_DTR_DELAY to be clear\n",
-		    unit);
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+		    "waiting for the ASYNC_DTR_DELAY to be clear");
 		mutex_exit(&asy->asy_excl_hi);
 		if (cv_wait_sig(&async->async_flags_cv,
 		    &asy->asy_excl) == 0) {
-			DEBUGCONT1(ASY_DEBUG_MODEM,
-			    "asy%dopen: interrupted by signal, exiting\n",
-			    unit);
+			ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+			    "interrupted by signal, exiting");
 			mutex_exit(&asy->asy_excl);
 			return (EINTR);
 		}
 		mutex_enter(&asy->asy_excl_hi);
 	}
 
-	mcr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + MCR);
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR,
-	    mcr|(asy->asy_mcr&DTR));
+	asy_set(asy, ASY_MCR, asy->asy_mcr & ASY_MCR_DTR);
 
-	DEBUGCONT3(ASY_DEBUG_INIT,
-	    "asy%dopen: \"Raise DTR on every open\": make mcr = %x, "
-	    "make TS_SOFTCAR = %s\n",
-	    unit, mcr|(asy->asy_mcr&DTR),
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "\"Raise DTR on every open\": "
+	    "make mcr = %x, make TS_SOFTCAR = %s", asy_get(asy, ASY_MCR),
 	    (asy->asy_flags & ASY_IGNORE_CD) ? "ON" : "OFF");
 
 	if (asy->asy_flags & ASY_IGNORE_CD) {
-		DEBUGCONT1(ASY_DEBUG_MODEM,
-		    "asy%dopen: ASY_IGNORE_CD set, set TS_SOFTCAR\n",
-		    unit);
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+		    "ASY_IGNORE_CD set, set TS_SOFTCAR");
 		async->async_ttycommon.t_flags |= TS_SOFTCAR;
-	}
-	else
+	} else {
 		async->async_ttycommon.t_flags &= ~TS_SOFTCAR;
+	}
 
 	/*
 	 * Check carrier.
 	 */
-	asy->asy_msr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + MSR);
-	DEBUGCONT3(ASY_DEBUG_INIT, "asy%dopen: TS_SOFTCAR is %s, "
-	    "MSR & DCD is %s\n",
-	    unit,
+	asy->asy_msr = asy_get(asy, ASY_MSR);
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "TS_SOFTCAR is %s, MSR & DCD is %s",
 	    (async->async_ttycommon.t_flags & TS_SOFTCAR) ? "set" : "clear",
-	    (asy->asy_msr & DCD) ? "set" : "clear");
+	    (asy->asy_msr & ASY_MSR_DCD) ? "set" : "clear");
 
-	if (asy->asy_msr & DCD)
+	if (asy->asy_msr & ASY_MSR_DCD)
 		async->async_flags |= ASYNC_CARR_ON;
 	else
 		async->async_flags &= ~ASYNC_CARR_ON;
@@ -1704,7 +2391,7 @@ again:
 	qprocson(rq);
 	async->async_flags |= ASYNC_ISOPEN;
 	async->async_polltid = 0;
-	DEBUGCONT1(ASY_DEBUG_INIT, "asy%dopen: done\n", unit);
+	ASY_DPRINTF(asy, ASY_DEBUG_INIT, "done");
 	return (0);
 }
 
@@ -1756,8 +2443,8 @@ async_dtr_free(struct asyncline *async)
 {
 	struct asycom *asy = async->async_common;
 
-	DEBUGCONT0(ASY_DEBUG_MODEM,
-	    "async_dtr_free, clearing ASYNC_DTR_DELAY\n");
+	ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+	    "async_dtr_free, clearing ASYNC_DTR_DELAY");
 	mutex_enter(&asy->asy_excl);
 	async->async_flags &= ~ASYNC_DTR_DELAY;
 	async->async_dtrtid = 0;
@@ -1768,24 +2455,18 @@ async_dtr_free(struct asyncline *async)
 /*
  * Close routine.
  */
-/*ARGSUSED2*/
 static int
-asyclose(queue_t *q, int flag, cred_t *credp)
+asyclose(queue_t *q, int flag, cred_t *credp __unused)
 {
 	struct asyncline *async;
 	struct asycom	 *asy;
-	int icr, lcr;
-#ifdef DEBUG
-	int instance;
-#endif
 
 	async = (struct asyncline *)q->q_ptr;
 	ASSERT(async != NULL);
-#ifdef DEBUG
-	instance = UNIT(async->async_dev);
-	DEBUGCONT1(ASY_DEBUG_CLOSE, "asy%dclose\n", instance);
-#endif
+
 	asy = async->async_common;
+
+	ASY_DPRINTF(asy, ASY_DEBUG_CLOSE, "enter");
 
 	mutex_enter(&asy->asy_excl);
 	async->async_flags |= ASYNC_CLOSING;
@@ -1813,9 +2494,7 @@ asyclose(queue_t *q, int flag, cred_t *credp)
 			async->async_utbrktid = 0;
 		}
 		mutex_enter(&asy->asy_excl_hi);
-		lcr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LCR);
-		ddi_put8(asy->asy_iohandle,
-		    asy->asy_ioaddr + LCR, (lcr & ~SETBREAK));
+		(void) asy_clr(asy, ASY_LCR, ASY_LCR_SETBRK);
 		mutex_exit(&asy->asy_excl_hi);
 		async->async_flags &= ~ASYNC_OUT_SUSPEND;
 		goto nodrain;
@@ -1880,34 +2559,29 @@ nodrain:
 	 * If line has HUPCL set or is incompletely opened fix up the modem
 	 * lines.
 	 */
-	DEBUGCONT1(ASY_DEBUG_MODEM, "asy%dclose: next check HUPCL flag\n",
-	    instance);
+	ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "next check HUPCL flag");
 	mutex_enter(&asy->asy_excl_hi);
 	if ((async->async_ttycommon.t_cflag & HUPCL) ||
 	    (async->async_flags & ASYNC_WOPEN)) {
-		DEBUGCONT3(ASY_DEBUG_MODEM,
-		    "asy%dclose: HUPCL flag = %x, ASYNC_WOPEN flag = %x\n",
-		    instance,
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+		    "HUPCL flag = %x, ASYNC_WOPEN flag = %x",
 		    async->async_ttycommon.t_cflag & HUPCL,
 		    async->async_ttycommon.t_cflag & ASYNC_WOPEN);
 		async->async_flags |= ASYNC_DTR_DELAY;
 
 		/* turn off DTR, RTS but NOT interrupt to 386 */
 		if (asy->asy_flags & (ASY_IGNORE_CD|ASY_RTS_DTR_OFF)) {
-			DEBUGCONT3(ASY_DEBUG_MODEM,
-			    "asy%dclose: ASY_IGNORE_CD flag = %x, "
-			    "ASY_RTS_DTR_OFF flag = %x\n",
-			    instance,
+			ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+			    "ASY_IGNORE_CD flag = %x, "
+			    "ASY_RTS_DTR_OFF flag = %x",
 			    asy->asy_flags & ASY_IGNORE_CD,
 			    asy->asy_flags & ASY_RTS_DTR_OFF);
 
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR,
-			    asy->asy_mcr|OUT2);
+			asy_put(asy, ASY_MCR, asy->asy_mcr | ASY_MCR_OUT2);
 		} else {
-			DEBUGCONT1(ASY_DEBUG_MODEM,
-			    "asy%dclose: Dropping DTR and RTS\n", instance);
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR,
-			    OUT2);
+			ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+			    "Dropping DTR and RTS");
+			asy_put(asy, ASY_MCR, ASY_MCR_OUT2);
 		}
 		async->async_dtrtid =
 		    timeout((void (*)())async_dtr_free,
@@ -1916,13 +2590,11 @@ nodrain:
 	/*
 	 * If nobody's using it now, turn off receiver interrupts.
 	 */
-	if ((async->async_flags & (ASYNC_WOPEN|ASYNC_ISOPEN)) == 0) {
-		icr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + ICR);
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR,
-		    (icr & ~RIEN));
-	}
+	if ((async->async_flags & (ASYNC_WOPEN|ASYNC_ISOPEN)) == 0)
+		asy_disable_interrupts(asy, ASY_IER_RIEN);
+
 	mutex_exit(&asy->asy_excl_hi);
-out:
+
 	ttycommon_close(&async->async_ttycommon);
 
 	/*
@@ -1946,7 +2618,7 @@ out:
 	cv_broadcast(&async->async_flags_cv);
 	mutex_exit(&asy->asy_excl);
 
-	DEBUGCONT1(ASY_DEBUG_CLOSE, "asy%dclose: done\n", instance);
+	ASY_DPRINTF(asy, ASY_DEBUG_CLOSE, "done");
 	return (0);
 }
 
@@ -1955,7 +2627,7 @@ asy_isbusy(struct asycom *asy)
 {
 	struct asyncline *async;
 
-	DEBUGCONT0(ASY_DEBUG_EOT, "asy_isbusy\n");
+	ASY_DPRINTF(asy, ASY_DEBUG_EOT, "enter");
 	async = asy->asy_priv;
 	ASSERT(mutex_owned(&asy->asy_excl));
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
@@ -1963,8 +2635,7 @@ asy_isbusy(struct asycom *asy)
  * XXXX this should be recoded
  */
 	return ((async->async_ocnt > 0) ||
-	    ((ddi_get8(asy->asy_iohandle,
-	    asy->asy_ioaddr + LSR) & (XSRE|XHRE)) == 0));
+	    ((asy_get(asy, ASY_LSR) & (ASY_LSR_TEMT | ASY_LSR_THRE)) == 0));
 }
 
 static void
@@ -1975,7 +2646,7 @@ asy_waiteot(struct asycom *asy)
 	 * current fifo data to transmit. Once this is done
 	 * we may go on.
 	 */
-	DEBUGCONT0(ASY_DEBUG_EOT, "asy_waiteot\n");
+	ASY_DPRINTF(asy, ASY_DEBUG_EOT, "enter");
 	ASSERT(mutex_owned(&asy->asy_excl));
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
 	while (asy_isbusy(asy)) {
@@ -1991,55 +2662,37 @@ asy_waiteot(struct asycom *asy)
 static void
 asy_reset_fifo(struct asycom *asy, uchar_t flush)
 {
-	uchar_t lcr = 0;
+	ASSERT(mutex_owned(&asy->asy_excl_hi));
 
-	/* On a 16750, we have to set DLAB in order to set FIFOEXTRA. */
+	/* On a 16750, we have to set DLAB in order to set ASY_FCR_FIFO64. */
+	if (asy->asy_hwtype >= ASY_16750)
+		asy_set(asy, ASY_LCR, ASY_LCR_DLAB);
 
-	if (asy->asy_hwtype >= ASY16750) {
-		lcr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LCR);
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    lcr | DLAB);
-	}
-
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + FIFOR,
-	    asy->asy_fifor | flush);
+	asy_put(asy, ASY_FCR, asy->asy_fifor | flush);
 
 	/* Clear DLAB */
-
-	if (asy->asy_hwtype >= ASY16750) {
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR, lcr);
-	}
+	if (asy->asy_hwtype >= ASY_16750)
+		asy_clr(asy, ASY_LCR, ASY_LCR_DLAB);
 }
 
 /*
  * Program the ASY port. Most of the async operation is based on the values
  * of 'c_iflag' and 'c_cflag'.
  */
-
-#define	BAUDINDEX(cflg)	(((cflg) & CBAUDEXT) ? \
-			(((cflg) & CBAUD) + CBAUD + 1) : ((cflg) & CBAUD))
-
 static void
 asy_program(struct asycom *asy, int mode)
 {
 	struct asyncline *async;
 	int baudrate, c_flag;
-	int icr, lcr;
+	uint8_t ier;
 	int flush_reg;
 	int ocflags;
-#ifdef DEBUG
-	int instance;
-#endif
 
 	ASSERT(mutex_owned(&asy->asy_excl));
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
 
 	async = asy->asy_priv;
-#ifdef DEBUG
-	instance = UNIT(async->async_dev);
-	DEBUGCONT2(ASY_DEBUG_PROCS,
-	    "asy%d_program: mode = 0x%08X, enter\n", instance, mode);
-#endif
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "mode = 0x%08X, enter", mode);
 
 	baudrate = BAUDINDEX(async->async_ttycommon.t_cflag);
 
@@ -2058,23 +2711,22 @@ asy_program(struct asycom *asy, int mode)
 	c_flag = async->async_ttycommon.t_cflag &
 	    (CLOCAL|CREAD|CSTOPB|CSIZE|PARENB|PARODD|CBAUD|CBAUDEXT);
 
-	/* disable interrupts */
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR, 0);
+	asy_disable_interrupts(asy, ASY_IER_ALL);
 
 	ocflags = asy->asy_ocflag;
 
 	/* flush/reset the status registers */
-	(void) ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + ISR);
-	(void) ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LSR);
-	asy->asy_msr = flush_reg = ddi_get8(asy->asy_iohandle,
-	    asy->asy_ioaddr + MSR);
+	(void) asy_get(asy, ASY_ISR);
+	(void) asy_get(asy, ASY_LSR);
+	asy->asy_msr = flush_reg = asy_get(asy, ASY_MSR);
 	/*
 	 * The device is programmed in the open sequence, if we
 	 * have to hardware handshake, then this is a good time
 	 * to check if the device can receive any data.
 	 */
 
-	if ((CRTSCTS & async->async_ttycommon.t_cflag) && !(flush_reg & CTS)) {
+	if ((CRTSCTS & async->async_ttycommon.t_cflag) &&
+	    !(flush_reg & ASY_MSR_CTS)) {
 		async_flowcontrol_hw_output(asy, FLOW_STOP);
 	} else {
 		/*
@@ -2100,78 +2752,69 @@ asy_program(struct asycom *asy, int mode)
 		async->async_flags &= ~ASYNC_SW_OUT_FLW;
 
 	/* manually flush receive buffer or fifo (workaround for buggy fifos) */
-	if (mode == ASY_INIT)
-		if (asy->asy_use_fifo == FIFO_ON) {
+	if (mode == ASY_INIT) {
+		if (asy->asy_use_fifo == ASY_FCR_FIFO_EN) {
 			for (flush_reg = asy->asy_fifo_buf; flush_reg-- > 0; ) {
-				(void) ddi_get8(asy->asy_iohandle,
-				    asy->asy_ioaddr + DAT);
+				(void) asy_get(asy, ASY_RHR);
 			}
 		} else {
-			flush_reg = ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + DAT);
+			flush_reg = asy_get(asy, ASY_RHR);
 		}
+	}
 
 	if (ocflags != (c_flag & ~CLOCAL) || mode == ASY_INIT) {
 		/* Set line control */
-		lcr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LCR);
-		lcr &= ~(WLS0|WLS1|STB|PEN|EPS);
+		uint8_t lcr = 0;
 
 		if (c_flag & CSTOPB)
-			lcr |= STB;	/* 2 stop bits */
+			lcr |= ASY_LCR_STOP2;	/* 2 stop bits */
 
 		if (c_flag & PARENB)
-			lcr |= PEN;
+			lcr |= ASY_LCR_PEN;
 
 		if ((c_flag & PARODD) == 0)
-			lcr |= EPS;
+			lcr |= ASY_LCR_EPS;
 
 		switch (c_flag & CSIZE) {
 		case CS5:
-			lcr |= BITS5;
+			lcr |= ASY_LCR_BITS5;
 			break;
 		case CS6:
-			lcr |= BITS6;
+			lcr |= ASY_LCR_BITS6;
 			break;
 		case CS7:
-			lcr |= BITS7;
+			lcr |= ASY_LCR_BITS7;
 			break;
 		case CS8:
-			lcr |= BITS8;
+			lcr |= ASY_LCR_BITS8;
 			break;
 		}
 
-		/* set the baud rate, unless it is "0" */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR, DLAB);
-
-		if (baudrate != 0) {
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + DAT,
-			    asyspdtab[baudrate] & 0xff);
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR,
-			    (asyspdtab[baudrate] >> 8) & 0xff);
-		}
-		/* set the line control modes */
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR, lcr);
+		asy_clr(asy, ASY_LCR, ASY_LCR_WLS0 | ASY_LCR_WLS1 |
+		    ASY_LCR_STB | ASY_LCR_PEN | ASY_LCR_EPS);
+		asy_set(asy, ASY_LCR, lcr);
+		asy_set_baudrate(asy, baudrate);
 
 		/*
 		 * If we have a FIFO buffer, enable/flush
 		 * at intialize time, flush if transitioning from
 		 * CREAD off to CREAD on.
 		 */
-		if ((ocflags & CREAD) == 0 && (c_flag & CREAD) ||
-		    mode == ASY_INIT)
-			if (asy->asy_use_fifo == FIFO_ON)
-				asy_reset_fifo(asy, FIFORXFLSH);
+		if (((ocflags & CREAD) == 0 && (c_flag & CREAD)) ||
+		    mode == ASY_INIT) {
+			if (asy->asy_use_fifo == ASY_FCR_FIFO_EN)
+				asy_reset_fifo(asy, ASY_FCR_RHR_FL);
+		}
 
 		/* remember the new cflags */
 		asy->asy_ocflag = c_flag & ~CLOCAL;
 	}
 
 	if (baudrate == 0)
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR,
-		    (asy->asy_mcr & RTS) | OUT2);
+		asy_put(asy, ASY_MCR,
+		    (asy->asy_mcr & ASY_MCR_RTS) | ASY_MCR_OUT2);
 	else
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR,
-		    asy->asy_mcr | OUT2);
+		asy_put(asy, ASY_MCR, asy->asy_mcr | ASY_MCR_OUT2);
 
 	/*
 	 * Call the modem status interrupt handler to check for the carrier
@@ -2181,25 +2824,27 @@ asy_program(struct asycom *asy, int mode)
 	async_msint(asy);
 
 	/* Set interrupt control */
-	DEBUGCONT3(ASY_DEBUG_MODM2,
-	    "asy%d_program: c_flag & CLOCAL = %x t_cflag & CRTSCTS = %x\n",
-	    instance, c_flag & CLOCAL,
-	    async->async_ttycommon.t_cflag & CRTSCTS);
+	ASY_DPRINTF(asy, ASY_DEBUG_MODM2,
+	    "c_flag & CLOCAL = %x t_cflag & CRTSCTS = %x",
+	    c_flag & CLOCAL, async->async_ttycommon.t_cflag & CRTSCTS);
 
-	if ((c_flag & CLOCAL) && !(async->async_ttycommon.t_cflag & CRTSCTS))
-		/*
-		 * direct-wired line ignores DCD, so we don't enable modem
-		 * status interrupts.
-		 */
-		icr = (TIEN | SIEN);
-	else
-		icr = (TIEN | SIEN | MIEN);
+
+	/* Always enable transmit and line status interrupts. */
+	ier = ASY_IER_TIEN | ASY_IER_SIEN;
+
+	/*
+	 * Enable Modem status interrupt if hardware flow control is enabled or
+	 * this isn't a direct-wired (local) line, which ignores DCD.
+	 */
+	if (((c_flag & CLOCAL) == 0) ||
+	    (async->async_ttycommon.t_cflag & CRTSCTS))
+		ier |= ASY_IER_MIEN;
 
 	if (c_flag & CREAD)
-		icr |= RIEN;
+		ier |= ASY_IER_RIEN;
 
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR, icr);
-	DEBUGCONT1(ASY_DEBUG_PROCS, "asy%d_program: done\n", instance);
+	asy_enable_interrupts(asy, ier);
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "done");
 }
 
 static boolean_t
@@ -2211,10 +2856,12 @@ asy_baudok(struct asycom *asy)
 
 	baudrate = BAUDINDEX(async->async_ttycommon.t_cflag);
 
-	if (baudrate >= sizeof (asyspdtab)/sizeof (*asyspdtab))
+	if (baudrate >= ARRAY_SIZE(asy_baud_tab))
 		return (0);
 
-	return (baudrate == 0 || asyspdtab[baudrate]);
+	return (baudrate == 0 ||
+	    asy_baud_tab[baudrate].asy_dll != 0 ||
+	    asy_baud_tab[baudrate].asy_dlh != 0);
 }
 
 /*
@@ -2229,41 +2876,48 @@ asy_baudok(struct asycom *asy)
  * the interrupt is from this port.
  */
 uint_t
-asyintr(caddr_t argasy)
+asyintr(caddr_t argasy, caddr_t argunused __unused)
 {
 	struct asycom		*asy = (struct asycom *)argasy;
-	struct asyncline	*async = asy->asy_priv;
+	struct asyncline	*async;
 	int			ret_status = DDI_INTR_UNCLAIMED;
 
-	if ((async == NULL) ||
-	    !(async->async_flags & (ASYNC_ISOPEN|ASYNC_WOPEN))) {
-		const uint8_t intr_id = ddi_get8(asy->asy_iohandle,
-		    asy->asy_ioaddr + ISR) & 0x0F;
+	mutex_enter(&asy->asy_excl_hi);
+	async = asy->asy_priv;
+	if (async == NULL ||
+	    (async->async_flags & (ASYNC_ISOPEN|ASYNC_WOPEN)) == 0) {
+		const uint8_t intr_id = asy_get(asy, ASY_ISR);
 
-		if (intr_id & NOINTERRUPT) {
-			return (DDI_INTR_UNCLAIMED);
-		} else {
+		ASY_DPRINTF(asy, ASY_DEBUG_INTR,
+		    "not open async=%p flags=0x%x interrupt_id=0x%x",
+		    async, async == NULL ? 0 : async->async_flags, intr_id);
+
+		if ((intr_id & ASY_ISR_NOINTR) == 0) {
 			/*
 			 * reset the device by:
 			 *	reading line status
 			 *	reading any data from data status register
 			 *	reading modem status
 			 */
-			(void) ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + LSR);
-			(void) ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + DAT);
-			asy->asy_msr = ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + MSR);
-			return (DDI_INTR_CLAIMED);
+			(void) asy_get(asy, ASY_LSR);
+			(void) asy_get(asy, ASY_RHR);
+			asy->asy_msr = asy_get(asy, ASY_MSR);
+			ret_status = DDI_INTR_CLAIMED;
 		}
+		mutex_exit(&asy->asy_excl_hi);
+		return (ret_status);
 	}
 
-	mutex_enter(&asy->asy_excl_hi);
+	/* By this point we're sure this is for us. */
+	ret_status = DDI_INTR_CLAIMED;
 
+	/*
+	 * Before this flag was set, interrupts were disabled. We may still get
+	 * here if asyintr() waited on the mutex.
+	 */
 	if (asy->asy_flags & ASY_DDI_SUSPENDED) {
 		mutex_exit(&asy->asy_excl_hi);
-		return (DDI_INTR_CLAIMED);
+		return (ret_status);
 	}
 
 	/*
@@ -2271,28 +2925,42 @@ asyintr(caddr_t argasy)
 	 * interrupt is edge triggered.
 	 */
 	for (;;) {
-		const uint8_t intr_id = ddi_get8(asy->asy_iohandle,
-		    asy->asy_ioaddr + ISR) & 0x0F;
+		const uint8_t intr_id = asy_get(asy, ASY_ISR);
+		/*
+		 * Reading LSR will clear any error bits (ASY_LSR_ERRORS) which
+		 * are set which is why the value is passed through to
+		 * async_rxint() and not re-read there. In the unexpected event
+		 * that we've ended up here without a pending interrupt, the
+		 * ASY_ISR_NOINTR case, it should do no harm to have cleared
+		 * the error bits, and it means we can get some additional
+		 * information in the debug message if it's enabled.
+		 */
+		const uint8_t lsr = asy_get(asy, ASY_LSR);
 
-		if (intr_id & NOINTERRUPT)
+		ASY_DPRINTF(asy, ASY_DEBUG_INTR,
+		    "interrupt_id=0x%x LSR=0x%x",
+		    intr_id, lsr);
+
+		if (intr_id & ASY_ISR_NOINTR)
 			break;
-		ret_status = DDI_INTR_CLAIMED;
 
-		DEBUGCONT1(ASY_DEBUG_INTR, "asyintr: interrupt_id = 0x%d\n",
-		    intr_id);
-		const uint8_t lsr = ddi_get8(asy->asy_iohandle,
-		    asy->asy_ioaddr + LSR);
+		switch (intr_id & ASY_ISR_MASK) {
+		case ASY_ISR_ID_RLST:
+		case ASY_ISR_ID_RDA:
+		case ASY_ISR_ID_TMO:
+			/* receiver interrupt or receiver errors */
+			async_rxint(asy, lsr);
+			break;
 
-		switch (intr_id) {
-		case TxRDY:
+		case ASY_ISR_ID_THRE:
 			/*
 			 * The transmit-ready interrupt implies an empty
 			 * transmit-hold register (or FIFO).  Check that it is
 			 * present before attempting to transmit more data.
 			 */
-			if ((lsr & XHRE) == 0) {
+			if ((lsr & ASY_LSR_THRE) == 0) {
 				/*
-				 * Taking a TxRDY interrupt only to find XHRE
+				 * Taking a THRE interrupt only to find THRE
 				 * absent would be a surprise, except for a
 				 * racing asyputchar(), which ignores the
 				 * excl_hi mutex when writing to the device.
@@ -2302,27 +2970,23 @@ asyintr(caddr_t argasy)
 			async_txint(asy);
 			/*
 			 * Unlike the other interrupts which fall through to
-			 * attempting to fill the output register/FIFO, TxRDY
+			 * attempting to fill the output register/FIFO, THRE
 			 * has no need having just done so.
 			 */
 			continue;
 
-		case RxRDY:
-		case RSTATUS:
-		case FFTMOUT:
-			/* receiver interrupt or receiver errors */
-			async_rxint(asy, lsr);
-			break;
-		case MSTATUS:
+		case ASY_ISR_ID_MST:
 			/* modem status interrupt */
 			async_msint(asy);
 			break;
 		}
+
 		/* Refill the output FIFO if it has gone empty */
-		if ((lsr & XHRE) && (async->async_flags & ASYNC_BUSY) &&
-		    (async->async_ocnt > 0))
+		if ((lsr & ASY_LSR_THRE) && (async->async_flags & ASYNC_BUSY) &&
+		    async->async_ocnt > 0)
 			async_txint(asy);
 	}
+
 	mutex_exit(&asy->asy_excl_hi);
 	return (ret_status);
 }
@@ -2363,8 +3027,7 @@ async_txint(struct asycom *asy)
 	    !(async->async_flags &
 	    (ASYNC_HW_OUT_FLW|ASYNC_SW_OUT_FLW|ASYNC_STOPPED))) {
 		while (fifo_len-- > 0 && async->async_ocnt-- > 0) {
-			ddi_put8(asy->asy_iohandle,
-			    asy->asy_ioaddr + DAT, *async->async_optr++);
+			asy_put(asy, ASY_THR, *async->async_optr++);
 		}
 		async->async_flags |= ASYNC_PROGRESS;
 	}
@@ -2372,7 +3035,7 @@ async_txint(struct asycom *asy)
 	if (fifo_len <= 0)
 		return;
 
-	ASYSETSOFT(asy);
+	asysetsoft(asy);
 }
 
 /*
@@ -2386,13 +3049,13 @@ asy_ppsevent(struct asycom *asy, int msr)
 
 	if (asy->asy_flags & ASY_PPS_EDGE) {
 		/* Have seen leading edge, now look for and record drop */
-		if ((msr & DCD) == 0)
+		if ((msr & ASY_MSR_DCD) == 0)
 			asy->asy_flags &= ~ASY_PPS_EDGE;
 		/*
 		 * Waiting for leading edge, look for rise; stamp event and
 		 * calibrate kernel clock.
 		 */
-	} else if (msr & DCD) {
+	} else if (msr & ASY_MSR_DCD) {
 			/*
 			 * This code captures a timestamp at the designated
 			 * transition of the PPS signal (DCD asserted).  The
@@ -2438,7 +3101,7 @@ asy_ppsevent(struct asycom *asy, int msr)
 }
 
 /*
- * Receiver interrupt: RxRDY interrupt, FIFO timeout interrupt or receive
+ * Receiver interrupt: RDA interrupt, FIFO timeout interrupt or receive
  * error interrupt.
  * Try to put the character into the circular buffer for this line; if it
  * overflows, indicate a circular buffer overrun. If this port is always
@@ -2461,23 +3124,21 @@ async_rxint(struct asycom *asy, uchar_t lsr)
 
 	tp = &async->async_ttycommon;
 	if (!(tp->t_cflag & CREAD)) {
-		while (lsr & (RCA|PARERR|FRMERR|BRKDET|OVRRUN)) {
-			(void) (ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + DAT) & 0xff);
-			lsr = ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + LSR);
+		/* Line is not open for reading. Flush receiver FIFO. */
+		while ((lsr & (ASY_LSR_DR | ASY_LSR_ERRORS)) != 0) {
+			(void) asy_get(asy, ASY_RHR);
+			lsr = asy_get(asy, ASY_LSR);
 			if (looplim-- < 0)		/* limit loop */
 				break;
 		}
-		return; /* line is not open for read? */
+		return;
 	}
 
-	while (lsr & (RCA|PARERR|FRMERR|BRKDET|OVRRUN)) {
+	while ((lsr & (ASY_LSR_DR | ASY_LSR_ERRORS)) != 0) {
 		c = 0;
 		s = 0;				/* reset error status */
-		if (lsr & RCA) {
-			c = ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + DAT) & 0xff;
+		if (lsr & ASY_LSR_DR) {
+			c = asy_get(asy, ASY_RHR);
 
 			/*
 			 * We handle XON/XOFF char if IXON is set,
@@ -2516,15 +3177,15 @@ async_rxint(struct asycom *asy, uchar_t lsr)
 		}
 
 		/* Handle framing errors */
-		if (lsr & (PARERR|FRMERR|BRKDET|OVRRUN)) {
-			if (lsr & PARERR) {
+		if (lsr & ASY_LSR_ERRORS) {
+			if (lsr & ASY_LSR_PE) {
 				if (tp->t_iflag & INPCK) /* parity enabled */
 					s |= PERROR;
 			}
 
-			if (lsr & (FRMERR|BRKDET))
+			if (lsr & (ASY_LSR_FE | ASY_LSR_BI))
 				s |= FRERROR;
-			if (lsr & OVRRUN) {
+			if (lsr & ASY_LSR_OE) {
 				async->async_hw_overrun = 1;
 				s |= OVERRUN;
 			}
@@ -2564,7 +3225,7 @@ async_rxint(struct asycom *asy, uchar_t lsr)
 				else
 					async->async_sw_overrun = 1;
 check_looplim:
-		lsr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LSR);
+		lsr = asy_get(asy, ASY_LSR);
 		if (looplim-- < 0)		/* limit loop */
 			break;
 	}
@@ -2577,7 +3238,7 @@ check_looplim:
 
 	if ((async->async_flags & ASYNC_SERVICEIMM) || needsoft ||
 	    (RING_FRAC(async)) || (async->async_polltid == 0)) {
-		ASYSETSOFT(asy);	/* need a soft interrupt */
+		asysetsoft(asy);	/* need a soft interrupt */
 	}
 }
 
@@ -2592,34 +3253,29 @@ async_msint(struct asycom *asy)
 {
 	struct asyncline *async = asy->asy_priv;
 	int msr, t_cflag = async->async_ttycommon.t_cflag;
-#ifdef DEBUG
-	int instance = UNIT(async->async_dev);
-#endif
 
 	ASSERT(MUTEX_HELD(&asy->asy_excl_hi));
 
 async_msint_retry:
 	/* this resets the interrupt */
-	msr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + MSR);
-	DEBUGCONT10(ASY_DEBUG_STATE,
-	    "async%d_msint call #%d:\n"
-	    "   transition: %3s %3s %3s %3s\n"
-	    "current state: %3s %3s %3s %3s\n",
-	    instance,
-	    ++(asy->asy_msint_cnt),
-	    (msr & DCTS) ? "DCTS" : "    ",
-	    (msr & DDSR) ? "DDSR" : "    ",
-	    (msr & DRI)  ? "DRI " : "    ",
-	    (msr & DDCD) ? "DDCD" : "    ",
-	    (msr & CTS)  ? "CTS " : "    ",
-	    (msr & DSR)  ? "DSR " : "    ",
-	    (msr & RI)   ? "RI  " : "    ",
-	    (msr & DCD)  ? "DCD " : "    ");
+	msr = asy_get(asy, ASY_MSR);
+	ASY_DPRINTF(asy, ASY_DEBUG_STATE, "call #%d:",
+	    ++(asy->asy_msint_cnt));
+	ASY_DPRINTF(asy, ASY_DEBUG_STATE, "   transition: %3s %3s %3s %3s",
+	    (msr & ASY_MSR_DCTS) ? "DCTS" : "    ",
+	    (msr & ASY_MSR_DDSR) ? "DDSR" : "    ",
+	    (msr & ASY_MSR_TERI) ? "TERI" : "    ",
+	    (msr & ASY_MSR_DDCD) ? "DDCD" : "    ");
+	ASY_DPRINTF(asy, ASY_DEBUG_STATE, "current state: %3s %3s %3s %3s",
+	    (msr & ASY_MSR_CTS)  ? "CTS " : "    ",
+	    (msr & ASY_MSR_DSR)  ? "DSR " : "    ",
+	    (msr & ASY_MSR_RI)   ? "RI  " : "    ",
+	    (msr & ASY_MSR_DCD)  ? "DCD " : "    ");
 
 	/* If CTS status is changed, do H/W output flow control */
-	if ((t_cflag & CRTSCTS) && (((asy->asy_msr ^ msr) & CTS) != 0))
+	if ((t_cflag & CRTSCTS) && (((asy->asy_msr ^ msr) & ASY_MSR_CTS) != 0))
 		async_flowcontrol_hw_output(asy,
-		    msr & CTS ? FLOW_START : FLOW_STOP);
+		    msr & ASY_MSR_CTS ? FLOW_START : FLOW_STOP);
 	/*
 	 * Reading MSR resets the interrupt, we save the
 	 * value of msr so that other functions could examine MSR by
@@ -2632,7 +3288,7 @@ async_msint_retry:
 		asy_ppsevent(asy, msr);
 
 	async->async_ext++;
-	ASYSETSOFT(asy);
+	asysetsoft(asy);
 	/*
 	 * We will make sure that the modem status presented to us
 	 * during the previous read has not changed. If the chip samples
@@ -2641,17 +3297,152 @@ async_msint_retry:
 	 * status, we would miss a change of modem status event that occured
 	 * after we initiated a read MSR operation.
 	 */
-	msr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + MSR);
-	if (STATES(msr) != STATES(asy->asy_msr))
+	msr = asy_get(asy, ASY_MSR);
+	if (ASY_MSR_STATES(msr) != ASY_MSR_STATES(asy->asy_msr))
 		goto	async_msint_retry;
+}
+
+/*
+ * Pend a soft interrupt if one isn't already pending.
+ */
+static void
+asysetsoft(struct asycom *asy)
+{
+	ASSERT(MUTEX_HELD(&asy->asy_excl_hi));
+
+	if (mutex_tryenter(&asy->asy_soft_lock) == 0)
+		return;
+
+	asy->asy_flags |= ASY_NEEDSOFT;
+	if (!asy->asysoftpend) {
+		asy->asysoftpend = 1;
+		mutex_exit(&asy->asy_soft_lock);
+		(void) ddi_intr_trigger_softint(asy->asy_soft_inth, NULL);
+	} else {
+		mutex_exit(&asy->asy_soft_lock);
+	}
+}
+
+/*
+ * Check the carrier signal DCD and handle carrier coming up or
+ * going down, cleaning up as needed and signalling waiters.
+ */
+static void
+asy_carrier_check(struct asycom *asy)
+{
+	struct asyncline *async = asy->asy_priv;
+	tty_common_t *tp = &async->async_ttycommon;
+	queue_t *q = tp->t_readq;
+	mblk_t	*bp;
+	int flushflag;
+
+	ASY_DPRINTF(asy, ASY_DEBUG_MODM2,
+	    "asy_msr & DCD = %x, tp->t_flags & TS_SOFTCAR = %x",
+	    asy->asy_msr & ASY_MSR_DCD, tp->t_flags & TS_SOFTCAR);
+
+	if (asy->asy_msr & ASY_MSR_DCD) {
+		/*
+		 * The DCD line is on. If we already had a carrier,
+		 * nothing changed and there's nothing to do.
+		 */
+		if ((async->async_flags & ASYNC_CARR_ON) != 0)
+			return;
+
+		ASY_DPRINTF(asy, ASY_DEBUG_MODM2, "set ASYNC_CARR_ON");
+		async->async_flags |= ASYNC_CARR_ON;
+		if (async->async_flags & ASYNC_ISOPEN) {
+			mutex_exit(&asy->asy_excl_hi);
+			mutex_exit(&asy->asy_excl);
+			(void) putctl(q, M_UNHANGUP);
+			mutex_enter(&asy->asy_excl);
+			mutex_enter(&asy->asy_excl_hi);
+		}
+		cv_broadcast(&async->async_flags_cv);
+
+		return;
+	}
+
+	/*
+	 * The DCD line is off. If we had no carrier, nothing changed
+	 * and there's nothing to do.
+	 */
+	if ((async->async_flags & ASYNC_CARR_ON) == 0)
+		return;
+
+	/*
+	 * The DCD line is off, but we had a carrier. If we're on a local line,
+	 * where carrier is ignored, or we're using a soft carrier, we're done
+	 * here.
+	 */
+	if ((tp->t_cflag & CLOCAL) != 0 || (tp->t_flags & TS_SOFTCAR) != 0)
+		goto out;
+
+	/*
+	 * Else, drop DTR, abort any output in progress, indicate that output
+	 * is not stopped.
+	 */
+	ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "carrier dropped, so drop DTR");
+	asy_clr(asy, ASY_MCR, ASY_MCR_DTR);
+
+	if (async->async_flags & ASYNC_BUSY) {
+		ASY_DPRINTF(asy, ASY_DEBUG_BUSY,
+		    "Carrier dropped. Clearing async_ocnt");
+		async->async_ocnt = 0;
+	}
+
+	async->async_flags &= ~ASYNC_STOPPED;
+
+	/* If nobody had the device open, we're done here. */
+	if ((async->async_flags & ASYNC_ISOPEN) == 0)
+		goto out;
+
+	/* Else, send a hangup notification upstream and clean up. */
+	mutex_exit(&asy->asy_excl_hi);
+	mutex_exit(&asy->asy_excl);
+	(void) putctl(q, M_HANGUP);
+	mutex_enter(&asy->asy_excl);
+	ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "putctl(q, M_HANGUP)");
+
+	/*
+	 * Flush the transmit FIFO. Any data left in there is invalid now.
+	 */
+	if (asy->asy_use_fifo == ASY_FCR_FIFO_EN) {
+		mutex_enter(&asy->asy_excl_hi);
+		asy_reset_fifo(asy, ASY_FCR_THR_FL);
+		mutex_exit(&asy->asy_excl_hi);
+	}
+
+	/*
+	 * Flush our write queue if we have one. If we're in the midst of close,
+	 * then flush everything. Don't leave stale ioctls lying about.
+	 */
+	ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+	    "Flushing to prevent HUPCL hanging");
+	flushflag = (async->async_flags & ASYNC_CLOSING) ? FLUSHALL : FLUSHDATA;
+	flushq(tp->t_writeq, flushflag);
+
+	/* Free the last active msg. */
+	bp = async->async_xmitblk;
+	if (bp != NULL) {
+		freeb(bp);
+		async->async_xmitblk = NULL;
+	}
+
+	mutex_enter(&asy->asy_excl_hi);
+	async->async_flags &= ~ASYNC_BUSY;
+
+
+out:
+	/* Clear our carrier flag and signal anyone waiting. */
+	async->async_flags &= ~ASYNC_CARR_ON;
+	cv_broadcast(&async->async_flags_cv);
 }
 
 /*
  * Handle a second-stage interrupt.
  */
-/*ARGSUSED*/
 uint_t
-asysoftintr(caddr_t intarg)
+asysoftintr(caddr_t intarg, caddr_t unusedarg __unused)
 {
 	struct asycom *asy = (struct asycom *)intarg;
 	struct asyncline *async;
@@ -2662,7 +3453,7 @@ asysoftintr(caddr_t intarg)
 	 * Test and clear soft interrupt.
 	 */
 	mutex_enter(&asy->asy_soft_lock);
-	DEBUGCONT0(ASY_DEBUG_PROCS, "asysoftintr: enter\n");
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "enter");
 	rv = asy->asysoftpend;
 	if (rv != 0)
 		asy->asysoftpend = 0;
@@ -2705,13 +3496,11 @@ async_softint(struct asycom *asy)
 	uint_t	cc;
 	mblk_t	*bp;
 	queue_t	*q;
-	uchar_t	val;
 	uchar_t	c;
 	tty_common_t	*tp;
 	int nb;
-	int instance = UNIT(async->async_dev);
 
-	DEBUGCONT1(ASY_DEBUG_PROCS, "async%d_softint\n", instance);
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "enter");
 	mutex_enter(&asy->asy_excl_hi);
 	if (asy->asy_flags & ASY_DOINGSOFT) {
 		asy->asy_flags |= ASY_DOINGSOFT_RETRY;
@@ -2725,6 +3514,7 @@ begin:
 	mutex_enter(&asy->asy_excl);
 	tp = &async->async_ttycommon;
 	q = tp->t_readq;
+
 	if (async->async_flags & ASYNC_OUT_FLW_RESUME) {
 		if (async->async_ocnt > 0) {
 			mutex_enter(&asy->asy_excl_hi);
@@ -2738,112 +3528,12 @@ begin:
 		}
 		async->async_flags &= ~ASYNC_OUT_FLW_RESUME;
 	}
+
 	mutex_enter(&asy->asy_excl_hi);
 	if (async->async_ext) {
 		async->async_ext = 0;
-		/* check for carrier up */
-		DEBUGCONT3(ASY_DEBUG_MODM2,
-		    "async%d_softint: asy_msr & DCD = %x, "
-		    "tp->t_flags & TS_SOFTCAR = %x\n",
-		    instance, asy->asy_msr & DCD, tp->t_flags & TS_SOFTCAR);
-
-		if (asy->asy_msr & DCD) {
-			/* carrier present */
-			if ((async->async_flags & ASYNC_CARR_ON) == 0) {
-				DEBUGCONT1(ASY_DEBUG_MODM2,
-				    "async%d_softint: set ASYNC_CARR_ON\n",
-				    instance);
-				async->async_flags |= ASYNC_CARR_ON;
-				if (async->async_flags & ASYNC_ISOPEN) {
-					mutex_exit(&asy->asy_excl_hi);
-					mutex_exit(&asy->asy_excl);
-					(void) putctl(q, M_UNHANGUP);
-					mutex_enter(&asy->asy_excl);
-					mutex_enter(&asy->asy_excl_hi);
-				}
-				cv_broadcast(&async->async_flags_cv);
-			}
-		} else {
-			if ((async->async_flags & ASYNC_CARR_ON) &&
-			    !(tp->t_cflag & CLOCAL) &&
-			    !(tp->t_flags & TS_SOFTCAR)) {
-				int flushflag;
-
-				DEBUGCONT1(ASY_DEBUG_MODEM,
-				    "async%d_softint: carrier dropped, "
-				    "so drop DTR\n",
-				    instance);
-				/*
-				 * Carrier went away.
-				 * Drop DTR, abort any output in
-				 * progress, indicate that output is
-				 * not stopped, and send a hangup
-				 * notification upstream.
-				 */
-				val = ddi_get8(asy->asy_iohandle,
-				    asy->asy_ioaddr + MCR);
-				ddi_put8(asy->asy_iohandle,
-				    asy->asy_ioaddr + MCR, (val & ~DTR));
-
-				if (async->async_flags & ASYNC_BUSY) {
-					DEBUGCONT0(ASY_DEBUG_BUSY,
-					    "async_softint: "
-					    "Carrier dropped.  "
-					    "Clearing async_ocnt\n");
-					async->async_ocnt = 0;
-				}	/* if */
-
-				async->async_flags &= ~ASYNC_STOPPED;
-				if (async->async_flags & ASYNC_ISOPEN) {
-					mutex_exit(&asy->asy_excl_hi);
-					mutex_exit(&asy->asy_excl);
-					(void) putctl(q, M_HANGUP);
-					mutex_enter(&asy->asy_excl);
-					DEBUGCONT1(ASY_DEBUG_MODEM,
-					    "async%d_softint: "
-					    "putctl(q, M_HANGUP)\n",
-					    instance);
-					/*
-					 * Flush FIFO buffers
-					 * Any data left in there is invalid now
-					 */
-					if (asy->asy_use_fifo == FIFO_ON)
-						asy_reset_fifo(asy, FIFOTXFLSH);
-					/*
-					 * Flush our write queue if we have one.
-					 * If we're in the midst of close, then
-					 * flush everything. Don't leave stale
-					 * ioctls lying about.
-					 */
-					flushflag = (async->async_flags &
-					    ASYNC_CLOSING) ? FLUSHALL :
-					    FLUSHDATA;
-					flushq(tp->t_writeq, flushflag);
-
-					/* active msg */
-					bp = async->async_xmitblk;
-					if (bp != NULL) {
-						freeb(bp);
-						async->async_xmitblk = NULL;
-					}
-
-					mutex_enter(&asy->asy_excl_hi);
-					async->async_flags &= ~ASYNC_BUSY;
-					/*
-					 * This message warns of Carrier loss
-					 * with data left to transmit can hang
-					 * the system.
-					 */
-					DEBUGCONT0(ASY_DEBUG_MODEM,
-					    "async_softint: Flushing to "
-					    "prevent HUPCL hanging\n");
-				}	/* if (ASYNC_ISOPEN) */
-			}	/* if (ASYNC_CARR_ON && CLOCAL) */
-			async->async_flags &= ~ASYNC_CARR_ON;
-			cv_broadcast(&async->async_flags_cv);
-		}	/* else */
-	}	/* if (async->async_ext) */
-
+		asy_carrier_check(asy);
+	}
 	mutex_exit(&asy->asy_excl_hi);
 
 	/*
@@ -2881,8 +3571,7 @@ begin:
 		mutex_exit(&asy->asy_excl_hi);
 	}
 
-	DEBUGCONT2(ASY_DEBUG_INPUT, "async%d_softint: %d char(s) in queue.\n",
-	    instance, cc);
+	ASY_DPRINTF(asy, ASY_DEBUG_INPUT, "%d char(s) in queue", cc);
 
 	if (!(bp = allocb(cc, BPRI_MED))) {
 		mutex_exit(&asy->asy_excl);
@@ -2897,20 +3586,22 @@ begin:
 			RING_UNMARK(async);
 			c = RING_GET(async);
 			break;
-		} else
+		} else {
 			*bp->b_wptr++ = RING_GET(async);
+		}
 	} while (--cc);
 	mutex_exit(&asy->asy_excl_hi);
 	mutex_exit(&asy->asy_excl);
 	if (bp->b_wptr > bp->b_rptr) {
-			if (!canput(q)) {
-				asyerror(CE_NOTE, "asy%d: local queue full",
-				    instance);
-				freemsg(bp);
-			} else
-				(void) putq(q, bp);
-	} else
+		if (!canput(q)) {
+			asyerror(asy, CE_WARN, "local queue full");
+			freemsg(bp);
+		} else {
+			(void) putq(q, bp);
+		}
+	} else {
 		freemsg(bp);
+	}
 	/*
 	 * If we have a parity error, then send
 	 * up an M_BREAK with the "bad"
@@ -2922,7 +3613,7 @@ begin:
 	mutex_enter(&asy->asy_excl);
 	mutex_enter(&asy->asy_excl_hi);
 	if (cc) {
-		ASYSETSOFT(asy);	/* finish cc chars */
+		asysetsoft(asy);	/* finish cc chars */
 	}
 rv:
 	if ((RING_CNT(async) < (RINGSIZE/4)) &&
@@ -2949,10 +3640,8 @@ rv:
 		}
 	}
 	if (async->async_ocnt <= 0 && (async->async_flags & ASYNC_BUSY)) {
-		DEBUGCONT2(ASY_DEBUG_BUSY,
-		    "async%d_softint: Clearing ASYNC_BUSY.  async_ocnt=%d\n",
-		    instance,
-		    async->async_ocnt);
+		ASY_DPRINTF(asy, ASY_DEBUG_BUSY,
+		    "Clearing ASYNC_BUSY, async_ocnt=%d", async->async_ocnt);
 		async->async_flags &= ~ASYNC_BUSY;
 		mutex_exit(&asy->asy_excl_hi);
 		if (async->async_xmitblk)
@@ -2979,7 +3668,7 @@ rv:
 		if (async->async_flags & ASYNC_ISOPEN) {
 			mutex_exit(&asy->asy_excl_hi);
 			mutex_exit(&asy->asy_excl);
-			asyerror(CE_NOTE, "asy%d: silo overflow", instance);
+			asyerror(asy, CE_WARN, "silo overflow");
 			mutex_enter(&asy->asy_excl);
 			mutex_enter(&asy->asy_excl_hi);
 		}
@@ -2989,8 +3678,7 @@ rv:
 		if (async->async_flags & ASYNC_ISOPEN) {
 			mutex_exit(&asy->asy_excl_hi);
 			mutex_exit(&asy->asy_excl);
-			asyerror(CE_NOTE, "asy%d: ring buffer overflow",
-			    instance);
+			asyerror(asy, CE_WARN, "ring buffer overflow");
 			mutex_enter(&asy->asy_excl);
 			mutex_enter(&asy->asy_excl_hi);
 		}
@@ -3003,7 +3691,7 @@ rv:
 	asy->asy_flags &= ~ASY_DOINGSOFT;
 	mutex_exit(&asy->asy_excl_hi);
 	mutex_exit(&asy->asy_excl);
-	DEBUGCONT1(ASY_DEBUG_PROCS, "async%d_softint: done\n", instance);
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "done");
 }
 
 /*
@@ -3014,16 +3702,13 @@ async_restart(void *arg)
 {
 	struct asyncline *async = (struct asyncline *)arg;
 	struct asycom *asy = async->async_common;
-	uchar_t lcr;
+
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "enter");
 
 	/*
 	 * If break timer expired, turn off the break bit.
 	 */
-#ifdef DEBUG
-	int instance = UNIT(async->async_dev);
 
-	DEBUGCONT1(ASY_DEBUG_PROCS, "async%d_restart\n", instance);
-#endif
 	mutex_enter(&asy->asy_excl);
 	/*
 	 * If ASYNC_OUT_SUSPEND is also set, we don't really
@@ -3032,9 +3717,7 @@ async_restart(void *arg)
 	if ((async->async_flags & ASYNC_BREAK) &&
 	    !(async->async_flags & ASYNC_OUT_SUSPEND)) {
 		mutex_enter(&asy->asy_excl_hi);
-		lcr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LCR);
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    (lcr & ~SETBREAK));
+		asy_clr(asy, ASY_LCR, ASY_LCR_SETBRK);
 		mutex_exit(&asy->asy_excl_hi);
 	}
 	async->async_flags &= ~(ASYNC_DELAY|ASYNC_BREAK);
@@ -3044,35 +3727,24 @@ async_restart(void *arg)
 	mutex_exit(&asy->asy_excl);
 }
 
-static void
-async_start(struct asyncline *async)
-{
-	async_nstart(async, 0);
-}
-
 /*
  * Start output on a line, unless it's busy, frozen, or otherwise.
  */
-/*ARGSUSED*/
 static void
-async_nstart(struct asyncline *async, int mode)
+async_start(struct asyncline *async)
 {
 	struct asycom *asy = async->async_common;
 	int cc;
 	queue_t *q;
 	mblk_t *bp;
 	uchar_t *xmit_addr;
-	uchar_t	val;
 	int	fifo_len = 1;
 	boolean_t didsome;
 	mblk_t *nbp;
 
-#ifdef DEBUG
-	int instance = UNIT(async->async_dev);
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "enter");
 
-	DEBUGCONT1(ASY_DEBUG_PROCS, "async%d_nstart\n", instance);
-#endif
-	if (asy->asy_use_fifo == FIFO_ON) {
+	if (asy->asy_use_fifo == ASY_FCR_FIFO_EN) {
 		fifo_len = asy->asy_fifo_buf; /* with FIFO buffers */
 		if (fifo_len > asy_max_tx_fifo)
 			fifo_len = asy_max_tx_fifo;
@@ -3086,9 +3758,7 @@ async_nstart(struct asyncline *async, int mode)
 	 * output to finish draining from chip), don't grab anything new.
 	 */
 	if (async->async_flags & (ASYNC_BREAK|ASYNC_BUSY)) {
-		DEBUGCONT2((mode? ASY_DEBUG_OUT : 0),
-		    "async%d_nstart: start %s.\n",
-		    instance,
+		ASY_DPRINTF(asy, ASY_DEBUG_OUT, "%s",
 		    async->async_flags & ASYNC_BREAK ? "break" : "busy");
 		return;
 	}
@@ -3106,14 +3776,12 @@ async_nstart(struct asyncline *async, int mode)
 	 * anything new.
 	 */
 	if (async->async_flags & ASYNC_DELAY) {
-		DEBUGCONT1((mode? ASY_DEBUG_OUT : 0),
-		    "async%d_nstart: start ASYNC_DELAY.\n", instance);
+		ASY_DPRINTF(asy, ASY_DEBUG_OUT, "start ASYNC_DELAY");
 		return;
 	}
 
 	if ((q = async->async_ttycommon.t_writeq) == NULL) {
-		DEBUGCONT1((mode? ASY_DEBUG_OUT : 0),
-		    "async%d_nstart: start writeq is null.\n", instance);
+		ASY_DPRINTF(asy, ASY_DEBUG_OUT, "start writeq is null");
 		return;	/* not attached to a stream */
 	}
 
@@ -3137,10 +3805,7 @@ async_nstart(struct asyncline *async, int mode)
 			 * the next message.
 			 */
 			mutex_enter(&asy->asy_excl_hi);
-			val = ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + LCR);
-			ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-			    (val | SETBREAK));
+			asy_set(asy, ASY_LCR, ASY_LCR_SETBRK);
 			mutex_exit(&asy->asy_excl_hi);
 			async->async_flags |= ASYNC_BREAK;
 			(void) timeout(async_restart, (caddr_t)async,
@@ -3220,11 +3885,9 @@ async_nstart(struct asyncline *async, int mode)
 	 */
 	didsome = B_FALSE;
 	while (--fifo_len >= 0 && cc > 0) {
-		if (!(ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LSR) &
-		    XHRE))
+		if (!(asy_get(asy, ASY_LSR) & ASY_LSR_THRE))
 			break;
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + DAT,
-		    *xmit_addr++);
+		asy_put(asy, ASY_THR, *xmit_addr++);
 		cc--;
 		didsome = B_TRUE;
 	}
@@ -3232,9 +3895,8 @@ async_nstart(struct asyncline *async, int mode)
 	async->async_ocnt = cc;
 	if (didsome)
 		async->async_flags |= ASYNC_PROGRESS;
-	DEBUGCONT2(ASY_DEBUG_BUSY,
-	    "async%d_nstart: Set ASYNC_BUSY.  async_ocnt=%d\n",
-	    instance, async->async_ocnt);
+	ASY_DPRINTF(asy, ASY_DEBUG_BUSY, "Set ASYNC_BUSY, async_ocnt=%d",
+	    async->async_ocnt);
 	async->async_flags |= ASYNC_BUSY;
 	mutex_exit(&asy->asy_excl_hi);
 }
@@ -3246,24 +3908,17 @@ static void
 async_resume(struct asyncline *async)
 {
 	struct asycom *asy = async->async_common;
-#ifdef DEBUG
-	int instance;
-#endif
 
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "enter");
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
-#ifdef DEBUG
-	instance = UNIT(async->async_dev);
-	DEBUGCONT1(ASY_DEBUG_PROCS, "async%d_resume\n", instance);
-#endif
 
-	if (ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LSR) & XHRE) {
+	if (asy_get(asy, ASY_LSR) & ASY_LSR_THRE) {
 		if (async_flowcontrol_sw_input(asy, FLOW_CHECK, IN_FLOW_NULL))
 			return;
 		if (async->async_ocnt > 0 &&
 		    !(async->async_flags &
 		    (ASYNC_HW_OUT_FLW|ASYNC_SW_OUT_FLW|ASYNC_OUT_SUSPEND))) {
-			ddi_put8(asy->asy_iohandle,
-			    asy->asy_ioaddr + DAT, *async->async_optr++);
+			asy_put(asy, ASY_THR, *async->async_optr++);
 			async->async_ocnt--;
 			async->async_flags |= ASYNC_PROGRESS;
 		}
@@ -3292,7 +3947,6 @@ async_hold_utbrk(void *arg)
 static void
 async_resume_utbrk(struct asyncline *async)
 {
-	uchar_t	val;
 	struct asycom *asy = async->async_common;
 	ASSERT(mutex_owned(&asy->asy_excl));
 
@@ -3309,11 +3963,9 @@ async_resume_utbrk(struct asyncline *async)
 	 * if ASYNC_BREAK is also set at here, we don't
 	 * really clean the HW break.
 	 */
-	if (!(async->async_flags & ASYNC_BREAK)) {
-		val = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LCR);
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + LCR,
-		    (val & ~SETBREAK));
-	}
+	if (!(async->async_flags & ASYNC_BREAK))
+		asy_clr(asy, ASY_LCR, ASY_LCR_SETBRK);
+
 	async->async_flags &= ~ASYNC_OUT_SUSPEND;
 	cv_broadcast(&async->async_flags_cv);
 	if (async->async_ocnt > 0) {
@@ -3345,15 +3997,9 @@ async_ioctl(struct asyncline *async, queue_t *wq, mblk_t *mp)
 	struct iocblk *iocp;
 	unsigned datasize;
 	int error = 0;
-	uchar_t val;
 	mblk_t *datamp;
-	unsigned int index;
 
-#ifdef DEBUG
-	int instance = UNIT(async->async_dev);
-
-	DEBUGCONT1(ASY_DEBUG_PROCS, "async%d_ioctl\n", instance);
-#endif
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "enter");
 
 	if (tp->t_iocpending != NULL) {
 		/*
@@ -3377,8 +4023,7 @@ async_ioctl(struct asyncline *async, queue_t *wq, mblk_t *mp)
 	 * zaps.  We know that ttycommon_ioctl doesn't know any CONS*
 	 * ioctls, so keep the others safe too.
 	 */
-	DEBUGCONT2(ASY_DEBUG_IOCTL, "async%d_ioctl: %s\n",
-	    instance,
+	ASY_DPRINTF(asy, ASY_DEBUG_IOCTL, "%s",
 	    iocp->ioc_cmd == TIOCMGET ? "TIOCMGET" :
 	    iocp->ioc_cmd == TIOCMSET ? "TIOCMSET" :
 	    iocp->ioc_cmd == TIOCMBIS ? "TIOCMBIS" :
@@ -3575,53 +4220,32 @@ async_ioctl(struct asyncline *async, queue_t *wq, mblk_t *mp)
 				}
 				mutex_enter(&asy->asy_excl_hi);
 				/*
-				 * We loop until the TSR is empty and then
-				 * set the break.  ASYNC_BREAK has been set
-				 * to ensure that no characters are
-				 * transmitted while the TSR is being
-				 * flushed and SOUT is being used for the
-				 * break signal.
-				 *
-				 * The wait period is equal to
-				 * clock / (baud * 16) * 16 * 2.
+				 * Wait until TSR is empty and then set the
+				 * break. ASYNC_BREAK has been set to ensure
+				 * that no characters are transmitted while the
+				 * TSR is being flushed and SOUT is being used
+				 * for the break signal.
 				 */
-				index = BAUDINDEX(
-				    async->async_ttycommon.t_cflag);
 				async->async_flags |= ASYNC_BREAK;
-
-				while ((ddi_get8(asy->asy_iohandle,
-				    asy->asy_ioaddr + LSR) & XSRE) == 0) {
-					mutex_exit(&asy->asy_excl_hi);
-					mutex_exit(&asy->asy_excl);
-					drv_usecwait(
-					    32*asyspdtab[index] & 0xfff);
-					mutex_enter(&asy->asy_excl);
-					mutex_enter(&asy->asy_excl_hi);
-				}
+				asy_wait_baudrate(asy);
 				/*
 				 * Arrange for "async_restart"
 				 * to be called in 1/4 second;
 				 * it will turn the break bit off, and call
 				 * "async_start" to grab the next message.
 				 */
-				val = ddi_get8(asy->asy_iohandle,
-				    asy->asy_ioaddr + LCR);
-				ddi_put8(asy->asy_iohandle,
-				    asy->asy_ioaddr + LCR,
-				    (val | SETBREAK));
+				asy_set(asy, ASY_LCR, ASY_LCR_SETBRK);
 				mutex_exit(&asy->asy_excl_hi);
 				(void) timeout(async_restart, (caddr_t)async,
 				    drv_usectohz(1000000)/4);
 			} else {
-				DEBUGCONT1(ASY_DEBUG_OUT,
-				    "async%d_ioctl: wait for flush.\n",
-				    instance);
+				ASY_DPRINTF(asy, ASY_DEBUG_OUT,
+				    "wait for flush");
 				mutex_enter(&asy->asy_excl_hi);
 				asy_waiteot(asy);
 				mutex_exit(&asy->asy_excl_hi);
-				DEBUGCONT1(ASY_DEBUG_OUT,
-				    "async%d_ioctl: ldterm satisfied.\n",
-				    instance);
+				ASY_DPRINTF(asy, ASY_DEBUG_OUT,
+				    "ldterm satisfied");
 			}
 			break;
 
@@ -3630,21 +4254,7 @@ async_ioctl(struct asyncline *async, queue_t *wq, mblk_t *mp)
 				mutex_enter(&asy->asy_excl_hi);
 				async->async_flags |= ASYNC_OUT_SUSPEND;
 				async->async_flags |= ASYNC_HOLD_UTBRK;
-				index = BAUDINDEX(
-				    async->async_ttycommon.t_cflag);
-				while ((ddi_get8(asy->asy_iohandle,
-				    asy->asy_ioaddr + LSR) & XSRE) == 0) {
-					mutex_exit(&asy->asy_excl_hi);
-					mutex_exit(&asy->asy_excl);
-					drv_usecwait(
-					    32*asyspdtab[index] & 0xfff);
-					mutex_enter(&asy->asy_excl);
-					mutex_enter(&asy->asy_excl_hi);
-				}
-				val = ddi_get8(asy->asy_iohandle,
-				    asy->asy_ioaddr + LCR);
-				ddi_put8(asy->asy_iohandle,
-				    asy->asy_ioaddr + LCR, (val | SETBREAK));
+				asy_wait_baudrate(asy);
 				mutex_exit(&asy->asy_excl_hi);
 				/* wait for 100ms to hold BREAK */
 				async->async_utbrktid =
@@ -3665,8 +4275,8 @@ async_ioctl(struct asyncline *async, queue_t *wq, mblk_t *mp)
 		case TIOCMBIS:
 		case TIOCMBIC:
 			if (iocp->ioc_count != TRANSPARENT) {
-				DEBUGCONT1(ASY_DEBUG_IOCTL, "async%d_ioctl: "
-				    "non-transparent\n", instance);
+				ASY_DPRINTF(asy, ASY_DEBUG_IOCTL,
+				    "non-transparent");
 
 				error = miocpullup(mp, sizeof (int));
 				if (error != 0)
@@ -3674,14 +4284,14 @@ async_ioctl(struct asyncline *async, queue_t *wq, mblk_t *mp)
 
 				mutex_enter(&asy->asy_excl_hi);
 				(void) asymctl(asy,
-				    dmtoasy(*(int *)mp->b_cont->b_rptr),
+				    dmtoasy(asy, *(int *)mp->b_cont->b_rptr),
 				    iocp->ioc_cmd);
 				mutex_exit(&asy->asy_excl_hi);
 				iocp->ioc_error = 0;
 				mp->b_datap->db_type = M_IOCACK;
 			} else {
-				DEBUGCONT1(ASY_DEBUG_IOCTL, "async%d_ioctl: "
-				    "transparent\n", instance);
+				ASY_DPRINTF(asy, ASY_DEBUG_IOCTL,
+				    "transparent");
 				mcopyin(mp, NULL, sizeof (int), NULL);
 			}
 			break;
@@ -3698,12 +4308,12 @@ async_ioctl(struct asyncline *async, queue_t *wq, mblk_t *mp)
 			mutex_exit(&asy->asy_excl_hi);
 
 			if (iocp->ioc_count == TRANSPARENT) {
-				DEBUGCONT1(ASY_DEBUG_IOCTL, "async%d_ioctl: "
-				    "transparent\n", instance);
+				ASY_DPRINTF(asy, ASY_DEBUG_IOCTL,
+				    "transparent");
 				mcopyout(mp, NULL, sizeof (int), NULL, datamp);
 			} else {
-				DEBUGCONT1(ASY_DEBUG_IOCTL, "async%d_ioctl: "
-				    "non-transparent\n", instance);
+				ASY_DPRINTF(asy, ASY_DEBUG_IOCTL,
+				    "non-transparent");
 				mioc2ack(mp, datamp, sizeof (int), 0);
 			}
 			break;
@@ -3773,7 +4383,7 @@ async_ioctl(struct asyncline *async, queue_t *wq, mblk_t *mp)
 	}
 	mutex_exit(&asy->asy_excl);
 	qreply(wq, mp);
-	DEBUGCONT1(ASY_DEBUG_PROCS, "async%d_ioctl: done\n", instance);
+	ASY_DPRINTF(asy, ASY_DEBUG_PROCS, "done");
 }
 
 static int
@@ -3789,7 +4399,7 @@ asyrsrv(queue_t *q)
 	while (canputnext(q) && (bp = getq(q)))
 		putnext(q, bp);
 	mutex_enter(&asy->asy_excl_hi);
-	ASYSETSOFT(asy);
+	asysetsoft(asy);
 	mutex_exit(&asy->asy_excl_hi);
 	async->async_polltid = 0;
 	return (0);
@@ -3820,16 +4430,9 @@ asywputdo(queue_t *q, mblk_t *mp, boolean_t wput)
 {
 	struct asyncline *async;
 	struct asycom *asy;
-#ifdef DEBUG
-	int instance;
-#endif
 	int error;
 
 	async = (struct asyncline *)q->q_ptr;
-
-#ifdef DEBUG
-	instance = UNIT(async->async_dev);
-#endif
 	asy = async->async_common;
 
 	switch (mp->b_datap->db_type) {
@@ -3879,9 +4482,8 @@ asywputdo(queue_t *q, mblk_t *mp, boolean_t wput)
 			}
 
 			if (*(int *)mp->b_cont->b_rptr != 0) {
-				DEBUGCONT1(ASY_DEBUG_OUT,
-				    "async%d_ioctl: flush request.\n",
-				    instance);
+				ASY_DPRINTF(asy, ASY_DEBUG_OUT,
+				    "flush request");
 				(void) putq(q, mp);
 
 				mutex_enter(&asy->asy_excl);
@@ -3952,26 +4554,20 @@ asywputdo(queue_t *q, mblk_t *mp, boolean_t wput)
 			 */
 			mutex_enter(&asy->asy_excl_hi);
 			if (async->async_flags & ASYNC_BUSY) {
-				DEBUGCONT1(ASY_DEBUG_BUSY, "asy%dwput: "
+				ASY_DPRINTF(asy, ASY_DEBUG_BUSY,
 				    "Clearing async_ocnt, "
-				    "leaving ASYNC_BUSY set\n",
-				    instance);
+				    "leaving ASYNC_BUSY set");
 				async->async_ocnt = 0;
 				async->async_flags &= ~ASYNC_BUSY;
 			} /* if */
 
 			if (ASYWPUTDO_NOT_SUSP(async, wput)) {
 				/* Flush FIFO buffers */
-				if (asy->asy_use_fifo == FIFO_ON) {
-					asy_reset_fifo(asy, FIFOTXFLSH);
+				if (asy->asy_use_fifo == ASY_FCR_FIFO_EN) {
+					asy_reset_fifo(asy, ASY_FCR_THR_FL);
 				}
 			}
 			mutex_exit(&asy->asy_excl_hi);
-
-			/* Flush FIFO buffers */
-			if (asy->asy_use_fifo == FIFO_ON) {
-				asy_reset_fifo(asy, FIFOTXFLSH);
-			}
 
 			/*
 			 * Flush our write queue.
@@ -3986,10 +4582,14 @@ asywputdo(queue_t *q, mblk_t *mp, boolean_t wput)
 		}
 		if (*mp->b_rptr & FLUSHR) {
 			if (ASYWPUTDO_NOT_SUSP(async, wput)) {
+				mutex_enter(&asy->asy_excl);
+				mutex_enter(&asy->asy_excl_hi);
 				/* Flush FIFO buffers */
-				if (asy->asy_use_fifo == FIFO_ON) {
-					asy_reset_fifo(asy, FIFORXFLSH);
+				if (asy->asy_use_fifo == ASY_FCR_FIFO_EN) {
+					asy_reset_fifo(asy, ASY_FCR_RHR_FL);
 				}
+				mutex_exit(&asy->asy_excl_hi);
+				mutex_exit(&asy->asy_excl);
 			}
 			flushq(RD(q), FLUSHDATA);
 			qreply(q, mp);	/* give the read queues a crack at it */
@@ -4165,9 +4765,6 @@ async_iocdata(queue_t *q, mblk_t *mp)
 	struct asycom		*asy;
 	struct iocblk *ip;
 	struct copyresp *csp;
-#ifdef DEBUG
-	int instance = UNIT(async->async_dev);
-#endif
 
 	asy = async->async_common;
 	ip = (struct iocblk *)mp->b_rptr;
@@ -4181,8 +4778,7 @@ async_iocdata(queue_t *q, mblk_t *mp)
 	}
 
 	mutex_enter(&asy->asy_excl);
-	DEBUGCONT2(ASY_DEBUG_MODEM, "async%d_iocdata: case %s\n",
-	    instance,
+	ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "case %s",
 	    csp->cp_cmd == TIOCMGET ? "TIOCMGET" :
 	    csp->cp_cmd == TIOCMSET ? "TIOCMSET" :
 	    csp->cp_cmd == TIOCMBIS ? "TIOCMBIS" :
@@ -4205,7 +4801,7 @@ async_iocdata(queue_t *q, mblk_t *mp)
 	case TIOCMBIS:
 	case TIOCMBIC:
 		mutex_enter(&asy->asy_excl_hi);
-		(void) asymctl(asy, dmtoasy(*(int *)mp->b_cont->b_rptr),
+		(void) asymctl(asy, dmtoasy(asy, *(int *)mp->b_cont->b_rptr),
 		    csp->cp_cmd);
 		mutex_exit(&asy->asy_excl_hi);
 		mioc2ack(mp, NULL, 0, 0);
@@ -4236,14 +4832,13 @@ asyputchar(cons_polledio_arg_t arg, uchar_t c)
 	if (c == '\n')
 		asyputchar(arg, '\r');
 
-	while ((ddi_get8(asy->asy_iohandle,
-	    asy->asy_ioaddr + LSR) & XHRE) == 0) {
+	while ((asy_get_reg(asy, ASY_LSR) & ASY_LSR_THRE) == 0) {
 		/* wait for xmit to finish */
 		drv_usecwait(10);
 	}
 
 	/* put the character out */
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + DAT, c);
+	asy_put_reg(asy, ASY_THR, c);
 }
 
 /*
@@ -4255,8 +4850,7 @@ asyischar(cons_polledio_arg_t arg)
 {
 	struct asycom *asy = (struct asycom *)arg;
 
-	return ((ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LSR) & RCA)
-	    != 0);
+	return ((asy_get_reg(asy, ASY_LSR) & ASY_LSR_DR) != 0);
 }
 
 /*
@@ -4269,7 +4863,7 @@ asygetchar(cons_polledio_arg_t arg)
 
 	while (!asyischar(arg))
 		drv_usecwait(10);
-	return (ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + DAT));
+	return (asy_get_reg(asy, ASY_RHR));
 }
 
 /*
@@ -4279,31 +4873,27 @@ static int
 asymctl(struct asycom *asy, int bits, int how)
 {
 	int mcr_r, msr_r;
-	int instance = asy->asy_unit;
 
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
 	ASSERT(mutex_owned(&asy->asy_excl));
 
 	/* Read Modem Control Registers */
-	mcr_r = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + MCR);
+	mcr_r = asy_get(asy, ASY_MCR);
 
 	switch (how) {
 
 	case TIOCMSET:
-		DEBUGCONT2(ASY_DEBUG_MODEM,
-		    "asy%dmctl: TIOCMSET, bits = %x\n", instance, bits);
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "TIOCMSET, bits = %x", bits);
 		mcr_r = bits;		/* Set bits	*/
 		break;
 
 	case TIOCMBIS:
-		DEBUGCONT2(ASY_DEBUG_MODEM, "asy%dmctl: TIOCMBIS, bits = %x\n",
-		    instance, bits);
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "TIOCMBIS, bits = %x", bits);
 		mcr_r |= bits;		/* Mask in bits	*/
 		break;
 
 	case TIOCMBIC:
-		DEBUGCONT2(ASY_DEBUG_MODEM, "asy%dmctl: TIOCMBIC, bits = %x\n",
-		    instance, bits);
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "TIOCMBIC, bits = %x", bits);
 		mcr_r &= ~bits;		/* Mask out bits */
 		break;
 
@@ -4313,25 +4903,21 @@ asymctl(struct asycom *asy, int bits, int how)
 		 * If modem interrupts are enabled, we return the
 		 * saved value of msr. We read MSR only in async_msint()
 		 */
-		if (ddi_get8(asy->asy_iohandle,
-		    asy->asy_ioaddr + ICR) & MIEN) {
+		if (asy_get(asy, ASY_IER) & ASY_IER_MIEN) {
 			msr_r = asy->asy_msr;
-			DEBUGCONT2(ASY_DEBUG_MODEM,
-			    "asy%dmctl: TIOCMGET, read msr_r = %x\n",
-			    instance, msr_r);
+			ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+			    "TIOCMGET, read msr_r = %x", msr_r);
 		} else {
-			msr_r = ddi_get8(asy->asy_iohandle,
-			    asy->asy_ioaddr + MSR);
-			DEBUGCONT2(ASY_DEBUG_MODEM,
-			    "asy%dmctl: TIOCMGET, read MSR = %x\n",
-			    instance, msr_r);
+			msr_r = asy_get(asy, ASY_MSR);
+			ASY_DPRINTF(asy, ASY_DEBUG_MODEM,
+			    "TIOCMGET, read MSR = %x", msr_r);
 		}
-		DEBUGCONT2(ASY_DEBUG_MODEM, "asy%dtodm: modem_lines = %x\n",
-		    instance, asytodm(mcr_r, msr_r));
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "modem_lines = %x",
+		    asytodm(mcr_r, msr_r));
 		return (asytodm(mcr_r, msr_r));
 	}
 
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + MCR, mcr_r);
+	asy_put(asy, ASY_MCR, mcr_r);
 
 	return (mcr_r);
 }
@@ -4342,58 +4928,58 @@ asytodm(int mcr_r, int msr_r)
 	int b = 0;
 
 	/* MCR registers */
-	if (mcr_r & RTS)
+	if (mcr_r & ASY_MCR_RTS)
 		b |= TIOCM_RTS;
 
-	if (mcr_r & DTR)
+	if (mcr_r & ASY_MCR_DTR)
 		b |= TIOCM_DTR;
 
 	/* MSR registers */
-	if (msr_r & DCD)
+	if (msr_r & ASY_MSR_DCD)
 		b |= TIOCM_CAR;
 
-	if (msr_r & CTS)
+	if (msr_r & ASY_MSR_CTS)
 		b |= TIOCM_CTS;
 
-	if (msr_r & DSR)
+	if (msr_r & ASY_MSR_DSR)
 		b |= TIOCM_DSR;
 
-	if (msr_r & RI)
+	if (msr_r & ASY_MSR_RI)
 		b |= TIOCM_RNG;
 	return (b);
 }
 
 static int
-dmtoasy(int bits)
+dmtoasy(struct asycom *asy, int bits)
 {
 	int b = 0;
 
-	DEBUGCONT1(ASY_DEBUG_MODEM, "dmtoasy: bits = %x\n", bits);
+	ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "bits = %x", bits);
 #ifdef	CAN_NOT_SET	/* only DTR and RTS can be set */
 	if (bits & TIOCM_CAR)
-		b |= DCD;
+		b |= ASY_MSR_DCD;
 	if (bits & TIOCM_CTS)
-		b |= CTS;
+		b |= ASY_MSR_CTS;
 	if (bits & TIOCM_DSR)
-		b |= DSR;
+		b |= ASY_MSR_DSR;
 	if (bits & TIOCM_RNG)
-		b |= RI;
+		b |= ASY_MSR_RI;
 #endif
 
 	if (bits & TIOCM_RTS) {
-		DEBUGCONT0(ASY_DEBUG_MODEM, "dmtoasy: set b & RTS\n");
-		b |= RTS;
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "set b & RTS");
+		b |= ASY_MCR_RTS;
 	}
 	if (bits & TIOCM_DTR) {
-		DEBUGCONT0(ASY_DEBUG_MODEM, "dmtoasy: set b & DTR\n");
-		b |= DTR;
+		ASY_DPRINTF(asy, ASY_DEBUG_MODEM, "set b & DTR");
+		b |= ASY_MCR_DTR;
 	}
 
 	return (b);
 }
 
 static void
-asyerror(int level, const char *fmt, ...)
+asyerror(const struct asycom *asy, int level, const char *fmt, ...)
 {
 	va_list adx;
 	static	time_t	last;
@@ -4417,7 +5003,7 @@ asyerror(int level, const char *fmt, ...)
 	lastfmt = fmt;
 
 	va_start(adx, fmt);
-	vcmn_err(level, fmt, adx);
+	vdev_err(asy->asy_dip, level, fmt, adx);
 	va_end(adx);
 }
 
@@ -4467,7 +5053,7 @@ asy_parse_mode(dev_info_t *devi, struct asycom *asy)
 	if (p && (p1 = strchr(p, ',')) != 0) {
 		*p1++ = '\0';
 	} else {
-		asy->asy_cflag |= BITS8;	/* add default bits */
+		asy->asy_cflag |= ASY_LCR_BITS8;	/* add default bits */
 		return;
 	}
 
@@ -4513,27 +5099,27 @@ asy_parse_mode(dev_info_t *devi, struct asycom *asy)
 	if (p && (p1 = strchr(p, ',')) != 0)  {
 		*p1++ = '\0';
 	} else {
-		asy->asy_cflag |= BITS8;	/* add default bits */
+		asy->asy_cflag |= ASY_LCR_BITS8;	/* add default bits */
 		return;
 	}
 	switch (*p) {
 		default:
 		case '8':
 			asy->asy_cflag |= CS8;
-			asy->asy_lcr = BITS8;
+			asy->asy_lcr = ASY_LCR_BITS8;
 			break;
 		case '7':
 			asy->asy_cflag |= CS7;
-			asy->asy_lcr = BITS7;
+			asy->asy_lcr = ASY_LCR_BITS7;
 			break;
 		case '6':
 			asy->asy_cflag |= CS6;
-			asy->asy_lcr = BITS6;
+			asy->asy_lcr = ASY_LCR_BITS6;
 			break;
 		case '5':
 			/* LINTED: CS5 is currently zero (but might change) */
 			asy->asy_cflag |= CS5;
-			asy->asy_lcr = BITS5;
+			asy->asy_lcr = ASY_LCR_BITS5;
 			break;
 	}
 
@@ -4550,10 +5136,11 @@ asy_parse_mode(dev_info_t *devi, struct asycom *asy)
 			break;
 		case 'e':
 			asy->asy_cflag |= PARENB;
-			asy->asy_lcr |= PEN; break;
+			asy->asy_lcr |= ASY_LCR_PEN;
+			break;
 		case 'o':
 			asy->asy_cflag |= PARENB|PARODD;
-			asy->asy_lcr |= PEN|EPS;
+			asy->asy_lcr |= ASY_LCR_PEN | ASY_LCR_EPS;
 			break;
 	}
 
@@ -4566,7 +5153,7 @@ asy_parse_mode(dev_info_t *devi, struct asycom *asy)
 	}
 	if (*p == '2') {
 		asy->asy_cflag |= CSTOPB;
-		asy->asy_lcr |= STB;
+		asy->asy_lcr |= ASY_LCR_STB;
 	}
 
 	/* ---- handshake is next ---- */
@@ -4630,7 +5217,6 @@ async_flowcontrol_sw_input(struct asycom *asy, async_flowc_action onoff,
     int type)
 {
 	struct asyncline *async = asy->asy_priv;
-	int instance = UNIT(async->async_dev);
 	int rval = B_FALSE;
 
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
@@ -4656,16 +5242,15 @@ async_flowcontrol_sw_input(struct asycom *asy, async_flowc_action onoff,
 		    IN_FLOW_STREAMS | IN_FLOW_USER))
 			async->async_flags |= ASYNC_SW_IN_FLOW |
 			    ASYNC_SW_IN_NEEDED;
-		DEBUGCONT2(ASY_DEBUG_SFLOW, "async%d: input sflow stop, "
-		    "type = %x\n", instance, async->async_inflow_source);
+		ASY_DPRINTF(asy, ASY_DEBUG_SFLOW, "input sflow stop, type = %x",
+		    async->async_inflow_source);
 		break;
 	case FLOW_START:
 		async->async_inflow_source &= ~type;
 		if (async->async_inflow_source == 0) {
 			async->async_flags = (async->async_flags &
 			    ~ASYNC_SW_IN_FLOW) | ASYNC_SW_IN_NEEDED;
-			DEBUGCONT1(ASY_DEBUG_SFLOW, "async%d: "
-			    "input sflow start\n", instance);
+			ASY_DPRINTF(asy, ASY_DEBUG_SFLOW, "input sflow start");
 		}
 		break;
 	default:
@@ -4674,14 +5259,14 @@ async_flowcontrol_sw_input(struct asycom *asy, async_flowc_action onoff,
 
 	if (((async->async_flags & (ASYNC_SW_IN_NEEDED | ASYNC_BREAK |
 	    ASYNC_OUT_SUSPEND)) == ASYNC_SW_IN_NEEDED) &&
-	    (ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + LSR) & XHRE)) {
+	    (asy_get(asy, ASY_LSR) & ASY_LSR_THRE)) {
 		/*
 		 * If we get this far, then we know we need to send out
 		 * XON or XOFF char.
 		 */
 		async->async_flags = (async->async_flags &
 		    ~ASYNC_SW_IN_NEEDED) | ASYNC_BUSY;
-		ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + DAT,
+		asy_put(asy, ASY_THR,
 		    async->async_flags & ASYNC_SW_IN_FLOW ?
 		    async->async_stopc : async->async_startc);
 		rval = B_TRUE;
@@ -4704,7 +5289,6 @@ static void
 async_flowcontrol_sw_output(struct asycom *asy, async_flowc_action onoff)
 {
 	struct asyncline *async = asy->asy_priv;
-	int instance = UNIT(async->async_dev);
 
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
 
@@ -4715,15 +5299,13 @@ async_flowcontrol_sw_output(struct asycom *asy, async_flowc_action onoff)
 	case FLOW_STOP:
 		async->async_flags |= ASYNC_SW_OUT_FLW;
 		async->async_flags &= ~ASYNC_OUT_FLW_RESUME;
-		DEBUGCONT1(ASY_DEBUG_SFLOW, "async%d: output sflow stop\n",
-		    instance);
+		ASY_DPRINTF(asy, ASY_DEBUG_SFLOW, "output sflow stop");
 		break;
 	case FLOW_START:
 		async->async_flags &= ~ASYNC_SW_OUT_FLW;
 		if (!(async->async_flags & ASYNC_HW_OUT_FLW))
 			async->async_flags |= ASYNC_OUT_FLW_RESUME;
-		DEBUGCONT1(ASY_DEBUG_SFLOW, "async%d: output sflow start\n",
-		    instance);
+		ASY_DPRINTF(asy, ASY_DEBUG_SFLOW, "output sflow start");
 		break;
 	default:
 		break;
@@ -4751,7 +5333,6 @@ async_flowcontrol_hw_input(struct asycom *asy, async_flowc_action onoff,
 	uchar_t	mcr;
 	uchar_t	flag;
 	struct asyncline *async = asy->asy_priv;
-	int instance = UNIT(async->async_dev);
 
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
 
@@ -4764,26 +5345,24 @@ async_flowcontrol_hw_input(struct asycom *asy, async_flowc_action onoff,
 		if (async->async_inflow_source & (IN_FLOW_RINGBUFF |
 		    IN_FLOW_STREAMS | IN_FLOW_USER))
 			async->async_flags |= ASYNC_HW_IN_FLOW;
-		DEBUGCONT2(ASY_DEBUG_HFLOW, "async%d: input hflow stop, "
-		    "type = %x\n", instance, async->async_inflow_source);
+		ASY_DPRINTF(asy, ASY_DEBUG_HFLOW, "input hflow stop, type = %x",
+		    async->async_inflow_source);
 		break;
 	case FLOW_START:
 		async->async_inflow_source &= ~type;
 		if (async->async_inflow_source == 0) {
 			async->async_flags &= ~ASYNC_HW_IN_FLOW;
-			DEBUGCONT1(ASY_DEBUG_HFLOW, "async%d: "
-			    "input hflow start\n", instance);
+			ASY_DPRINTF(asy, ASY_DEBUG_HFLOW, "input hflow start");
 		}
 		break;
 	default:
 		break;
 	}
-	mcr = ddi_get8(asy->asy_iohandle, asy->asy_ioaddr + MCR);
-	flag = (async->async_flags & ASYNC_HW_IN_FLOW) ? 0 : RTS;
+	mcr = asy_get(asy, ASY_MCR);
+	flag = (async->async_flags & ASYNC_HW_IN_FLOW) ? 0 : ASY_MCR_RTS;
 
-	if (((mcr ^ flag) & RTS) != 0) {
-		ddi_put8(asy->asy_iohandle,
-		    asy->asy_ioaddr + MCR, (mcr ^ RTS));
+	if (((mcr ^ flag) & ASY_MCR_RTS) != 0) {
+		asy_put(asy, ASY_MCR, (mcr ^ ASY_MCR_RTS));
 	}
 }
 
@@ -4804,7 +5383,6 @@ static void
 async_flowcontrol_hw_output(struct asycom *asy, async_flowc_action onoff)
 {
 	struct asyncline *async = asy->asy_priv;
-	int instance = UNIT(async->async_dev);
 
 	ASSERT(mutex_owned(&asy->asy_excl_hi));
 
@@ -4815,21 +5393,18 @@ async_flowcontrol_hw_output(struct asycom *asy, async_flowc_action onoff)
 	case FLOW_STOP:
 		async->async_flags |= ASYNC_HW_OUT_FLW;
 		async->async_flags &= ~ASYNC_OUT_FLW_RESUME;
-		DEBUGCONT1(ASY_DEBUG_HFLOW, "async%d: output hflow stop\n",
-		    instance);
+		ASY_DPRINTF(asy, ASY_DEBUG_HFLOW, "output hflow stop");
 		break;
 	case FLOW_START:
 		async->async_flags &= ~ASYNC_HW_OUT_FLW;
 		if (!(async->async_flags & ASYNC_SW_OUT_FLW))
 			async->async_flags |= ASYNC_OUT_FLW_RESUME;
-		DEBUGCONT1(ASY_DEBUG_HFLOW, "async%d: output hflow start\n",
-		    instance);
+		ASY_DPRINTF(asy, ASY_DEBUG_HFLOW, "output hflow start");
 		break;
 	default:
 		break;
 	}
 }
-
 
 /*
  * quiesce(9E) entry point.
@@ -4853,11 +5428,12 @@ asyquiesce(dev_info_t *devi)
 	if (asy == NULL)
 		return (DDI_FAILURE);
 
-	/* disable all interrupts */
-	ddi_put8(asy->asy_iohandle, asy->asy_ioaddr + ICR, 0);
+	asy_disable_interrupts(asy, ASY_IER_ALL);
 
-	/* reset the FIFO */
-	asy_reset_fifo(asy, FIFOTXFLSH | FIFORXFLSH);
+	/* Flush the FIFOs, if required */
+	if (asy->asy_use_fifo == ASY_FCR_FIFO_EN) {
+		asy_reset_fifo(asy, ASY_FCR_THR_FL | ASY_FCR_RHR_FL);
+	}
 
 	return (DDI_SUCCESS);
 }

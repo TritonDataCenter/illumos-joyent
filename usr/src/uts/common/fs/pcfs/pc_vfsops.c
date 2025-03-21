@@ -25,6 +25,7 @@
  */
 /*
  * Copyright (c) 2017 by Delphix. All rights reserved.
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <sys/param.h>
@@ -88,6 +89,7 @@ static int pc_syncfsnodes(struct pcfs *);
 static int pcfs_sync(struct vfs *, short, struct cred *);
 static int pcfs_vget(struct vfs *vfsp, struct vnode **vpp, struct fid *fidp);
 static void pcfs_freevfs(vfs_t *vfsp);
+static int pcfs_syncfs(struct vfs *, uint64_t, struct cred *);
 
 static int pc_readfat(struct pcfs *fsp, uchar_t *fatp);
 static int pc_writefat(struct pcfs *fsp, daddr_t start);
@@ -243,6 +245,7 @@ pcfsinit(int fstype, char *name)
 		VFSNAME_SYNC,		{ .vfs_sync = pcfs_sync },
 		VFSNAME_VGET,		{ .vfs_vget = pcfs_vget },
 		VFSNAME_FREEVFS,	{ .vfs_freevfs = pcfs_freevfs },
+		VFSNAME_SYNCFS,		{ .vfs_syncfs = pcfs_syncfs },
 		NULL,			NULL
 	};
 	int error;
@@ -885,7 +888,7 @@ pcfs_root(
 	if (error = pc_lockfs(fsp, 0, 0))
 		return (error);
 
-	pcp = pc_getnode(fsp, (daddr_t)0, 0, (struct pcdir *)0);
+	pcp = pc_getnode(fsp, (daddr_t)0, 0, NULL);
 	pc_unlockfs(fsp);
 	*vpp = PCTOV(pcp);
 	pcp->pc_flags |= PC_EXTERNAL;
@@ -960,12 +963,8 @@ pc_syncfsnodes(struct pcfs *fsp)
 /*
  * Flush any pending I/O.
  */
-/*ARGSUSED*/
 static int
-pcfs_sync(
-	struct vfs *vfsp,
-	short flag,
-	struct cred *cr)
+pcfs_sync(struct vfs *vfsp, short flag, struct cred *cr)
 {
 	struct pcfs *fsp;
 	int error = 0;
@@ -999,6 +998,29 @@ pcfs_sync(
 	}
 	mutex_exit(&pcfslock);
 	return (error);
+}
+
+static int
+pcfs_syncfs(vfs_t *vfsp, uint64_t flags, cred_t *cr)
+{
+	int ret;
+	struct pcfs *fsp;
+
+	if (flags != 0) {
+		return (ENOTSUP);
+	}
+
+	fsp = VFSTOPCFS(vfsp);
+	if ((fsp->pcfs_flags & PCFS_IRRECOV) == 0) {
+		ret = pc_syncfsnodes(fsp);
+	} else {
+		rw_enter(&pcnodes_lock, RW_WRITER);
+		pc_diskchanged(fsp);
+		rw_exit(&pcnodes_lock);
+		ret = EIO;
+	}
+
+	return (ret);
 }
 
 int
@@ -1057,7 +1079,7 @@ pc_syncfat(struct pcfs *fsp)
 	int	error = 0;
 	struct fat_od_fsi *fsinfo_disk;
 
-	if ((fsp->pcfs_fatp == (uchar_t *)0) ||
+	if ((fsp->pcfs_fatp == NULL) ||
 	    !(fsp->pcfs_flags & PCFS_FATMOD))
 		return (0);
 	/*
@@ -1108,7 +1130,7 @@ pc_invalfat(struct pcfs *fsp)
 	struct pcfs *xfsp;
 	int mount_cnt = 0;
 
-	if (fsp->pcfs_fatp == (uchar_t *)0)
+	if (fsp->pcfs_fatp == NULL)
 		panic("pc_invalfat");
 	/*
 	 * Release FAT
@@ -1177,7 +1199,7 @@ pcfs_vget(struct vfs *vfsp, struct vnode **vpp, struct fid *fidp)
 	}
 
 	if (pcfid->pcfid_block == 0) {
-		pcp = pc_getnode(fsp, (daddr_t)0, 0, (struct pcdir *)0);
+		pcp = pc_getnode(fsp, (daddr_t)0, 0, NULL);
 		pcp->pc_flags |= PC_EXTERNAL;
 		*vpp = PCTOV(pcp);
 		pc_unlockfs(fsp);
@@ -1341,8 +1363,11 @@ pc_writefat(struct pcfs *fsp, daddr_t start)
 		bp = ngeteblk(writesize);
 		bp->b_edev = fsp->pcfs_xdev;
 		bp->b_dev = cmpdev(bp->b_edev);
-		bp->b_blkno = pc_dbdaddr(fsp, start +
+		bp->b_blkno = start + pc_dbdaddr(fsp,
 		    pc_cltodb(fsp, pc_lblkno(fsp, off)));
+		DTRACE_PROBE3(pc_writefat, longlong_t, bp->b_blkno,
+		    uchar_t *, fatp,
+		    size_t, writesize);
 		bcopy(fatp, bp->b_un.b_addr, writesize);
 		bwrite2(bp);
 		error = geterror(bp);
@@ -1414,7 +1439,7 @@ pcfs_freevfs(vfs_t *vfsp)
 	 * Purging the FAT closes the device - can't do any more
 	 * I/O after this.
 	 */
-	if (fsp->pcfs_fatp != (uchar_t *)0)
+	if (fsp->pcfs_fatp != NULL)
 		pc_invalfat(fsp);
 	mutex_exit(&pcfslock);
 

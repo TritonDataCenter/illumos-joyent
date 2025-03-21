@@ -26,6 +26,7 @@
  * Copyright 2015 Nexenta Systems, Inc. All rights reserved.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2022 Garrett D'Amore
+ * Copyright 2024 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -83,6 +84,13 @@ int do_useracc = 1;		/* Controlled by setting SO_DEBUG to 4 */
 extern int	xnet_truncate_print;
 
 /*
+ * This constitutes the known flags that are allowed to be passed in the upper
+ * bits of a socket type either for socket() or accept4().
+ */
+#define	SOCK_KNOWN_FLAGS	(SOCK_CLOEXEC | SOCK_NDELAY | SOCK_NONBLOCK | \
+				    SOCK_CLOFORK)
+
+/*
  * Kernel component of socket creation.
  *
  * The socket library determines which version number to use.
@@ -104,7 +112,7 @@ so_socket(int family, int type_w_flags, int protocol, char *devpath,
 
 	type = type_w_flags & SOCK_TYPE_MASK;
 	type_w_flags &= ~SOCK_TYPE_MASK;
-	if (type_w_flags & ~(SOCK_CLOEXEC|SOCK_NDELAY|SOCK_NONBLOCK))
+	if (type_w_flags & ~SOCK_KNOWN_FLAGS)
 		return (set_errno(EINVAL));
 
 	if (devpath != NULL) {
@@ -129,7 +137,8 @@ so_socket(int family, int type_w_flags, int protocol, char *devpath,
 
 	/* Allocate a file descriptor for the socket */
 	vp = SOTOV(so);
-	if (error = falloc(vp, FWRITE|FREAD, &fp, &fd)) {
+	error = falloc(vp, FWRITE|FREAD, &fp, &fd);
+	if (error != 0) {
 		(void) socket_close(so, 0, CRED());
 		socket_destroy(so);
 		return (set_errno(error));
@@ -149,7 +158,10 @@ so_socket(int family, int type_w_flags, int protocol, char *devpath,
 	mutex_exit(&fp->f_tlock);
 	setf(fd, fp);
 	if ((type_w_flags & SOCK_CLOEXEC) != 0) {
-		f_setfd(fd, FD_CLOEXEC);
+		f_setfd_or(fd, FD_CLOEXEC);
+	}
+	if ((type_w_flags & SOCK_CLOFORK) != 0) {
+		f_setfd_or(fd, FD_CLOFORK);
 	}
 
 	return (fd);
@@ -487,7 +499,8 @@ so_socketpair(int sv[2])
 		}
 
 		nvp = SOTOV(nso);
-		if (error = falloc(nvp, FWRITE|FREAD, &nfp, &nfd)) {
+		error = falloc(nvp, FWRITE|FREAD, &nfp, &nfd);
+		if (error != 0) {
 			(void) socket_close(nso, 0, CRED());
 			socket_destroy(nso);
 			eprintsoline(nso, error);
@@ -516,11 +529,11 @@ so_socketpair(int sv[2])
 		releasef(svs[1]);
 
 		/*
-		 * If FD_CLOEXEC was set on the filedescriptor we're
-		 * swapping out, we should set it on the new one too.
+		 * If FD_CLOEXEC or FD_CLOFORK was set on the file descriptor
+		 * we're swapping out, we should set it on the new one too.
 		 */
-		if (orig_flags & FD_CLOEXEC) {
-			f_setfd(nfd, FD_CLOEXEC);
+		if (orig_flags & (FD_CLOEXEC | FD_CLOFORK)) {
+			f_setfd_or(nfd, orig_flags & (FD_CLOEXEC | FD_CLOFORK));
 		}
 
 		/*
@@ -584,7 +597,7 @@ bind(int sock, struct sockaddr *name, socklen_t namelen, int version)
 		error = socket_bind(so, name, namelen, _SOBIND_SOCKBSD, CRED());
 		break;
 	}
-done:
+
 	releasef(sock);
 	if (name != NULL)
 		kmem_free(name, (size_t)namelen);
@@ -635,7 +648,7 @@ accept(int sock, struct sockaddr *name, socklen_t *namelenp, int version,
 	dprint(1, ("accept(%d, %p, %p)\n",
 	    sock, (void *)name, (void *)namelenp));
 
-	if (flags & ~(SOCK_CLOEXEC|SOCK_NONBLOCK|SOCK_NDELAY)) {
+	if (flags & ~SOCK_KNOWN_FLAGS) {
 		return (set_errno(EINVAL));
 	}
 
@@ -708,7 +721,8 @@ accept(int sock, struct sockaddr *name, socklen_t *namelenp, int version,
 		releasef(sock);
 		return (set_errno(error));
 	}
-	if (error = falloc(NULL, FWRITE|FREAD, &nfp, NULL)) {
+	error = falloc(NULL, FWRITE|FREAD, &nfp, NULL);
+	if (error != 0) {
 		setf(nfd, NULL);
 		(void) socket_close(nso, 0, CRED());
 		socket_destroy(nso);
@@ -724,10 +738,14 @@ accept(int sock, struct sockaddr *name, socklen_t *namelenp, int version,
 	setf(nfd, nfp);
 
 	/*
-	 * Act on SOCK_CLOEXEC from flags
+	 * Act on SOCK_CLOEXEC and SOCK_CLOFORK from flags
 	 */
 	if (flags & SOCK_CLOEXEC) {
-		f_setfd(nfd, FD_CLOEXEC);
+		f_setfd_or(nfd, FD_CLOEXEC);
+	}
+
+	if (flags & SOCK_CLOFORK) {
+		f_setfd_or(nfd, FD_CLOFORK);
 	}
 
 	/*
@@ -846,7 +864,7 @@ recvit(int sock, struct nmsghdr *msg, struct uio *uiop, int flags,
 	controllen = msg->msg_controllen;
 
 	msg->msg_flags = flags & (MSG_OOB | MSG_PEEK | MSG_WAITALL |
-	    MSG_DONTWAIT | MSG_XPG4_2);
+	    MSG_DONTWAIT | MSG_XPG4_2 | MSG_CMSG_CLOEXEC | MSG_CMSG_CLOFORK);
 
 	error = socket_recvmsg(so, msg, uiop, CRED());
 	if (error) {
@@ -865,9 +883,12 @@ recvit(int sock, struct nmsghdr *msg, struct uio *uiop, int flags,
 
 	if (flagsp != NULL) {
 		/*
-		 * Clear internal flag.
+		 * Clear internal flag. We also clear the CMSG flags out of
+		 * paranoia, though they should have been cleared by our
+		 * sop_recvmsg.
 		 */
-		msg->msg_flags &= ~MSG_XPG4_2;
+		msg->msg_flags &= ~(MSG_XPG4_2 | MSG_CMSG_CLOEXEC |
+		    MSG_CMSG_CLOFORK);
 
 		/*
 		 * Determine MSG_CTRUNC. sorecvmsg sets MSG_CTRUNC only
@@ -1210,6 +1231,8 @@ sendit(int sock, struct nmsghdr *msg, struct uio *uiop, int flags)
 	else
 		uiop->uio_extflg = UIO_COPY_DEFAULT;
 
+	len = uiop->uio_resid;
+
 	/* Allocate and copyin name and control */
 	name = msg->msg_name;
 	namelen = msg->msg_namelen;
@@ -1252,7 +1275,6 @@ sendit(int sock, struct nmsghdr *msg, struct uio *uiop, int flags)
 		msg->msg_controllen = controllen = 0;
 	}
 
-	len = uiop->uio_resid;
 	msg->msg_flags = flags;
 
 	error = socket_sendmsg(so, msg, uiop, CRED());
@@ -2172,7 +2194,7 @@ snf_async_read(snf_req_t *sr)
 	int extra = 0;
 	int maxblk = 0;
 	int wroff = 0;
-	struct sonode *so;
+	struct sonode *so = NULL;
 
 	fp = sr->sr_fp;
 	size = sr->sr_file_size;
@@ -2776,7 +2798,7 @@ snf_cache(file_t *fp, vnode_t *fvp, u_offset_t fileoff, u_offset_t size,
 	struct vattr va;
 	int maxblk = 0;
 	int wroff = 0;
-	struct sonode *so;
+	struct sonode *so = NULL;
 	struct nmsghdr msg;
 
 	vp = fp->f_vnode;

@@ -14,8 +14,8 @@
 #
 
 #
-# Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
-# Copyright 2023 Oxide Computer Company
+# Copyright 2024 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2025 Oxide Computer Company
 #
 
 set name=pkg.fmri value=pkg:/system/bhyve/tests@$(PKGVERS)
@@ -32,9 +32,11 @@ file path=opt/bhyve-tests/runfiles/default.run mode=0444
 dir  path=opt/bhyve-tests/tests
 dir  path=opt/bhyve-tests/tests/inst_emul
 file path=opt/bhyve-tests/tests/inst_emul/cpuid mode=0555
+file path=opt/bhyve-tests/tests/inst_emul/cpuid_guest_state mode=0555
 file path=opt/bhyve-tests/tests/inst_emul/exit_consistent mode=0555
 file path=opt/bhyve-tests/tests/inst_emul/exit_paging mode=0555
 file path=opt/bhyve-tests/tests/inst_emul/imul mode=0555
+file path=opt/bhyve-tests/tests/inst_emul/inout mode=0555
 file path=opt/bhyve-tests/tests/inst_emul/page_dirty mode=0555
 file path=opt/bhyve-tests/tests/inst_emul/rdmsr mode=0555
 file path=opt/bhyve-tests/tests/inst_emul/suspend_info mode=0555
@@ -56,6 +58,7 @@ file path=opt/bhyve-tests/tests/kdev/vrtc_ops mode=0555
 file path=opt/bhyve-tests/tests/kdev/wrmsr_tsc mode=0555
 dir  path=opt/bhyve-tests/tests/mevent
 file path=opt/bhyve-tests/tests/mevent/lists_delete mode=0555
+file path=opt/bhyve-tests/tests/mevent/mevent_test mode=0555
 file path=opt/bhyve-tests/tests/mevent/read_disable mode=0555
 file path=opt/bhyve-tests/tests/mevent/read_pause mode=0555
 file path=opt/bhyve-tests/tests/mevent/read_requeue mode=0555
@@ -64,7 +67,11 @@ file path=opt/bhyve-tests/tests/mevent/vnode_zvol mode=0555
 dir  path=opt/bhyve-tests/tests/perf
 file path=opt/bhyve-tests/tests/perf/entry_exit mode=0555
 dir  path=opt/bhyve-tests/tests/viona
+file path=opt/bhyve-tests/tests/viona/cleanup mode=0555
+file path=opt/bhyve-tests/tests/viona/create_delete mode=0555
 file path=opt/bhyve-tests/tests/viona/interface_version mode=0555
+file path=opt/bhyve-tests/tests/viona/link_params mode=0555
+file path=opt/bhyve-tests/tests/viona/setup mode=0555
 dir  path=opt/bhyve-tests/tests/vmm
 file path=opt/bhyve-tests/tests/vmm/auto_destruct mode=0555
 file path=opt/bhyve-tests/tests/vmm/check_iommu mode=0555
@@ -82,15 +89,16 @@ file path=opt/bhyve-tests/tests/vmm/maxcpu mode=0555
 file path=opt/bhyve-tests/tests/vmm/mem_devmem mode=0555
 file path=opt/bhyve-tests/tests/vmm/mem_partial mode=0555
 file path=opt/bhyve-tests/tests/vmm/mem_seg_map mode=0555
+file path=opt/bhyve-tests/tests/vmm/npt_ops mode=0555
 file path=opt/bhyve-tests/tests/vmm/pause_resume mode=0555
 file path=opt/bhyve-tests/tests/vmm/self_destruct mode=0555
 file path=opt/bhyve-tests/tests/vmm/time_data mode=0555
-file path=opt/bhyve-tests/tests/vmm/vmm_drv_test_fini mode=0555
-file path=opt/bhyve-tests/tests/vmm/vmm_drv_test_init mode=0555
 dir  path=usr/kernel/drv group=sys
 dir  path=usr/kernel/drv/$(ARCH64) group=sys
 file path=usr/kernel/drv/$(ARCH64)/vmm_drv_test
 file path=usr/kernel/drv/vmm_drv_test.conf
+driver name=vmm_drv_test perms="* 0666 root sys" \
+    policy="read_priv_set=sys_devices write_priv_set=sys_devices"
 license lic_CDDL license=lic_CDDL
 depend type=require fmri=system/bhyve
 depend type=require fmri=system/test/testrunner

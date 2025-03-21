@@ -16,7 +16,7 @@
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
 # Copyright 2019 Joyent, Inc.
 # Copyright 2022 RackTop Systems, Inc.
-# Copyright 2023 Oxide Computer Company
+# Copyright 2024 Oxide Computer Company
 # Copyright 2023 Peter Tribble
 #
 
@@ -717,6 +717,14 @@ link path=usr/share/man/man9f/kmem_cache_free.9f target=kmem_cache_create.9f
 link path=usr/share/man/man9f/kmem_cache_set_move.9f target=kmem_cache_create.9f
 link path=usr/share/man/man9f/kmem_free.9f target=kmem_alloc.9f
 link path=usr/share/man/man9f/kmem_zalloc.9f target=kmem_alloc.9f
+file path=usr/share/man/man9f/ksensor_create.9f
+link path=usr/share/man/man9f/ksensor_create_scalar_pcidev.9f \
+    target=ksensor_create.9f
+file path=usr/share/man/man9f/ksensor_kind.9f
+link path=usr/share/man/man9f/ksensor_kind_current.9f target=ksensor_kind.9f
+link path=usr/share/man/man9f/ksensor_kind_temperature.9f target=ksensor_kind.9f
+link path=usr/share/man/man9f/ksensor_kind_voltage.9f target=ksensor_kind.9f
+link path=usr/share/man/man9f/ksensor_remove.9f target=ksensor_create.9f
 file path=usr/share/man/man9f/kstat_create.9f
 file path=usr/share/man/man9f/kstat_delete.9f
 file path=usr/share/man/man9f/kstat_install.9f
@@ -1267,6 +1275,135 @@ link path=usr/share/man/man9f/sema_v.9f target=semaphore.9f
 file path=usr/share/man/man9f/semaphore.9f
 link path=usr/share/man/man9f/snprintf.9f target=sprintf.9f
 file path=usr/share/man/man9f/sprintf.9f
+file path=usr/share/man/man9f/stdc_bit_ceil.9f
+link path=usr/share/man/man9f/stdc_bit_ceil_uc.9f target=stdc_bit_ceil.9f
+link path=usr/share/man/man9f/stdc_bit_ceil_ui.9f target=stdc_bit_ceil.9f
+link path=usr/share/man/man9f/stdc_bit_ceil_ul.9f target=stdc_bit_ceil.9f
+link path=usr/share/man/man9f/stdc_bit_ceil_ull.9f target=stdc_bit_ceil.9f
+link path=usr/share/man/man9f/stdc_bit_ceil_us.9f target=stdc_bit_ceil.9f
+file path=usr/share/man/man9f/stdc_bit_floor.9f
+link path=usr/share/man/man9f/stdc_bit_floor_uc.9f target=stdc_bit_floor.9f
+link path=usr/share/man/man9f/stdc_bit_floor_ui.9f target=stdc_bit_floor.9f
+link path=usr/share/man/man9f/stdc_bit_floor_ul.9f target=stdc_bit_floor.9f
+link path=usr/share/man/man9f/stdc_bit_floor_ull.9f target=stdc_bit_floor.9f
+link path=usr/share/man/man9f/stdc_bit_floor_us.9f target=stdc_bit_floor.9f
+file path=usr/share/man/man9f/stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_uc.9f target=stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_ui.9f target=stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_ul.9f target=stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_ull.9f target=stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_us.9f target=stdc_bit_width.9f
+file path=usr/share/man/man9f/stdc_count_ones.9f
+link path=usr/share/man/man9f/stdc_count_ones_uc.9f target=stdc_count_ones.9f
+link path=usr/share/man/man9f/stdc_count_ones_ui.9f target=stdc_count_ones.9f
+link path=usr/share/man/man9f/stdc_count_ones_ul.9f target=stdc_count_ones.9f
+link path=usr/share/man/man9f/stdc_count_ones_ull.9f target=stdc_count_ones.9f
+link path=usr/share/man/man9f/stdc_count_ones_us.9f target=stdc_count_ones.9f
+file path=usr/share/man/man9f/stdc_count_zeros.9f
+link path=usr/share/man/man9f/stdc_count_zeros_uc.9f target=stdc_count_zeros.9f
+link path=usr/share/man/man9f/stdc_count_zeros_ui.9f target=stdc_count_zeros.9f
+link path=usr/share/man/man9f/stdc_count_zeros_ul.9f target=stdc_count_zeros.9f
+link path=usr/share/man/man9f/stdc_count_zeros_ull.9f target=stdc_count_zeros.9f
+link path=usr/share/man/man9f/stdc_count_zeros_us.9f target=stdc_count_zeros.9f
+file path=usr/share/man/man9f/stdc_first_leading_one.9f
+link path=usr/share/man/man9f/stdc_first_leading_one_uc.9f \
+    target=stdc_first_leading_one.9f
+link path=usr/share/man/man9f/stdc_first_leading_one_ui.9f \
+    target=stdc_first_leading_one.9f
+link path=usr/share/man/man9f/stdc_first_leading_one_ul.9f \
+    target=stdc_first_leading_one.9f
+link path=usr/share/man/man9f/stdc_first_leading_one_ull.9f \
+    target=stdc_first_leading_one.9f
+link path=usr/share/man/man9f/stdc_first_leading_one_us.9f \
+    target=stdc_first_leading_one.9f
+file path=usr/share/man/man9f/stdc_first_leading_zero.9f
+link path=usr/share/man/man9f/stdc_first_leading_zero_uc.9f \
+    target=stdc_first_leading_zero.9f
+link path=usr/share/man/man9f/stdc_first_leading_zero_ui.9f \
+    target=stdc_first_leading_zero.9f
+link path=usr/share/man/man9f/stdc_first_leading_zero_ul.9f \
+    target=stdc_first_leading_zero.9f
+link path=usr/share/man/man9f/stdc_first_leading_zero_ull.9f \
+    target=stdc_first_leading_zero.9f
+link path=usr/share/man/man9f/stdc_first_leading_zero_us.9f \
+    target=stdc_first_leading_zero.9f
+file path=usr/share/man/man9f/stdc_first_trailing_one.9f
+link path=usr/share/man/man9f/stdc_first_trailing_one_uc.9f \
+    target=stdc_first_trailing_one.9f
+link path=usr/share/man/man9f/stdc_first_trailing_one_ui.9f \
+    target=stdc_first_trailing_one.9f
+link path=usr/share/man/man9f/stdc_first_trailing_one_ul.9f \
+    target=stdc_first_trailing_one.9f
+link path=usr/share/man/man9f/stdc_first_trailing_one_ull.9f \
+    target=stdc_first_trailing_one.9f
+link path=usr/share/man/man9f/stdc_first_trailing_one_us.9f \
+    target=stdc_first_trailing_one.9f
+file path=usr/share/man/man9f/stdc_first_trailing_zero.9f
+link path=usr/share/man/man9f/stdc_first_trailing_zero_uc.9f \
+    target=stdc_first_trailing_zero.9f
+link path=usr/share/man/man9f/stdc_first_trailing_zero_ui.9f \
+    target=stdc_first_trailing_zero.9f
+link path=usr/share/man/man9f/stdc_first_trailing_zero_ul.9f \
+    target=stdc_first_trailing_zero.9f
+link path=usr/share/man/man9f/stdc_first_trailing_zero_ull.9f \
+    target=stdc_first_trailing_zero.9f
+link path=usr/share/man/man9f/stdc_first_trailing_zero_us.9f \
+    target=stdc_first_trailing_zero.9f
+file path=usr/share/man/man9f/stdc_has_single_bit.9f
+link path=usr/share/man/man9f/stdc_has_single_bit_uc.9f \
+    target=stdc_has_single_bit.9f
+link path=usr/share/man/man9f/stdc_has_single_bit_ui.9f \
+    target=stdc_has_single_bit.9f
+link path=usr/share/man/man9f/stdc_has_single_bit_ul.9f \
+    target=stdc_has_single_bit.9f
+link path=usr/share/man/man9f/stdc_has_single_bit_ull.9f \
+    target=stdc_has_single_bit.9f
+link path=usr/share/man/man9f/stdc_has_single_bit_us.9f \
+    target=stdc_has_single_bit.9f
+file path=usr/share/man/man9f/stdc_leading_ones.9f
+link path=usr/share/man/man9f/stdc_leading_ones_uc.9f \
+    target=stdc_leading_ones.9f
+link path=usr/share/man/man9f/stdc_leading_ones_ui.9f \
+    target=stdc_leading_ones.9f
+link path=usr/share/man/man9f/stdc_leading_ones_ul.9f \
+    target=stdc_leading_ones.9f
+link path=usr/share/man/man9f/stdc_leading_ones_ull.9f \
+    target=stdc_leading_ones.9f
+link path=usr/share/man/man9f/stdc_leading_ones_us.9f \
+    target=stdc_leading_ones.9f
+file path=usr/share/man/man9f/stdc_leading_zeros.9f
+link path=usr/share/man/man9f/stdc_leading_zeros_uc.9f \
+    target=stdc_leading_zeros.9f
+link path=usr/share/man/man9f/stdc_leading_zeros_ui.9f \
+    target=stdc_leading_zeros.9f
+link path=usr/share/man/man9f/stdc_leading_zeros_ul.9f \
+    target=stdc_leading_zeros.9f
+link path=usr/share/man/man9f/stdc_leading_zeros_ull.9f \
+    target=stdc_leading_zeros.9f
+link path=usr/share/man/man9f/stdc_leading_zeros_us.9f \
+    target=stdc_leading_zeros.9f
+file path=usr/share/man/man9f/stdc_trailing_ones.9f
+link path=usr/share/man/man9f/stdc_trailing_ones_uc.9f \
+    target=stdc_trailing_ones.9f
+link path=usr/share/man/man9f/stdc_trailing_ones_ui.9f \
+    target=stdc_trailing_ones.9f
+link path=usr/share/man/man9f/stdc_trailing_ones_ul.9f \
+    target=stdc_trailing_ones.9f
+link path=usr/share/man/man9f/stdc_trailing_ones_ull.9f \
+    target=stdc_trailing_ones.9f
+link path=usr/share/man/man9f/stdc_trailing_ones_us.9f \
+    target=stdc_trailing_ones.9f
+file path=usr/share/man/man9f/stdc_trailing_zeros.9f
+link path=usr/share/man/man9f/stdc_trailing_zeros_uc.9f \
+    target=stdc_trailing_zeros.9f
+link path=usr/share/man/man9f/stdc_trailing_zeros_ui.9f \
+    target=stdc_trailing_zeros.9f
+link path=usr/share/man/man9f/stdc_trailing_zeros_ul.9f \
+    target=stdc_trailing_zeros.9f
+link path=usr/share/man/man9f/stdc_trailing_zeros_ull.9f \
+    target=stdc_trailing_zeros.9f
+link path=usr/share/man/man9f/stdc_trailing_zeros_us.9f \
+    target=stdc_trailing_zeros.9f
 file path=usr/share/man/man9f/stoi.9f
 link path=usr/share/man/man9f/strcasecmp.9f target=string.9f
 link path=usr/share/man/man9f/strcat.9f target=string.9f
@@ -1314,6 +1451,7 @@ link path=usr/share/man/man9f/va_copy.9f target=va_arg.9f
 link path=usr/share/man/man9f/va_end.9f target=va_arg.9f
 link path=usr/share/man/man9f/va_start.9f target=va_arg.9f
 link path=usr/share/man/man9f/vcmn_err.9f target=cmn_err.9f
+link path=usr/share/man/man9f/vdev_err.9f target=cmn_err.9f
 file path=usr/share/man/man9f/vmem_add.9f
 file path=usr/share/man/man9f/vmem_alloc.9f
 file path=usr/share/man/man9f/vmem_contains.9f

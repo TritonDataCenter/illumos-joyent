@@ -9,10 +9,10 @@
 .\" http://www.illumos.org/license/CDDL.
 .\"
 .\"
-.\" Copyright 2023 Oxide Computer Company
+.\" Copyright 2024 Oxide Computer Company
 .\" Copyright 2023 Peter Tribble
 .\"
-.Dd July 17, 2023
+.Dd October 27, 2024
 .Dt INTRO 9F
 .Os
 .Sh NAME
@@ -199,7 +199,7 @@ can be read with
 .Xr man 1 .
 In addition, some corresponding concepts are documented in section 9 and
 some groups of functions are present to support a specific type of
-device driver, which is discussed more in section 9E .
+device driver, which is discussed more in section 9E.
 .Ss Logging Functions
 Through the kernel there are often needs to log messages that either
 make it into the system log or on the console.
@@ -356,7 +356,7 @@ For more information on vmem, see
 .El
 .Ss String and libc Analogues
 The kernel has many analogues for classic libc functions that deal with
-string processing, memory copying, and related.
+string processing, memory copying, bit manipulation, and related.
 For the most part, these behave similarly to their userland analogues,
 but there can be some differences in return values and for example, in
 the set of supported format characters in the case of
@@ -374,6 +374,13 @@ and related.
 .It Xr memset 9F Ta Xr min 9F
 .It Xr numtos 9F Ta Xr snprintf 9F
 .It Xr sprintf 9F Ta Xr stoi 9F
+.It Xr stdc_bit_ceil 9F Ta Xr stdc_bit_floor 9F
+.It Xr stdc_bit_width 9F Ta Xr stdc_count_ones 9F
+.It Xr stdc_count_zeros 9F Ta Xr stdc_first_leading_one 9F
+.It Xr stdc_first_leading_zero 9F Ta Xr stdc_first_trailing_one 9F
+.It Xr stdc_first_trailing_zero 9F Ta Xr stdc_has_single_bit 9F
+.It Xr stdc_leading_ones 9F Ta Xr stdc_leading_zeros 9F
+.It Xr stdc_trailing_ones 9F Ta Xr stdc_trailing_zeros 9F
 .It Xr strcasecmp 9F Ta Xr strcat 9F
 .It Xr strchr 9F Ta Xr strcmp 9F
 .It Xr strcpy 9F Ta Xr strdup 9F
@@ -1679,9 +1686,9 @@ the kernel's UFM framework, which is discussed in
 .Xr ddi_ufm 9E .
 .Pp
 The
-.Xr ddi_ufm_init 9E
+.Xr ddi_ufm_init 9F
 and
-.Xr ddi_ufm_fini 9E
+.Xr ddi_ufm_fini 9F
 functions are used to indicate support of the subsystem to the kernel.
 The driver is required to use the
 .Xr ddi_ufm_update 9F
@@ -1757,7 +1764,7 @@ then it is allowed to set up its register attributes to indicate that it
 will check for errors on the register handle after using functions like
 .Xr ddi_get8 9F
 and
-.Xr ddi_set8 9F
+.Xr ddi_put8 9F
 by calling
 .Xr ddi_fm_acc_err_get 9F
 and reacting accordingly.
@@ -1796,7 +1803,7 @@ and
 .Xr tgtmap 9 .
 .Pp
 Device drivers register initially with the kernel by using the
-.Xr scsi_ha_init 9F
+.Xr scsi_hba_init 9F
 function and then, in their attach routine, register specific instances,
 using functions like
 .Xr scsi_hba_iport_register 9F
@@ -1906,8 +1913,8 @@ The full framework and how to use it is described in
 .It Xr mac_prop_info_set_default_uint32 9F Ta Xr mac_prop_info_set_default_uint64 9F
 .It Xr mac_prop_info_set_default_uint8 9F Ta Xr mac_prop_info_set_perm 9F
 .It Xr mac_prop_info_set_range_uint32 9F Ta Xr mac_prop_info 9F
-.It Xr mac_register 9F Ta Xr mac_rx_ring 9F
-.It Xr mac_rx 9F Ta Xr mac_transceiver_info_set_present 9F
+.It Xr mac_register 9F Ta Xr mac_rx 9F
+.It Xr mac_rx_ring 9F Ta Xr mac_transceiver_info_set_present 9F
 .It Xr mac_transceiver_info_set_usable 9F Ta Xr mac_transceiver_info 9F
 .It Xr mac_tx_ring_update 9F Ta Xr mac_tx_update 9F
 .It Xr mac_unregister 9F Ta

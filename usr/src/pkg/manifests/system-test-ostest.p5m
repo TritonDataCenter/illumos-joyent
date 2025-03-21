@@ -15,7 +15,7 @@
 # Copyright 2020 Joyent, Inc.
 # Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
-# Copyright 2023 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 # Copyright 2022 MNX Cloud, Inc.
 #
 
@@ -61,6 +61,13 @@ file path=opt/os-tests/tests/definit/init.data mode=0444
 file path=opt/os-tests/tests/definit/init.expected mode=0444
 file path=opt/os-tests/tests/eventfd.32 mode=0555
 file path=opt/os-tests/tests/eventfd.64 mode=0555
+dir  path=opt/os-tests/tests/execvpe
+file path=opt/os-tests/tests/execvpe/execvpe-noperm mode=0444
+file path=opt/os-tests/tests/execvpe/execvpe-script mode=0555
+file path=opt/os-tests/tests/execvpe/execvpe-test.32 mode=0555
+file path=opt/os-tests/tests/execvpe/execvpe-test.64 mode=0555
+file path=opt/os-tests/tests/fifo-tvnsec.32 mode=0555
+file path=opt/os-tests/tests/fifo-tvnsec.64 mode=0555
 dir  path=opt/os-tests/tests/file-locking
 file path=opt/os-tests/tests/file-locking/acquire-lock.32 mode=0555
 file path=opt/os-tests/tests/file-locking/acquire-lock.64 mode=0555
@@ -68,6 +75,31 @@ file path=opt/os-tests/tests/file-locking/runtests.32 mode=0555
 file path=opt/os-tests/tests/file-locking/runtests.64 mode=0555
 file path=opt/os-tests/tests/getcontext_extd.32 mode=0555
 file path=opt/os-tests/tests/getcontext_extd.64 mode=0555
+dir  path=opt/os-tests/tests/hexdump
+dir  path=opt/os-tests/tests/hexdump/data
+file path=opt/os-tests/tests/hexdump/data/_input mode=0444
+file path=opt/os-tests/tests/hexdump/data/addr1 mode=0444
+file path=opt/os-tests/tests/hexdump/data/addr2 mode=0444
+file path=opt/os-tests/tests/hexdump/data/address mode=0444
+file path=opt/os-tests/tests/hexdump/data/address+header mode=0444
+file path=opt/os-tests/tests/hexdump/data/align1 mode=0444
+file path=opt/os-tests/tests/hexdump/data/ascii mode=0444
+file path=opt/os-tests/tests/hexdump/data/basic mode=0444
+file path=opt/os-tests/tests/hexdump/data/dedup mode=0444
+file path=opt/os-tests/tests/hexdump/data/default mode=0444
+file path=opt/os-tests/tests/hexdump/data/doublespace mode=0444
+file path=opt/os-tests/tests/hexdump/data/group2 mode=0444
+file path=opt/os-tests/tests/hexdump/data/group4 mode=0444
+file path=opt/os-tests/tests/hexdump/data/group8 mode=0444
+file path=opt/os-tests/tests/hexdump/data/header mode=0444
+file path=opt/os-tests/tests/hexdump/data/indent mode=0444
+file path=opt/os-tests/tests/hexdump/data/marker1 mode=0444
+file path=opt/os-tests/tests/hexdump/data/narrow1 mode=0444
+file path=opt/os-tests/tests/hexdump/data/narrow2 mode=0444
+file path=opt/os-tests/tests/hexdump/data/wide1 mode=0444
+file path=opt/os-tests/tests/hexdump/data/width12 mode=0444
+file path=opt/os-tests/tests/hexdump/hexdump_basic.32 mode=0555
+file path=opt/os-tests/tests/hexdump/hexdump_basic.64 mode=0555
 $(i386_ONLY)dir path=opt/os-tests/tests/i386
 $(i386_ONLY)file path=opt/os-tests/tests/i386/badseg mode=0555
 $(i386_ONLY)file path=opt/os-tests/tests/i386/badseg_exec mode=0555
@@ -90,6 +122,10 @@ file path=opt/os-tests/tests/ksensor/ksensor_unload mode=0555
 dir  path=opt/os-tests/tests/ksid
 file path=opt/os-tests/tests/ksid/ksid.32 mode=0555
 file path=opt/os-tests/tests/ksid/ksid.64 mode=0555
+dir  path=opt/os-tests/tests/ktest
+file path=opt/os-tests/tests/ktest/ktest_ktest mode=0555
+file path=opt/os-tests/tests/ktest/mac_ktest mode=0555
+file path=opt/os-tests/tests/ktest/stream_ktest mode=0555
 dir  path=opt/os-tests/tests/libtopo
 file path=opt/os-tests/tests/libtopo/digraph-test mode=0555
 file path=opt/os-tests/tests/libtopo/digraph-test-in-badedge.xml mode=0444
@@ -97,6 +133,14 @@ file path=opt/os-tests/tests/libtopo/digraph-test-in-badelement.xml mode=0444
 file path=opt/os-tests/tests/libtopo/digraph-test-in-badnum.xml mode=0444
 file path=opt/os-tests/tests/libtopo/digraph-test-in-badscheme.xml mode=0444
 file path=opt/os-tests/tests/libtopo/digraph-test-in.xml mode=0444
+file path=opt/os-tests/tests/mac_test mode=0555
+dir  path=opt/os-tests/tests/minttl
+file path=opt/os-tests/tests/minttl/minttl mode=0555
+file path=opt/os-tests/tests/minttl/minttl_err mode=0555
+dir  path=opt/os-tests/tests/oclo
+file path=opt/os-tests/tests/oclo/oclo mode=0555
+file path=opt/os-tests/tests/oclo/oclo_errors mode=0555
+file path=opt/os-tests/tests/oclo/ocloexec_verify mode=0555
 file path=opt/os-tests/tests/odirectory.32 mode=0555
 file path=opt/os-tests/tests/odirectory.64 mode=0555
 dir  path=opt/os-tests/tests/pf_key
@@ -115,6 +159,20 @@ file path=opt/os-tests/tests/portfs/file_assoc.64 mode=0555
 dir  path=opt/os-tests/tests/regression
 file path=opt/os-tests/tests/regression/illumos-15031 mode=0555
 file path=opt/os-tests/tests/regression/illumos-15036 mode=0555
+dir  path=opt/os-tests/tests/saveargs
+dir  path=opt/os-tests/tests/saveargs/functional
+file path=opt/os-tests/tests/saveargs/functional/align mode=0555
+file path=opt/os-tests/tests/saveargs/functional/basic mode=0555
+file path=opt/os-tests/tests/saveargs/functional/big-struct-ret mode=0555
+file path=opt/os-tests/tests/saveargs/functional/big-struct-ret-and-spill \
+    mode=0555
+file path=opt/os-tests/tests/saveargs/functional/functional mode=0555
+file path=opt/os-tests/tests/saveargs/functional/small-struct-ret mode=0555
+file path=opt/os-tests/tests/saveargs/functional/small-struct-ret-and-spill \
+    mode=0555
+file path=opt/os-tests/tests/saveargs/functional/stack-spill mode=0555
+dir  path=opt/os-tests/tests/saveargs/testmatch
+file path=opt/os-tests/tests/saveargs/testmatch/testmatch mode=0555
 dir  path=opt/os-tests/tests/sdevfs
 file path=opt/os-tests/tests/sdevfs/sdevfs_eisdir mode=0555
 dir  path=opt/os-tests/tests/secflags
@@ -133,6 +191,9 @@ file path=opt/os-tests/tests/secflags/secflags_syscall mode=0555
 file path=opt/os-tests/tests/secflags/secflags_truss mode=0555
 file path=opt/os-tests/tests/secflags/secflags_zonecfg mode=0555
 file path=opt/os-tests/tests/secflags/stacky mode=0555
+dir  path=opt/os-tests/tests/secure_getenv
+file path=opt/os-tests/tests/secure_getenv/checker mode=0555
+file path=opt/os-tests/tests/secure_getenv/secure_getenv mode=0555
 dir  path=opt/os-tests/tests/signalfd
 file path=opt/os-tests/tests/signalfd/basic_args mode=0555
 file path=opt/os-tests/tests/signalfd/basic_read mode=0555
@@ -148,18 +209,29 @@ file path=opt/os-tests/tests/sockfs/recvmsg.32 mode=0555
 file path=opt/os-tests/tests/sockfs/recvmsg.64 mode=0555
 file path=opt/os-tests/tests/sockfs/rights.32 mode=0555
 file path=opt/os-tests/tests/sockfs/rights.64 mode=0555
+file path=opt/os-tests/tests/sockfs/so_protocol mode=0555
 file path=opt/os-tests/tests/sockfs/sockpair mode=0555
+file path=opt/os-tests/tests/sockfs/timeouts.32 mode=0555
+file path=opt/os-tests/tests/sockfs/timeouts.64 mode=0555
 file path=opt/os-tests/tests/spoof-ras mode=0555
 dir  path=opt/os-tests/tests/stackalign
 file path=opt/os-tests/tests/stackalign/stackalign.32 mode=0555
 file path=opt/os-tests/tests/stackalign/stackalign.64 mode=0555
+file path=opt/os-tests/tests/statvfs.32 mode=0555
+file path=opt/os-tests/tests/statvfs.64 mode=0555
 dir  path=opt/os-tests/tests/stress
 file path=opt/os-tests/tests/stress/dladm-kstat mode=0555
+file path=opt/os-tests/tests/syncfs.32 mode=0555
+file path=opt/os-tests/tests/syncfs.64 mode=0555
 dir  path=opt/os-tests/tests/syscall
 file path=opt/os-tests/tests/syscall/fchmodat.32 mode=0555
 file path=opt/os-tests/tests/syscall/fchmodat.64 mode=0555
 file path=opt/os-tests/tests/syscall/open.32 mode=0555
 file path=opt/os-tests/tests/syscall/open.64 mode=0555
+dir  path=opt/os-tests/tests/tcpsig
+file path=opt/os-tests/tests/tcpsig/tcpsig mode=0555
+file path=opt/os-tests/tests/tcpsig/tcpsig_fini mode=0555
+file path=opt/os-tests/tests/tcpsig/tcpsig_init mode=0555
 dir  path=opt/os-tests/tests/timer
 file path=opt/os-tests/tests/timer/timer_limit mode=0555
 dir  path=opt/os-tests/tests/uccid
@@ -238,6 +310,7 @@ file path=opt/os-tests/tests/zen_umc_test mode=0555
 license cr_Sun license=cr_Sun
 license lic_CDDL license=lic_CDDL
 depend type=require fmri=developer/dtrace
+depend type=require fmri=driver/ktest
 depend type=require fmri=system/io/tests
 depend type=require fmri=system/kernel/dtrace/providers
 depend type=require fmri=system/ksensor

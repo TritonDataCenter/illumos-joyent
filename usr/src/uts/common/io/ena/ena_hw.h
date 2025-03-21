@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2021 Oxide Computer Company
+ * Copyright 2024 Oxide Computer Company
  */
 
 /*
@@ -113,10 +113,8 @@
  * BAR0 register offsets.
  *
  * Any register not defined in the common code was marked as a gap,
- * using the hex address of the register as suffix. The idea is to
- * make it clear where the gaps are and allow the
- * ena_hw_update_reg_cache() function to display any bits stored in
- * these gaps in case they turn out to be interesting later.
+ * using the hex address of the register as suffix to make it clear
+ * where the gaps are.
  */
 #define	ENAHW_REG_VERSION		0x0
 #define	ENAHW_REG_CONTROLLER_VERSION	0x4
@@ -199,7 +197,7 @@
 	(((v) & ENAHW_CAPS_ADMIN_CMD_TIMEOUT_MASK) >>	\
 	    ENAHW_CAPS_ADMIN_CMD_TIMEOUT_SHIFT)
 
-enum enahw_reset_reason_types {
+typedef enum enahw_reset_reason_types {
 	ENAHW_RESET_NORMAL			= 0,
 	ENAHW_RESET_KEEP_ALIVE_TO		= 1,
 	ENAHW_RESET_ADMIN_TO			= 2,
@@ -215,8 +213,22 @@ enum enahw_reset_reason_types {
 	ENAHW_RESET_USER_TRIGGER		= 12,
 	ENAHW_RESET_GENERIC			= 13,
 	ENAHW_RESET_MISS_INTERRUPT		= 14,
+	ENAHW_RESET_SUSPECTED_POLL_STARVATION	= 15,
+	ENAHW_RESET_RX_DESCRIPTOR_MALFORMED	= 16,
+	ENAHW_RESET_TX_DESCRIPTOR_MALFORMED	= 17,
+	ENAHW_RESET_MISSING_ADMIN_INTERRUPT	= 18,
+	ENAHW_RESET_DEVICE_REQUEST		= 19,
 	ENAHW_RESET_LAST,
-};
+} enahw_reset_reason_t;
+
+#define	ENAHW_RESET_REASON_LSB_SHIFT		0
+#define	ENAHW_RESET_REASON_LSB_MASK		0xf
+#define	ENAHW_RESET_REASON_MSB_SHIFT		4
+#define	ENAHW_RESET_REASON_MSB_MASK		0xf0
+#define	ENAHW_RESET_REASON_LSB(v)		\
+	(((v) & ENAHW_RESET_REASON_LSB_MASK) >> ENAHW_RESET_REASON_LSB_SHIFT)
+#define	ENAHW_RESET_REASON_MSB(v)		\
+	(((v) & ENAHW_RESET_REASON_MSB_MASK) >> ENAHW_RESET_REASON_MSB_SHIFT)
 
 /*
  * Admin Submission Queue Caps (Register 0x18)
@@ -273,6 +285,8 @@ enum enahw_reset_reason_types {
 #define	ENAHW_DEV_CTL_QUIESCENT_MASK		0x4
 #define	ENAHW_DEV_CTL_IO_RESUME_SHIFT		3
 #define	ENAHW_DEV_CTL_IO_RESUME_MASK		0x8
+#define	ENAHW_DEV_CTL_RESET_REASON_EXT_SHIFT	24
+#define	ENAHW_DEV_CTL_RESET_REASON_EXT_MASK	0xf000000
 #define	ENAHW_DEV_CTL_RESET_REASON_SHIFT	28
 #define	ENAHW_DEV_CTL_RESET_REASON_MASK		0xf0000000
 
@@ -316,6 +330,8 @@ typedef struct enahw_aenq_desc {
 			uint32_t rx_drops_high;
 			uint32_t tx_drops_low;
 			uint32_t tx_drops_high;
+			uint32_t rx_overruns_low;
+			uint32_t rx_overruns_high;
 		} keep_alive;
 	} ead_payload;
 } enahw_aenq_desc_t;
@@ -343,7 +359,9 @@ typedef enum enahw_aenq_groups {
 	ENAHW_AENQ_GROUP_NOTIFICATION		= 3,
 	ENAHW_AENQ_GROUP_KEEP_ALIVE		= 4,
 	ENAHW_AENQ_GROUP_REFRESH_CAPABILITIES	= 5,
-	ENAHW_AENQ_GROUPS_ARR_NUM		= 6,
+	ENAHW_AENQ_GROUP_CONF_NOTIFICATIONS	= 6,
+	ENAHW_AENQ_GROUP_DEVICE_REQUEST_RESET	= 7,
+	ENAHW_AENQ_GROUPS_ARR_NUM		= 8,
 } enahw_aenq_groups_t;
 
 /*
@@ -507,6 +525,12 @@ typedef struct enahw_host_info {
 #define	ENAHW_HOST_INFO_RX_BUF_MIRRORING_MASK			BIT(3)
 #define	ENAHW_HOST_INFO_RSS_CONFIGURABLE_FUNCTION_KEY_SHIFT	4
 #define	ENAHW_HOST_INFO_RSS_CONFIGURABLE_FUNCTION_KEY_MASK	BIT(4)
+#define	ENAHW_HOST_INFO_RX_PAGE_REUSE_SHIFT			6
+#define	ENAHW_HOST_INFO_RX_PAGE_REUSE_MASK			BIT(6)
+#define	ENAHW_HOST_INFO_TX_IPV6_CSUM_OFFLOAD_SHIFT		7
+#define	ENAHW_HOST_INFO_TX_IPV6_CSUM_OFFLOAD_MASK		BIT(7)
+#define	ENAHW_HOST_INFO_INFO_PHC_SHIFT				8
+#define	ENAHW_HOST_INFO_INFO_PHC_MASK				BIT(8)
 
 /* common: ena_admin_os_type */
 enum enahw_os_type {
@@ -625,8 +649,8 @@ typedef struct enahw_cmd_create_sq {
 	/*
 	 * 7-1	reserved
 	 *
-	 * 0	physically contiguous: When set indicates the descriptor
-	 *			       ring memory is physically contiguous.
+	 * 0	physically contiguous:	When set indicates the descriptor
+	 *				ring memory is physically contiguous.
 	 */
 	uint8_t		ecsq_caps_3;
 
@@ -755,7 +779,7 @@ typedef struct enahw_cmd_get_stats {
  * "string format" with additional statistics per queue and per device ID.
  *
  * ENI: According to the Linux documentation it returns "extra HW
- * stats for a specific network interfaces".
+ * stats for specific network interface".
  *
  * common: ena_admin_get_stats_type
  */
@@ -835,8 +859,23 @@ typedef enum enahw_feature_id {
 	ENAHW_FEAT_AENQ_CONFIG			= 26,
 	ENAHW_FEAT_LINK_CONFIG			= 27,
 	ENAHW_FEAT_HOST_ATTR_CONFIG		= 28,
+	ENAHW_FEAT_PHC_CONFIG			= 29,
 	ENAHW_FEAT_NUM				= 32,
 } enahw_feature_id_t;
+
+/*
+ * Device capabilities.
+ *
+ * common: ena_admin_aq_caps_id
+ */
+typedef enum enahw_capability_id {
+	ENAHW_CAP_ENI_STATS			= 0,
+	ENAHW_CAP_ENA_SRD_INFO			= 1,
+	ENAHW_CAP_CUSTOMER_METRICS		= 2,
+	ENAHW_CAP_EXTENDED_RESET_REASONS	= 3,
+	ENAHW_CAP_CDESC_MBZ			= 4,
+	ENAHW_CAP_NUM
+} enahw_capability_id_t;
 
 /*
  * The following macros define the maximum version we support for each
@@ -886,6 +925,9 @@ typedef enum enahw_link_speeds {
  *
  * common: ena_admin_ena_hw_hints
  */
+
+#define	ENAHW_HINTS_NO_TIMEOUT	0xffff
+
 typedef struct enahw_device_hints {
 	/*
 	 * The amount of time the driver should wait for an MMIO read
@@ -897,6 +939,7 @@ typedef struct enahw_device_hints {
 	 * If the driver has not seen an AENQ keep alive in this
 	 * timeframe, then consider the device hung and perform a
 	 * reset.
+	 * common: driver_watchdog_timeout
 	 */
 	uint16_t edh_keep_alive_timeout;
 
@@ -920,12 +963,12 @@ typedef struct enahw_device_hints {
 	 * This value is used by the networking stack to determine
 	 * when a pending transmission has stalled. This is similar to
 	 * the keep alive timeout, except its viewing progress from
-	 * the perspective of the network stack itself. This differnce
+	 * the perspective of the network stack itself. This difference
 	 * is subtle but important: the device could be in a state
 	 * where it has a functioning keep alive heartbeat, but has a
 	 * stuck Tx queue impeding forward progress of the networking
 	 * stack (which in many cases results in a scenario
-	 * indistinguishable form a complete host hang).
+	 * indistinguishable from a complete host hang).
 	 *
 	 * The mac layer does not currently provide such
 	 * functionality, though it could and should be extended to
@@ -957,9 +1000,14 @@ typedef struct enahw_feat_dev_attr {
 	 * (enahw_feature_id).
 	 */
 	uint32_t efda_supported_features;
-	uint32_t efda_rsvd1;
 
-	/* Number of bits used for physical/vritual address. */
+	/*
+	 * Bitmap representing device capabilities.
+	 * (enahw_capability_id)
+	 */
+	uint32_t efda_capabilities;
+
+	/* Number of bits used for physical/virtual address. */
 	uint32_t efda_phys_addr_width;
 	uint32_t efda_virt_addr_with;
 
@@ -1159,6 +1207,7 @@ typedef union enahw_resp_get_feat {
 	enahw_feat_aenq_t		ergf_aenq;
 	enahw_feat_link_conf_t		ergf_link_conf;
 	enahw_feat_offload_t		ergf_offload;
+	enahw_device_hints_t		ergf_hints;
 } enahw_resp_get_feat_u;
 
 /*
@@ -1176,7 +1225,8 @@ typedef struct enahw_resp_create_cq {
 	 */
 	uint16_t ercq_actual_num_descs;
 	uint32_t ercq_numa_node_reg_offset;
-	uint32_t ercq_head_db_reg_offset; /* doorbell */
+	/* CQ doorbell register - no longer supported by any ENA adapter */
+	uint32_t ercq_head_db_reg_offset;
 	uint32_t ercq_interrupt_mask_reg_offset; /* stop intr */
 } enahw_resp_create_cq_t;
 
@@ -1203,6 +1253,8 @@ typedef struct enahw_resp_basic_stats {
 	uint32_t erbs_rx_drops_high;
 	uint32_t erbs_tx_drops_low;
 	uint32_t erbs_tx_drops_high;
+	uint32_t erbs_rx_overruns_low;
+	uint32_t erbs_rx_overruns_high;
 } enahw_resp_basic_stats_t;
 
 /* common: ena_admin_eni_stats */
@@ -1298,7 +1350,7 @@ typedef enum enahw_resp_status {
 	ENAHW_RESP_MALFORMED_REQUEST		= 4,
 	/*
 	 * At this place in the common code it mentions that there is
-	 * "additional status" in the reponse descriptor's
+	 * "additional status" in the response descriptor's
 	 * erd_ext_status field. As the common code never actually
 	 * uses this field it's hard to know the exact meaning of the
 	 * comment. My best guess is the illegal parameter error
@@ -1311,16 +1363,7 @@ typedef enum enahw_resp_status {
 } enahw_resp_status_t;
 
 /*
- * Not really a device structure, more of a helper to debug register values.
- */
-typedef struct enahw_reg_nv {
-	char		*ern_name;
-	uint32_t	ern_offset;
-	uint32_t	ern_value;
-} enahw_reg_nv_t;
-
-/*
- * I/O macros and strcutures.
+ * I/O macros and structures.
  * -------------------------
  */
 
@@ -1768,6 +1811,7 @@ typedef struct enahw_rx_desc {
 #define	ENAHW_RX_DESC_COMP_REQ_SHIFT	4
 #define	ENAHW_RX_DESC_COMP_REQ_MASK	BIT(4)
 
+#define	ENAHW_RX_DESC_CLEAR_CTRL(desc)	((desc)->erd_ctrl = 0)
 #define	ENAHW_RX_DESC_SET_PHASE(desc, val)				\
 	((desc)->erd_ctrl |= ((val) & ENAHW_RX_DESC_PHASE_MASK))
 

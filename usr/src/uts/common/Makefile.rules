@@ -26,7 +26,7 @@
 # Copyright 2021 Joyent, Inc.
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright (c) 2017 by Delphix. All rights reserved.
-# Copyright 2023 Oxide Computer Company
+# Copyright 2024 Oxide Computer Company
 # Copyright 2023 RackTop Systems, Inc.
 #
 
@@ -48,6 +48,9 @@
 #
 #	Section 1a: C objects build rules
 #
+$(OBJS_DIR)/deflate.o := CPPFLAGS += -DHAVE_MEMCPY
+$(OBJS_DIR)/inflate.o := CPPFLAGS += -DHAVE_MEMCPY
+$(OBJS_DIR)/trees.o := CPPFLAGS += -DHAVE_MEMCPY
 $(OBJS_DIR)/decompress.o := CPPFLAGS += -I$(SRC)/contrib/zlib
 $(OBJS_DIR)/zmod.o := CPPFLAGS += -I$(SRC)/contrib/zlib
 $(OBJS_DIR)/zmod_subr.o := CPPFLAGS += -I$(SRC)/contrib/zlib
@@ -114,6 +117,10 @@ $(OBJS_DIR)/%.o:		$(COMMONBASE)/avl/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(COMMONBASE)/inet/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/nvme/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -942,6 +949,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/ksocket/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/ktest/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/aggr/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -1429,6 +1440,14 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/igb/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/igc/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/igc/core/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/iprb/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -1594,6 +1613,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/krtld/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(COMMONBASE)/bootbanner/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(COMMONBASE)/hexdump/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
