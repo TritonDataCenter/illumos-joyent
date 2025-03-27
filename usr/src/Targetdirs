@@ -271,6 +271,7 @@ DIRS= \
 	/usr/lib \
 	/usr/lib/abi \
 	/usr/lib/brand \
+	/usr/lib/brand/builder \
 	/usr/lib/brand/ipkg \
 	/usr/lib/brand/jcommon \
 	/usr/lib/brand/joyent \
