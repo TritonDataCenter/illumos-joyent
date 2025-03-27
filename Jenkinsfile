@@ -15,7 +15,8 @@ pipeline {
 
     agent {
         label 'platform:true && image_ver:24.4.1 && pkgsrc_arch:x86_64 && ' +
-            'dram:16gb && !virt:kvm && fs:pcfs && fs:ufs && jenkins_agent:3'
+            '( dram:16gb || dram:32gb ) && !virt:kvm && fs:pcfs && fs:ufs && ' +
+            'jenkins_agent:3'
     }
 
     options {
