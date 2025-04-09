@@ -21,6 +21,7 @@
 #
 # Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2019 Joyent, Inc.
+# Copyright 2025 MNX Cloud, Inc.
 #
 include ../../Makefile.master
 

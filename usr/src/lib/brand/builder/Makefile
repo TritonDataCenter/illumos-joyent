@@ -9,6 +9,7 @@
 # http://www.illumos.org/license/CDDL.
 #
 # Copyright 2019 Joyent, Inc.
+# Copyright 2025 MNX Cloud, Inc.
 #
 
 default: all
