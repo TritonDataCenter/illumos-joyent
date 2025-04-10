@@ -5682,6 +5682,9 @@ f usr/lib/brand/bhyve/platform.xml 0444 root sys
 f usr/lib/brand/bhyve/statechange 0555 root sys
 f usr/lib/brand/bhyve/uninstall 0555 root sys
 f usr/lib/brand/bhyve/zhyve 0555 root sys
+d usr/lib/brand/builder 0555 root sys
+f usr/lib/brand/builder/config.xml 0444 root root
+f usr/lib/brand/builder/platform.xml 0444 root root
 d usr/lib/brand/jcommon 0755 root bin
 f usr/lib/brand/jcommon/cattach 0444 root root
 f usr/lib/brand/jcommon/cdetach 0444 root root
@@ -13121,6 +13124,7 @@ s usr/share/man/man3c/door_setparam.3c=door_getparam.3c
 f usr/share/man/man3c/door_ucred.3c 0444 root bin
 s usr/share/man/man3c/door_unbind.3c=door_bind.3c
 s usr/share/man/man3c/double_to_decimal.3c=floating_to_decimal.3c
+s usr/share/man/man3c/dprintf.3c=printf.3c
 f usr/share/man/man3c/drand48.3c 0444 root bin
 f usr/share/man/man3c/dup2.3c 0444 root bin
 s usr/share/man/man3c/dup3.3c=dup2.3c
@@ -14248,6 +14252,7 @@ s usr/share/man/man3c/utmpname.3c=getutent.3c
 s usr/share/man/man3c/utmpxname.3c=getutxent.3c
 s usr/share/man/man3c/valloc.3c=malloc.3c
 s usr/share/man/man3c/vasprintf.3c=vprintf.3c
+s usr/share/man/man3c/vdprintf.3c=vprintf.3c
 s usr/share/man/man3c/verr.3c=err.3c
 s usr/share/man/man3c/verrc.3c=err.3c
 s usr/share/man/man3c/verrx.3c=err.3c
