@@ -167,7 +167,7 @@ extern "C" {
  * How big does an mblk have to be before we dma_bind() it instead of
  * bcopying?
  */
-#define	MLXCX_TX_BIND_THRESHOLD_DFLT	2048
+#define	MLXCX_TX_BIND_THRESHOLD_DFLT	512
 
 /*
  * How often to check the status of completion queues for overflow and
@@ -246,6 +246,21 @@ extern uint_t mlxcx_stuck_intr_count;
  */
 #define	MLXCX_FUNC_ID_MAX	0
 
+#if defined(DEBUG)
+#define	MLXCX_PERF_TIMERS
+#endif
+
+#if defined(MLXCX_PERF_TIMERS)
+static inline void
+mlxcx_ptimer(hrtime_t *arr, uint idx)
+{
+	arr[idx] = gethrtime();
+}
+#define	MLXCX_PTIMER(A, I)	mlxcx_ptimer(A, I)
+#else
+#define	MLXCX_PTIMER(A, I)
+#endif
+
 /*
  * Forwards
  */
@@ -318,12 +333,7 @@ typedef struct mlxcx_cmd_queue {
 	uint8_t			mcmd_size_l2;
 	uint8_t			mcmd_stride_l2;
 	uint_t			mcmd_size;
-	/*
-	 * The mask has a bit for each command slot, there are a maximum
-	 * of 32 slots. When the bit is set in the mask, it indicates
-	 * the slot is available.
-	 */
-	uint32_t		mcmd_mask;
+	uint8_t			mcmd_next;	/* next command slot */
 
 	mlxcx_cmd_t		*mcmd_active[MLXCX_CMD_MAX];
 
@@ -552,6 +562,25 @@ typedef struct mlxcx_buf_shard {
 	kcondvar_t		mlbs_free_nonempty;
 } mlxcx_buf_shard_t;
 
+typedef enum {
+	MLXCX_BUF_TIMER_PRE_RING_TX,
+	MLXCX_BUF_TIMER_POST_OFFLOAD_INFO,
+	MLXCX_BUF_TIMER_POST_INLINE_BCOPY,
+	MLXCX_BUF_TIMER_POST_BUF_BIND_COPY,
+	MLXCX_BUF_TIMER_POST_SQE_BUF,
+	MLXCX_BUF_TIMER_POST_PREPARE_SQE_INLINE,
+	MLXCX_BUF_TIMER_POST_PREPARE_SQE,
+	MLXCX_BUF_TIMER_POST_WQ_MTX,
+	MLXCX_BUF_TIMER_POST_SQE_IN_RING,
+	MLXCX_BUF_TIMER_POST_SQ_ADD_BUF,
+	MLXCX_BUF_TIMER_PRE_TX_COMP,
+	MLXCX_BUF_TIMER_PRE_STEP2,
+	MLXCX_BUF_TIMER_COPY_TOTAL,
+	MLXCX_BUF_TIMER_TAKE_FOREIGN_TOTAL,
+	MLXCX_BUF_TIMER_BIND_MBLK_TOTAL,
+	MLXCX_BUF_TIMER_MAX
+} mlxcx_buf_timer_t;
+
 typedef struct mlxcx_buffer {
 	mlxcx_buf_shard_t	*mlb_shard;
 	list_node_t		mlb_entry;
@@ -576,6 +605,18 @@ typedef struct mlxcx_buffer {
 	mlxcx_dma_buffer_t	mlb_dma;
 	mblk_t			*mlb_mp;
 	frtn_t			mlb_frtn;
+
+	/* spooled up sendq entries ready to push into the ring */
+	union {
+		mlxcx_sendq_ent_t	*mlb_sqe;
+		mlxcx_sendq_extra_ent_t	*mlb_esqe;
+	};
+	size_t			mlb_sqe_size;
+	uint_t			mlb_sqe_count;
+
+#if defined(MLXCX_PERF_TIMERS)
+	hrtime_t		mlb_t[MLXCX_BUF_TIMER_MAX];
+#endif
 } mlxcx_buffer_t;
 
 typedef enum {
@@ -629,6 +670,7 @@ typedef struct mlxcx_completion_queue {
 	list_t				mlcq_buffers;
 	kmutex_t			mlcq_bufbmtx;
 	list_t				mlcq_buffers_b;
+	uint64_t			mlcq_bufbgen;
 
 	uint_t				mlcq_check_disarm_cnt;
 	uint64_t			mlcq_check_disarm_cc;
@@ -643,14 +685,15 @@ typedef struct mlxcx_completion_queue {
 } mlxcx_completion_queue_t;
 
 typedef enum {
-	MLXCX_WQ_ALLOC		= 1 << 0,
-	MLXCX_WQ_CREATED	= 1 << 1,
-	MLXCX_WQ_STARTED	= 1 << 2,
-	MLXCX_WQ_DESTROYED	= 1 << 3,
-	MLXCX_WQ_TEARDOWN	= 1 << 4,
-	MLXCX_WQ_BUFFERS	= 1 << 5,
-	MLXCX_WQ_REFILLING	= 1 << 6,
-	MLXCX_WQ_BLOCKED_MAC	= 1 << 7
+	MLXCX_WQ_INIT		= 1 << 0,
+	MLXCX_WQ_ALLOC		= 1 << 1,
+	MLXCX_WQ_CREATED	= 1 << 2,
+	MLXCX_WQ_STARTED	= 1 << 3,
+	MLXCX_WQ_DESTROYED	= 1 << 4,
+	MLXCX_WQ_TEARDOWN	= 1 << 5,
+	MLXCX_WQ_BUFFERS	= 1 << 6,
+	MLXCX_WQ_REFILLING	= 1 << 7,
+	MLXCX_WQ_BLOCKED_MAC	= 1 << 8
 } mlxcx_workq_state_t;
 
 typedef enum {
@@ -891,6 +934,8 @@ typedef enum {
 	MLXCX_TIRS_PER_GROUP
 } mlxcx_tir_role_t;
 
+#define	MLXCX_TIS_PER_GROUP	8
+
 typedef struct {
 	avl_node_t		mlgm_group_entry;
 	list_node_t		mlgm_fe_entry;
@@ -915,7 +960,7 @@ struct mlxcx_ring_group {
 	mac_group_handle_t		mlg_mac_hdl;
 
 	union {
-		mlxcx_tis_t		mlg_tis;
+		mlxcx_tis_t		mlg_tis[MLXCX_TIS_PER_GROUP];
 		mlxcx_tir_t		mlg_tir[MLXCX_TIRS_PER_GROUP];
 	};
 	mlxcx_port_t			*mlg_port;
@@ -1230,6 +1275,7 @@ struct mlxcx {
 	mlxcx_ring_group_t	*mlx_tx_groups;
 
 	kmem_cache_t		*mlx_bufs_cache;
+	kmem_cache_t		*mlx_mbrm_cache;
 	list_t			mlx_buf_shards;
 
 	ddi_periodic_t		mlx_eq_checktimer;
@@ -1243,18 +1289,83 @@ struct mlxcx {
 	mlxcx_temp_sensor_t	*mlx_temp_sensors;
 };
 
+typedef struct mlxcx_buf_return_mblk {
+	list_node_t		mbrm_entry;
+	mblk_t			*mbrm_mp;
+} mlxcx_buf_return_mblk_t;
+
+#define	MLXCX_BRB_SHARDS		4
+#define	MLXCX_BRB_INLINE_MBLKS		8
+typedef struct mlxcx_buf_return_batch {
+	uint			mbrb_n[MLXCX_BRB_SHARDS];
+	mlxcx_buf_shard_t	*mbrb_shard[MLXCX_BRB_SHARDS];
+	list_t			mbrb_list[MLXCX_BRB_SHARDS];
+	list_t			mbrb_mblks;
+	mblk_t			*mbrb_inline_mblk[MLXCX_BRB_INLINE_MBLKS];
+	uint			mbrb_inline_mblks;
+} mlxcx_buf_return_batch_t;
+
+extern void mlxcx_buf_return_batch_init(mlxcx_buf_return_batch_t *);
+extern void mlxcx_buf_return_batch_flush(mlxcx_t *, mlxcx_buf_return_batch_t *);
+
+
 /*
- * Register access
+ * Register access.  Use static inlines.
  */
-extern uint16_t mlxcx_get16(mlxcx_t *, uintptr_t);
-extern uint32_t mlxcx_get32(mlxcx_t *, uintptr_t);
-extern uint64_t mlxcx_get64(mlxcx_t *, uintptr_t);
+static inline uint16_t
+mlxcx_get16(mlxcx_t *mlxp, uintptr_t off)
+{
+	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
+	return (ddi_get16(mlxp->mlx_regs_handle, (void *)addr));
+}
 
-extern void mlxcx_put32(mlxcx_t *, uintptr_t, uint32_t);
-extern void mlxcx_put64(mlxcx_t *, uintptr_t, uint64_t);
+static inline uint32_t
+mlxcx_get32(mlxcx_t *mlxp, uintptr_t off)
+{
+	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
+	return (ddi_get32(mlxp->mlx_regs_handle, (void *)addr));
+}
 
-extern void mlxcx_uar_put32(mlxcx_t *, mlxcx_uar_t *, uintptr_t, uint32_t);
-extern void mlxcx_uar_put64(mlxcx_t *, mlxcx_uar_t *, uintptr_t, uint64_t);
+static inline uint64_t
+mlxcx_get64(mlxcx_t *mlxp, uintptr_t off)
+{
+	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
+	return (ddi_get64(mlxp->mlx_regs_handle, (void *)addr));
+}
+
+static inline void
+mlxcx_put32(mlxcx_t *mlxp, uintptr_t off, uint32_t val)
+{
+	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
+	ddi_put32(mlxp->mlx_regs_handle, (void *)addr, val);
+}
+
+static inline void
+mlxcx_put64(mlxcx_t *mlxp, uintptr_t off, uint64_t val)
+{
+	uintptr_t addr = off + (uintptr_t)mlxp->mlx_regs_base;
+	ddi_put64(mlxp->mlx_regs_handle, (void *)addr, val);
+}
+
+static inline void
+mlxcx_uar_put32(mlxcx_t *mlxp, mlxcx_uar_t *mlu, uintptr_t off, uint32_t val)
+{
+	/*
+	 * The UAR is always inside the first BAR, which we mapped as
+	 * mlx_regs
+	 */
+	uintptr_t addr = off + (uintptr_t)mlu->mlu_base +
+	    (uintptr_t)mlxp->mlx_regs_base;
+	ddi_put32(mlxp->mlx_regs_handle, (void *)addr, val);
+}
+
+static inline void
+mlxcx_uar_put64(mlxcx_t *mlxp, mlxcx_uar_t *mlu, uintptr_t off, uint64_t val)
+{
+	uintptr_t addr = off + (uintptr_t)mlu->mlu_base +
+	    (uintptr_t)mlxp->mlx_regs_base;
+	ddi_put64(mlxp->mlx_regs_handle, (void *)addr, val);
+}
 
 /*
  * Logging functions.
@@ -1343,7 +1454,7 @@ extern void mlxcx_shard_ready(mlxcx_buf_shard_t *);
 extern void mlxcx_shard_draining(mlxcx_buf_shard_t *);
 
 extern uint_t mlxcx_buf_bind_or_copy(mlxcx_t *, mlxcx_work_queue_t *,
-    mblk_t *, size_t, mlxcx_buffer_t **);
+    mblk_t *, mblk_t *, size_t, mlxcx_buffer_t **);
 
 extern boolean_t mlxcx_rx_group_setup(mlxcx_t *, mlxcx_ring_group_t *);
 extern boolean_t mlxcx_tx_group_setup(mlxcx_t *, mlxcx_ring_group_t *);
@@ -1359,9 +1470,20 @@ extern boolean_t mlxcx_rq_add_buffer(mlxcx_t *, mlxcx_work_queue_t *,
 extern boolean_t mlxcx_rq_add_buffers(mlxcx_t *, mlxcx_work_queue_t *,
     mlxcx_buffer_t **, size_t);
 extern boolean_t mlxcx_sq_add_buffer(mlxcx_t *, mlxcx_work_queue_t *,
-    uint8_t *, size_t, uint32_t, mlxcx_buffer_t *);
+    mlxcx_buffer_t *);
 extern boolean_t mlxcx_sq_add_nop(mlxcx_t *, mlxcx_work_queue_t *);
 extern void mlxcx_rq_refill(mlxcx_t *, mlxcx_work_queue_t *);
+
+typedef struct mlxcx_tx_ctx {
+	uint8_t		mtc_inline_hdrs[MLXCX_MAX_INLINE_HEADERLEN];
+	size_t		mtc_inline_hdrlen;
+	uint32_t	mtc_chkflags;
+	uint32_t	mtc_mss;
+	uint32_t	mtc_lsoflags;
+} mlxcx_tx_ctx_t;
+
+extern boolean_t mlxcx_buf_prepare_sqe(mlxcx_t *, mlxcx_work_queue_t *,
+    mlxcx_buffer_t *, const mlxcx_tx_ctx_t *);
 
 extern void mlxcx_teardown_groups(mlxcx_t *);
 extern void mlxcx_wq_teardown(mlxcx_t *, mlxcx_work_queue_t *);
@@ -1370,7 +1492,7 @@ extern void mlxcx_teardown_rx_group(mlxcx_t *, mlxcx_ring_group_t *);
 extern void mlxcx_teardown_tx_group(mlxcx_t *, mlxcx_ring_group_t *);
 
 extern void mlxcx_tx_completion(mlxcx_t *, mlxcx_completion_queue_t *,
-    mlxcx_completionq_ent_t *, mlxcx_buffer_t *);
+    mlxcx_completionq_ent_t *, mlxcx_buffer_t *, mlxcx_buf_return_batch_t *);
 extern mblk_t *mlxcx_rx_completion(mlxcx_t *, mlxcx_completion_queue_t *,
     mlxcx_completionq_ent_t *, mlxcx_buffer_t *);
 

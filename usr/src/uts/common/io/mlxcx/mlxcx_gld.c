@@ -13,6 +13,7 @@
  * Copyright (c) 2021, the University of Queensland
  * Copyright 2020 RackTop Systems, Inc.
  * Copyright 2023 MNX Cloud, Inc.
+ * Copyright 2023 Oxide Computer Company
  */
 
 /*
@@ -29,6 +30,7 @@
 #include <sys/dlpi.h>
 
 #include <sys/mac_provider.h>
+#include <sys/mac_ether.h>
 
 /* Need these for mac_vlan_header_info() */
 #include <sys/mac_client.h>
@@ -200,6 +202,119 @@ mlxcx_link_fec_cap(link_fec_t fec, mlxcx_pplm_fec_caps_t *pfecp)
 	return (B_TRUE);
 }
 
+static mac_ether_media_t
+mlxcx_mac_media(mlxcx_port_t *port)
+{
+	switch (port->mlp_oper_status) {
+	case MLXCX_PORT_STATUS_UP:
+	case MLXCX_PORT_STATUS_UP_ONCE:
+		break;
+	case MLXCX_PORT_STATUS_DOWN:
+		return (ETHER_MEDIA_NONE);
+	case MLXCX_PORT_STATUS_DISABLED:
+		return (ETHER_MEDIA_UNKNOWN);
+	}
+
+	switch (port->mlp_oper_proto) {
+	case MLXCX_PROTO_SGMII:
+		return (ETHER_MEDIA_1000_SGMII);
+	case MLXCX_PROTO_1000BASE_KX:
+		return (ETHER_MEDIA_1000BASE_KX);
+	case MLXCX_PROTO_10GBASE_CX4:
+		return (ETHER_MEDIA_10GBASE_CX4);
+	case MLXCX_PROTO_10GBASE_KX4:
+		return (ETHER_MEDIA_10GBASE_KX4);
+	case MLXCX_PROTO_10GBASE_KR:
+		return (ETHER_MEDIA_10GBASE_KR);
+	case MLXCX_PROTO_40GBASE_CR4:
+		return (ETHER_MEDIA_40GBASE_CR4);
+	case MLXCX_PROTO_40GBASE_KR4:
+		return (ETHER_MEDIA_40GBASE_KR4);
+	case MLXCX_PROTO_SGMII_100BASE:
+		return (ETHER_MEDIA_100_SGMII);
+	case MLXCX_PROTO_10GBASE_CR:
+		return (ETHER_MEDIA_10GBASE_CR);
+	case MLXCX_PROTO_10GBASE_SR:
+		return (ETHER_MEDIA_10GBASE_SR);
+	case MLXCX_PROTO_10GBASE_ER_LR:
+		return (ETHER_MEDIA_10GBASE_LR);
+	case MLXCX_PROTO_40GBASE_SR4:
+		return (ETHER_MEDIA_40GBASE_SR4);
+	case MLXCX_PROTO_40GBASE_LR4_ER4:
+		return (ETHER_MEDIA_40GBASE_LR4);
+	case MLXCX_PROTO_50GBASE_SR2:
+		return (ETHER_MEDIA_50GBASE_SR2);
+	case MLXCX_PROTO_100GBASE_CR4:
+		return (ETHER_MEDIA_100GBASE_CR4);
+	case MLXCX_PROTO_100GBASE_SR4:
+		return (ETHER_MEDIA_100GBASE_SR4);
+	case MLXCX_PROTO_100GBASE_KR4:
+		return (ETHER_MEDIA_100GBASE_KR4);
+	case MLXCX_PROTO_25GBASE_CR:
+		return (ETHER_MEDIA_25GBASE_CR);
+	case MLXCX_PROTO_25GBASE_KR:
+		return (ETHER_MEDIA_25GBASE_KR);
+	case MLXCX_PROTO_25GBASE_SR:
+		return (ETHER_MEDIA_25GBASE_SR);
+	case MLXCX_PROTO_50GBASE_CR2:
+		return (ETHER_MEDIA_50GBASE_CR2);
+	case MLXCX_PROTO_50GBASE_KR2:
+		return (ETHER_MEDIA_50GBASE_KR2);
+	default:
+		/* FALLTHRU */
+		break;
+	}
+
+	switch (port->mlp_ext_oper_proto) {
+	case MLXCX_EXTPROTO_SGMII_100BASE:
+		return (ETHER_MEDIA_100_SGMII);
+	case MLXCX_EXTPROTO_1000BASE_X_SGMII:
+		return (ETHER_MEDIA_1000_SGMII);
+	case MLXCX_EXTPROTO_5GBASE_R:
+		return (ETHER_MEDIA_5000BASE_KR); /* XXX KEBE ASKS use _KR ? */
+	case MLXCX_EXTPROTO_10GBASE_XFI_XAUI_1:
+		return (ETHER_MEDIA_10G_XAUI);
+	case MLXCX_EXTPROTO_40GBASE_XLAUI_4_XLPPI_4:
+		return (ETHER_MEDIA_40G_XLPPI);
+	case MLXCX_EXTPROTO_25GAUI_1_25GBASE_CR_KR:
+		return (ETHER_MEDIA_25G_AUI);
+	case MLXCX_EXTPROTO_50GAUI_2_LAUI_2_50GBASE_CR2_KR2:
+	case MLXCX_EXTPROTO_50GAUI_1_LAUI_1_50GBASE_CR_KR:
+		/* No type for 50G AUI as far as I can see. */
+		return (ETHER_MEDIA_UNKNOWN);
+	case MLXCX_EXTPROTO_CAUI_4_100GBASE_CR4_KR4:
+		return (ETHER_MEDIA_100GBASE_CAUI4);
+	case MLXCX_EXTPROTO_100GAUI_2_100GBASE_CR2_KR2:
+	case MLXCX_EXTPROTO_100GAUI_1_100GBASE_CR_KR:
+		/* No type for 100G AUI as far as I can see. */
+		return (ETHER_MEDIA_UNKNOWN);
+	/*
+	 * NOTE: These report unsupported but keeping them in active code for
+	 * detection purposes.
+	 */
+	case MLXCX_EXTPROTO_200GAUI_4_200GBASE_CR4_KR4:
+		return (ETHER_MEDIA_200GAUI_4);
+	case MLXCX_EXTPROTO_200GAUI_2_200GBASE_CR2_KR2:
+		return (ETHER_MEDIA_200GAUI_2);
+	case MLXCX_EXTPROTO_400GAUI_8_400GBASE_CR8:
+		return (ETHER_MEDIA_400GAUI_8);
+	case MLXCX_EXTPROTO_400GAUI_4_400GBASE_CR4:
+		return (ETHER_MEDIA_400GAUI_4);
+	default:
+		/*
+		 * There ARE legitimate single-bit values we don't support,
+		 * and should just return 0 immediately.  We will ASSERT()
+		 * that it's a single-bit value, however.
+		 */
+		/* This check should work okay for 0 too. */
+		ASSERT0((uint32_t)port->mlp_ext_oper_proto &
+		    ((uint32_t)port->mlp_ext_oper_proto - 1U));
+		break;
+	}
+
+	return (ETHER_MEDIA_UNKNOWN);
+}
+
 static int
 mlxcx_mac_stat_rfc_2863(mlxcx_t *mlxp, mlxcx_port_t *port, uint_t stat,
     uint64_t *val)
@@ -339,6 +454,9 @@ mlxcx_mac_stat(void *arg, uint_t stat, uint64_t *val)
 		break;
 	case MAC_STAT_NORCVBUF:
 		*val = port->mlp_stats.mlps_rx_drops;
+		break;
+	case ETHER_STAT_XCVR_INUSE:
+		*val = (uint64_t)mlxcx_mac_media(port);
 		break;
 	default:
 		ret = ENOTSUP;
@@ -509,30 +627,71 @@ mlxcx_mac_ring_tx(void *arg, mblk_t *mp)
 	mlxcx_t *mlxp = sq->mlwq_mlx;
 	mlxcx_completion_queue_t *cq;
 	mlxcx_buffer_t *b;
-	mac_header_info_t mhi;
-	mblk_t *kmp, *nmp;
-	uint8_t inline_hdrs[MLXCX_MAX_INLINE_HEADERLEN];
-	size_t inline_hdrlen, rem, off;
-	uint32_t chkflags = 0;
+	mac_ether_offload_info_t meoi;
+	mblk_t *kmp;
+	size_t rem, off;
 	boolean_t ok;
 	size_t take = 0;
 	uint_t bcount;
+	mlxcx_tx_ctx_t ctx;
+#if defined(MLXCX_PERF_TIMERS)
+	hrtime_t times[MLXCX_BUF_TIMER_MAX];
+	uint i;
+#endif
 
 	VERIFY(mp->b_next == NULL);
 
-	mac_hcksum_get(mp, NULL, NULL, NULL, NULL, &chkflags);
+#if defined(MLXCX_PERF_TIMERS)
+	bzero(times, sizeof (times));
+	times[MLXCX_BUF_TIMER_PRE_RING_TX] = gethrtime();
+#endif
 
-	if (mac_vlan_header_info(mlxp->mlx_mac_hdl, mp, &mhi) != 0) {
+	mac_hcksum_get(mp, NULL, NULL, NULL, NULL, &ctx.mtc_chkflags);
+	mac_lso_get(mp, &ctx.mtc_mss, &ctx.mtc_lsoflags);
+
+	if (mac_ether_offload_info(mp, &meoi) != 0 ||
+	    (meoi.meoi_flags & MEOI_L2INFO_SET) == 0) {
 		/*
 		 * We got given a frame without a valid L2 header on it. We
 		 * can't really transmit that (mlx parts don't like it), so
 		 * we will just drop it on the floor.
 		 */
+		mlxcx_warn(mlxp, "!tried to tx packet with no valid L2 header;"
+		    " dropping it on the floor");
 		freemsg(mp);
 		return (NULL);
 	}
 
-	inline_hdrlen = rem = mhi.mhi_hdrsize;
+#if defined(MLXCX_PERF_TIMERS)
+	times[MLXCX_BUF_TIMER_POST_OFFLOAD_INFO] = gethrtime();
+#endif
+
+	ctx.mtc_inline_hdrlen = meoi.meoi_l2hlen;
+
+	/*
+	 * If we're doing LSO, we need to find the end of the TCP header, and
+	 * inline up to that point.
+	 */
+	if (ctx.mtc_lsoflags & HW_LSO) {
+		if ((meoi.meoi_flags & MEOI_L3INFO_SET) == 0 ||
+		    (meoi.meoi_flags & MEOI_L4INFO_SET) == 0) {
+			mlxcx_warn(mlxp, "!tried to tx LSO packet with no "
+			    "valid L3/L4 headers; dropping it on the floor");
+			freemsg(mp);
+			return (NULL);
+		}
+		ctx.mtc_inline_hdrlen += meoi.meoi_l3hlen + meoi.meoi_l4hlen;
+	}
+
+	if (ctx.mtc_inline_hdrlen > MLXCX_MAX_INLINE_HEADERLEN) {
+		mlxcx_warn(mlxp, "!tried to tx LSO packet with headers that "
+		    "are too long (%u bytes, max is %u); dropping it on the "
+		    "floor", ctx.mtc_inline_hdrlen, MLXCX_MAX_INLINE_HEADERLEN);
+		freemsg(mp);
+		return (NULL);
+	}
+
+	rem = ctx.mtc_inline_hdrlen;
 
 	kmp = mp;
 	off = 0;
@@ -543,7 +702,7 @@ mlxcx_mac_ring_tx(void *arg, mblk_t *mp)
 		take = sz;
 		if (take > rem)
 			take = rem;
-		bcopy(kmp->b_rptr, inline_hdrs + off, take);
+		bcopy(kmp->b_rptr, ctx.mtc_inline_hdrs + off, take);
 		rem -= take;
 		off += take;
 		if (take == sz) {
@@ -552,15 +711,36 @@ mlxcx_mac_ring_tx(void *arg, mblk_t *mp)
 		}
 	}
 
-	bcount = mlxcx_buf_bind_or_copy(mlxp, sq, kmp, take, &b);
+	MLXCX_PTIMER(times, MLXCX_BUF_TIMER_POST_INLINE_BCOPY);
+
+	bcount = mlxcx_buf_bind_or_copy(mlxp, sq, mp, kmp, take, &b);
 	if (bcount == 0) {
 		atomic_or_uint(&sq->mlwq_state, MLXCX_WQ_BLOCKED_MAC);
 		return (mp);
 	}
 
+	MLXCX_PTIMER(times, MLXCX_BUF_TIMER_POST_BUF_BIND_COPY);
+
+#if defined(MLXCX_PERF_TIMERS)
+	/* Copy our temporary timers over to the buffer_t */
+	for (i = 0; i <= MLXCX_BUF_TIMER_POST_BUF_BIND_COPY; ++i)
+		b->mlb_t[i] = times[i];
+#endif
+
+	if (!mlxcx_buf_prepare_sqe(mlxp, sq, b, &ctx)) {
+		mlxcx_warn(mlxp, "!tried to tx packet that couldn't fit in "
+		    "an SQE, dropping");
+		freemsg(mp);
+		return (NULL);
+	}
+
+	MLXCX_PTIMER(b->mlb_t, MLXCX_BUF_TIMER_POST_PREPARE_SQE);
+
 	mutex_enter(&sq->mlwq_mtx);
 	VERIFY3U(sq->mlwq_inline_mode, <=, MLXCX_ETH_INLINE_L2);
 	cq = sq->mlwq_cq;
+
+	MLXCX_PTIMER(b->mlb_t, MLXCX_BUF_TIMER_POST_WQ_MTX);
 
 	/*
 	 * state is a single int, so read-only access without the CQ lock
@@ -595,24 +775,15 @@ mlxcx_mac_ring_tx(void *arg, mblk_t *mp)
 		goto blocked;
 	}
 
-	ok = mlxcx_sq_add_buffer(mlxp, sq, inline_hdrs, inline_hdrlen,
-	    chkflags, b);
+	ok = mlxcx_sq_add_buffer(mlxp, sq, b);
 	if (!ok) {
 		atomic_or_uint(&cq->mlcq_state, MLXCX_CQ_BLOCKED_MAC);
 		atomic_or_uint(&sq->mlwq_state, MLXCX_WQ_BLOCKED_MAC);
 		goto blocked;
 	}
 
-	/*
-	 * Now that we've successfully enqueued the rest of the packet,
-	 * free any mblks that we cut off while inlining headers.
-	 */
-	for (; mp != kmp; mp = nmp) {
-		nmp = mp->b_cont;
-		freeb(mp);
-	}
-
 	mutex_exit(&sq->mlwq_mtx);
+	MLXCX_PTIMER(b->mlb_t, MLXCX_BUF_TIMER_POST_SQ_ADD_BUF);
 
 	return (NULL);
 
@@ -1126,6 +1297,7 @@ mlxcx_mac_getcapab(void *arg, mac_capab_t cap, void *cap_data)
 	mac_capab_rings_t *cap_rings;
 	mac_capab_led_t *cap_leds;
 	mac_capab_transceiver_t *cap_txr;
+	mac_capab_lso_t *cap_lso;
 	uint_t i, n = 0;
 
 	switch (cap) {
@@ -1158,10 +1330,10 @@ mlxcx_mac_getcapab(void *arg, mac_capab_t cap, void *cap_data)
 		break;
 
 	case MAC_CAPAB_HCKSUM:
-		if (mlxp->mlx_caps->mlc_checksum) {
-			*(uint32_t *)cap_data = HCKSUM_INET_FULL_V4 |
-			    HCKSUM_INET_FULL_V6 | HCKSUM_IPHDRCKSUM;
-		}
+		if (!mlxp->mlx_caps->mlc_checksum)
+			return (B_FALSE);
+		*(uint32_t *)cap_data = HCKSUM_INET_FULL_V4 |
+		    HCKSUM_INET_FULL_V6 | HCKSUM_IPHDRCKSUM;
 		break;
 
 	case MAC_CAPAB_LED:
@@ -1180,6 +1352,24 @@ mlxcx_mac_getcapab(void *arg, mac_capab_t cap, void *cap_data)
 		cap_txr->mct_ntransceivers = 1;
 		cap_txr->mct_info = mlxcx_mac_txr_info;
 		cap_txr->mct_read = mlxcx_mac_txr_read;
+		break;
+
+	case MAC_CAPAB_LSO:
+		cap_lso = cap_data;
+
+		if (!mlxp->mlx_caps->mlc_lso)
+			return (B_FALSE);
+
+		cap_lso->lso_flags = LSO_TX_BASIC_TCP_IPV4 |
+		    LSO_TX_BASIC_TCP_IPV6;
+		/*
+		 * Cap LSO sends at 64k due to limitations in the TCP stack
+		 * (full length needs to fit in an IP header apparently)
+		 */
+		cap_lso->lso_basic_tcp_ipv4.lso_max =
+		    MIN(mlxp->mlx_caps->mlc_max_lso_size, UINT16_MAX);
+		cap_lso->lso_basic_tcp_ipv6.lso_max =
+		    MIN(mlxp->mlx_caps->mlc_max_lso_size, UINT16_MAX);
 		break;
 
 	default:
@@ -1452,6 +1642,9 @@ mlxcx_mac_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 		default:
 			*(link_state_t *)pr_val = LINK_STATE_UNKNOWN;
 		}
+		break;
+	case MAC_PROP_MEDIA:
+		*(mac_ether_media_t *)pr_val = mlxcx_mac_media(port);
 		break;
 	case MAC_PROP_AUTONEG:
 		if (pr_valsize < sizeof (uint8_t)) {

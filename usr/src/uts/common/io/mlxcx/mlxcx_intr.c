@@ -874,6 +874,7 @@ mlxcx_process_cq(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq, mblk_t **mpp,
 	uint_t rx_frames = 0;
 	uint_t comp_cnt = 0;
 	int64_t wqebbs, bufcnt;
+	mlxcx_buf_return_batch_t rbatch;
 
 	*mpp = NULL;
 
@@ -885,6 +886,8 @@ mlxcx_process_cq(mlxcx_t *mlxp, mlxcx_completion_queue_t *mlcq, mblk_t **mpp,
 	}
 
 	nmp = cmp = mp = NULL;
+
+	mlxcx_buf_return_batch_init(&rbatch);
 
 	wqebbs = 0;
 	bufcnt = 0;
@@ -939,6 +942,7 @@ lookagain:
 				list_move_tail(&mlcq->mlcq_buffers,
 				    &mlcq->mlcq_buffers_b);
 				added = B_TRUE;
+				++mlcq->mlcq_bufbgen;
 			}
 			mutex_exit(&mlcq->mlcq_bufbmtx);
 			if (added)
@@ -977,9 +981,11 @@ lookagain:
 		list_remove(&mlcq->mlcq_buffers, buf);
 		bufcnt++;
 
+		MLXCX_PTIMER(buf->mlb_t, MLXCX_BUF_TIMER_PRE_TX_COMP);
+
 		switch (mlcq->mlcq_wq->mlwq_type) {
 		case MLXCX_WQ_TYPE_SENDQ:
-			mlxcx_tx_completion(mlxp, mlcq, cent, buf);
+			mlxcx_tx_completion(mlxp, mlcq, cent, buf, &rbatch);
 			break;
 		case MLXCX_WQ_TYPE_RECVQ:
 			nmp = mlxcx_rx_completion(mlxp, mlcq, cent, buf);
@@ -1006,6 +1012,7 @@ lookagain:
 		 * high->low water mark.
 		 */
 		if (bufcnt > (MLXCX_CQ_LWM_GAP - MLXCX_CQ_HWM_GAP)) {
+			mlxcx_buf_return_batch_flush(mlxp, &rbatch);
 			mlxcx_update_cqci(mlxp, mlcq);
 			/*
 			 * Both these variables are incremented using
@@ -1023,6 +1030,8 @@ nextcq:
 		    (bytelim != 0 && bytes > bytelim))
 			break;
 	}
+
+	mlxcx_buf_return_batch_flush(mlxp, &rbatch);
 
 	if (comp_cnt > 0) {
 		mlxcx_update_cqci(mlxp, mlcq);
