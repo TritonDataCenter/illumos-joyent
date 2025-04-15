@@ -2442,7 +2442,7 @@ mac_rx_srs_poll_ring(mac_soft_ring_set_t *mac_srs)
 	callb_cpr_t		cprinfo;
 	ssize_t			bytes_to_pickup;
 	size_t			sz;
-	int			count;
+	uint_t			count;
 	mac_client_impl_t	*smcip;
 	boolean_t		is_bw;
 
@@ -2536,34 +2536,63 @@ check_again:
 			SRS_RX_STAT_UPDATE(mac_srs, pollbytes, sz);
 			SRS_RX_STAT_UPDATE(mac_srs, pollcnt, count);
 
-			/*
-			 * If there are any promiscuous mode callbacks
-			 * defined for this MAC client, pass them a copy
-			 * if appropriate and also update the counters.
-			 */
-			if (smcip != NULL) {
-				if (smcip->mci_mip->mi_promisc_list != NULL) {
-					mutex_exit(lock);
-					mac_promisc_dispatch(smcip->mci_mip,
-					    head, NULL, B_FALSE);
-					mutex_enter(lock);
-				}
-			}
 			if (is_bw) {
 				MAC_SRS_BW_LOCK(mac_srs);
 				mac_srs->srs_bw->mac_bw_polled += sz;
-			}
-			MAC_RX_SRS_ENQUEUE_CHAIN(mac_srs, head, tail, count, sz,
-			    is_bw);
-			if (is_bw) {
 				MAC_SRS_BW_UNLOCK(mac_srs);
 			}
+
 			if (count <= 10)
 				srs_rx->sr_stat.mrs_chaincntundr10++;
 			else if (count > 10 && count <= 50)
 				srs_rx->sr_stat.mrs_chaincnt10to50++;
 			else
 				srs_rx->sr_stat.mrs_chaincntover50++;
+
+			if (smcip != NULL) {
+				mac_impl_t *smip = smcip->mci_mip;
+				const boolean_t callbacks =
+				    smip->mi_promisc_list != NULL ||
+				    smcip->mci_siphon != NULL;
+
+				if (callbacks)
+					mutex_exit(lock);
+
+				/*
+				 * If there are any promiscuous mode callbacks
+				 * defined for this MAC client, pass them a copy
+				 * if appropriate and also update the counters.
+				 */
+				if (smip->mi_promisc_list != NULL) {
+					mac_promisc_dispatch(smip, head, NULL,
+					    B_FALSE);
+				}
+
+				/*
+				 * If there's a packet siphon defined, give it
+				 * first dibs over [head..tail]. The siphon will
+				 * update our tail, count, and size.
+				 */
+				if (smcip->mci_siphon != NULL) {
+					head = smcip->mci_siphon(
+					    smcip->mci_siphon_arg, head, &tail,
+					    &count, &sz);
+				}
+
+				if (callbacks)
+					mutex_enter(lock);
+			}
+
+			if (head != NULL) {
+				if (is_bw) {
+					MAC_SRS_BW_LOCK(mac_srs);
+				}
+				MAC_RX_SRS_ENQUEUE_CHAIN(mac_srs, head, tail,
+				    count, sz, is_bw);
+				if (is_bw) {
+					MAC_SRS_BW_UNLOCK(mac_srs);
+				}
+			}
 		}
 
 		/*
@@ -3492,19 +3521,34 @@ mac_rx_srs_process(void *arg, mac_resource_handle_t srs, mblk_t *mp_chain,
 	size_t			sz = 0;
 	mac_bw_ctl_t		*mac_bw = mac_srs->srs_bw;
 	mac_srs_rx_t		*srs_rx = &mac_srs->srs_rx;
+	mac_client_impl_t	*mcip = mac_srs->srs_mcip;
 
-	/*
-	 * Set the tail, count and sz. We set the sz irrespective
-	 * of whether we are doing B/W control or not for the
-	 * purpose of updating the stats.
-	 */
-	mp = tail = mp_chain;
-	while (mp != NULL) {
-		tail = mp;
-		count++;
-		sz += msgdsize(mp);
-		mp = mp->b_next;
+	if (mcip != NULL && mcip->mci_siphon != NULL) {
+		/*
+		 * If there's a packet siphon defined, give it
+		 * first dibs over [head..tail]. The siphon will
+		 * update our tail, count, and size.
+		 */
+		mp_chain = mcip->mci_siphon(
+		    mcip->mci_siphon_arg, mp_chain, &tail,
+		    &count, &sz);
+	} else {
+		/*
+		 * Set the tail, count and sz. We set the sz irrespective
+		 * of whether we are doing B/W control or not for the
+		 * purpose of updating the stats.
+		 */
+		mp = tail = mp_chain;
+		while (mp != NULL) {
+			tail = mp;
+			count++;
+			sz += msgdsize(mp);
+			mp = mp->b_next;
+		}
 	}
+
+	if (mp_chain == NULL)
+		return;
 
 	mutex_enter(&mac_srs->srs_lock);
 

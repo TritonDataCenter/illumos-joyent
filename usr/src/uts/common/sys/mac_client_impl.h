@@ -201,6 +201,9 @@ struct mac_client_impl_s {			/* Protected by */
 	mac_direct_rxs_t	mci_direct_rx;		/* SL */
 	mac_rx_t		mci_rx_p_fn;		/* Rx Quiescence */
 	void			*mci_rx_p_arg;		/* Rx Quiescence */
+	/* for packet siphon handlers */
+	mac_siphon_t		mci_siphon;		/* Rx Quiescence */
+	void			*mci_siphon_arg;	/* Rx Quiescence */
 	void			*mci_p_unicast_list;
 
 	mac_cb_t		*mci_promisc_list;	/* mi_promisc_lock */
