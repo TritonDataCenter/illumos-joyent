@@ -20,9 +20,14 @@ SRCDIR =	$(SGSDIR)/yacc/common
 
 OBJS =		y1.o y2.o y3.o y4.o
 
+YACCPAR =	yaccpar
+
 include ../Makefile.tools
 
 CPPFLAGS =	-I$(SGSDIR)/include
+CSTD =		$(CSTD_GNU99)
+
+ROOTYACCPAR =	$(YACCPAR:%=$(ROOTONBLDSHLIBCCS)/%)
 
 .KEEP_STATE:
 
@@ -35,9 +40,9 @@ $(PROG):	$(OBJS)
 %.o:	$(SRCDIR)/%.c
 	$(COMPILE.c) -o $@ $<
 
-install: all $(ROOTONBLDMACHPROG) $(ROOTONBLDLIB)/yaccpar
+install: all $(ROOTONBLDMACHPROG) $(ROOTYACCPAR)
 
-$(ROOTONBLDLIB)/%: $(SGSDIR)/yacc/common/%
+$(ROOTONBLDSHLIBCCS)/%: $(SRCDIR)/%
 	$(INS.file)
 
 clean:

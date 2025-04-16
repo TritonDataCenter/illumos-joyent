@@ -22,11 +22,13 @@ OBJS=	nvme_version.o	\
 	nvmeadm.o	\
 	nvmeadm_ofmt.o	\
 	nvmeadm_print.o	\
-	nvmeadm_wdc.o
+	nvmeadm_wdc.o	\
+	$(HEXDUMP_OBJS)
 
 include ../Makefile.cmd
 include ../Makefile.cmd.64
 include ../Makefile.ctf
+include $(SRC)/common/hexdump/Makefile.com
 
 .KEEP_STATE:
 
@@ -62,4 +64,5 @@ clean:
 
 lint:	lint_SRCS
 
+include $(SRC)/common/hexdump/Makefile.targ
 include ../Makefile.targ

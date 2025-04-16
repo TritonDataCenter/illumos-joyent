@@ -24,7 +24,7 @@
  */
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #ifndef	_SYS_PCIE_H
@@ -34,6 +34,7 @@
 extern "C" {
 #endif
 
+#include <sys/stdint.h>
 #include <sys/pci.h>
 
 /*
@@ -355,6 +356,7 @@ extern "C" {
 #define	PCIE_SLOTCTL_EMI_LOCK_CONTROL	0x0800	/* EMI Lock control */
 #define	PCIE_SLOTCTL_DLL_STATE_EN	0x1000	/* DLL State Changed En */
 #define	PCIE_SLOTCTL_AUTO_SLOT_PL_DIS	0x2000	/* Auto Slot Power Limit Dis */
+#define	PCIE_SLOTCTL_INB_PRES_DET_DIS	0x4000	/* Inband Presence Detect Dis */
 #define	PCIE_SLOTCTL_ATTN_INDICATOR_MASK 0x00C0	/* Attn Indicator mask */
 #define	PCIE_SLOTCTL_PWR_INDICATOR_MASK	0x0300	/* Power Indicator mask */
 #define	PCIE_SLOTCTL_INTR_MASK		0x103f	/* Supported intr mask */
@@ -535,6 +537,11 @@ extern "C" {
 #define	PCIE_LINKSTS2_XLINK_RES		0x0300
 #define	PCIE_LINKSTS2_DS_COMP_PRES_MASK	0x7000
 #define	PCIE_LINKSTS2_DRS_MSG_RX	0x8000
+
+/*
+ * Slot Capabilities 2 Register (4 bytes)
+ */
+#define	PCIE_SLOTCAP2_INB_PRES_DET_DIS_SUP	0x1
 
 /*
  * PCI-Express Enhanced Capabilities Link Entry Bit Offsets
@@ -1043,6 +1050,41 @@ typedef struct pcie_msg {
 #define	PCIE_MSG_CODE_ERR_COR		0x30
 #define	PCIE_MSG_CODE_ERR_NONFATAL	0x31
 #define	PCIE_MSG_CODE_ERR_FATAL		0x33
+
+/*
+ * Receiver preset hint encodings for PCIe Gen 3 (8 GT/s) receivers. These match
+ * the PCIe Base 3/4/5 specification, section 4.2.3.2. These are used in the
+ * Lane Equalization Control Register in the Secondary PCI Express Extended
+ * Capability.
+ */
+#define	PCIE_GEN3_RX_PRESET_6DB		0
+#define	PCIE_GEN3_RX_PRESET_7DB		1
+#define	PCIE_GEN3_RX_PRESET_8DB		2
+#define	PCIE_GEN3_RX_PRESET_9DB		3
+#define	PCIE_GEN3_RX_PRESET_10DB	4
+#define	PCIE_GEN3_RX_PRESET_11DB	5
+#define	PCIE_GEN3_RX_PRESET_12DB	6
+#define	PCIE_GEN3_RX_PRESET_RSVD	7
+
+/*
+ * The following are used for transmitter preset hints and are shared in all
+ * PCIe versions from PCIe Gen 3+. Table 4.2.3.2 (PCIe 3/4/5) describes the
+ * meaning of the transmitter hints. These basically correspond to 10 values
+ * labeled P0-P10. Section 8.3.3.3 (PCIe 4/5) translates these into the
+ * corresponding values in Table 8-1 Tx Preset Ratios and Corresponding
+ * Coefficient Values.
+ */
+#define	PCIE_TX_PRESET_0	0
+#define	PCIE_TX_PRESET_1	1
+#define	PCIE_TX_PRESET_2	2
+#define	PCIE_TX_PRESET_3	3
+#define	PCIE_TX_PRESET_4	4
+#define	PCIE_TX_PRESET_5	5
+#define	PCIE_TX_PRESET_6	6
+#define	PCIE_TX_PRESET_7	7
+#define	PCIE_TX_PRESET_8	8
+#define	PCIE_TX_PRESET_9	9
+#define	PCIE_TX_PRESET_10	10
 
 #ifdef	__cplusplus
 }

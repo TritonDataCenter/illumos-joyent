@@ -35,7 +35,10 @@
  * A full copy of the text of the CDDL should have accompanied this
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
- *
+ */
+/* This file is dual-licensed; see usr/src/contrib/bhyve/LICENSE */
+
+/*
  * Copyright 2022 Oxide Computer Company
  */
 
@@ -151,6 +154,7 @@ struct svm_softc;
 #define	VMCB_EXIT_INIT			0x63
 #define	VMCB_EXIT_VINTR			0x64
 #define	VMCB_EXIT_CR0_SEL_WRITE		0x65
+#define	VMCB_EXIT_RDPMC			0x6f
 #define	VMCB_EXIT_PUSHF			0x70
 #define	VMCB_EXIT_POPF			0x71
 #define	VMCB_EXIT_CPUID			0x72

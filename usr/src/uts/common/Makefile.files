@@ -44,51 +44,52 @@ i386_CORE_OBJS += \
 
 sparc_CORE_OBJS +=
 
-COMMON_CORE_OBJS +=		\
-		beep.o		\
-		bitset.o	\
-		bp_map.o	\
-		brand.o		\
-		cpucaps.o	\
-		cmt.o		\
-		cmt_policy.o	\
-		cpu.o		\
-		cpu_uarray.o	\
-		cpu_event.o	\
-		cpu_intr.o	\
-		cpu_pm.o	\
-		cpupart.o	\
-		cap_util.o	\
-		disp.o		\
-		group.o		\
-		kstat_fr.o	\
+COMMON_CORE_OBJS +=			\
+		beep.o			\
+		bitset.o		\
+		bp_map.o		\
+		brand.o			\
+		cap_util.o		\
+		clock_tick.o		\
+		cmt.o			\
+		cmt_policy.o		\
+		cpu.o			\
+		cpu_event.o		\
+		cpu_intr.o		\
+		cpu_pm.o		\
+		cpu_uarray.o		\
+		cpucaps.o		\
+		cpupart.o		\
+		disp.o			\
+		group.o			\
+		hexdump.o		\
+		ilstr.o			\
 		iscsiboot_prop.o	\
-		lgrp.o		\
-		lgrp_topo.o	\
-		mmapobj.o	\
-		mutex.o		\
-		page_lock.o	\
-		page_retire.o	\
-		panic.o		\
-		param.o		\
-		pg.o		\
-		pghw.o		\
-		putnext.o	\
-		rctl_proc.o	\
-		rwlock.o	\
-		seg_kmem.o	\
-		softint.o	\
-		string.o	\
-		strtol.o	\
-		strtoul.o	\
-		strtoll.o	\
-		strtoull.o	\
-		ilstr.o		\
-		thread_intr.o	\
-		vm_page.o	\
-		vm_pagelist.o	\
-		zlib_obj.o	\
-		clock_tick.o
+		kstat_fr.o		\
+		lgrp.o			\
+		lgrp_topo.o		\
+		mmapobj.o		\
+		mutex.o			\
+		page_lock.o		\
+		page_retire.o		\
+		panic.o			\
+		param.o			\
+		pg.o			\
+		pghw.o			\
+		putnext.o		\
+		rctl_proc.o		\
+		rwlock.o		\
+		seg_kmem.o		\
+		softint.o		\
+		string.o		\
+		strtol.o		\
+		strtoll.o		\
+		strtoul.o		\
+		strtoull.o		\
+		thread_intr.o		\
+		vm_page.o		\
+		vm_pagelist.o		\
+		zlib_obj.o
 
 CORE_OBJS +=	$(COMMON_CORE_OBJS) $($(MACH)_CORE_OBJS)
 
@@ -245,7 +246,6 @@ GENUNIX_OBJS +=	\
 		main.o		\
 		mmapobjsys.o	\
 		memcntl.o	\
-		memstr.o	\
 		lgrpsys.o	\
 		mkdir.o		\
 		mknod.o		\
@@ -344,6 +344,7 @@ GENUNIX_OBJS +=	\
 		stat.o		\
 		statfs.o	\
 		statvfs.o	\
+		stdbit.o	\
 		stol.o		\
 		str_conf.o	\
 		strcalls.o	\
@@ -2010,8 +2011,8 @@ CH_COM_OBJS =	ch_mac.o ch_subr.o cspi.o espi.o ixf1010.o mc3.o mc4.o mc5.o \
 #	Chelsio Terminator 4 10G NIC nexus driver module
 #
 CXGBE_COM_OBJS =	t4_hw.o common.o
-CXGBE_NEX_OBJS =	t4_nexus.o t4_sge.o t4_mac.o t4_ioctl.o shared.o \
-			t4_l2t.o osdep.o cudbg_lib.o cudbg_wtp.o fastlz.o \
+CXGBE_NEX_OBJS =	t4_nexus.o t4_sge.o t4_mac.o t4_ioctl.o t4_debug.o \
+			t4_l2t.o cudbg_lib.o cudbg_wtp.o fastlz.o \
 			fastlz_api.o cudbg_common.o cudbg_flash_utils.o \
 			cudbg.o
 
@@ -2384,6 +2385,6 @@ KTEST_OBJS += ktest.o
 #
 # Kernel test modules included with the system.
 #
-MAC_TEST_OBJS += mac_test.o
-KTEST_SELFTEST_OBJS += ktest_selftest.o
-STREAM_TEST_OBJS += stream_test.o
+MAC_KTEST_OBJS += mac_ktest.o
+KTEST_KTEST_OBJS += ktest_selftest.o
+STREAM_KTEST_OBJS += stream_ktest.o

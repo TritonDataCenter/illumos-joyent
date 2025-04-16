@@ -22,6 +22,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2015, Joyent Inc.
  * Copyright (c) 2017, Joyent, Inc.
+ * Copyright 2025 MNX Cloud, Inc.
  */
 
 /*
@@ -624,6 +625,50 @@ done:
 }
 
 /*
+ * Calculate caller's allowed permissions to a property.
+ */
+static uint_t
+dld_macprop_perm_mask(dls_dl_handle_t dlh, const dld_ioc_macprop_t *prop,
+    const cred_t *cred)
+{
+	const zoneid_t zid = crgetzoneid(cred);
+	const boolean_t is_owner = zid == dls_devnet_getownerzid(dlh);
+	const boolean_t is_in_zone = zid == dls_devnet_getzid(dlh);
+	const boolean_t is_in_global = zid == GLOBAL_ZONEID;
+	uint_t mask = 0;
+
+	/* If the zone owns the datalink device, it should have full access. */
+	if (is_owner) {
+		mask = MAC_PROP_PERM_RW;
+	}
+
+	switch (prop->pr_num) {
+	case MAC_PROP_MTU:
+	case MAC_PROP_STATUS:
+		/*
+		 * These properties remain readable inside a zone which has been
+		 * assigned (but does not own) a datalink device.
+		 */
+		if (is_in_zone) {
+			mask |= MAC_PROP_PERM_READ;
+		}
+		break;
+	case MAC_PROP_ZONE:
+		/*
+		 * Actors outside global zone are not allowed to change the zone
+		 * ownership property.
+		 */
+		if (!is_in_global) {
+			mask &= ~MAC_PROP_PERM_WRITE;
+		}
+		break;
+	default:
+		break;
+	}
+	return (mask);
+}
+
+/*
  * DLDIOC_SET/GETMACPROP
  */
 static int
@@ -637,7 +682,6 @@ drv_ioc_prop_common(dld_ioc_macprop_t *prop, intptr_t arg, boolean_t set,
 	dld_ioc_macprop_t	*kprop;
 	datalink_id_t		linkid;
 	datalink_class_t	class;
-	zoneid_t		zoneid = crgetzoneid(cred);
 	uint_t			dsize;
 
 	/*
@@ -678,12 +722,10 @@ drv_ioc_prop_common(dld_ioc_macprop_t *prop, intptr_t arg, boolean_t set,
 	if ((err = dls_link_hold(dls_devnet_mac(dlh), &dlp)) != 0)
 		goto done;
 
-	/*
-	 * Don't allow a process to get or set properties of a link if that
-	 * link doesn't belong to that zone.
-	 */
-	if (zoneid != dls_devnet_getownerzid(dlh)) {
-		err = ENOENT;
+	const uint_t perm_req = set ? MAC_PROP_PERM_RW : MAC_PROP_PERM_READ;
+	const uint_t perm_mask = dld_macprop_perm_mask(dlh, kprop, cred);
+	if ((perm_req & perm_mask) != perm_req) {
+		err = EACCES;
 		goto done;
 	}
 
@@ -698,10 +740,6 @@ drv_ioc_prop_common(dld_ioc_macprop_t *prop, intptr_t arg, boolean_t set,
 		if (set) {
 			dld_ioc_zid_t *dzp = (dld_ioc_zid_t *)kprop->pr_val;
 
-			if (zoneid != GLOBAL_ZONEID) {
-				err = EACCES;
-				goto done;
-			}
 			err = dls_devnet_setzid(dlh, dzp->diz_zid,
 			    dzp->diz_transient);
 		} else {
@@ -801,6 +839,9 @@ drv_ioc_prop_common(dld_ioc_macprop_t *prop, intptr_t arg, boolean_t set,
 		}
 	}
 	}
+
+	/* Properly communicate allowed permissions */
+	kprop->pr_perm_flags &= perm_mask;
 
 done:
 	if (!set && ddi_copyout(kprop, (void *)arg, dsize, mode) != 0)

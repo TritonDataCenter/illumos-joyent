@@ -2104,7 +2104,7 @@ sata_scsi_tgt_init(dev_info_t *hba_dip, dev_info_t *tgt_dip,
 	 * if we need to create cmdk-style devid for all the disk devices
 	 * attached to this controller. This property may have been set
 	 * from HBA driver's .conf file or by the HBA driver in its
-	 * attach(9F) function.
+	 * attach(9E) function.
 	 */
 	if ((sdinfo->satadrv_type == SATA_DTYPE_ATADISK) &&
 	    (ddi_getprop(DDI_DEV_T_ANY, hba_dip, DDI_PROP_DONTPASS,
@@ -2232,7 +2232,7 @@ sata_scsi_tgt_free(dev_info_t *hba_dip, dev_info_t *tgt_dip,
 
 	/*
 	 * If devid was previously created but not freed up from
-	 * sd(4D) driver (i.e during detach(9F)) then do it here.
+	 * sd(4D) driver (i.e during detach(9E)) then do it here.
 	 */
 	if ((sdinfo->satadrv_type == SATA_DTYPE_ATADISK) &&
 	    (ddi_getprop(DDI_DEV_T_ANY, hba_dip, DDI_PROP_DONTPASS,
@@ -4874,6 +4874,25 @@ sata_txlt_read_capacity16(sata_pkt_txlate_t *spx)
 	return (TRAN_ACCEPT);
 }
 
+static boolean_t
+sata_txlt_unmap_supported(sata_pkt_txlate_t *spx, sata_drive_info_t *sdinfo)
+{
+	const sata_id_t *id = &sdinfo->satadrv_id;
+
+	ASSERT(MUTEX_HELD(&SATA_TXLT_CPORT_MUTEX(spx)));
+
+	/*
+	 * SAT-5 9.24.1 If the TRIM SUPPORTED bit is zero or the
+	 * DRAT SUPPORTED bit is zero, then UNMAP is not supported.
+	 */
+	if (!(id->ai_dsm & SATA_DSM_TRIM) ||
+	    !(id->ai_addsupported & SATA_DETERMINISTIC_READ)) {
+		return (B_FALSE);
+	}
+
+	return (B_TRUE);
+}
+
 /*
  * Translate command: UNMAP
  *
@@ -4915,6 +4934,11 @@ sata_txlt_unmap(sata_pkt_txlate_t *spx)
 	if ((rval != TRAN_ACCEPT) || (reason == CMD_DEV_GONE)) {
 		mutex_exit(cport_mutex);
 		return (rval);
+	}
+
+	if (!sata_txlt_unmap_supported(spx, sdinfo)) {
+		mutex_exit(cport_mutex);
+		return (sata_txlt_invalid_command(spx));
 	}
 
 	/*
@@ -16969,7 +16993,7 @@ sata_check_modser(char *buf, int buf_len)
 	boolean_t ret;
 	char *s;
 	int i;
-	int tb;
+	int tb = 0;
 	char ch;
 
 	ret = B_FALSE;

@@ -26,6 +26,7 @@
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2025 Hans Rosenfeld
 #
 
 LIBCDIR=	$(SRC)/lib/libc
@@ -103,9 +104,11 @@ COMOBJS=			\
 	bcopy.o			\
 	bsearch.o		\
 	bzero.o			\
+	ctzdi2.o		\
 	explicit_bzero.o	\
 	memmem.o		\
 	qsort.o			\
+	popcountdi2.o		\
 	strtol.o		\
 	strtoul.o		\
 	strtoll.o		\
@@ -617,7 +620,7 @@ PORTGEN=			\
 	tfind.o			\
 	time_data.o		\
 	time_gdata.o		\
-	timespec_get.o		\
+	timespec_cstd.o		\
 	tls_data.o		\
 	truncate.o		\
 	tsdalloc.o		\
@@ -645,29 +648,26 @@ PORTINET=			\
 	inet_pton.o
 
 PORTPRINT_W=			\
-	doprnt_w.o
+	doprnt_w.o		\
+	vwprintf.o
 
 PORTPRINT=			\
 	asprintf.o		\
 	doprnt.o		\
-	fprintf.o		\
-	printf.o		\
-	snprintf.o		\
-	sprintf.o		\
+	vdprintf.o		\
 	vfprintf.o		\
-	vprintf.o		\
 	vsnprintf.o		\
-	vsprintf.o		\
-	vwprintf.o		\
-	wprintf.o
+	vsprintf.o
 
 # c89 variants to support 32-bit size of c89 u/intmax_t (32-bit libc only)
+PORTPRINT_C89_W=		\
+	vwprintf_c89.o
+
+
 PORTPRINT_C89=			\
 	vfprintf_c89.o		\
-	vprintf_c89.o		\
 	vsnprintf_c89.o		\
-	vsprintf_c89.o		\
-	vwprintf_c89.o
+	vsprintf_c89.o
 
 PORTSTDIO_C89=			\
 	vscanf_c89.o		\
@@ -748,6 +748,8 @@ PORTI18N=			\
 	putwchar.o		\
 	putws.o			\
 	strtows.o		\
+	wcslcat.o		\
+	wcslcpy.o		\
 	wcsnlen.o		\
 	wcsstr.o		\
 	wcstoimax.o		\
@@ -1010,6 +1012,9 @@ PORTREGEX=			\
 PORTREGEX64=			\
 	glob64.o
 
+BITOBJS=			\
+	stdbit.o
+
 MOSTOBJS=			\
 	$(STRETS)		\
 	$(CRTOBJS)		\
@@ -1031,6 +1036,7 @@ MOSTOBJS=			\
 	$(PORTLOCALE)		\
 	$(PORTPRINT)		\
 	$(PORTPRINT_C89)	\
+	$(PORTPRINT_C89_W)	\
 	$(PORTPRINT_W)		\
 	$(PORTREGEX)		\
 	$(PORTREGEX64)		\
@@ -1054,7 +1060,8 @@ MOSTOBJS=			\
 	$(SYSOBJS)		\
 	$(COMSYSOBJS64)		\
 	$(SYSOBJS64)		\
-	$(VALUES)
+	$(VALUES)		\
+	$(BITOBJS)
 
 TRACEOBJS=			\
 	plockstat.o
@@ -1211,6 +1218,9 @@ $(PORTPRINT_W:%=pics/%) := \
 
 $(PORTPRINT_C89:%=pics/%) := \
 	CPPFLAGS += -D_C89_INTMAX32
+
+$(PORTPRINT_C89_W:%=pics/%) := \
+	CPPFLAGS += -D_C89_INTMAX32 -D_WIDE
 
 $(PORTSTDIO_C89:%=pics/%) := \
 	CPPFLAGS += -D_C89_INTMAX32

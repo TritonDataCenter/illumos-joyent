@@ -22,13 +22,14 @@
 /*
  * Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*
  * method.c - method execution functions
  *
  * This file contains the routines needed to run a method:  a fork(2)-exec(2)
- * invocation monitored using either the contract filesystem or waitpid(2).
+ * invocation monitored using either the contract filesystem or waitpid(3C).
  * (Plain fork1(2) support is provided in fork.c.)
  *
  * Contract Transfer
@@ -467,7 +468,7 @@ exec_method(const restarter_inst_t *inst, int type, const char *method,
 
 	cmd = uu_msprintf("exec %s", method);
 
-	if (inst->ri_utmpx_prefix[0] != '\0' && inst->ri_utmpx_prefix != NULL)
+	if (inst->ri_utmpx_prefix != NULL && inst->ri_utmpx_prefix[0] != '\0')
 		(void) utmpx_mark_init(getpid(), inst->ri_utmpx_prefix);
 
 	setlog(inst->ri_logstem);
@@ -610,6 +611,9 @@ exec_method(const restarter_inst_t *inst, int type, const char *method,
 	log_preexec();
 
 	(void) execle(SBIN_SH, SBIN_SH, "-c", cmd, NULL, nenv);
+
+	(void) fprintf(stderr, "Failed to exec %s -c '%s': %s\n",
+	    SBIN_SH, cmd, strerror(errno));
 
 	exit(10);
 }
