@@ -47,6 +47,7 @@ CPPFLAGS +=	-I$(SRCDIR) -D_REENTRANT
 
 # not linted
 SMATCH=off
+CSTD=		$(CSTD_GNU99)
 
 CSTD=		$(CSTD_GNU99)
 
