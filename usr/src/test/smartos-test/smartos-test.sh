@@ -13,7 +13,7 @@
 
 #
 # Copyright 2020 Joyent, Inc.
-# Copyright 2024 MNX Cloud, Inc.
+# Copyright 2025 MNX Cloud, Inc.
 #
 
 #
@@ -23,7 +23,10 @@
 # It exits 1 if any configuration, setup or test fails.
 #
 
-export PATH=/usr/bin:/usr/sbin:/opt/tools/sbin:/opt/tools/bin:$PATH
+# Restrict path to only what we need for running tests.  Note that in illumos,
+# /bin points to /usr/bin, but /sbin is its own directory.  Also note that
+# the ZFS test suites require that we have /opt/zfs-tests/bin in $PATH
+export PATH=/usr/bin:/sbin:/usr/sbin:/opt/tools/sbin:/opt/tools/bin:/opt/zfs-tests/bin
 
 #
 # Set $KEEP as a precaution in case we ever end up running the zfs-test suite
@@ -44,6 +47,10 @@ FAILED_TESTS=""
 function fatal {
     echo "ERROR: $@"
     exit 1
+}
+
+function driver_install_fail {
+    fatal "failed to add $1 driver"
 }
 
 function warn {
@@ -235,8 +242,15 @@ function setup_pkgsrc {
 # consult with pkgsrc and/or maintainers of usr/src/test tests to update.
 
 function install_required_pkgs {
-
     log_must pkgin -y in smartos-test-tools
+
+    # Some packages install defaults that mess with tests (e.g. OS-8582).
+    # Address those defaults here if possible.
+
+    # sudo needs to keep /opt/zfs-tests/bin in its PATH.
+    SUDOERS=/opt/tools/etc/sudoers
+    grep "^Defaults secure_path" $SUDOERS | grep -q "/opt/zfs-tests/bin" || \
+	/usr/bin/sed -I -e '/^Defaults secure_path/s,".*","'$PATH'",g' $SUDOERS
 }
 
 function add_test_accounts {
@@ -264,7 +278,7 @@ function add_test_accounts {
         zprofile=/zones/global/ztest/.profile
         if [[ ! -f $zprofile ]]; then
             cat > $zprofile <<-EOF
-PATH=/bin:/usr/bin:/sbin:/usr/sbin:/opt/tools/bin:/opt/tools/sbin:/opt/zfs-tests/bin
+PATH="$PATH"
 export PATH
 
 KEEP="zones"
@@ -289,6 +303,12 @@ EOF
         echo "ztest ALL=(ALL) NOPASSWD: ALL" >> /opt/tools/etc/sudoers.d/ztest
     fi
 }
+
+#
+# *_test_check() functions exist because some illumos tests assume some
+# reality checks, test drivers, or other prerequisites, that we cannot just
+# extract from the tests-tar tarball.
+#
 
 function zfs_test_check {
     # DISKS is set either in our environment, or in the .profile of ~ztest.
@@ -318,10 +338,9 @@ function zfs_test_check {
     fi
 
     # Allow access to ZFS unit tests driver.
-    add_drv zut
+    add_drv zut || driver_install_fail zut
     # OKAY, now we can run it!
     log_test zfstest su - ztest -c /opt/zfs-tests/bin/zfstest
-    rem_drv zut
 }
 
 function nvme_test_check {
@@ -336,17 +355,33 @@ function nvme_test_check {
     fi
 }
 
+function bhyve_test_check {
+    # Add the VMM test driver. It needs to be a bit more permissive than
+    # just root@gz safe.
+    add_drv -m '* 0666 root sys' \
+	-p 'read_priv_set=sys_devices write_priv_set=sys_devices' \
+	vmm_drv_test || driver_install_fail vmm_drv_test
+
+    log_test bhyvetest /opt/bhyve-tests/bin/bhyvetest
+}
+
+function os_tests_check {
+    # Add the ktest driver.
+    add_drv ktest || driver_install_fail ktest
+    # OKAY, now we can run it!
+    log_testrunner os-tests /opt/os-tests/runfiles/default.run
+}
+
 #
 # By using log_test or log_testrunner, we accumulate the exit codes from each
 # test run to $RESULT.
 #
-# We don't - yet - run net-tests, smbclient-tests, zfs-tests, or the dtrace
-# suite.
+# We don't - yet - run net-tests, smbclient-tests, or the dtrace suite.
 #
 function execute_tests {
 
     log "Starting test runs"
-    log_test bhyvetest /opt/bhyve-tests/bin/bhyvetest
+    bhyve_test_check
     log_testrunner crypto-tests /opt/crypto-tests/runfiles/default.run
     log_testrunner elf-tests /opt/elf-tests/runfiles/default.run
     log_testrunner libc-tests /opt/libc-tests/runfiles/default.run
@@ -354,7 +389,7 @@ function execute_tests {
     log_testrunner libproc-tests /opt/libproc-tests/runfiles/default.run
     log_test vndtest /opt/vndtest/bin/vndtest -a
     log_testrunner util-tests /opt/util-tests/runfiles/default.run
-    log_testrunner os-tests /opt/os-tests/runfiles/default.run
+    os_tests_check
     nvme_test_check
     zfs_test_check
 

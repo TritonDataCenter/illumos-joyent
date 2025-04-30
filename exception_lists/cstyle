@@ -19,6 +19,7 @@ usr/src/common/acpica/utilities/utnonansi.c
 usr/src/common/acpica/utilities/utxferror.c
 usr/src/cmd/ast/libshell/common/illumos_cmdlist.h
 usr/src/cmd/cxgbetool/*
+usr/src/cmd/hal/hald/util.c
 usr/src/cmd/hal/tools/hal_set_property.c
 usr/src/cmd/krb5/kadmin/cli/kadmin_ct.c
 usr/src/cmd/krb5/kadmin/cli/kadmin.c
@@ -90,6 +91,8 @@ usr/src/cmd/pools/poold/libjpool/jpool.h
 usr/src/cmd/pools/poold/libjsyslog/jsyslog.h
 usr/src/cmd/ttymon/sttyparse.c
 usr/src/cmd/vi/
+usr/src/cmd/zic/
+usr/src/cmd/zdump/
 usr/src/common/ficl/ficltokens.h
 usr/src/common/bzip2/bzlib.h
 usr/src/common/bzip2/crctable.c
@@ -820,6 +823,7 @@ usr/src/uts/common/inet/cc.h
 usr/src/uts/common/inet/cc/cc_cubic.c
 usr/src/uts/common/inet/cc/cc_module.h
 usr/src/uts/common/inet/cc/cc_newreno.c
+usr/src/uts/common/inet/ipf/ipf.h
 usr/src/uts/common/io/bnx/570x/*
 usr/src/uts/common/io/bnx/include/*
 usr/src/uts/common/io/bnxe/577xx/*
@@ -852,7 +856,10 @@ usr/src/uts/common/io/bge/bge_kstats.c
 usr/src/uts/common/io/bge/bge_impl.h
 usr/src/uts/common/io/bge/bge_send.c
 usr/src/uts/common/io/bge/bge_hw.h
-usr/src/uts/common/io/cxgbe/*
+usr/src/uts/common/io/cxgbe/common/*
+usr/src/uts/common/io/cxgbe/firmware/*
+usr/src/uts/common/io/cxgbe/t4nex/cudbg*
+usr/src/uts/common/io/cxgbe/t4nex/fastlz*
 usr/src/uts/common/io/e1000api/e1000_80003es2lan.c
 usr/src/uts/common/io/e1000api/e1000_80003es2lan.h
 usr/src/uts/common/io/e1000api/e1000_82540.c
@@ -1274,7 +1281,9 @@ usr/src/cmd/bhyve/common/smbiostbl.[ch]
 usr/src/cmd/bhyve/common/tpm_device.c
 usr/src/cmd/bhyve/common/tpm_emul.h
 usr/src/cmd/bhyve/common/tpm_emul_passthru.c
+usr/src/cmd/bhyve/common/tpm_emul_swtpm.c
 usr/src/cmd/bhyve/common/tpm_intf.h
+usr/src/cmd/bhyve/common/tpm_intf_crb.c
 usr/src/cmd/bhyve/common/tpm_intf_crb.c
 usr/src/cmd/bhyve/common/tpm_ppi.h
 usr/src/cmd/bhyve/common/tpm_ppi_qemu.c

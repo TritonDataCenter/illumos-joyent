@@ -27,6 +27,7 @@
  * Copyright (c) 2018, Joyent, Inc.  All rights reserved.
  * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2013 by Delphix. All rights reserved.
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -39,6 +40,7 @@
 #include <mdb/mdb_kreg_impl.h>
 #include <mdb/mdb_debug.h>
 #include <mdb/mdb_modapi.h>
+#include <mdb/mdb_stack.h>
 #include <mdb/mdb_isautil.h>
 #include <mdb/mdb_amd64util.h>
 #include <mdb/mdb_ctf.h>
@@ -500,45 +502,89 @@ mdb_amd64_next(mdb_tgt_t *t, uintptr_t *p, kreg_t pc, mdb_instr_t curinstr)
 	return (0);
 }
 
-/*ARGSUSED*/
 int
-mdb_amd64_kvm_frame(void *arglim, uintptr_t pc, uint_t argc, const long *argv,
+mdb_amd64_kvm_frame(void *argp, uintptr_t pc, uint_t argc, const long *argv,
     const mdb_tgt_gregset_t *gregs)
 {
-	argc = MIN(argc, (uintptr_t)arglim);
-	mdb_printf("%a(", pc);
+	mdb_stack_frame_hdl_t *hdl = argp;
+	uint64_t bp;
 
-	if (argc != 0) {
-		mdb_printf("%lr", *argv++);
-		for (argc--; argc != 0; argc--)
-			mdb_printf(", %lr", *argv++);
-	}
-
-	mdb_printf(")\n");
+	bp = gregs->kregs[KREG_RBP];
+	mdb_stack_frame(hdl, pc, bp, argc, argv);
 	return (0);
 }
 
-int
-mdb_amd64_kvm_framev(void *arglim, uintptr_t pc, uint_t argc, const long *argv,
-    const mdb_tgt_gregset_t *gregs)
+/*
+ * Check if the instruction immediately before the given program counter (pcp)
+ * is a CALL instruction on AMD64. Since x86-64 instructions are
+ * variable-length, we read the 8 bytes preceding the PC and look for specific
+ * call encodings at known offsets that would align with common call
+ * instruction lengths. Although x86 instructions can be up to 15 bytes long,
+ * for a CALL to reach that length would require a long sequence of prefixes.
+ * Of those, only the address-size prefix would affect where we need to look
+ * for the instruction, and such prefixes are extremely rare in real-world
+ * code.
+ */
+boolean_t
+mdb_amd64_prev_callcheck(uintptr_t pcp)
 {
+	uint8_t buf[8];
+
 	/*
-	 * Historically adb limited stack trace argument display to a fixed-
-	 * size number of arguments since no symbolic debugging info existed.
-	 * On amd64 we can detect the true number of saved arguments so only
-	 * respect an arglim of zero; otherwise display the entire argv[].
+	 * Ensure we can read 8 bytes before the PC. This accommodates the
+	 * largest call encoding we care about (far calls).
 	 */
-	if (arglim == 0)
-		argc = 0;
+	if (pcp < 8 || mdb_vread(buf, sizeof (buf), pcp - 8) != sizeof (buf))
+		return (B_FALSE);
 
-	mdb_printf("%0?lr %a(", gregs->kregs[KREG_RBP], pc);
+	/*
+	 * Direct near call: CALL rel32
+	 * Opcode: E8, followed by 4-byte PC-relative offset.
+	 * Instruction is 5 bytes long; opcode is at buf[3].
+	 */
+	if (buf[3] == 0xe8)
+		return (B_TRUE);
 
-	if (argc != 0) {
-		mdb_printf("%lr", *argv++);
-		for (argc--; argc != 0; argc--)
-			mdb_printf(", %lr", *argv++);
-	}
+	/*
+	 * Indirect near call: CALL r/m64
+	 * Opcode: FF /2 (i.e., reg field of ModR/M is 010).
+	 *
+	 * We're expecting the instruction to be exactly 2 bytes: FF 14,
+	 * with opcode at buf[5] and ModR/M at buf[6].
+	 *
+	 * buf[6] == 0x14 means:
+	 *  - mod = 00 (no displacement)
+	 *  - reg = 010 (CALL)
+	 *  - r/m = 100 (SIB follows — typically [rsp])
+	 *
+	 * This form is common in PLT stubs like: CALL QWORD PTR [RSP]
+	 *
+	 * Other encodings of FF /2 are less plausible here:
+	 *  - mod = 01 - 8-bit displacement - unlikely for noreturn functions
+	 *  - mod = 10 - 32-bit displacement - would overlap with PC; invalid
+	 *  - mod = 00 with r/m != 100 - e.g., CALL RAX - would return to
+	 *    buf[7], not pcp
+	 */
+	if (buf[5] == 0xff && buf[6] == 0x14)
+		return (B_TRUE);
 
-	mdb_printf(")\n");
-	return (0);
+	/*
+	 * Indirect RIP-relative call: CALL QWORD PTR [RIP + disp32]
+	 * Encoding: FF 15 xx xx xx xx
+	 * Instruction is 6 bytes long; opcode at buf[2], ModR/M at buf[3].
+	 * Common in PLT thunks and PIC code.
+	 */
+	if (buf[2] == 0xff && buf[3] == 0x15)
+		return (B_TRUE);
+
+	/*
+	 * Far call (segment-based): CALL FAR ptr16:32
+	 * Opcode: 9A, followed by 6-byte far pointer.
+	 * Rare in modern 64-bit code but still valid.
+	 * Instruction is 7 bytes; opcode at buf[0].
+	 */
+	if (buf[0] == 0x9a)
+		return (B_TRUE);
+
+	return (B_FALSE);
 }

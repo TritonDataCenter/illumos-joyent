@@ -8,10 +8,11 @@
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
  */
+/* This file is dual-licensed; see usr/src/contrib/bhyve/LICENSE */
 
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -199,14 +200,15 @@ vmm_gpt_lvl_index(vmm_gpt_node_level_t level, uint64_t gpa)
 {
 	ASSERT(level < MAX_GPT_LEVEL);
 
-	const uint_t shifts[] = {
-		[LEVEL4] = 39,
-		[LEVEL3] = 30,
-		[LEVEL2] = 21,
-		[LEVEL1] = 12,
-	};
 	const uint16_t mask = (1U << 9) - 1;
-	return ((gpa >> shifts[level]) & mask);
+	switch (level) {
+	case LEVEL4: return ((gpa >> 39) & mask);
+	case LEVEL3: return ((gpa >> 30) & mask);
+	case LEVEL2: return ((gpa >> 21) & mask);
+	case LEVEL1: return ((gpa >> 12) & mask);
+	default:
+		panic("impossible level value");
+	};
 }
 
 /* Get mask for addresses of entries at a given table level. */
@@ -215,13 +217,14 @@ vmm_gpt_lvl_mask(vmm_gpt_node_level_t level)
 {
 	ASSERT(level < MAX_GPT_LEVEL);
 
-	const uint64_t gpa_mask[] = {
-		[LEVEL4] = 0xffffff8000000000ul, /* entries cover 512G */
-		[LEVEL3] = 0xffffffffc0000000ul, /* entries cover 1G */
-		[LEVEL2] = 0xffffffffffe00000ul, /* entries cover 2M */
-		[LEVEL1] = 0xfffffffffffff000ul, /* entries cover 4K */
+	switch (level) {
+	case LEVEL4: return (0xffffff8000000000ul);	/* entries cover 512G */
+	case LEVEL3: return (0xffffffffc0000000ul);	/* entries cover 1G */
+	case LEVEL2: return (0xffffffffffe00000ul);	/* entries cover 2M */
+	case LEVEL1: return (0xfffffffffffff000ul);	/* entries cover 4K */
+	default:
+		panic("impossible level value");
 	};
-	return (gpa_mask[level]);
 }
 
 /* Get length of GPA covered by entries at a given table level. */
@@ -230,13 +233,14 @@ vmm_gpt_lvl_len(vmm_gpt_node_level_t level)
 {
 	ASSERT(level < MAX_GPT_LEVEL);
 
-	const uint64_t gpa_len[] = {
-		[LEVEL4] = 0x8000000000ul,	/* entries cover 512G */
-		[LEVEL3] = 0x40000000ul,	/* entries cover 1G */
-		[LEVEL2] = 0x200000ul,		/* entries cover 2M */
-		[LEVEL1] = 0x1000ul,		/* entries cover 4K */
+	switch (level) {
+	case LEVEL4: return (0x8000000000ul);	/* entries cover 512G */
+	case LEVEL3: return (0x40000000ul);	/* entries cover 1G */
+	case LEVEL2: return (0x200000ul);	/* entries cover 2M */
+	case LEVEL1: return (0x1000ul);		/* entries cover 4K */
+	default:
+		panic("impossible level value");
 	};
-	return (gpa_len[level]);
 }
 
 /*
@@ -301,11 +305,8 @@ vmm_gpt_node_next(vmm_gpt_node_t *node, bool only_seq)
 
 	/* Try our next sibling */
 	vmm_gpt_node_t *next = node->vgn_sib_next;
-	if (next != NULL) {
-		if (next->vgn_gpa == gpa_match || !only_seq) {
-			return (next);
-		}
-	} else {
+
+	if (next == NULL) {
 		/*
 		 * If the next-sibling pointer is NULL on the node, it can mean
 		 * one of two things:
@@ -318,17 +319,21 @@ vmm_gpt_node_next(vmm_gpt_node_t *node, bool only_seq)
 		 *    boundary of the node.
 		 *
 		 * Either way, the proper course of action is to check the first
-		 * child of our parent's next sibling.
+		 * child of our parent's next sibling (if the parent is not the
+		 * root of the GPT itself).
 		 */
-		vmm_gpt_node_t *pibling = node->vgn_parent->vgn_sib_next;
-		if (pibling != NULL) {
-			next = pibling->vgn_children;
-			if (next != NULL) {
-				if (next->vgn_gpa == gpa_match || !only_seq) {
-					return (next);
-				}
+		if (node->vgn_parent != NULL && node->vgn_level > LEVEL3) {
+			vmm_gpt_node_t *psibling =
+			    vmm_gpt_node_next(node->vgn_parent, true);
+			if (psibling != NULL) {
+				next = psibling->vgn_children;
 			}
 		}
+	}
+
+	if (next != NULL &&
+	    (next->vgn_gpa == gpa_match || !only_seq)) {
+		return (next);
 	}
 
 	return (NULL);

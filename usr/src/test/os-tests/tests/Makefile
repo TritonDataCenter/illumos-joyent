@@ -14,7 +14,7 @@
 # Copyright 2020 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
-# Copyright 2024 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 #
 
 SUBDIRS_i386 =		\
@@ -30,10 +30,13 @@ SUBDIRS =       \
 		definit \
 		execvpe \
 		file-locking \
+		hexdump \
 		ilstr \
 		ksensor \
 		ksid \
+		ktest \
 		libtopo \
+		mac \
 		minttl \
 		oclo \
 		pf_key \
@@ -42,6 +45,7 @@ SUBDIRS =       \
 		regression \
 		sdevfs \
 		secflags \
+		secure_getenv \
 		signalfd \
 		sigqueue \
 		sockfs \

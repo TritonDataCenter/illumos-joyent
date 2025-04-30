@@ -23,13 +23,16 @@
 # Use is subject to license terms.
 #
 # Copyright 2018 Joyent, Inc.
+# Copyright 2024 Oxide Computer Company
 #
 
 PROG = smbios
-OBJS = smbios.o bitext.o
+OBJS = smbios.o bitext.o $(HEXDUMP_OBJS)
 SRCS = $(OBJS:%.o=%.c)
 
 include ../Makefile.cmd
+include ../Makefile.cmd.64
+include $(SRC)/common/hexdump/Makefile.com
 
 CFLAGS += $(CCVERBOSE)
 LDLIBS += -lsmbios -ljedec
@@ -56,4 +59,5 @@ clean:
 
 install: $(ROOTUSRSBINPROG)
 
+include $(SRC)/common/hexdump/Makefile.targ
 include ../Makefile.targ

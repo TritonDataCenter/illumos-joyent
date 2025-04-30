@@ -26,7 +26,7 @@
  * Copyright 2012 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2018, Joyent, Inc.
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include <sys/stdbool.h>
@@ -34,20 +34,24 @@
 #include <sys/controlregs.h>
 #include <sys/kobj.h>
 #include <sys/kobj_impl.h>
+#include <sys/machparam.h>
 #include <sys/ontrap.h>
 #include <sys/sysmacros.h>
+#include <sys/systm.h>
 #include <sys/ucode.h>
 #include <sys/ucode_amd.h>
 #include <ucode/ucode_errno.h>
 #include <ucode/ucode_utils_amd.h>
 #include <sys/x86_archext.h>
 
-extern void *ucode_zalloc(processorid_t, size_t);
-extern void ucode_free(processorid_t, void *, size_t);
+extern void *ucode_zalloc(size_t);
+extern void ucode_free(void *, size_t);
 extern const char *ucode_path(void);
 extern int ucode_force_update;
+extern bool ucode_use_kmem;
 
 static ucode_file_amd_t *amd_ucodef;
+static size_t amd_ucodef_len, amd_ucodef_buflen;
 static ucode_eqtbl_amd_t *ucode_eqtbl_amd;
 static uint_t ucode_eqtbl_amd_entries;
 
@@ -81,13 +85,14 @@ ucode_capable_amd(cpu_t *cp)
  * or when the cached microcode doesn't match the CPU being processed.
  */
 static void
-ucode_file_reset_amd(processorid_t id)
+ucode_file_reset_amd(void)
 {
 	if (amd_ucodef == NULL)
 		return;
 
-	ucode_free(id, amd_ucodef, sizeof (*amd_ucodef));
+	ucode_free(amd_ucodef, amd_ucodef_buflen);
 	amd_ucodef = NULL;
+	amd_ucodef_buflen = amd_ucodef_len = 0;
 }
 
 /*
@@ -100,8 +105,8 @@ ucode_equiv_cpu_amd(cpu_t *cp, uint16_t *eq_sig)
 	int cpi_sig = cpuid_getsig(cp);
 	ucode_errno_t ret = EM_OK;
 
-	if (cp->cpu_id == 0 || ucode_eqtbl_amd == NULL) {
-		name = ucode_zalloc(cp->cpu_id, MAXPATHLEN);
+	if (ucode_eqtbl_amd == NULL) {
+		name = ucode_zalloc(MAXPATHLEN);
 		if (name == NULL)
 			return (EM_NOMEM);
 
@@ -110,15 +115,15 @@ ucode_equiv_cpu_amd(cpu_t *cp, uint16_t *eq_sig)
 		    UCODE_AMD_EQUIVALENCE_TABLE_NAME);
 	}
 
-	if (cp->cpu_id == 0) {
+	if (!ucode_use_kmem) {
 		/*
-		 * No kmem_zalloc() etc. available on boot cpu.
+		 * No kmem_zalloc() etc. available yet.
 		 */
 		ucode_eqtbl_amd_t eqtbl;
 		int count, offset = 0;
 		intptr_t fd;
 
-		ASSERT(name != NULL);
+		ASSERT3P(name, !=, NULL);
 
 		if ((fd = kobj_open(name)) == -1) {
 			ret = EM_OPENFILE;
@@ -142,14 +147,13 @@ ucode_equiv_cpu_amd(cpu_t *cp, uint16_t *eq_sig)
 
 		/*
 		 * If not already done, load the equivalence table.
-		 * Not done on boot CPU.
 		 */
 		if (ucode_eqtbl_amd == NULL) {
 			struct _buf *eq;
 			uint64_t size;
 			int count;
 
-			ASSERT(name != NULL);
+			ASSERT3P(name, !=, NULL);
 
 			if ((eq = kobj_open_file(name)) == (struct _buf *)-1) {
 				ret = EM_OPENFILE;
@@ -210,14 +214,14 @@ ucode_equiv_cpu_amd(cpu_t *cp, uint16_t *eq_sig)
 	}
 
 out:
-	ucode_free(cp->cpu_id, name, MAXPATHLEN);
+	ucode_free(name, MAXPATHLEN);
 
 	return (ret);
 }
 
 static ucode_errno_t
 ucode_match_amd(uint16_t eq_sig, cpu_ucode_info_t *uinfop,
-    ucode_file_amd_t *ucodefp, int size)
+    ucode_file_amd_t *ucodefp, size_t size)
 {
 	ucode_header_amd_t *uh;
 
@@ -258,6 +262,28 @@ ucode_match_amd(uint16_t eq_sig, cpu_ucode_info_t *uinfop,
 }
 
 /*
+ * Copy the given ucode into cpu_ucode_info_t in preparation for loading onto
+ * the corresponding CPU via ucode_load_amd().
+ */
+static ucode_errno_t
+ucode_copy_amd(cpu_ucode_info_t *uinfop, const ucode_file_amd_t *ucodefp,
+    size_t size)
+{
+	ASSERT3P(uinfop->cui_pending_ucode, ==, NULL);
+	ASSERT3U(size, <=, UCODE_AMD_MAXSIZE);
+
+	uinfop->cui_pending_ucode = ucode_zalloc(size);
+	if (uinfop->cui_pending_ucode == NULL)
+		return (EM_NOMEM);
+
+	(void) memcpy(uinfop->cui_pending_ucode, ucodefp, size);
+	uinfop->cui_pending_size = size;
+	uinfop->cui_pending_rev = ucodefp->uf_header.uh_patch_id;
+
+	return (EM_OK);
+}
+
+/*
  * Populate the ucode file structure from microcode file corresponding to
  * this CPU, if exists.
  *
@@ -266,9 +292,8 @@ ucode_match_amd(uint16_t eq_sig, cpu_ucode_info_t *uinfop,
 static ucode_errno_t
 ucode_locate_amd(cpu_t *cp, cpu_ucode_info_t *uinfop)
 {
-	ucode_file_amd_t *ucodefp = amd_ucodef;
 	uint16_t eq_sig;
-	int rc;
+	ucode_errno_t rc;
 
 	/* get equivalent CPU id */
 	eq_sig = 0;
@@ -280,18 +305,23 @@ ucode_locate_amd(cpu_t *cp, cpu_ucode_info_t *uinfop)
 	 * allocated before, check for a matching microcode to avoid loading
 	 * the file again.
 	 */
+	if (amd_ucodef == NULL) {
+		size_t len = PAGESIZE;
 
-	if (ucodefp == NULL) {
-		ucodefp = ucode_zalloc(cp->cpu_id, sizeof (*ucodefp));
-	} else if (ucode_match_amd(eq_sig, uinfop, ucodefp, sizeof (*ucodefp))
-	    == EM_OK) {
-		return (EM_OK);
+		amd_ucodef = ucode_zalloc(len);
+		if (amd_ucodef == NULL)
+			return (EM_NOMEM);
+		amd_ucodef_buflen = len;
+	} else {
+		rc = ucode_match_amd(eq_sig, uinfop, amd_ucodef,
+		    amd_ucodef_len);
+		if (rc == EM_HIGHERREV)
+			return (rc);
+		if (rc == EM_OK) {
+			return (ucode_copy_amd(uinfop, amd_ucodef,
+			    amd_ucodef_len));
+		}
 	}
-
-	if (ucodefp == NULL)
-		return (EM_NOMEM);
-
-	amd_ucodef = ucodefp;
 
 	/*
 	 * Find the patch for this CPU. The patch files are named XXXX-YY, where
@@ -300,21 +330,73 @@ ucode_locate_amd(cpu_t *cp, cpu_ucode_info_t *uinfop)
 	 * numbers than less specific patches, so we can just load the first
 	 * patch that matches.
 	 */
-
 	for (uint_t i = 0; i < 0xff; i++) {
 		char name[MAXPATHLEN];
 		intptr_t fd;
 		int count;
+		/* This is a uint_t to match the signature of kobj_read() */
+		uint_t size;
 
 		(void) snprintf(name, MAXPATHLEN, "%s/%s/%04X-%02X",
 		    ucode_path(), cpuid_getvendorstr(cp), eq_sig, i);
+
 		if ((fd = kobj_open(name)) == -1)
 			return (EM_NOMATCH);
-		count = kobj_read(fd, (char *)ucodefp, sizeof (*ucodefp), 0);
-		(void) kobj_close(fd);
 
-		if (ucode_match_amd(eq_sig, uinfop, ucodefp, count) == EM_OK)
-			return (EM_OK);
+		/*
+		 * Since this code will run for the boot CPU before kmem is
+		 * initialised we can't use the kobj_*_file() functions.
+		 * In the case where the archive contains compressed files,
+		 * kobj_fstat() will return the compressed size and so we must
+		 * read the entire file through to determine its size.
+		 */
+		size = 0;
+		do {
+			count = kobj_read(fd, (char *)amd_ucodef,
+			    amd_ucodef_buflen, size);
+			if (count < 0) {
+				(void) kobj_close(fd);
+				return (EM_OPENFILE);
+			}
+			size += count;
+		} while (count == amd_ucodef_buflen &&
+		    size <= UCODE_AMD_MAXSIZE);
+
+		if (size > UCODE_AMD_MAXSIZE) {
+			(void) kobj_close(fd);
+			cmn_err(CE_WARN, "ucode: microcode file %s is "
+			    "too large (over 0x%x bytes)", name,
+			    UCODE_AMD_MAXSIZE);
+			return (EM_FILESIZE);
+		}
+
+		if (size > amd_ucodef_buflen) {
+			size_t len = P2ROUNDUP(size, PAGESIZE);
+
+			ucode_file_reset_amd();
+			amd_ucodef = ucode_zalloc(len);
+			if (amd_ucodef == NULL) {
+				(void) kobj_close(fd);
+				return (EM_NOMEM);
+			}
+			amd_ucodef_buflen = len;
+		}
+
+		count = kobj_read(fd, (char *)amd_ucodef, amd_ucodef_buflen, 0);
+		(void) kobj_close(fd);
+		if (count < 0 || count != size)
+			return (EM_OPENFILE);
+
+		amd_ucodef_len = count;
+
+		rc = ucode_match_amd(eq_sig, uinfop, amd_ucodef,
+		    amd_ucodef_len);
+		if (rc == EM_HIGHERREV)
+			return (rc);
+		if (rc == EM_OK) {
+			return (ucode_copy_amd(uinfop, amd_ucodef,
+			    amd_ucodef_len));
+		}
 	}
 	return (EM_NOMATCH);
 }
@@ -325,13 +407,14 @@ ucode_read_rev_amd(cpu_ucode_info_t *uinfop)
 	uinfop->cui_rev = rdmsr(MSR_AMD_PATCHLEVEL);
 }
 
-static uint32_t
+static void
 ucode_load_amd(cpu_ucode_info_t *uinfop)
 {
-	ucode_file_amd_t *ucodefp = amd_ucodef;
+	ucode_file_amd_t *ucodefp = uinfop->cui_pending_ucode;
 	on_trap_data_t otd;
 
-	VERIFY(ucodefp != NULL);
+	VERIFY3P(ucodefp, !=, NULL);
+	VERIFY3U(ucodefp->uf_header.uh_patch_id, ==, uinfop->cui_pending_rev);
 
 	kpreempt_disable();
 	if (on_trap(&otd, OT_DATA_ACCESS)) {
@@ -340,11 +423,9 @@ ucode_load_amd(cpu_ucode_info_t *uinfop)
 	}
 	wrmsr(MSR_AMD_PATCHLOADER, (uintptr_t)ucodefp);
 	no_trap();
-	ucode_read_rev_amd(uinfop);
 
 out:
 	kpreempt_enable();
-	return (ucodefp->uf_header.uh_patch_id);
 }
 
 static ucode_errno_t
@@ -354,7 +435,7 @@ ucode_extract_amd(ucode_update_t *uusp, uint8_t *ucodep, int size)
 	ucode_eqtbl_amd_t *eqtbl;
 	ucode_file_amd_t *ufp;
 	int count;
-	int higher = 0;
+	bool higher = false;
 	ucode_errno_t rc = EM_NOMATCH;
 	uint16_t eq_sig;
 
@@ -386,7 +467,7 @@ ucode_extract_amd(ucode_update_t *uusp, uint8_t *ucodep, int size)
 
 		rc = ucode_match_amd(eq_sig, &uusp->info, ufp, count);
 		if (rc == EM_HIGHERREV)
-			higher = 1;
+			higher = true;
 	} while (rc != EM_OK);
 
 	uusp->ucodep = (uint8_t *)ufp;

@@ -11,6 +11,7 @@
 
 #
 # Copyright 2019, Joyent, Inc.
+# Copyright 2024 Oxide Computer Company
 #
 
 include $(SRC)/Makefile.master
@@ -37,12 +38,14 @@ PROGS =		\
 	yk-readonly
 
 COMMON_OBJS = \
-	atr.o
+	atr.o		\
+	$(HEXDUMP_OBJS)
 
 atrparse := EXTRA_OBJS = $(COMMON_OBJS)
 
 include $(SRC)/cmd/Makefile.cmd
 include $(SRC)/test/Makefile.com
+include $(SRC)/common/hexdump/Makefile.com
 
 CMDS = $(PROGS:%=$(TESTDIR)/%)
 $(CMDS) := FILEMODE = 0555
@@ -80,3 +83,5 @@ $(TESTDIR)/%: %
 %: %.o
 	$(LINK.c) -o $@ $< $(EXTRA_OBJS) $(LDLIBS)
 	$(POST_PROCESS)
+
+include $(SRC)/common/hexdump/Makefile.targ

@@ -19,7 +19,7 @@
 # CDDL HEADER END
 #
 #
-# Copyright 2023 MNX Cloud, Inc.
+# Copyright 2025 MNX Cloud, Inc.
 # Copyright 2020 Joyent, Inc.
 # Copyright 2017 ASS-Einrichtungssysteme GmbH
 #
@@ -2059,12 +2059,26 @@ f platform/i86pc/ucode/AuthenticAMD/7001-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/8012-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/8082-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/8310-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/8601-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/8681-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/8710-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/8A00-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/A010-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/A011-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/A012-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A082-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/A111-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/A112-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A181-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A210-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A212-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A441-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A500-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A612-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A741-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A752-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A780-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/A7C0-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/AA01-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/AA02-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/equivalence-table 0444 root sys
@@ -2746,7 +2760,7 @@ f usr/bin/fdformat 4555 root bin
 h usr/bin/fg=usr/bin/alias
 h usr/bin/fgrep=usr/bin/grep
 f usr/bin/ficl-sys 0555 root bin
-f usr/bin/file 0555 root bin
+s usr/bin/file=../has/bin/file
 f usr/bin/filesync 0555 root bin
 f usr/bin/find 0555 root bin
 f usr/bin/fmt 0555 root bin
@@ -3116,10 +3130,13 @@ d usr/gnu/share/man/man3 0755 root bin
 d usr/gnu/share/man/man5 0755 root bin
 d usr/gnu/share/man/man7 0755 root bin
 d usr/has 0755 root bin
+d usr/has/bin 0755 root bin
+f usr/has/bin/file 0755 root bin
 d usr/has/man 0755 root bin
 d usr/has/man/man1has 0755 root bin
 f usr/has/man/man1has/csh.1has 0444 root bin
 f usr/has/man/man1has/edit.1has 0444 root bin
+f usr/has/man/man1has/file.1has 0444 root bin
 f usr/has/man/man1has/vi.1has 0444 root bin
 d usr/include 0755 root bin
 f usr/include/aclutils.h 0644 root bin
@@ -3971,6 +3988,7 @@ f usr/include/spawn.h 0644 root bin
 f usr/include/stack_unwind.h 0644 root bin
 f usr/include/stdalign.h 0644 root bin
 f usr/include/stdarg.h 0644 root bin
+f usr/include/stdbit.h 0644 root bin
 f usr/include/stdbool.h 0644 root bin
 f usr/include/stddef.h 0644 root bin
 f usr/include/stdint.h 0644 root bin
@@ -4617,14 +4635,17 @@ f usr/include/sys/nvme/kioxia_cd8.h 0644 root bin
 f usr/include/sys/nvme/micron.h 0644 root bin
 f usr/include/sys/nvme/micron_7300.h 0644 root bin
 f usr/include/sys/nvme/micron_74x0.h 0644 root bin
+f usr/include/sys/nvme/micron_9550.h 0644 root bin
 f usr/include/sys/nvme/micron_x500.h 0644 root bin
 f usr/include/sys/nvme/ocp.h 0644 root bin
+f usr/include/sys/nvme/phison.h 0644 root bin
 f usr/include/sys/nvme/solidigm.h 0644 root bin
 f usr/include/sys/nvme/solidigm_p5xxx.h 0644 root bin
 f usr/include/sys/nvme/solidigm_ps10x0.h 0644 root bin
 f usr/include/sys/nvme/wdc.h 0644 root bin
 f usr/include/sys/nvme/wdc_sn65x.h 0644 root bin
 f usr/include/sys/nvme/wdc_sn840.h 0644 root bin
+f usr/include/sys/nvme/wdc_sn861.h 0644 root bin
 f usr/include/sys/nvpair.h 0644 root bin
 f usr/include/sys/nvpair_impl.h 0644 root bin
 f usr/include/sys/objfs.h 0644 root bin
@@ -4842,6 +4863,7 @@ f usr/include/sys/stat_impl.h 0644 root bin
 f usr/include/sys/statfs.h 0644 root bin
 f usr/include/sys/statvfs.h 0644 root bin
 f usr/include/sys/stdalign.h 0644 root bin
+f usr/include/sys/stdbit.h 0644 root bin
 f usr/include/sys/stdbool.h 0644 root bin
 f usr/include/sys/stddef.h 0644 root bin
 f usr/include/sys/stdint.h 0644 root bin
@@ -5055,7 +5077,6 @@ f usr/include/time.h 0644 root bin
 f usr/include/tiuser.h 0644 root bin
 d usr/include/tsol 0755 root bin
 f usr/include/tsol/label.h 0644 root bin
-f usr/include/tzfile.h 0644 root bin
 f usr/include/uchar.h 0644 root bin
 f usr/include/ucontext.h 0644 root bin
 f usr/include/ucred.h 0644 root bin
@@ -5663,6 +5684,9 @@ f usr/lib/brand/bhyve/platform.xml 0444 root sys
 f usr/lib/brand/bhyve/statechange 0555 root sys
 f usr/lib/brand/bhyve/uninstall 0555 root sys
 f usr/lib/brand/bhyve/zhyve 0555 root sys
+d usr/lib/brand/builder 0555 root sys
+f usr/lib/brand/builder/config.xml 0444 root root
+f usr/lib/brand/builder/platform.xml 0444 root root
 d usr/lib/brand/jcommon 0755 root bin
 f usr/lib/brand/jcommon/cattach 0444 root root
 f usr/lib/brand/jcommon/cdetach 0444 root root
@@ -6104,6 +6128,7 @@ f usr/lib/fs/pcfs/fstyp.so.1 0555 root bin
 h usr/lib/fs/pcfs/fstyp=usr/sbin/fstyp
 f usr/lib/fs/pcfs/mkfs 0555 root bin
 f usr/lib/fs/pcfs/mount 0555 root bin
+f usr/lib/fs/pcfs/pmbr 0444 root bin
 d usr/lib/fs/proc 0755 root sys
 f usr/lib/fs/proc/mount 0555 root bin
 d usr/lib/fs/sharefs 0755 root sys
@@ -6655,6 +6680,7 @@ f usr/lib/iconv/amd64/UCS-2LE%UTF-8.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%646.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%UCS-2.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%UCS-2LE.so 0755 root bin
+f usr/lib/iconv/alias 0444 root bin
 f usr/lib/idmapd 0555 root bin
 d usr/lib/inet 0755 root bin
 d usr/lib/inet/amd64 0755 root bin
@@ -10246,7 +10272,7 @@ f usr/lib/mdb/proc/amd64/libavl.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libc.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libnvpair.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libproc.so 0555 root sys
-f usr/lib/mdb/proc/amd64/libpython3.9.so 0555 root sys
+f usr/lib/mdb/proc/amd64/libpython3.12.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libsmbios.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libsysevent.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libtopo.so 0555 root sys
@@ -11530,6 +11556,7 @@ f usr/share/lib/zoneinfo/America/Ciudad_Juarez 0644 root bin
 h usr/share/lib/zoneinfo/America/Coral_Harbour=usr/share/lib/zoneinfo/America/Panama
 h usr/share/lib/zoneinfo/America/Cordoba=usr/share/lib/zoneinfo/America/Argentina/Cordoba
 f usr/share/lib/zoneinfo/America/Costa_Rica 0644 root bin
+f usr/share/lib/zoneinfo/America/Coyhaique 0644 root bin
 h usr/share/lib/zoneinfo/America/Creston=usr/share/lib/zoneinfo/America/Phoenix
 f usr/share/lib/zoneinfo/America/Cuiaba 0644 root bin
 h usr/share/lib/zoneinfo/America/Curacao=usr/share/lib/zoneinfo/America/Puerto_Rico
@@ -11691,7 +11718,7 @@ f usr/share/lib/zoneinfo/Asia/Bishkek 0644 root bin
 h usr/share/lib/zoneinfo/Asia/Brunei=usr/share/lib/zoneinfo/Asia/Kuching
 h usr/share/lib/zoneinfo/Asia/Calcutta=usr/share/lib/zoneinfo/Asia/Kolkata
 f usr/share/lib/zoneinfo/Asia/Chita 0644 root bin
-f usr/share/lib/zoneinfo/Asia/Choibalsan 0644 root bin
+h usr/share/lib/zoneinfo/Asia/Choibalsan=usr/share/lib/zoneinfo/Asia/Ulaanbaatar
 h usr/share/lib/zoneinfo/Asia/Chongqing=usr/share/lib/zoneinfo/Asia/Shanghai
 h usr/share/lib/zoneinfo/Asia/Chungking=usr/share/lib/zoneinfo/Asia/Shanghai
 f usr/share/lib/zoneinfo/Asia/Colombo 0644 root bin
@@ -11813,8 +11840,8 @@ h usr/share/lib/zoneinfo/Brazil/Acre=usr/share/lib/zoneinfo/America/Rio_Branco
 f usr/share/lib/zoneinfo/Brazil/DeNoronha 0644 root bin
 f usr/share/lib/zoneinfo/Brazil/East 0644 root bin
 f usr/share/lib/zoneinfo/Brazil/West 0644 root bin
-f usr/share/lib/zoneinfo/CET 0644 root bin
-f usr/share/lib/zoneinfo/CST6CDT 0644 root bin
+h usr/share/lib/zoneinfo/CET=usr/share/lib/zoneinfo/Europe/Brussels
+h usr/share/lib/zoneinfo/CST6CDT=usr/share/lib/zoneinfo/America/Chicago
 d usr/share/lib/zoneinfo/Canada 0755 root bin
 f usr/share/lib/zoneinfo/Canada/Atlantic 0644 root bin
 f usr/share/lib/zoneinfo/Canada/Central 0644 root bin
@@ -11828,9 +11855,9 @@ d usr/share/lib/zoneinfo/Chile 0755 root bin
 f usr/share/lib/zoneinfo/Chile/Continental 0644 root bin
 f usr/share/lib/zoneinfo/Chile/EasterIsland 0644 root bin
 f usr/share/lib/zoneinfo/Cuba 0644 root bin
-f usr/share/lib/zoneinfo/EET 0644 root bin
-f usr/share/lib/zoneinfo/EST 0644 root bin
-f usr/share/lib/zoneinfo/EST5EDT 0644 root bin
+h usr/share/lib/zoneinfo/EET=usr/share/lib/zoneinfo/Europe/Athens
+h usr/share/lib/zoneinfo/EST=usr/share/lib/zoneinfo/America/Panama
+h usr/share/lib/zoneinfo/EST5EDT=usr/share/lib/zoneinfo/America/New_York
 f usr/share/lib/zoneinfo/Egypt 0644 root bin
 f usr/share/lib/zoneinfo/Eire 0644 root bin
 d usr/share/lib/zoneinfo/Etc 0755 root bin
@@ -11942,7 +11969,7 @@ h usr/share/lib/zoneinfo/GMT+0=usr/share/lib/zoneinfo/GMT
 h usr/share/lib/zoneinfo/GMT-0=usr/share/lib/zoneinfo/GMT
 h usr/share/lib/zoneinfo/GMT0=usr/share/lib/zoneinfo/GMT
 h usr/share/lib/zoneinfo/Greenwich=usr/share/lib/zoneinfo/GMT
-f usr/share/lib/zoneinfo/HST 0644 root bin
+h usr/share/lib/zoneinfo/HST=usr/share/lib/zoneinfo/Pacific/Honolulu
 f usr/share/lib/zoneinfo/Hongkong 0644 root bin
 h usr/share/lib/zoneinfo/Iceland=usr/share/lib/zoneinfo/Africa/Abidjan
 d usr/share/lib/zoneinfo/Indian 0755 root bin
@@ -11963,9 +11990,9 @@ f usr/share/lib/zoneinfo/Jamaica 0644 root bin
 f usr/share/lib/zoneinfo/Japan 0644 root bin
 f usr/share/lib/zoneinfo/Kwajalein 0644 root bin
 f usr/share/lib/zoneinfo/Libya 0644 root bin
-f usr/share/lib/zoneinfo/MET 0644 root bin
-f usr/share/lib/zoneinfo/MST 0644 root bin
-f usr/share/lib/zoneinfo/MST7MDT 0644 root bin
+h usr/share/lib/zoneinfo/MET=usr/share/lib/zoneinfo/Europe/Brussels
+h usr/share/lib/zoneinfo/MST=usr/share/lib/zoneinfo/America/Phoenix
+h usr/share/lib/zoneinfo/MST7MDT=usr/share/lib/zoneinfo/America/Denver
 d usr/share/lib/zoneinfo/Mexico 0755 root bin
 h usr/share/lib/zoneinfo/Mexico/BajaNorte=usr/share/lib/zoneinfo/America/Tijuana
 f usr/share/lib/zoneinfo/Mexico/BajaSur 0644 root bin
@@ -11974,7 +12001,7 @@ f usr/share/lib/zoneinfo/NZ 0644 root bin
 f usr/share/lib/zoneinfo/NZ-CHAT 0644 root bin
 h usr/share/lib/zoneinfo/Navajo=usr/share/lib/zoneinfo/US/Mountain
 f usr/share/lib/zoneinfo/PRC 0644 root bin
-f usr/share/lib/zoneinfo/PST8PDT 0644 root bin
+h usr/share/lib/zoneinfo/PST8PDT=usr/share/lib/zoneinfo/America/Los_Angeles
 d usr/share/lib/zoneinfo/Pacific 0755 root bin
 f usr/share/lib/zoneinfo/Pacific/Apia 0644 root bin
 f usr/share/lib/zoneinfo/Pacific/Auckland 0644 root bin
@@ -12043,7 +12070,7 @@ f usr/share/lib/zoneinfo/US/Samoa 0644 root bin
 f usr/share/lib/zoneinfo/UTC 0644 root bin
 h usr/share/lib/zoneinfo/Universal=usr/share/lib/zoneinfo/UTC
 f usr/share/lib/zoneinfo/W-SU 0644 root bin
-f usr/share/lib/zoneinfo/WET 0644 root bin
+h usr/share/lib/zoneinfo/WET=usr/share/lib/zoneinfo/Europe/Lisbon
 h usr/share/lib/zoneinfo/Zulu=usr/share/lib/zoneinfo/UTC
 s usr/share/lib/zoneinfo/posixrules=US/Eastern
 d usr/share/lib/zoneinfo/src 0755 root bin
@@ -12183,7 +12210,7 @@ s usr/share/man/man1/fc.1=history.1
 f usr/share/man/man1/fdformat.1 0444 root bin
 s usr/share/man/man1/fg.1=jobs.1
 s usr/share/man/man1/fgrep.1=grep.1
-f usr/share/man/man1/file.1 0444 root bin
+s usr/share/man/man1/file.1=../../../has/man/man1has/file.1has
 f usr/share/man/man1/filesync.1 0444 root bin
 f usr/share/man/man1/find.1 0444 root bin
 f usr/share/man/man1/fmt.1 0444 root bin
@@ -13100,6 +13127,7 @@ s usr/share/man/man3c/door_setparam.3c=door_getparam.3c
 f usr/share/man/man3c/door_ucred.3c 0444 root bin
 s usr/share/man/man3c/door_unbind.3c=door_bind.3c
 s usr/share/man/man3c/double_to_decimal.3c=floating_to_decimal.3c
+s usr/share/man/man3c/dprintf.3c=printf.3c
 f usr/share/man/man3c/drand48.3c 0444 root bin
 f usr/share/man/man3c/dup2.3c 0444 root bin
 s usr/share/man/man3c/dup3.3c=dup2.3c
@@ -13144,6 +13172,7 @@ f usr/share/man/man3c/fcloseall.3c 0444 root bin
 s usr/share/man/man3c/fconvert.3c=econvert.3c
 s usr/share/man/man3c/fcvt.3c=ecvt.3c
 f usr/share/man/man3c/fdatasync.3c 0444 root bin
+f usr/share/man/man3c/fdclose.3c 0444 root bin
 f usr/share/man/man3c/fdetach.3c 0444 root bin
 f usr/share/man/man3c/fdopen.3c 0444 root bin
 s usr/share/man/man3c/fdopendir.3c=opendir.3c
@@ -13254,6 +13283,7 @@ f usr/share/man/man3c/gethrtime.3c 0444 root bin
 s usr/share/man/man3c/gethrvtime.3c=gethrtime.3c
 f usr/share/man/man3c/getline.3c 0444 root bin
 f usr/share/man/man3c/getloadavg.3c 0444 root bin
+f usr/share/man/man3c/getlocalename_l.3c 0444 root bin
 f usr/share/man/man3c/getlogin.3c 0444 root bin
 s usr/share/man/man3c/getlogin_r.3c=getlogin.3c
 s usr/share/man/man3c/getmntany.3c=getmntent.3c
@@ -13575,9 +13605,11 @@ f usr/share/man/man3c/posix_madvise.3c 0444 root bin
 f usr/share/man/man3c/posix_memalign.3c 0444 root bin
 f usr/share/man/man3c/posix_openpt.3c 0444 root bin
 f usr/share/man/man3c/posix_spawn.3c 0444 root bin
+f usr/share/man/man3c/posix_spawn_file_actions_addchdir.3c 0444 root bin
 f usr/share/man/man3c/posix_spawn_file_actions_addclose.3c 0444 root bin
 f usr/share/man/man3c/posix_spawn_file_actions_addclosefrom_np.3c 0444 root bin
 f usr/share/man/man3c/posix_spawn_file_actions_adddup2.3c 0444 root bin
+s usr/share/man/man3c/posix_spawn_file_actions_addfchdir.3c=posix_spawn_file_actions_addchdir.3c
 s usr/share/man/man3c/posix_spawn_file_actions_addopen.3c=posix_spawn_file_actions_addclose.3c
 f usr/share/man/man3c/posix_spawn_file_actions_destroy.3c 0444 root bin
 s usr/share/man/man3c/posix_spawn_file_actions_init.3c=posix_spawn_file_actions_destroy.3c
@@ -13842,6 +13874,7 @@ s usr/share/man/man3c/schedctl_lookup.3c=schedctl_init.3c
 s usr/share/man/man3c/schedctl_start.3c=schedctl_init.3c
 s usr/share/man/man3c/schedctl_stop.3c=schedctl_init.3c
 s usr/share/man/man3c/seconvert.3c=econvert.3c
+s usr/share/man/man3c/secure_getenv.3c=getenv.3c
 s usr/share/man/man3c/seed48.3c=drand48.3c
 f usr/share/man/man3c/seekdir.3c 0444 root bin
 f usr/share/man/man3c/select.3c 0444 root bin
@@ -13929,6 +13962,90 @@ f usr/share/man/man3c/stack_getbounds.3c 0444 root bin
 f usr/share/man/man3c/stack_inbounds.3c 0444 root bin
 f usr/share/man/man3c/stack_setbounds.3c 0444 root bin
 f usr/share/man/man3c/stack_violation.3c 0444 root bin
+f usr/share/man/man3c/stdc_bit_ceil.3c 0444 root bin
+s usr/share/man/man3c/stdc_bit_ceil_uc.3c=stdc_bit_ceil.3c
+s usr/share/man/man3c/stdc_bit_ceil_ui.3c=stdc_bit_ceil.3c
+s usr/share/man/man3c/stdc_bit_ceil_ul.3c=stdc_bit_ceil.3c
+s usr/share/man/man3c/stdc_bit_ceil_ull.3c=stdc_bit_ceil.3c
+s usr/share/man/man3c/stdc_bit_ceil_us.3c=stdc_bit_ceil.3c
+f usr/share/man/man3c/stdc_bit_floor.3c 0444 root bin
+s usr/share/man/man3c/stdc_bit_floor_uc.3c=stdc_bit_floor.3c
+s usr/share/man/man3c/stdc_bit_floor_ui.3c=stdc_bit_floor.3c
+s usr/share/man/man3c/stdc_bit_floor_ul.3c=stdc_bit_floor.3c
+s usr/share/man/man3c/stdc_bit_floor_ull.3c=stdc_bit_floor.3c
+s usr/share/man/man3c/stdc_bit_floor_us.3c=stdc_bit_floor.3c
+f usr/share/man/man3c/stdc_bit_width.3c 0444 root bin
+s usr/share/man/man3c/stdc_bit_width_uc.3c=stdc_bit_width.3c
+s usr/share/man/man3c/stdc_bit_width_ui.3c=stdc_bit_width.3c
+s usr/share/man/man3c/stdc_bit_width_ul.3c=stdc_bit_width.3c
+s usr/share/man/man3c/stdc_bit_width_ull.3c=stdc_bit_width.3c
+s usr/share/man/man3c/stdc_bit_width_us.3c=stdc_bit_width.3c
+f usr/share/man/man3c/stdc_count_ones.3c 0444 root bin
+s usr/share/man/man3c/stdc_count_ones_uc.3c=stdc_count_ones.3c
+s usr/share/man/man3c/stdc_count_ones_ui.3c=stdc_count_ones.3c
+s usr/share/man/man3c/stdc_count_ones_ul.3c=stdc_count_ones.3c
+s usr/share/man/man3c/stdc_count_ones_ull.3c=stdc_count_ones.3c
+s usr/share/man/man3c/stdc_count_ones_us.3c=stdc_count_ones.3c
+f usr/share/man/man3c/stdc_count_zeros.3c 0444 root bin
+s usr/share/man/man3c/stdc_count_zeros_uc.3c=stdc_count_zeros.3c
+s usr/share/man/man3c/stdc_count_zeros_ui.3c=stdc_count_zeros.3c
+s usr/share/man/man3c/stdc_count_zeros_ul.3c=stdc_count_zeros.3c
+s usr/share/man/man3c/stdc_count_zeros_ull.3c=stdc_count_zeros.3c
+s usr/share/man/man3c/stdc_count_zeros_us.3c=stdc_count_zeros.3c
+f usr/share/man/man3c/stdc_first_leading_one.3c 0444 root bin
+s usr/share/man/man3c/stdc_first_leading_one_uc.3c=stdc_first_leading_one.3c
+s usr/share/man/man3c/stdc_first_leading_one_ui.3c=stdc_first_leading_one.3c
+s usr/share/man/man3c/stdc_first_leading_one_ul.3c=stdc_first_leading_one.3c
+s usr/share/man/man3c/stdc_first_leading_one_ull.3c=stdc_first_leading_one.3c
+s usr/share/man/man3c/stdc_first_leading_one_us.3c=stdc_first_leading_one.3c
+f usr/share/man/man3c/stdc_first_leading_zero.3c 0444 root bin
+s usr/share/man/man3c/stdc_first_leading_zero_uc.3c=stdc_first_leading_zero.3c
+s usr/share/man/man3c/stdc_first_leading_zero_ui.3c=stdc_first_leading_zero.3c
+s usr/share/man/man3c/stdc_first_leading_zero_ul.3c=stdc_first_leading_zero.3c
+s usr/share/man/man3c/stdc_first_leading_zero_ull.3c=stdc_first_leading_zero.3c
+s usr/share/man/man3c/stdc_first_leading_zero_us.3c=stdc_first_leading_zero.3c
+f usr/share/man/man3c/stdc_first_trailing_one.3c 0444 root bin
+s usr/share/man/man3c/stdc_first_trailing_one_uc.3c=stdc_first_trailing_one.3c
+s usr/share/man/man3c/stdc_first_trailing_one_ui.3c=stdc_first_trailing_one.3c
+s usr/share/man/man3c/stdc_first_trailing_one_ul.3c=stdc_first_trailing_one.3c
+s usr/share/man/man3c/stdc_first_trailing_one_ull.3c=stdc_first_trailing_one.3c
+s usr/share/man/man3c/stdc_first_trailing_one_us.3c=stdc_first_trailing_one.3c
+f usr/share/man/man3c/stdc_first_trailing_zero.3c 0444 root bin
+s usr/share/man/man3c/stdc_first_trailing_zero_uc.3c=stdc_first_trailing_zero.3c
+s usr/share/man/man3c/stdc_first_trailing_zero_ui.3c=stdc_first_trailing_zero.3c
+s usr/share/man/man3c/stdc_first_trailing_zero_ul.3c=stdc_first_trailing_zero.3c
+s usr/share/man/man3c/stdc_first_trailing_zero_ull.3c=stdc_first_trailing_zero.3c
+s usr/share/man/man3c/stdc_first_trailing_zero_us.3c=stdc_first_trailing_zero.3c
+f usr/share/man/man3c/stdc_has_single_bit.3c 0444 root bin
+s usr/share/man/man3c/stdc_has_single_bit_uc.3c=stdc_has_single_bit.3c
+s usr/share/man/man3c/stdc_has_single_bit_ui.3c=stdc_has_single_bit.3c
+s usr/share/man/man3c/stdc_has_single_bit_ul.3c=stdc_has_single_bit.3c
+s usr/share/man/man3c/stdc_has_single_bit_ull.3c=stdc_has_single_bit.3c
+s usr/share/man/man3c/stdc_has_single_bit_us.3c=stdc_has_single_bit.3c
+f usr/share/man/man3c/stdc_leading_ones.3c 0444 root bin
+s usr/share/man/man3c/stdc_leading_ones_uc.3c=stdc_leading_ones.3c
+s usr/share/man/man3c/stdc_leading_ones_ui.3c=stdc_leading_ones.3c
+s usr/share/man/man3c/stdc_leading_ones_ul.3c=stdc_leading_ones.3c
+s usr/share/man/man3c/stdc_leading_ones_ull.3c=stdc_leading_ones.3c
+s usr/share/man/man3c/stdc_leading_ones_us.3c=stdc_leading_ones.3c
+f usr/share/man/man3c/stdc_leading_zeros.3c 0444 root bin
+s usr/share/man/man3c/stdc_leading_zeros_uc.3c=stdc_leading_zeros.3c
+s usr/share/man/man3c/stdc_leading_zeros_ui.3c=stdc_leading_zeros.3c
+s usr/share/man/man3c/stdc_leading_zeros_ul.3c=stdc_leading_zeros.3c
+s usr/share/man/man3c/stdc_leading_zeros_ull.3c=stdc_leading_zeros.3c
+s usr/share/man/man3c/stdc_leading_zeros_us.3c=stdc_leading_zeros.3c
+f usr/share/man/man3c/stdc_trailing_ones.3c 0444 root bin
+s usr/share/man/man3c/stdc_trailing_ones_uc.3c=stdc_trailing_ones.3c
+s usr/share/man/man3c/stdc_trailing_ones_ui.3c=stdc_trailing_ones.3c
+s usr/share/man/man3c/stdc_trailing_ones_ul.3c=stdc_trailing_ones.3c
+s usr/share/man/man3c/stdc_trailing_ones_ull.3c=stdc_trailing_ones.3c
+s usr/share/man/man3c/stdc_trailing_ones_us.3c=stdc_trailing_ones.3c
+f usr/share/man/man3c/stdc_trailing_zeros.3c 0444 root bin
+s usr/share/man/man3c/stdc_trailing_zeros_uc.3c=stdc_trailing_zeros.3c
+s usr/share/man/man3c/stdc_trailing_zeros_ui.3c=stdc_trailing_zeros.3c
+s usr/share/man/man3c/stdc_trailing_zeros_ul.3c=stdc_trailing_zeros.3c
+s usr/share/man/man3c/stdc_trailing_zeros_ull.3c=stdc_trailing_zeros.3c
+s usr/share/man/man3c/stdc_trailing_zeros_us.3c=stdc_trailing_zeros.3c
 s usr/share/man/man3c/stderr.3c=stdio.3c
 s usr/share/man/man3c/stdin.3c=stdio.3c
 f usr/share/man/man3c/stdio.3c 0444 root bin
@@ -14068,6 +14185,7 @@ s usr/share/man/man3c/timerfd_settime.3c=timerfd_create.3c
 s usr/share/man/man3c/timerisset.3c=timeradd.3c
 s usr/share/man/man3c/timersub.3c=timeradd.3c
 f usr/share/man/man3c/timespec_get.3c 0444 root bin
+s usr/share/man/man3c/timespec_getres.3c=timespec_get.3c
 f usr/share/man/man3c/tmpfile.3c 0444 root bin
 f usr/share/man/man3c/tmpnam.3c 0444 root bin
 s usr/share/man/man3c/tmpnam_r.3c=tmpnam.3c
@@ -14138,6 +14256,7 @@ s usr/share/man/man3c/utmpname.3c=getutent.3c
 s usr/share/man/man3c/utmpxname.3c=getutxent.3c
 s usr/share/man/man3c/valloc.3c=malloc.3c
 s usr/share/man/man3c/vasprintf.3c=vprintf.3c
+s usr/share/man/man3c/vdprintf.3c=vprintf.3c
 s usr/share/man/man3c/verr.3c=err.3c
 s usr/share/man/man3c/verrc.3c=err.3c
 s usr/share/man/man3c/verrx.3c=err.3c
@@ -14188,6 +14307,8 @@ s usr/share/man/man3c/wcscspn.3c=wcstring.3c
 f usr/share/man/man3c/wcsdup.3c 0444 root bin
 s usr/share/man/man3c/wcsetno.3c=cset.3c
 f usr/share/man/man3c/wcsftime.3c 0444 root bin
+f usr/share/man/man3c/wcslcat.3c 0444 root bin
+f usr/share/man/man3c/wcslcpy.3c 0444 root bin
 f usr/share/man/man3c/wcslen.3c 0444 root bin
 s usr/share/man/man3c/wcsncasecmp.3c=wcscasecmp.3c
 s usr/share/man/man3c/wcsncasecmp_l.3c=wcscasecmp.3c
@@ -15836,6 +15957,8 @@ s usr/share/man/man3head/stat.3head=stat.h.3head
 f usr/share/man/man3head/stat.h.3head 0444 root bin
 s usr/share/man/man3head/statvfs.3head=statvfs.h.3head
 f usr/share/man/man3head/statvfs.h.3head 0444 root bin
+s usr/share/man/man3head/stdbit.3head=stdbit.h.3head
+f usr/share/man/man3head/stdbit.h.3head 0444 root bin
 s usr/share/man/man3head/stdbool.3head=stdbool.h.3head
 f usr/share/man/man3head/stdbool.h.3head 0444 root bin
 s usr/share/man/man3head/stddef.3head=stddef.h.3head
@@ -19406,6 +19529,7 @@ f usr/share/man/man5/timezone.5 0444 root bin
 f usr/share/man/man5/ts_dptbl.5 0444 root bin
 f usr/share/man/man5/ttydefs.5 0444 root bin
 f usr/share/man/man5/ttysrch.5 0444 root bin
+f usr/share/man/man5/tzfile.5 0444 root bin
 f usr/share/man/man5/ufsdump.5 0444 root bin
 f usr/share/man/man5/updaters.5 0444 root bin
 f usr/share/man/man5/user_attr.5 0444 root bin
@@ -20006,7 +20130,7 @@ s usr/share/man/man9e/ddi_ufm_op_fill_image.9e=ddi_ufm.9e
 s usr/share/man/man9e/ddi_ufm_op_fill_slot.9e=ddi_ufm.9e
 s usr/share/man/man9e/ddi_ufm_op_getcaps.9e=ddi_ufm.9e
 s usr/share/man/man9e/ddi_ufm_op_nimages.9e=ddi_ufm.9e
-s usr/share/man/man9e/ddi_ufm_op_nslots.9e=ddi_ufm.9e
+s usr/share/man/man9e/ddi_ufm_op_readimg.9e=ddi_ufm.9e
 f usr/share/man/man9e/detach.9e 0444 root bin
 f usr/share/man/man9e/devmap.9e 0444 root bin
 f usr/share/man/man9e/devmap_access.9e 0444 root bin
@@ -21350,6 +21474,90 @@ s usr/share/man/man9f/sema_v.9f=semaphore.9f
 f usr/share/man/man9f/semaphore.9f 0444 root bin
 s usr/share/man/man9f/snprintf.9f=sprintf.9f
 f usr/share/man/man9f/sprintf.9f 0444 root bin
+f usr/share/man/man9f/stdc_bit_ceil.9f 0444 root bin
+s usr/share/man/man9f/stdc_bit_ceil_uc.9f=stdc_bit_ceil.9f
+s usr/share/man/man9f/stdc_bit_ceil_ui.9f=stdc_bit_ceil.9f
+s usr/share/man/man9f/stdc_bit_ceil_ul.9f=stdc_bit_ceil.9f
+s usr/share/man/man9f/stdc_bit_ceil_ull.9f=stdc_bit_ceil.9f
+s usr/share/man/man9f/stdc_bit_ceil_us.9f=stdc_bit_ceil.9f
+f usr/share/man/man9f/stdc_bit_floor.9f 0444 root bin
+s usr/share/man/man9f/stdc_bit_floor_uc.9f=stdc_bit_floor.9f
+s usr/share/man/man9f/stdc_bit_floor_ui.9f=stdc_bit_floor.9f
+s usr/share/man/man9f/stdc_bit_floor_ul.9f=stdc_bit_floor.9f
+s usr/share/man/man9f/stdc_bit_floor_ull.9f=stdc_bit_floor.9f
+s usr/share/man/man9f/stdc_bit_floor_us.9f=stdc_bit_floor.9f
+f usr/share/man/man9f/stdc_bit_width.9f 0444 root bin
+s usr/share/man/man9f/stdc_bit_width_uc.9f=stdc_bit_width.9f
+s usr/share/man/man9f/stdc_bit_width_ui.9f=stdc_bit_width.9f
+s usr/share/man/man9f/stdc_bit_width_ul.9f=stdc_bit_width.9f
+s usr/share/man/man9f/stdc_bit_width_ull.9f=stdc_bit_width.9f
+s usr/share/man/man9f/stdc_bit_width_us.9f=stdc_bit_width.9f
+f usr/share/man/man9f/stdc_count_ones.9f 0444 root bin
+s usr/share/man/man9f/stdc_count_ones_uc.9f=stdc_count_ones.9f
+s usr/share/man/man9f/stdc_count_ones_ui.9f=stdc_count_ones.9f
+s usr/share/man/man9f/stdc_count_ones_ul.9f=stdc_count_ones.9f
+s usr/share/man/man9f/stdc_count_ones_ull.9f=stdc_count_ones.9f
+s usr/share/man/man9f/stdc_count_ones_us.9f=stdc_count_ones.9f
+f usr/share/man/man9f/stdc_count_zeros.9f 0444 root bin
+s usr/share/man/man9f/stdc_count_zeros_uc.9f=stdc_count_zeros.9f
+s usr/share/man/man9f/stdc_count_zeros_ui.9f=stdc_count_zeros.9f
+s usr/share/man/man9f/stdc_count_zeros_ul.9f=stdc_count_zeros.9f
+s usr/share/man/man9f/stdc_count_zeros_ull.9f=stdc_count_zeros.9f
+s usr/share/man/man9f/stdc_count_zeros_us.9f=stdc_count_zeros.9f
+f usr/share/man/man9f/stdc_first_leading_one.9f 0444 root bin
+s usr/share/man/man9f/stdc_first_leading_one_uc.9f=stdc_first_leading_one.9f
+s usr/share/man/man9f/stdc_first_leading_one_ui.9f=stdc_first_leading_one.9f
+s usr/share/man/man9f/stdc_first_leading_one_ul.9f=stdc_first_leading_one.9f
+s usr/share/man/man9f/stdc_first_leading_one_ull.9f=stdc_first_leading_one.9f
+s usr/share/man/man9f/stdc_first_leading_one_us.9f=stdc_first_leading_one.9f
+f usr/share/man/man9f/stdc_first_leading_zero.9f 0444 root bin
+s usr/share/man/man9f/stdc_first_leading_zero_uc.9f=stdc_first_leading_zero.9f
+s usr/share/man/man9f/stdc_first_leading_zero_ui.9f=stdc_first_leading_zero.9f
+s usr/share/man/man9f/stdc_first_leading_zero_ul.9f=stdc_first_leading_zero.9f
+s usr/share/man/man9f/stdc_first_leading_zero_ull.9f=stdc_first_leading_zero.9f
+s usr/share/man/man9f/stdc_first_leading_zero_us.9f=stdc_first_leading_zero.9f
+f usr/share/man/man9f/stdc_first_trailing_one.9f 0444 root bin
+s usr/share/man/man9f/stdc_first_trailing_one_uc.9f=stdc_first_trailing_one.9f
+s usr/share/man/man9f/stdc_first_trailing_one_ui.9f=stdc_first_trailing_one.9f
+s usr/share/man/man9f/stdc_first_trailing_one_ul.9f=stdc_first_trailing_one.9f
+s usr/share/man/man9f/stdc_first_trailing_one_ull.9f=stdc_first_trailing_one.9f
+s usr/share/man/man9f/stdc_first_trailing_one_us.9f=stdc_first_trailing_one.9f
+f usr/share/man/man9f/stdc_first_trailing_zero.9f 0444 root bin
+s usr/share/man/man9f/stdc_first_trailing_zero_uc.9f=stdc_first_trailing_zero.9f
+s usr/share/man/man9f/stdc_first_trailing_zero_ui.9f=stdc_first_trailing_zero.9f
+s usr/share/man/man9f/stdc_first_trailing_zero_ul.9f=stdc_first_trailing_zero.9f
+s usr/share/man/man9f/stdc_first_trailing_zero_ull.9f=stdc_first_trailing_zero.9f
+s usr/share/man/man9f/stdc_first_trailing_zero_us.9f=stdc_first_trailing_zero.9f
+f usr/share/man/man9f/stdc_has_single_bit.9f 0444 root bin
+s usr/share/man/man9f/stdc_has_single_bit_uc.9f=stdc_has_single_bit.9f
+s usr/share/man/man9f/stdc_has_single_bit_ui.9f=stdc_has_single_bit.9f
+s usr/share/man/man9f/stdc_has_single_bit_ul.9f=stdc_has_single_bit.9f
+s usr/share/man/man9f/stdc_has_single_bit_ull.9f=stdc_has_single_bit.9f
+s usr/share/man/man9f/stdc_has_single_bit_us.9f=stdc_has_single_bit.9f
+f usr/share/man/man9f/stdc_leading_ones.9f 0444 root bin
+s usr/share/man/man9f/stdc_leading_ones_uc.9f=stdc_leading_ones.9f
+s usr/share/man/man9f/stdc_leading_ones_ui.9f=stdc_leading_ones.9f
+s usr/share/man/man9f/stdc_leading_ones_ul.9f=stdc_leading_ones.9f
+s usr/share/man/man9f/stdc_leading_ones_ull.9f=stdc_leading_ones.9f
+s usr/share/man/man9f/stdc_leading_ones_us.9f=stdc_leading_ones.9f
+f usr/share/man/man9f/stdc_leading_zeros.9f 0444 root bin
+s usr/share/man/man9f/stdc_leading_zeros_uc.9f=stdc_leading_zeros.9f
+s usr/share/man/man9f/stdc_leading_zeros_ui.9f=stdc_leading_zeros.9f
+s usr/share/man/man9f/stdc_leading_zeros_ul.9f=stdc_leading_zeros.9f
+s usr/share/man/man9f/stdc_leading_zeros_ull.9f=stdc_leading_zeros.9f
+s usr/share/man/man9f/stdc_leading_zeros_us.9f=stdc_leading_zeros.9f
+f usr/share/man/man9f/stdc_trailing_ones.9f 0444 root bin
+s usr/share/man/man9f/stdc_trailing_ones_uc.9f=stdc_trailing_ones.9f
+s usr/share/man/man9f/stdc_trailing_ones_ui.9f=stdc_trailing_ones.9f
+s usr/share/man/man9f/stdc_trailing_ones_ul.9f=stdc_trailing_ones.9f
+s usr/share/man/man9f/stdc_trailing_ones_ull.9f=stdc_trailing_ones.9f
+s usr/share/man/man9f/stdc_trailing_ones_us.9f=stdc_trailing_ones.9f
+f usr/share/man/man9f/stdc_trailing_zeros.9f 0444 root bin
+s usr/share/man/man9f/stdc_trailing_zeros_uc.9f=stdc_trailing_zeros.9f
+s usr/share/man/man9f/stdc_trailing_zeros_ui.9f=stdc_trailing_zeros.9f
+s usr/share/man/man9f/stdc_trailing_zeros_ul.9f=stdc_trailing_zeros.9f
+s usr/share/man/man9f/stdc_trailing_zeros_ull.9f=stdc_trailing_zeros.9f
+s usr/share/man/man9f/stdc_trailing_zeros_us.9f=stdc_trailing_zeros.9f
 f usr/share/man/man9f/stoi.9f 0444 root bin
 s usr/share/man/man9f/strcasecmp.9f=string.9f
 s usr/share/man/man9f/strcat.9f=string.9f
@@ -21372,6 +21580,7 @@ f usr/share/man/man9f/strqget.9f 0444 root bin
 f usr/share/man/man9f/strqset.9f 0444 root bin
 s usr/share/man/man9f/strrchr.9f=string.9f
 s usr/share/man/man9f/strspn.9f=string.9f
+s usr/share/man/man9f/strtok_r.9f=string.9f
 f usr/share/man/man9f/swab.9f 0444 root bin
 f usr/share/man/man9f/taskq.9f 0444 root bin
 f usr/share/man/man9f/testb.9f 0444 root bin

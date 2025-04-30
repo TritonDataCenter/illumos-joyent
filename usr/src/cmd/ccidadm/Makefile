@@ -11,17 +11,19 @@
 
 #
 # Copyright 2019, Joyent, Inc.
-# Copyright 2024 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 #
 
 PROG= ccidadm
 
 include ../Makefile.cmd
 include ../Makefile.ctf
+include $(SRC)/common/hexdump/Makefile.com
 
 CFLAGS += $(CCVERBOSE)
+CSTD = $(CSTD_GNU17)
 LDLIBS += -lofmt -lcmdutils
-SRCS = ccidadm.c atr.c ilstr.o
+SRCS = ccidadm.c atr.c hexdump.o ilstr.o
 OBJS = $(SRCS:%.c=%.o)
 CPPFLAGS += -I$(SRC)/common/ccid
 
@@ -50,4 +52,5 @@ install: all $(ROOTUSRSBINPROG)
 clean:
 	$(RM) $(OBJS) $(PROG)
 
+include $(SRC)/common/hexdump/Makefile.targ
 include ../Makefile.targ

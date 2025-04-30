@@ -28,7 +28,7 @@
 # Copyright 2015 Igor Kozhukhov <ikozhukhov@gmail.com>
 # Copyright 2016 Toomas Soome <tsoome@me.com>
 # Copyright 2019 RackTop Systems.
-# Copyright 2020 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 # Copyright 2020 Peter Tribble
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2021 Joyent, Inc.
@@ -134,7 +134,8 @@ ELFEXTRACT=	$(ONBLD_TOOLS)/bin/$(MACH)/elfextract
 MBH_PATCH=	$(ONBLD_TOOLS)/bin/$(MACH)/mbh_patch
 BTXLD=		$(ONBLD_TOOLS)/bin/$(MACH)/btxld
 VTFONTCVT=	$(ONBLD_TOOLS)/bin/$(MACH)/vtfontcvt
-YACC=		$(ONBLD_TOOLS)/bin/$(MACH)/yacc -P $(ONBLD_TOOLS)/lib/yaccpar
+YACC=		$(ONBLD_TOOLS)/bin/$(MACH)/yacc -P \
+	$(ONBLD_TOOLS)/share/lib/ccs/yaccpar
 # echo(1) and true(1) are specified without absolute paths, so that the shell
 # spawned by make(1) may use the built-in versions.  This is minimally
 # problematic, as the shell spawned by make(1) is known and under control, the
@@ -168,7 +169,7 @@ ELFDUMP=	/usr/bin/elfdump
 M4=		/usr/bin/m4
 GM4=		/usr/bin/gm4
 STRIP=		/usr/bin/strip
-LEX=		/usr/bin/lex
+LEX=		$(ONBLD_TOOLS)/bin/$(MACH)/lex -Y $(ONBLD_TOOLS)/share/lib/ccs
 FLEX=		/usr/bin/flex
 BISON=		/usr/bin/bison
 CPP=		/usr/lib/cpp
@@ -464,6 +465,7 @@ CCERRWARN += -_gcc=-Wno-missing-field-initializers
 # C standard
 CSTD_GNU89=	-xc99=%none
 CSTD_GNU99=	-xc99=%all
+CSTD_GNU17=	-std=gnu17
 CSTD=		$(CSTD_GNU89)
 
 # In most places, assignments to these macros should be appended with +=
@@ -502,10 +504,9 @@ CALLSYMS=	-_gcc=-fno-eliminate-unused-debug-symbols \
 
 #
 # We force the compilers to generate the debugging information best understood
-# by the CTF tools.  With Sun Studio this is stabs due to bugs in the Studio
-# compilers.  With GCC this is DWARF v2.
+# by the CTF tools.  Currently this is DWARFv4.
 #
-DEBUGFORMAT=	-_gcc=-gdwarf-2 -_gcc10=-gstrict-dwarf -_gcc11=-gstrict-dwarf
+DEBUGFORMAT=	-_gcc=-gdwarf-4 -_gcc=-gstrict-dwarf
 
 #
 # Ask the compiler to include debugging information

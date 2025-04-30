@@ -25,6 +25,7 @@
 /*
  * Copyright (c) 2013, 2015 by Delphix. All rights reserved.
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 Oxide Computer Company
  */
 
 #ifndef	_MDB_CTF_H
@@ -91,6 +92,7 @@ extern int mdb_ctf_type_cmp(mdb_ctf_id_t, mdb_ctf_id_t);
 
 extern int mdb_ctf_type_resolve(mdb_ctf_id_t, mdb_ctf_id_t *);
 extern char *mdb_ctf_type_name(mdb_ctf_id_t, char *, size_t);
+extern ssize_t mdb_ctf_type_lname(mdb_ctf_id_t, char *, size_t);
 extern ssize_t mdb_ctf_type_size(mdb_ctf_id_t);
 extern int mdb_ctf_type_kind(mdb_ctf_id_t);
 extern int mdb_ctf_type_reference(const mdb_ctf_id_t, mdb_ctf_id_t *);
@@ -100,10 +102,23 @@ extern int mdb_ctf_type_visit(mdb_ctf_id_t, mdb_ctf_visit_f *, void *);
 extern int mdb_ctf_array_info(mdb_ctf_id_t, mdb_ctf_arinfo_t *);
 extern const char *mdb_ctf_enum_name(mdb_ctf_id_t, int);
 
-extern int mdb_ctf_member_iter(mdb_ctf_id_t, mdb_ctf_member_f *, void *);
+extern int mdb_ctf_member_iter(mdb_ctf_id_t, mdb_ctf_member_f *, void *,
+    uint32_t);
 extern int mdb_ctf_enum_iter(mdb_ctf_id_t, mdb_ctf_enum_f *, void *);
 extern int mdb_ctf_type_iter(const char *, mdb_ctf_type_f *, void *);
 extern int mdb_ctf_type_delete(const mdb_ctf_id_t *);
+
+/*
+ * Flags to mdb_ctf_member_iter to change iteration behavior.
+ *
+ * MDB_CTF_F_ITER_ANON		This controls whether or not type member
+ *				iteration will descend into anonymous structs
+ *				or unions recursively. This is used for cases
+ *				where one is trying to reason about member
+ *				references (ala ::print) in a similar way to a C
+ *				compiler.
+ */
+#define	MDB_CTF_F_ITER_ANON	(1 << 0)
 
 /*
  * Special values for mdb_ctf_type_iter.

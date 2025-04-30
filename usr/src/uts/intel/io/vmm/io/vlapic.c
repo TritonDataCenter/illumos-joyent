@@ -35,7 +35,10 @@
  * A full copy of the text of the CDDL should have accompanied this
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
- *
+ */
+/* This file is dual-licensed; see usr/src/contrib/bhyve/LICENSE */
+
+/*
  * Copyright 2014 Pluribus Networks Inc.
  * Copyright 2018 Joyent, Inc.
  * Copyright 2024 Oxide Computer Company
@@ -108,7 +111,7 @@ vlapic_x2mode(const struct vlapic *vlapic)
 	return ((vlapic->msr_apicbase & APICBASE_X2APIC) != 0);
 }
 
-static __inline bool
+bool
 vlapic_hw_disabled(const struct vlapic *vlapic)
 {
 	return ((vlapic->msr_apicbase & APICBASE_ENABLED) == 0);
