@@ -551,6 +551,7 @@ dsl_pool_sync_mos(dsl_pool_t *dp, dmu_tx_t *tx)
 {
 	zio_t *zio = zio_root(dp->dp_spa, NULL, NULL, ZIO_FLAG_MUSTSUCCEED);
 	dmu_objset_sync(dp->dp_meta_objset, zio, tx);
+	// XXX
 	VERIFY0(zio_wait(zio));
 	dprintf_bp(&dp->dp_meta_rootbp, "meta objset rootbp is %s", "");
 	spa_set_rootblkptr(dp->dp_spa, &dp->dp_meta_rootbp);
