@@ -1395,6 +1395,13 @@ perl/contrib/Sun/Solaris/Lgrp/amd64/Lgrp.c
 perl/contrib/Sun/Solaris/Project/amd64/Project.c
 perl/contrib/Sun/Solaris/Task/amd64/Task.c
 perl/contrib/Sun/Solaris/Utils/amd64/Utils.c
+perl/contrib/Sun/Solaris/Intrs/i386/Intrs.c
+perl/contrib/Sun/Solaris/Kstat/i386/Kstat.c
+perl/contrib/Sun/Solaris/Lgrp/i386/Lgrp.c
+perl/contrib/Sun/Solaris/Project/i386/Project.c
+perl/contrib/Sun/Solaris/Task/i386/Task.c
+perl/contrib/Sun/Solaris/Utils/i386/Utils.c
+
 
 pfexec/pfexec
 pfexecd/pfexecd
