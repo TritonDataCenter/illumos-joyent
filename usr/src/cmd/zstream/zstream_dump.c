@@ -149,9 +149,9 @@ print_block(char *buf, int length)
 static void
 sprintf_bytes(char *str, uint8_t *buf, uint_t buf_len)
 {
-	int i, n;
+	int n;
 
-	for (i = 0; i < buf_len; i++) {
+	for (uint_t i = 0; i < buf_len; i++) {
 		n = sprintf(str, "%02x", buf[i] & 0xff);
 		str += n;
 	}
@@ -333,7 +333,7 @@ zstream_do_dump(int argc, char *argv[])
 
 			if (drr->drr_payloadlen != 0) {
 				nvlist_t *nv;
-				int sz = drr->drr_payloadlen;
+				size_t sz = drr->drr_payloadlen;
 
 				if (sz > SPA_MAXBLOCKSIZE) {
 					free(buf);

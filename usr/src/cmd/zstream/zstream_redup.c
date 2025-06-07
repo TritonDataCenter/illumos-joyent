@@ -106,7 +106,7 @@ spread(int fd, void *buf, size_t count, off_t offset)
 		    "Error while reading file: %s\n",
 		    strerror(errno));
 		exit(1);
-	} else if (err != count) {
+	} else if ((size_t)err != count) {
 		(void) fprintf(stderr,
 		    "Error while reading file: short read\n");
 		exit(1);
