@@ -73,18 +73,20 @@ typedef struct arc_state {
 	/*
 	 * list of evictable buffers
 	 */
-	multilist_t *arcs_list[ARC_BUFC_NUMTYPES];
+	multilist_t arcs_list[ARC_BUFC_NUMTYPES];
+	/*
+	 * supports the "dbufs" kstat
+	 */
+	arc_state_type_t arcs_state;
 	/*
 	 * total amount of evictable data in this state
 	 */
-	zfs_refcount_t arcs_esize[ARC_BUFC_NUMTYPES];
+	zfs_refcount_t arcs_esize[ARC_BUFC_NUMTYPES] __cacheline_aligned;
 	/*
 	 * total amount of data in this state; this includes: evictable,
 	 * non-evictable, ARC_BUFC_DATA, and ARC_BUFC_METADATA.
 	 */
 	zfs_refcount_t arcs_size;
-
-	arc_state_type_t arcs_state;
 } arc_state_t;
 
 typedef struct arc_callback arc_callback_t;
@@ -862,6 +864,13 @@ typedef struct arc_stats {
 #define	arc_uncompressed_size	ARCSTAT(arcstat_uncompressed_size)
 /* number of bytes in the arc from arc_buf_t's */
 #define	arc_overhead_size	ARCSTAT(arcstat_overhead_size)
+
+#define	arc_anon	(&ARC_anon)
+#define	arc_mru		(&ARC_mru)
+#define	arc_mru_ghost	(&ARC_mru_ghost)
+#define	arc_mfu		(&ARC_mfu)
+#define	arc_mfu_ghost	(&ARC_mfu_ghost)
+#define	arc_l2c_only	(&ARC_l2c_only)
 
 extern arc_stats_t arc_stats;
 
