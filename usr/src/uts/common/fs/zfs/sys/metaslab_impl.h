@@ -200,7 +200,7 @@ struct metaslab_class {
 	 * List of all loaded metaslabs in the class, sorted in order of most
 	 * recent use.
 	 */
-	multilist_t		*mc_metaslab_txg_list;
+	multilist_t		mc_metaslab_txg_list;
 };
 
 /*

@@ -147,7 +147,7 @@ struct objset {
 	/* no lock needed: */
 	struct dmu_tx *os_synctx; /* XXX sketchy */
 	zil_header_t os_zil_header;
-	multilist_t *os_synced_dnodes;
+	multilist_t os_synced_dnodes;
 	uint64_t os_flags;
 	uint64_t os_freed_dnodes;
 	boolean_t os_rescan_dnodes;
@@ -166,7 +166,7 @@ struct objset {
 
 	/* Protected by os_lock */
 	kmutex_t os_lock;
-	multilist_t *os_dirty_dnodes[TXG_SIZE];
+	multilist_t os_dirty_dnodes[TXG_SIZE];
 	list_t os_dnodes;
 	list_t os_downgraded_dbufs;
 
@@ -239,7 +239,7 @@ objset_t *dmu_objset_create_impl(spa_t *spa, struct dsl_dataset *ds,
 int dmu_objset_open_impl(spa_t *spa, struct dsl_dataset *ds, blkptr_t *bp,
     objset_t **osp);
 void dmu_objset_evict(objset_t *os);
-void dmu_objset_do_userquota_updates(objset_t *os, dmu_tx_t *tx);
+void dmu_objset_sync_done(objset_t *os, dmu_tx_t *tx);
 void dmu_objset_userquota_get_ids(dnode_t *dn, boolean_t before, dmu_tx_t *tx);
 boolean_t dmu_objset_userused_enabled(objset_t *os);
 int dmu_objset_userspace_upgrade(objset_t *os);
