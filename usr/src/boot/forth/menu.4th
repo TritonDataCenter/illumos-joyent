@@ -578,7 +578,6 @@ also menu-infrastructure definitions
 	over	( N addr N )
 	0= if	\ if N is 0, output spaces
 		drop
-		\ 1 extra to account decimal place change
 		R> spaces
 	else
 		R> type
