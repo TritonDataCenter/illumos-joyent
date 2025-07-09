@@ -455,8 +455,14 @@ add_nets(int *argc, char **argv)
 			nextpcifn++;
 		}
 
+		//TODO: OS-6892
+		//if you look in bhyve(8) you will see that
+		//one can append "[,network-backend-options]"
+		//If this vnic has been marked to allow promiscuity
+		//we will want to add ",promiscphys=true"
+		//XXX DOING IT ALWAYS FOR TESTING XXX DO NOT SHIP XXX
 		if (snprintf(slotconf, sizeof (slotconf),
-		    "%d:%d,virtio-net-viona,%s", PCI_SLOT_NICS, pcifn, net) >=
+		    "%d:%d,virtio-net-viona,%s,promiscphys=true", PCI_SLOT_NICS, pcifn, net) >=
 		    sizeof (slotconf)) {
 			(void) printf("Error: net '%s' too long\n", net);
 			return (-1);
