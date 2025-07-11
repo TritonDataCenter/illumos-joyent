@@ -1422,8 +1422,10 @@ nvme_ctrl_mark_dead(nvme_t *nvme, boolean_t removed)
 		ddi_fm_service_impact(nvme->n_dip, DDI_SERVICE_LOST);
 	}
 
-	taskq_dispatch_ent(nvme_dead_taskq, nvme_rwlock_ctrl_dead, nvme,
-	    TQ_NOSLEEP, &nvme->n_dead_tqent);
+	if (nvme->n_progress & NVME_MGMT_INIT) {
+		taskq_dispatch_ent(nvme_dead_taskq, nvme_rwlock_ctrl_dead, nvme,
+		    TQ_NOSLEEP, &nvme->n_dead_tqent);
+	}
 }
 
 static boolean_t
