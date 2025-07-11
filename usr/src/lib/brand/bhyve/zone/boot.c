@@ -463,8 +463,8 @@ add_nets(int *argc, char **argv)
 		// All other network backend options are by default true.
 		if (snprintf(slotconf, sizeof (slotconf),
 		    "%d:%d,virtio-net-viona,%s%s", PCI_SLOT_NICS, pcifn, net,
-					 is_env_true("net", net, "allow_mac_spoofing") ?
-					 ",promiscphys=true" : "") >= sizeof (slotconf)) {
+		    is_env_true("net", net, "allow_mac_spoofing") ?
+			",promiscphys=true" : "") >= sizeof (slotconf)) {
 			(void) printf("Error: net '%s' too long\n", net);
 			return (-1);
 		}
