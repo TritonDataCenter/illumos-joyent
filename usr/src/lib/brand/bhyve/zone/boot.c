@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /*
@@ -464,7 +465,7 @@ add_nets(int *argc, char **argv)
 		if (snprintf(slotconf, sizeof (slotconf),
 		    "%d:%d,virtio-net-viona,%s%s", PCI_SLOT_NICS, pcifn, net,
 		    is_env_true("net", net, "allow_mac_spoofing") ?
-			",promiscphys=true" : "") >= sizeof (slotconf)) {
+		    ",promiscphys=true" : "") >= sizeof (slotconf)) {
 			(void) printf("Error: net '%s' too long\n", net);
 			return (-1);
 		}
