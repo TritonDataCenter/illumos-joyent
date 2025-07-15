@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2024 MNX Cloud, Inc.
  */
 
 /*
@@ -143,7 +144,7 @@ add_smbios(int *argc, char **argv)
 	 * This is based upon the SMBIOS values we expose to KVM guests.
 	 */
 	(void) snprintf(smbios, sizeof (smbios),
-	    "1,manufacturer=Joyent,product=SmartDC HVM,version=7.%s,"
+	    "1,manufacturer=Triton Data Center,product=Triton HVM,version=7.%s,"
 	    "serial=%s,sku=001,family=Virtual Machine",
 	    version, zonename);
 
