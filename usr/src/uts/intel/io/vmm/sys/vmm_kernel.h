@@ -34,7 +34,10 @@
  * A full copy of the text of the CDDL should have accompanied this
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
- *
+ */
+/* This file is dual-licensed; see usr/src/contrib/bhyve/LICENSE */
+
+/*
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2025 Oxide Computer Company
@@ -159,9 +162,8 @@ int vm_npt_do_operation(struct vm *, uint64_t, size_t, uint32_t, uint8_t *,
 /*
  * APIs that modify the guest memory map require all vcpus to be frozen.
  */
-int vm_mmap_memseg(struct vm *vm, vm_paddr_t gpa, int segid, vm_ooffset_t off,
-    size_t len, int prot, int flags);
-int vm_munmap_memseg(struct vm *vm, vm_paddr_t gpa, size_t len);
+int vm_mmap_memseg(struct vm *, vm_paddr_t, int, uintptr_t, size_t, int, int);
+int vm_munmap_memseg(struct vm *, vm_paddr_t, size_t);
 int vm_alloc_memseg(struct vm *vm, int ident, size_t len, bool sysmem);
 void vm_free_memseg(struct vm *vm, int ident);
 int vm_map_mmio(struct vm *vm, vm_paddr_t gpa, size_t len, vm_paddr_t hpa);
@@ -174,8 +176,8 @@ int vm_unassign_pptdev(struct vm *vm, int pptfd);
  * be frozen. This acts like a read lock on the guest memory map since any
  * modification requires *all* vcpus to be frozen.
  */
-int vm_mmap_getnext(struct vm *vm, vm_paddr_t *gpa, int *segid,
-    vm_ooffset_t *segoff, size_t *len, int *prot, int *flags);
+int vm_mmap_getnext(struct vm *, vm_paddr_t *, int *, uintptr_t *, size_t *,
+    int *, int *);
 int vm_get_memseg(struct vm *vm, int ident, size_t *len, bool *sysmem,
     struct vm_object **objptr);
 vm_paddr_t vmm_sysmem_maxaddr(struct vm *vm);

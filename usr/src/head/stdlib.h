@@ -176,7 +176,7 @@ extern void setkey(const char *);
 	(!defined(_XOPEN_SOURCE) || (defined(_XPG3) && !defined(_XPG4)))
 #ifndef	_SSIZE_T
 #define	_SSIZE_T
-#if defined(_LP64) || defined(_I32LPx)
+#if defined(_LP64)
 typedef long	ssize_t;	/* size of something in bytes or -1 */
 #else
 typedef int	ssize_t;	/* (historical version) */
@@ -332,6 +332,15 @@ extern long long strtonum(const char *, long long, long long, const char **);
 extern long long strtonumx(const char *, long long, long long, const char **,
     int);
 extern void *reallocf(void *, size_t);
+
+/* these three are also in xlocale.h */
+#ifndef _LOCALE_T
+#define	_LOCALE_T
+typedef struct _locale *locale_t;
+#endif
+extern float strtof_l(const char *, char **, locale_t);
+extern double strtod_l(const char *, char **, locale_t);
+extern long double strtold_l(const char *, char **, locale_t);
 #endif	/* !_STRICT_SYBMOLS */
 
 /*

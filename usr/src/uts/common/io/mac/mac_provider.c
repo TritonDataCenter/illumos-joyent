@@ -65,6 +65,8 @@
 #include <inet/tcp.h>
 #include <netinet/udp.h>
 #include <netinet/sctp.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/icmp6.h>
 
 /*
  * MAC Provider Interface.
@@ -2009,7 +2011,7 @@ mac_mmc_parse_ether(mac_mblk_cursor_t *cursor, uint8_t *dst_addrp,
  */
 static bool
 mac_mmc_parse_l3(mac_mblk_cursor_t *cursor, uint16_t l3_sap, uint8_t *ipprotop,
-    bool *is_fragp, uint16_t *hdr_sizep)
+    mac_ether_offload_flags_t *fragp, uint16_t *hdr_sizep)
 {
 	const size_t l3_off = mac_mmc_offset(cursor);
 
@@ -2039,8 +2041,15 @@ mac_mmc_parse_l3(mac_mblk_cursor_t *cursor, uint16_t l3_sap, uint8_t *ipprotop,
 		if (ipprotop != NULL) {
 			*ipprotop = ipproto;
 		}
-		if (is_fragp != NULL) {
-			*is_fragp = ((frag_off & (IPH_MF | IPH_OFFSET)) != 0);
+		if (fragp != NULL) {
+			mac_ether_offload_flags_t frag_flags = 0;
+			if ((frag_off & IPH_MF) != 0) {
+				frag_flags |= MEOI_L3_FRAG_MORE;
+			}
+			if ((frag_off & IPH_OFFSET) != 0) {
+				frag_flags |= MEOI_L3_FRAG_OFFSET;
+			}
+			*fragp = frag_flags;
 		}
 		if (hdr_sizep != NULL) {
 			*hdr_sizep = verlen * 4;
@@ -2050,7 +2059,7 @@ mac_mmc_parse_l3(mac_mblk_cursor_t *cursor, uint16_t l3_sap, uint8_t *ipprotop,
 	if (l3_sap == ETHERTYPE_IPV6) {
 		uint16_t ip_len = sizeof (ip6_t);
 		uint8_t ipproto;
-		bool found_frag_eh = false;
+		mac_ether_offload_flags_t frag_flags = 0;
 
 		if (!mac_mmc_get_uint8(cursor,
 		    l3_off + offsetof(ip6_t, ip6_nxt), &ipproto)) {
@@ -2074,7 +2083,20 @@ mac_mmc_parse_l3(mac_mblk_cursor_t *cursor, uint16_t l3_sap, uint8_t *ipprotop,
 				 * communicating it through the EH itself.
 				 */
 				eh_len = 8;
-				found_frag_eh = true;
+
+				uint16_t frag_off;
+				if (!mac_mmc_get_uint16(cursor, hdr_off + 2,
+				    &frag_off)) {
+					return (false);
+				}
+				/* IP6F_* defines already in network order */
+				frag_off = htons(frag_off);
+				if ((frag_off & IP6F_MORE_FRAG) != 0) {
+					frag_flags |= MEOI_L3_FRAG_MORE;
+				}
+				if ((frag_off & IP6F_OFF_MASK) != 0) {
+					frag_flags |= MEOI_L3_FRAG_OFFSET;
+				}
 			} else if (ipproto == IPPROTO_AH) {
 				/*
 				 * The length of the IP Authentication EH is
@@ -2113,8 +2135,8 @@ mac_mmc_parse_l3(mac_mblk_cursor_t *cursor, uint16_t l3_sap, uint8_t *ipprotop,
 		if (ipprotop != NULL) {
 			*ipprotop = ipproto;
 		}
-		if (is_fragp != NULL) {
-			*is_fragp = found_frag_eh;
+		if (fragp != NULL) {
+			*fragp = frag_flags;
 		}
 		if (hdr_sizep != NULL) {
 			*hdr_sizep = ip_len;
@@ -2158,6 +2180,16 @@ mac_mmc_parse_l4(mac_mblk_cursor_t *cursor, uint8_t ipproto, uint8_t *hdr_sizep)
 	case IPPROTO_UDP:
 		*hdr_sizep = sizeof (struct udphdr);
 		return (true);
+	case IPPROTO_ICMP:
+		/*
+		 * Only count the parts of the header which are common to
+		 * message types.
+		 */
+		*hdr_sizep = offsetof(struct icmp, icmp_hun);
+		return (true);
+	case IPPROTO_ICMPV6:
+		*hdr_sizep = sizeof (icmp6_t);
+		return (true);
 	case IPPROTO_SCTP:
 		*hdr_sizep = sizeof (sctp_hdr_t);
 		return (true);
@@ -2171,18 +2203,21 @@ mac_mmc_parse_l4(mac_mblk_cursor_t *cursor, uint8_t ipproto, uint8_t *hdr_sizep)
  *
  * If packet ethertype does not indicate that a VLAN is present,
  * MEOI_VLAN_TCI_INVALID will be returned for the TCI.
+ *
+ * Returns B_TRUE if header could be parsed for destination MAC address and VLAN
+ * TCI, otherwise B_FALSE.
  */
-int
+boolean_t
 mac_ether_l2_info(mblk_t *mp, uint8_t *dst_addrp, uint32_t *vlan_tcip)
 {
 	mac_mblk_cursor_t cursor;
 
 	mac_mmc_init(&cursor, mp);
 	if (!mac_mmc_parse_ether(&cursor, dst_addrp, vlan_tcip, NULL, NULL)) {
-		return (-1);
+		return (B_FALSE);
 	}
 
-	return (0);
+	return (B_TRUE);
 }
 
 /*
@@ -2202,11 +2237,9 @@ mac_ether_l2_info(mblk_t *mp, uint8_t *dst_addrp, uint32_t *vlan_tcip)
  * Alternatively, this could be used to parse the headers in an encapsulated
  * Ethernet packet by simply specifying the start of its header in `off`.
  *
- * Returns 0 if parsing was able to proceed all the way through the L4 header.
- * The meoi_flags field will be updated regardless for any partial (L2/L3)
- * parsing which was successful.
+ * The degree to which parsing was able to proceed is stored in `meoi_flags`.
  */
-int
+void
 mac_partial_offload_info(mblk_t *mp, size_t off, mac_ether_offload_info_t *meoi)
 {
 	mac_mblk_cursor_t cursor;
@@ -2214,7 +2247,7 @@ mac_partial_offload_info(mblk_t *mp, size_t off, mac_ether_offload_info_t *meoi)
 	mac_mmc_init(&cursor, mp);
 
 	if (!mac_mmc_seek(&cursor, off)) {
-		return (-1);
+		return;
 	}
 
 	if ((meoi->meoi_flags & MEOI_L2INFO_SET) == 0) {
@@ -2222,7 +2255,7 @@ mac_partial_offload_info(mblk_t *mp, size_t off, mac_ether_offload_info_t *meoi)
 		uint16_t l2_sz, ethertype;
 		if (!mac_mmc_parse_ether(&cursor, NULL, &vlan_tci, &ethertype,
 		    &l2_sz)) {
-			return (-1);
+			return;
 		}
 
 		meoi->meoi_flags |= MEOI_L2INFO_SET;
@@ -2237,35 +2270,46 @@ mac_partial_offload_info(mblk_t *mp, size_t off, mac_ether_offload_info_t *meoi)
 	const size_t l2_end = off + (size_t)meoi->meoi_l2hlen;
 	if (!mac_mmc_seek(&cursor, l2_end)) {
 		meoi->meoi_flags &= ~MEOI_L2INFO_SET;
-		return (-1);
+		return;
 	}
 
 	if ((meoi->meoi_flags & MEOI_L3INFO_SET) == 0) {
 		uint8_t ipproto;
 		uint16_t l3_sz;
-		bool is_frag;
+		mac_ether_offload_flags_t frag_flags;
+
 		if (!mac_mmc_parse_l3(&cursor, meoi->meoi_l3proto, &ipproto,
-		    &is_frag, &l3_sz)) {
-			return (-1);
+		    &frag_flags, &l3_sz)) {
+			return;
 		}
+
+		/* Only the fragment-related flags should be emitted */
+		ASSERT3U(frag_flags &
+		    ~(MEOI_L3_FRAG_MORE | MEOI_L3_FRAG_OFFSET), ==, 0);
 
 		meoi->meoi_l3hlen = l3_sz;
 		meoi->meoi_l4proto = ipproto;
-		meoi->meoi_flags |= MEOI_L3INFO_SET;
-		if (is_frag) {
-			meoi->meoi_flags |= MEOI_L3_FRAGMENT;
-		}
+		meoi->meoi_flags |= MEOI_L3INFO_SET | frag_flags;
 	}
 	const size_t l3_end = l2_end + (size_t)meoi->meoi_l3hlen;
 	if (!mac_mmc_seek(&cursor, l3_end)) {
 		meoi->meoi_flags &= ~MEOI_L3INFO_SET;
-		return (-1);
+		return;
 	}
 
 	if ((meoi->meoi_flags & MEOI_L4INFO_SET) == 0) {
+		if ((meoi->meoi_flags & MEOI_L3_FRAG_OFFSET) != 0) {
+			/*
+			 * If this packet is a fragment, and is offset into the
+			 * data (not at the "head"), then we are past where the
+			 * L4 header would be, and should parse no further.
+			 */
+			return;
+		}
+
 		uint8_t l4_sz;
 		if (!mac_mmc_parse_l4(&cursor, meoi->meoi_l4proto, &l4_sz)) {
-			return (-1);
+			return;
 		}
 
 		meoi->meoi_l4hlen = l4_sz;
@@ -2274,10 +2318,7 @@ mac_partial_offload_info(mblk_t *mp, size_t off, mac_ether_offload_info_t *meoi)
 	const size_t l4_end = l3_end + (size_t)meoi->meoi_l4hlen;
 	if (!mac_mmc_seek(&cursor, l4_end)) {
 		meoi->meoi_flags &= ~MEOI_L4INFO_SET;
-		return (-1);
 	}
-
-	return (0);
 }
 
 /*
@@ -2299,17 +2340,16 @@ mac_partial_offload_info(mblk_t *mp, size_t off, mac_ether_offload_info_t *meoi)
  * parsing:
  *
  * - MEOI_VLAN_TAGGED: Ethernet header is tagged with a VLAN
- * - MEOI_L3_FRAGMENT: L3 header indicated fragmentation
- *
- * When parsing is able to complete through the end of the L4 header, a value of
- * 0 is returned.  Otherwise a non-0 value is returned, although any partial
- * results will be set in meoi as described above.
+ * - MEOI_L3_FRAG_MORE: L3 indicated that this packet is fragmented into one or
+ *   more packets to follow
+ * - MEOI_L3_FRAG_OFFSET: L3 header that this packet is a fragment which is
+ *   offset (following) from the head of the data
  */
-int
+void
 mac_ether_offload_info(mblk_t *mp, mac_ether_offload_info_t *meoi)
 {
 	bzero(meoi, sizeof (mac_ether_offload_info_t));
 	meoi->meoi_len = msgdsize(mp);
 
-	return (mac_partial_offload_info(mp, 0, meoi));
+	mac_partial_offload_info(mp, 0, meoi);
 }

@@ -92,6 +92,7 @@ CORE_OBJS +=			\
 	mem_config_arch.o	\
 	memlist_new.o		\
 	memnode.o		\
+	memstr.o		\
 	microcode_amd.o		\
 	microcode_intel.o	\
 	mlsetup.o		\
@@ -244,6 +245,8 @@ AMD_IOMMU_OBJS +=	amd_iommu.o amd_iommu_impl.o amd_iommu_acpi.o \
 			amd_iommu_cmd.o amd_iommu_log.o amd_iommu_page_tables.o
 
 PCI_PRD_OBJS += pci_prd_i86pc.o pci_memlist.o
+
+I86PC_KTEST_OBJS =	i86pc_ktest.o
 
 #
 #	Build up defines and paths.

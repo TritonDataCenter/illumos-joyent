@@ -25,17 +25,20 @@ SUBDIRS_i386 =		\
 	zen_umc
 
 SUBDIRS =       \
+		comm_page \
 		cores \
 		ddi_ufm \
 		definit \
 		execvpe \
 		file-locking \
 		hexdump \
+		idmap \
 		ilstr \
 		ksensor \
 		ksid \
+		ktest \
 		libtopo \
-		mac_test \
+		mac \
 		minttl \
 		oclo \
 		pf_key \

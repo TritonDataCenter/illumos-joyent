@@ -25,11 +25,11 @@
  * across multiple device families.
  */
 
+#include <sys/nvme/ocp.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <sys/nvme/ocp.h>
 
 #define	PHISON_PCI_VID	0x1987
 #define	PHISON_X200_DID	0x5302

@@ -20,6 +20,10 @@
  * release for licensing terms and conditions.
  */
 
+/*
+ * Copyright 2025 Oxide Computer Company
+ */
+
 #ifndef __T4NEX_H
 #define	__T4NEX_H
 
@@ -33,17 +37,9 @@ extern "C" {
 #define	T4_IOCTL_GET32		(T4_IOCTL + 3)
 #define	T4_IOCTL_PUT32		(T4_IOCTL + 4)
 #define	T4_IOCTL_REGDUMP	(T4_IOCTL + 5)
-#define	T4_IOCTL_SGE_CONTEXT	(T4_IOCTL + 6)
-#define	T4_IOCTL_DEVLOG		(T4_IOCTL + 7)
-#define	T4_IOCTL_GET_MEM	(T4_IOCTL + 8)
-#define	T4_IOCTL_GET_TID_TAB	(T4_IOCTL + 9)
-#define	T4_IOCTL_GET_MBOX	(T4_IOCTL + 10)
-#define	T4_IOCTL_GET_CIM_LA	(T4_IOCTL + 11)
-#define	T4_IOCTL_GET_CIM_QCFG	(T4_IOCTL + 12)
-#define	T4_IOCTL_GET_CIM_IBQ	(T4_IOCTL + 13)
-#define	T4_IOCTL_GET_EDC	(T4_IOCTL + 14)
-#define	T4_IOCTL_LOAD_FW	(T4_IOCTL + 15)
-#define	T4_IOCTL_GET_CUDBG	(T4_IOCTL + 16)
+#define	T4_IOCTL_DEVLOG		(T4_IOCTL + 6)
+#define	T4_IOCTL_LOAD_FW	(T4_IOCTL + 7)
+#define	T4_IOCTL_GET_CUDBG	(T4_IOCTL + 8)
 
 enum {
 	T4_CTXT_EGRESS,
@@ -61,9 +57,9 @@ struct t4_reg32_cmd {
 #define	T5_REGDUMP_SIZE (332 * 1024)
 
 struct t4_regdump {
-	uint32_t  version;
-	uint32_t  len;
-	uint32_t  *data;
+	uint32_t version;
+	uint32_t len;
+	uint32_t data[];
 };
 
 struct t4_sge_context {

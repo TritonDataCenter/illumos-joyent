@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  *
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 Oxide Computer Company
  */
 
 /*
@@ -33,6 +34,7 @@
 #include <kmdb/kmdb_kdi.h>
 #include <kmdb/kmdb_asmutil.h>
 #include <mdb/mdb_debug.h>
+#include <mdb/mdb_stack.h>
 #include <mdb/mdb_err.h>
 #include <mdb/mdb_list.h>
 #include <mdb/mdb_target_impl.h>
@@ -119,69 +121,84 @@ kmt_next(mdb_tgt_t *t, uintptr_t *p)
 	return (mdb_isa_next(t, p, pc, instr));
 }
 
-/*ARGSUSED*/
 static int
 kmt_stack_common(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv,
-    int cpuid, mdb_tgt_stack_f *func)
+    int cpuid, mdb_stack_frame_flags_t sflags, mdb_tgt_stack_f *func)
 {
+	mdb_tgt_t *t = mdb.m_target;
 	const mdb_tgt_gregset_t *grp = NULL;
 	mdb_tgt_gregset_t gregs;
-	void *arg = (void *)(uintptr_t)mdb.m_nargs;
+	mdb_stack_frame_hdl_t *hdl;
+	uint_t arglim = mdb.m_nargs;
+	int i;
 
 	if (flags & DCMD_ADDRSPEC) {
 		bzero(&gregs, sizeof (gregs));
 		gregs.kregs[KREG_FP] = addr;
 		grp = &gregs;
-	} else
+	} else {
 		grp = kmdb_dpi_get_gregs(cpuid);
+	}
 
 	if (grp == NULL) {
 		warn("failed to retrieve registers for cpu %d", cpuid);
 		return (DCMD_ERR);
 	}
 
+	i = mdb_getopts(argc, argv,
+	    'n', MDB_OPT_SETBITS, MSF_ADDR, &sflags,
+	    's', MDB_OPT_SETBITS, MSF_SIZES, &sflags,
+	    't', MDB_OPT_SETBITS, MSF_TYPES, &sflags,
+	    'v', MDB_OPT_SETBITS, MSF_VERBOSE, &sflags,
+	    NULL);
+
+	argc -= i;
+	argv += i;
+
 	if (argc != 0) {
 		if (argv->a_type == MDB_TYPE_CHAR || argc > 1)
 			return (DCMD_USAGE);
 
-		if (argv->a_type == MDB_TYPE_STRING)
-			arg = (void *)(uintptr_t)mdb_strtoull(argv->a_un.a_str);
-		else
-			arg = (void *)(uintptr_t)argv->a_un.a_val;
+		arglim = mdb_argtoull(argv);
 	}
 
-	(void) mdb_isa_kvm_stack_iter(mdb.m_target, grp, func, arg);
+	if ((hdl = mdb_stack_frame_init(t, arglim, sflags)) == NULL) {
+		mdb_warn("failed to init stack frame\n");
+		return (DCMD_ERR);
+	}
+
+	(void) mdb_isa_kvm_stack_iter(t, grp, func, (void *)hdl);
 
 	return (DCMD_OK);
 }
 
 int
 kmt_cpustack(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv,
-    int cpuid, int verbose)
+    int cpuid, uint_t verbose)
 {
 	return (kmt_stack_common(addr, flags, argc, argv, cpuid,
-	    (verbose ? mdb_isa_kvm_framev : mdb_isa_kvm_frame)));
+	    verbose != 0 ? MSF_VERBOSE : 0, mdb_isa_kvm_frame));
 }
 
 int
 kmt_stack(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 {
 	return (kmt_stack_common(addr, flags, argc, argv, DPI_MASTER_CPUID,
-	    mdb_isa_kvm_frame));
+	    0, mdb_isa_kvm_frame));
 }
 
 int
 kmt_stackv(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 {
 	return (kmt_stack_common(addr, flags, argc, argv, DPI_MASTER_CPUID,
-	    mdb_isa_kvm_framev));
+	    MSF_VERBOSE, mdb_isa_kvm_frame));
 }
 
 int
 kmt_stackr(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 {
 	return (kmt_stack_common(addr, flags, argc, argv, DPI_MASTER_CPUID,
-	    mdb_isa_kvm_framev));
+	    MSF_VERBOSE, mdb_isa_kvm_frame));
 }
 
 /*ARGSUSED*/
@@ -249,15 +266,6 @@ kmt_in_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	return (DCMD_OK);
 }
 
-static uint64_t
-kmt_numarg(const mdb_arg_t *arg)
-{
-	if (arg->a_type == MDB_TYPE_STRING)
-		return (mdb_strtoull(arg->a_un.a_str));
-	else
-		return (arg->a_un.a_val);
-}
-
 /*ARGSUSED1*/
 int
 kmt_out_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
@@ -274,7 +282,7 @@ kmt_out_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		len = mdb.m_dcount;
 
 	argv += argc - 1;
-	val = kmt_numarg(argv);
+	val = mdb_argtoull(argv);
 
 	if (kmt_io_check(len, addr, IOCHECK_WARN) < 0)
 		return (DCMD_ERR);
@@ -337,7 +345,7 @@ kmt_wrmsr(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	if (!(flags & DCMD_ADDRSPEC) || argc != 1)
 		return (DCMD_USAGE);
 
-	val = kmt_numarg(argv);
+	val = mdb_argtoull(argv);
 
 	if (kmt_rwmsr(addr, &val, wrmsr)) {
 		warn("wrmsr failed");
@@ -411,9 +419,9 @@ kmt_pcicfg_common(uintptr_t off, uint32_t *valp, const mdb_arg_t *argv,
 	uint32_t bus, dev, func;
 	uint32_t addr;
 
-	bus = kmt_numarg(&argv[0]);
-	dev = kmt_numarg(&argv[1]);
-	func = kmt_numarg(&argv[2]);
+	bus = (uint32_t)mdb_argtoull(&argv[0]);
+	dev = (uint32_t)mdb_argtoull(&argv[1]);
+	func = (uint32_t)mdb_argtoull(&argv[2]);
 
 	if ((bus & 0xffff) != bus) {
 		warn("invalid bus number (must be 0-0xffff)\n");
@@ -479,7 +487,7 @@ kmt_wrpcicfg(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	if (argc != 4 || !(flags & DCMD_ADDRSPEC))
 		return (DCMD_USAGE);
 
-	val = (uint32_t)kmt_numarg(&argv[3]);
+	val = (uint32_t)mdb_argtoull(&argv[3]);
 
 	if (kmt_pcicfg_common(addr, &val, argv, kmt_out) != DCMD_OK)
 		return (DCMD_ERR);

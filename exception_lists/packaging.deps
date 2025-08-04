@@ -10,14 +10,18 @@ pkg:/developer/macro/cpp
 pkg:/file/gnu-coreutils
 pkg:/gnome/zenity
 pkg:/library/expat
+pkg:/library/expat/32
 pkg:/library/glib2
+pkg:/library/glib2/32
 pkg:/library/libxml2
 pkg:/library/libxml2/32
 pkg:/library/nspr
+pkg:/library/nspr/32
 pkg:/library/security/openssl
 pkg:/library/security/openssl-10
 pkg:/library/security/openssl-11
 pkg:/library/security/openssl-3
+pkg:/library/security/openssl-3/32
 pkg:/library/security/openssl-30
 pkg:/library/security/trousers
 pkg:/library/zlib
@@ -25,6 +29,7 @@ pkg:/package/pkg
 pkg:/release/name
 pkg:/runtime/java
 pkg:/runtime/java/openjdk11
+pkg:/runtime/java/openjdk17
 pkg:/runtime/java/openjdk8
 pkg:/runtime/java/runtime64
 pkg:/runtime/perl
@@ -45,6 +50,7 @@ pkg:/system/library/libdbus
 pkg:/system/library/libdbus-glib
 pkg:/system/library/mozilla-nss
 pkg:/system/management/snmp/net-snmp
+pkg:/system/management/snmp/net-snmp/32
 pkg:/system/test/fio
 pkg:/system/xvm/xvmstore
 pkg:/text/less

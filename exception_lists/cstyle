@@ -91,6 +91,8 @@ usr/src/cmd/pools/poold/libjpool/jpool.h
 usr/src/cmd/pools/poold/libjsyslog/jsyslog.h
 usr/src/cmd/ttymon/sttyparse.c
 usr/src/cmd/vi/
+usr/src/cmd/zic/
+usr/src/cmd/zdump/
 usr/src/common/ficl/ficltokens.h
 usr/src/common/bzip2/bzlib.h
 usr/src/common/bzip2/crctable.c
@@ -1279,7 +1281,9 @@ usr/src/cmd/bhyve/common/smbiostbl.[ch]
 usr/src/cmd/bhyve/common/tpm_device.c
 usr/src/cmd/bhyve/common/tpm_emul.h
 usr/src/cmd/bhyve/common/tpm_emul_passthru.c
+usr/src/cmd/bhyve/common/tpm_emul_swtpm.c
 usr/src/cmd/bhyve/common/tpm_intf.h
+usr/src/cmd/bhyve/common/tpm_intf_crb.c
 usr/src/cmd/bhyve/common/tpm_intf_crb.c
 usr/src/cmd/bhyve/common/tpm_ppi.h
 usr/src/cmd/bhyve/common/tpm_ppi_qemu.c

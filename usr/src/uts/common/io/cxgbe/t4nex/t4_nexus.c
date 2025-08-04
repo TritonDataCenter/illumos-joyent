@@ -47,12 +47,10 @@
 #include <sys/mac_ether.h>
 #include <sys/vlan.h>
 
-#include "version.h"
 #include "common/common.h"
 #include "common/t4_msg.h"
 #include "common/t4_regs.h"
 #include "common/t4_extra_regs.h"
-#include "t4_l2t.h"
 
 static int t4_cb_open(dev_t *devp, int flag, int otyp, cred_t *credp);
 static int t4_cb_close(dev_t dev, int flag, int otyp, cred_t *credp);
@@ -134,10 +132,6 @@ struct intrs_and_queues {
 	int nrxq1g;		/* # of NIC rxq's for each 1G port */
 };
 
-static int cpl_not_handled(struct sge_iq *iq, const struct rss_header *rss,
-    mblk_t *m);
-static int fw_msg_not_handled(struct adapter *, const __be64 *);
-int t4_register_cpl_handler(struct adapter *sc, int opcode, cpl_handler_t h);
 static unsigned int getpf(struct adapter *sc);
 static int prep_firmware(struct adapter *sc);
 static int upload_config_file(struct adapter *sc, uint32_t *mt, uint32_t *ma);
@@ -367,17 +361,6 @@ t4_devo_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 
 	(void) memset(sc->chan_map, 0xff, sizeof (sc->chan_map));
 
-	/*
-	 * Initialize cpl handler.
-	 */
-	for (i = 0; i < ARRAY_SIZE(sc->cpl_handler); i++) {
-		sc->cpl_handler[i] = cpl_not_handled;
-	}
-
-	for (i = 0; i < ARRAY_SIZE(sc->fw_msg_handler); i++) {
-		sc->fw_msg_handler[i] = fw_msg_not_handled;
-	}
-
 	for (i = 0; i < NCHAN; i++) {
 		(void) snprintf(name, sizeof (name), "%s-%d", "reclaim", i);
 		sc->tq[i] = ddi_taskq_create(sc->dip, name, 1,
@@ -460,7 +443,7 @@ t4_devo_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 
 	t4_sge_init(sc);
 
-	if (sc->flags & MASTER_PF) {
+	if (sc->flags & TAF_MASTER_PF) {
 		/* get basic stuff going */
 		rc = -t4_fw_initialize(sc, sc->mbox);
 		if (rc != 0) {
@@ -583,7 +566,7 @@ t4_devo_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	s->neq = s->ntxq + s->nrxq;	/* the fl in an rxq is an eq */
 	s->niq = s->nrxq + 1;		/* 1 extra for firmware event queue */
 	if (iaq.intr_fwd != 0)
-		sc->flags |= INTR_FWD;
+		sc->flags |= TAF_INTR_FWD;
 	s->rxq = kmem_zalloc(s->nrxq * sizeof (struct sge_rxq), KM_SLEEP);
 	s->txq = kmem_zalloc(s->ntxq * sizeof (struct sge_txq), KM_SLEEP);
 	s->iqmap =
@@ -644,7 +627,7 @@ t4_devo_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	(void) ddi_intr_get_cap(sc->intr_handle[0], &sc->intr_cap);
 	(void) ddi_intr_get_pri(sc->intr_handle[0], &sc->intr_pri);
 	if (sc->intr_count == 1) {
-		ASSERT(sc->flags & INTR_FWD);
+		ASSERT(sc->flags & TAF_INTR_FWD);
 		(void) ddi_intr_add_handler(sc->intr_handle[0], t4_intr_all, sc,
 		    &s->fwq);
 	} else {
@@ -658,7 +641,7 @@ t4_devo_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 		    &s->fwq);
 		irq++;
 		/*
-		 * Note that if INTR_FWD is set then either the NIC rx
+		 * Note that if TAF_INTR_FWD is set then either the NIC rx
 		 * queues or (exclusive or) the TOE rx queueus will be taking
 		 * direct interrupts.
 		 *
@@ -678,7 +661,7 @@ t4_devo_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 		}
 
 	}
-	sc->flags |= INTR_ALLOCATED;
+	sc->flags |= TAF_INTR_ALLOC;
 
 	if ((rc = ksensor_create_scalar_pcidev(dip, SENSOR_KIND_TEMPERATURE,
 	    &t4_temp_ops, sc, "temp", &sc->temp_sensor)) != 0) {
@@ -748,11 +731,11 @@ t4_devo_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 	if (sc == NULL)
 		return (DDI_SUCCESS);
 
-	if (sc->flags & FULL_INIT_DONE) {
+	if (sc->flags & TAF_INIT_DONE) {
 		t4_intr_disable(sc);
 		for_each_port(sc, i) {
 			pi = sc->port[i];
-			if (pi && pi->flags & PORT_INIT_DONE)
+			if (pi && pi->flags & TPF_INIT_DONE)
 				(void) port_full_uninit(pi);
 		}
 		(void) adapter_full_uninit(sc);
@@ -792,12 +775,12 @@ t4_devo_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 	if (s->rxbuf_cache != NULL)
 		kmem_cache_destroy(s->rxbuf_cache);
 
-	if (sc->flags & INTR_ALLOCATED) {
+	if (sc->flags & TAF_INTR_ALLOC) {
 		for (i = 0; i < sc->intr_count; i++) {
 			(void) ddi_intr_remove_handler(sc->intr_handle[i]);
 			(void) ddi_intr_free(sc->intr_handle[i]);
 		}
-		sc->flags &= ~INTR_ALLOCATED;
+		sc->flags &= ~TAF_INTR_ALLOC;
 	}
 
 	if (sc->intr_handle != NULL) {
@@ -1079,7 +1062,7 @@ prep_firmware(struct adapter *sc)
 	}
 
 	if (rc == sc->mbox)
-		sc->flags |= MASTER_PF;
+		sc->flags |= TAF_MASTER_PF;
 
 	/* We may need FW version info for later reporting */
 	t4_get_version_info(sc);
@@ -1175,7 +1158,7 @@ prep_firmware(struct adapter *sc)
 	}
 
 	/* Partition adapter resources as specified in the config file. */
-	if (sc->flags & MASTER_PF) {
+	if (sc->flags & TAF_MASTER_PF) {
 		/* Handle default vs special T4 config file */
 
 		rc = partition_resources(sc);
@@ -1544,36 +1527,19 @@ get_params__post_init(struct adapter *sc)
 
 	param[0] = FW_PARAM_PFVF(IQFLINT_START);
 	param[1] = FW_PARAM_PFVF(EQ_START);
-	param[2] = FW_PARAM_PFVF(FILTER_START);
-	param[3] = FW_PARAM_PFVF(FILTER_END);
-	param[4] = FW_PARAM_PFVF(L2T_START);
-	param[5] = FW_PARAM_PFVF(L2T_END);
-	rc = -t4_query_params(sc, sc->mbox, sc->pf, 0, 6, param, val);
+	param[2] = FW_PARAM_PFVF(IQFLINT_END);
+	param[3] = FW_PARAM_PFVF(EQ_END);
+	rc = -t4_query_params(sc, sc->mbox, sc->pf, 0, 4, param, val);
 	if (rc != 0) {
 		cxgb_printf(sc->dip, CE_WARN,
 		    "failed to query parameters (post_init): %d.\n", rc);
 		return (rc);
 	}
 
-	/* LINTED: E_ASSIGN_NARROW_CONV */
 	sc->sge.iq_start = val[0];
 	sc->sge.eq_start = val[1];
-	sc->tids.ftid_base = val[2];
-	sc->tids.nftids = val[3] - val[2] + 1;
-	sc->vres.l2t.start = val[4];
-	sc->vres.l2t.size = val[5] - val[4] + 1;
-
-	param[0] = FW_PARAM_PFVF(IQFLINT_END);
-	param[1] = FW_PARAM_PFVF(EQ_END);
-	rc = -t4_query_params(sc, sc->mbox, sc->pf, 0, 2, param, val);
-	if (rc != 0) {
-		cxgb_printf(sc->dip, CE_WARN, "failed to query eq/iq map "
-		    "size parameters (post_init): %d.\n", rc);
-		return (rc);
-	}
-
-	sc->sge.iqmap_sz = val[0] - sc->sge.iq_start + 1;
-	sc->sge.eqmap_sz = val[1] - sc->sge.eq_start + 1;
+	sc->sge.iqmap_sz = val[2] - sc->sge.iq_start + 1;
+	sc->sge.eqmap_sz = val[3] - sc->sge.eq_start + 1;
 
 	/* get capabilites */
 	bzero(&caps, sizeof (caps));
@@ -1585,30 +1551,6 @@ get_params__post_init(struct adapter *sc)
 		cxgb_printf(sc->dip, CE_WARN,
 		    "failed to get card capabilities: %d.\n", rc);
 		return (rc);
-	}
-
-	if (caps.toecaps != 0) {
-		/* query offload-related parameters */
-		param[0] = FW_PARAM_DEV(NTID);
-		param[1] = FW_PARAM_PFVF(SERVER_START);
-		param[2] = FW_PARAM_PFVF(SERVER_END);
-		param[3] = FW_PARAM_PFVF(TDDP_START);
-		param[4] = FW_PARAM_PFVF(TDDP_END);
-		param[5] = FW_PARAM_DEV(FLOWC_BUFFIFO_SZ);
-		rc = -t4_query_params(sc, sc->mbox, sc->pf, 0, 6, param, val);
-		if (rc != 0) {
-			cxgb_printf(sc->dip, CE_WARN,
-			    "failed to query TOE parameters: %d.\n", rc);
-			return (rc);
-		}
-		sc->tids.ntids = val[0];
-		sc->tids.natids = min(sc->tids.ntids / 2, MAX_ATIDS);
-		sc->tids.stid_base = val[1];
-		sc->tids.nstids = val[2] - val[1] + 1;
-		sc->vres.ddp.start = val[3];
-		sc->vres.ddp.size = val[4] - val[3] + 1;
-		sc->params.ofldq_wr_cred = val[5];
-		sc->params.offload = 1;
 	}
 
 	rc = -t4_get_pfres(sc);
@@ -2563,7 +2505,7 @@ adapter_full_init(struct adapter *sc)
 			(void) ddi_intr_enable(sc->intr_handle[i]);
 	}
 	t4_intr_enable(sc);
-	sc->flags |= FULL_INIT_DONE;
+	sc->flags |= TAF_INIT_DONE;
 
 done:
 	if (rc != 0)
@@ -2590,7 +2532,7 @@ adapter_full_uninit(struct adapter *sc)
 	if (rc != 0)
 		return (rc);
 
-	sc->flags &= ~FULL_INIT_DONE;
+	sc->flags &= ~TAF_INIT_DONE;
 
 	return (0);
 }
@@ -2604,7 +2546,7 @@ port_full_init(struct port_info *pi)
 	int rc, i;
 
 	ADAPTER_LOCK_ASSERT_NOTOWNED(sc);
-	ASSERT((pi->flags & PORT_INIT_DONE) == 0);
+	ASSERT((pi->flags & TPF_INIT_DONE) == 0);
 
 	/*
 	 * Allocate tx/rx/fl queues for this port.
@@ -2633,7 +2575,7 @@ port_full_init(struct port_info *pi)
 	 */
 	pi->ksp_fec = setup_port_fec_kstats(pi);
 
-	pi->flags |= PORT_INIT_DONE;
+	pi->flags |= TPF_INIT_DONE;
 done:
 	if (rc != 0)
 		(void) port_full_uninit(pi);
@@ -2648,14 +2590,14 @@ int
 port_full_uninit(struct port_info *pi)
 {
 
-	ASSERT(pi->flags & PORT_INIT_DONE);
+	ASSERT(pi->flags & TPF_INIT_DONE);
 
 	if (pi->ksp_fec != NULL) {
 		kstat_delete(pi->ksp_fec);
 		pi->ksp_fec = NULL;
 	}
 	(void) t4_teardown_port_queues(pi);
-	pi->flags &= ~PORT_INIT_DONE;
+	pi->flags &= ~TPF_INIT_DONE;
 
 	return (0);
 }
@@ -2668,7 +2610,7 @@ enable_port_queues(struct port_info *pi)
 	struct sge_iq *iq;
 	struct sge_rxq *rxq;
 
-	ASSERT(pi->flags & PORT_INIT_DONE);
+	ASSERT(pi->flags & TPF_INIT_DONE);
 
 	/*
 	 * TODO: whatever was queued up after we set iq->state to IQS_DISABLED
@@ -2694,7 +2636,7 @@ disable_port_queues(struct port_info *pi)
 	struct adapter *sc = pi->adapter;
 	struct sge_rxq *rxq;
 
-	ASSERT(pi->flags & PORT_INIT_DONE);
+	ASSERT(pi->flags & TPF_INIT_DONE);
 
 	/*
 	 * TODO: need proper implementation for all tx queues (ctrl, eth, ofld).
@@ -2769,64 +2711,6 @@ t4_os_portmod_changed(struct adapter *sc, int idx)
 	if ((isset(&sc->open_device_map, pi->port_id) != 0) &&
 	    pi->link_cfg.new_module)
 		pi->link_cfg.redo_l1cfg = true;
-}
-
-/* ARGSUSED */
-static int
-cpl_not_handled(struct sge_iq *iq, const struct rss_header *rss, mblk_t *m)
-{
-	if (m != NULL)
-		freemsg(m);
-	return (0);
-}
-
-int
-t4_register_cpl_handler(struct adapter *sc, int opcode, cpl_handler_t h)
-{
-	uint_t *loc, new;
-
-	if (opcode >= ARRAY_SIZE(sc->cpl_handler))
-		return (EINVAL);
-
-	new = (uint_t)(unsigned long) (h ? h : cpl_not_handled);
-	loc = (uint_t *)&sc->cpl_handler[opcode];
-	(void) atomic_swap_uint(loc, new);
-
-	return (0);
-}
-
-static int
-fw_msg_not_handled(struct adapter *sc, const __be64 *data)
-{
-	struct cpl_fw6_msg *cpl;
-
-	cpl = __containerof((void *)data, struct cpl_fw6_msg, data);
-
-	cxgb_printf(sc->dip, CE_WARN, "%s fw_msg type %d", __func__, cpl->type);
-	return (0);
-}
-
-int
-t4_register_fw_msg_handler(struct adapter *sc, int type, fw_msg_handler_t h)
-{
-	fw_msg_handler_t *loc, new;
-
-	if (type >= ARRAY_SIZE(sc->fw_msg_handler))
-		return (EINVAL);
-
-	/*
-	 * These are dispatched by the handler for FW{4|6}_CPL_MSG using the CPL
-	 * handler dispatch table.  Reject any attempt to install a handler for
-	 * this subtype.
-	 */
-	if (type == FW_TYPE_RSSCPL || type == FW6_TYPE_RSSCPL)
-		return (EINVAL);
-
-	new = h ? h : fw_msg_not_handled;
-	loc = &sc->fw_msg_handler[type];
-	(void) atomic_swap_ptr(loc, (void *)new);
-
-	return (0);
 }
 
 static int

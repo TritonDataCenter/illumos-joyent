@@ -17,7 +17,7 @@
 # Copyright 2019 Joyent, Inc.
 # Copyright 2022 RackTop Systems, Inc.
 # Copyright 2024 Oxide Computer Company
-# Copyright 2023 Peter Tribble
+# Copyright 2025 Peter Tribble
 #
 
 file path=usr/share/man/man9f/ASSERT.9f
@@ -1287,6 +1287,12 @@ link path=usr/share/man/man9f/stdc_bit_floor_ui.9f target=stdc_bit_floor.9f
 link path=usr/share/man/man9f/stdc_bit_floor_ul.9f target=stdc_bit_floor.9f
 link path=usr/share/man/man9f/stdc_bit_floor_ull.9f target=stdc_bit_floor.9f
 link path=usr/share/man/man9f/stdc_bit_floor_us.9f target=stdc_bit_floor.9f
+file path=usr/share/man/man9f/stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_uc.9f target=stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_ui.9f target=stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_ul.9f target=stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_ull.9f target=stdc_bit_width.9f
+link path=usr/share/man/man9f/stdc_bit_width_us.9f target=stdc_bit_width.9f
 file path=usr/share/man/man9f/stdc_count_ones.9f
 link path=usr/share/man/man9f/stdc_count_ones_uc.9f target=stdc_count_ones.9f
 link path=usr/share/man/man9f/stdc_count_ones_ui.9f target=stdc_count_ones.9f
@@ -1420,6 +1426,7 @@ file path=usr/share/man/man9f/strqget.9f
 file path=usr/share/man/man9f/strqset.9f
 link path=usr/share/man/man9f/strrchr.9f target=string.9f
 link path=usr/share/man/man9f/strspn.9f target=string.9f
+link path=usr/share/man/man9f/strtok_r.9f target=string.9f
 file path=usr/share/man/man9f/swab.9f
 file path=usr/share/man/man9f/taskq.9f
 file path=usr/share/man/man9f/testb.9f

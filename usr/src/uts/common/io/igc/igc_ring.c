@@ -1631,11 +1631,7 @@ igc_tx_ring_write_descs(igc_t *igc, igc_tx_ring_t *ring, mblk_t *mp,
 static bool
 igc_meoi_checks(mblk_t *mp, igc_tx_state_t *tx)
 {
-	/*
-	 * Inability to parse all the way through L4 is not a concern unless
-	 * requested offloads require it.
-	 */
-	(void) mac_ether_offload_info(mp, &tx->itx_meoi);
+	mac_ether_offload_info(mp, &tx->itx_meoi);
 
 	const mac_ether_offload_info_t *meoi = &tx->itx_meoi;
 	if ((tx->itx_cksum & HCK_IPV4_HDRCKSUM) != 0) {
@@ -1669,6 +1665,11 @@ igc_ring_tx(void *arg, mblk_t *mp)
 	igc_tx_state_t tx = { 0 };
 
 	ASSERT3P(mp->b_next, ==, NULL);
+
+	if (igc->igc_link_state != LINK_STATE_UP) {
+		freemsg(mp);
+		return (NULL);
+	}
 
 	mac_hcksum_get(mp, NULL, NULL, NULL, NULL, &tx.itx_cksum);
 	mac_lso_get(mp, &tx.itx_mss, &tx.itx_lso);
