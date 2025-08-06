@@ -7784,6 +7784,17 @@ lxpr_write_sys_net_core_somaxc(lxpr_node_t *lxpnp, struct uio *uio,
  *    tcp_recv_hiwat is the default TCP receive window size
  *    tcp_xmit_hiwat is the default TCP send window size
  *    tcp_max_buf is the maximum TCP send and receive buffer size
+ *
+ * In Linux, these tunables control TCP and UDP buffer sizes.
+ * However, in illumos, we have separate receive and send buffers
+ * for each stack: ICMP, TCP, UDP, and SCTP.
+ *
+ * Due to this, WE WILL ONLY MODIFY VALUES FOR THE TCP STACK.
+ *
+ * This means that when reading from this lxprocfs node, the reported value
+ * will reflect only the TCP stack settings. It is up to the user to use
+ * ipadm(8) to properly configure the receive and send buffers for the
+ * remaining protocol stacks, if required.
  */
 static int
 lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
