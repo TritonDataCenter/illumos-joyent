@@ -7971,7 +7971,8 @@ lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
 	attr = (lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ?
 	    "recv_buf" : "send_buf");
 
-    /* Update recv_buf/send_buf  for sctp, udp and raw/ip stacks as done
+	/*
+	 * Update recv_buf/send_buf  for sctp, udp and raw/ip stacks as done
 	 * in Linux.
 	 *
 	 * WARNING:
@@ -7989,12 +7990,13 @@ static int
 lxpr_write_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, struct uio *uio,
     struct cred *cr, caller_context_t *ct)
 {
-	char* attr = "max_buf";
+	char *attr = "max_buf";
 
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_MAX ||
 	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_MAX);
 
-    /* Update max_buf for sctp, udp and raw/ip stacks as done
+	/*
+	 * Update max_buf for sctp, udp and raw/ip stacks as done
 	 * in Linux. As a best effort only a failure setting the new
 	 * value in the udp stack is considered, as that's the value
 	 * that will be exposed when tools/users try to read rmem/wmem
