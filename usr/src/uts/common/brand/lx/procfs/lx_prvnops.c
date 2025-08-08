@@ -74,6 +74,8 @@
 #include <inet/tcp.h>
 #include <inet/tcp_impl.h>
 #include <inet/udp_impl.h>
+#include <inet/rawip_impl.h>
+#include <inet/sctp/sctp_impl.h>
 #include <inet/ipclassifier.h>
 #include <sys/socketvar.h>
 #include <fs/sockfs/socktpi.h>
@@ -4976,7 +4978,7 @@ static void
 lxpr_read_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 {
 	netstack_t	*ns;
-	tcp_stack_t	*tcps;
+	udp_stack_t	*udps;
 
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_MAX ||
 	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_MAX);
@@ -4987,8 +4989,8 @@ lxpr_read_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 		return;
 	}
 
-	tcps = ns->netstack_tcp;
-	lxpr_uiobuf_printf(uiobuf, "%d\n", tcps->tcps_max_buf);
+	udps = ns->netstack_udp;
+	lxpr_uiobuf_printf(uiobuf, "%d\n", udps->us_max_buf);
 	netstack_rele(ns);
 }
 
@@ -7757,6 +7759,161 @@ lxpr_write_tcp_property(lxpr_node_t *lxpnp, struct uio *uio,
 	return (res);
 }
 
+static int
+lxpr_write_udp_property(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct, char *prop,
+    int (*xlate)(char *, int))
+{
+	int error;
+	int res = 0;
+	size_t olen;
+	char val[16];	/* big enough for a uint numeric string */
+	netstack_t *ns;
+	mod_prop_info_t *ptbl = NULL;
+	mod_prop_info_t *pinfo = NULL;
+
+	if (uio->uio_loffset != 0)
+		return (EINVAL);
+
+	if (uio->uio_resid == 0)
+		return (0);
+
+	olen = uio->uio_resid;
+	if (olen > sizeof (val) - 1)
+		return (EINVAL);
+
+	bzero(val, sizeof (val));
+	error = uiomove(val, olen, UIO_WRITE, uio);
+	if (error != 0)
+		return (error);
+
+	if (val[olen - 1] == '\n')
+		val[olen - 1] = '\0';
+
+	if (val[0] == '\0') /* no input */
+		return (EINVAL);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL)
+		return (EINVAL);
+
+	if (xlate != NULL && xlate(val, sizeof (val)) != 0) {
+		netstack_rele(ns);
+		return (EINVAL);
+	}
+
+	ptbl = ns->netstack_udp->us_propinfo_tbl;
+	pinfo = mod_prop_lookup(ptbl, prop, MOD_PROTO_UDP);
+	if (pinfo == NULL || pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0)
+		res = EINVAL;
+
+	netstack_rele(ns);
+	return (res);
+}
+
+static int
+lxpr_write_sctp_property(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct, char *prop,
+    int (*xlate)(char *, int))
+{
+	int error;
+	int res = 0;
+	size_t olen, cbytes;
+	char val[16];	/* big enough for a uint numeric string */
+	netstack_t *ns;
+	mod_prop_info_t *ptbl = NULL;
+	mod_prop_info_t *pinfo = NULL;
+
+	if (uio->uio_loffset != 0)
+		return (EINVAL);
+
+	if (uio->uio_resid == 0)
+		return (0);
+
+	olen = uio->uio_resid;
+	if (olen > sizeof (val) - 1)
+		return (EINVAL);
+
+	bzero(val, sizeof (val));
+	error = uiocopy(val, olen, UIO_WRITE, uio, &cbytes);
+	if (error != 0)
+		return (error);
+
+	if (val[olen - 1] == '\n')
+		val[olen - 1] = '\0';
+
+	if (val[0] == '\0') /* no input */
+		return (EINVAL);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL)
+		return (EINVAL);
+
+	if (xlate != NULL && xlate(val, sizeof (val)) != 0) {
+		netstack_rele(ns);
+		return (EINVAL);
+	}
+
+	ptbl = ns->netstack_sctp->sctps_propinfo_tbl;
+	pinfo = mod_prop_lookup(ptbl, prop, MOD_PROTO_SCTP);
+	if (pinfo == NULL || pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0)
+		res = EINVAL;
+
+	netstack_rele(ns);
+	return (res);
+}
+
+static int
+lxpr_write_icmp_property(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct, char *prop,
+    int (*xlate)(char *, int))
+{
+	int error;
+	int res = 0;
+	size_t olen, cbytes;
+	char val[16];	/* big enough for a uint numeric string */
+	netstack_t *ns;
+	mod_prop_info_t *ptbl = NULL;
+	mod_prop_info_t *pinfo = NULL;
+
+	if (uio->uio_loffset != 0)
+		return (EINVAL);
+
+	if (uio->uio_resid == 0)
+		return (0);
+
+	olen = uio->uio_resid;
+	if (olen > sizeof (val) - 1)
+		return (EINVAL);
+
+	bzero(val, sizeof (val));
+	error = uiocopy(val, olen, UIO_WRITE, uio, &cbytes);
+	if (error != 0)
+		return (error);
+
+	if (val[olen - 1] == '\n')
+		val[olen - 1] = '\0';
+
+	if (val[0] == '\0') /* no input */
+		return (EINVAL);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL)
+		return (EINVAL);
+
+	if (xlate != NULL && xlate(val, sizeof (val)) != 0) {
+		netstack_rele(ns);
+		return (EINVAL);
+	}
+
+	ptbl = ns->netstack_icmp->is_propinfo_tbl;
+	pinfo = mod_prop_lookup(ptbl, prop, MOD_PROTO_RAWIP);
+	if (pinfo == NULL || pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0)
+		res = EINVAL;
+
+	netstack_rele(ns);
+	return (res);
+}
 
 static int
 lxpr_write_sys_net_core_somaxc(lxpr_node_t *lxpnp, struct uio *uio,
@@ -7789,12 +7946,18 @@ lxpr_write_sys_net_core_somaxc(lxpr_node_t *lxpnp, struct uio *uio,
  * However, in illumos, we have separate receive and send buffers
  * for each stack: ICMP, TCP, UDP, and SCTP.
  *
- * Due to this, WE WILL ONLY MODIFY VALUES FOR THE TCP STACK.
+ * Testing in a baremetal instance modifying values for rmem/wmem default
+ * affects the send/recv values for UDP, SCTP, raw/IP buffers.
  *
- * This means that when reading from this lxprocfs node, the reported value
- * will reflect only the TCP stack settings. It is up to the user to use
- * ipadm(8) to properly configure the receive and send buffers for the
- * remaining protocol stacks, if required.
+ *
+ * There is a caveat, when reading from this lxprocfs node, the reported value
+ * will reflect the UDP stack settings. On writing to this lxprocfs node
+ * we will try to update sctp, udp and raw/ip buffers with the supplied values.
+ * As the range of possible values are different between each stack is
+ * different, if the supplied value is not on the range of possible values for
+ * one of the stacks, then that stack will not be updated.
+ * Is up to the user to inspect ipadm(8) show-prop output for recv_buf, send_buf
+ * and max_buf to choose/set the appropiate value.
  */
 static int
 lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
@@ -7808,20 +7971,44 @@ lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
 	attr = (lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ?
 	    "recv_buf" : "send_buf");
 
-	return (lxpr_write_tcp_property(lxpnp, uio, cr, ct,
-	    attr, NULL));
+    /* Update recv_buf/send_buf  for sctp, udp and raw/ip stacks as done
+	 * in Linux.
+	 *
+	 * WARNING:
+	 * lxpr_write_sctp|icmp uses uiocopy to reuse uio
+	 * between calls.
+	 */
+
+	(void) lxpr_write_sctp_property(lxpnp, uio, cr, ct, attr, NULL);
+	(void) lxpr_write_icmp_property(lxpnp, uio, cr, ct, attr, NULL);
+
+	return (lxpr_write_udp_property(lxpnp, uio, cr, ct, attr, NULL));
 }
 
 static int
 lxpr_write_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, struct uio *uio,
     struct cred *cr, caller_context_t *ct)
 {
+	char* attr = "max_buf";
 
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_MAX ||
 	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_MAX);
 
-	return (lxpr_write_tcp_property(lxpnp, uio, cr, ct,
-	    "max_buf", NULL));
+    /* Update max_buf for sctp, udp and raw/ip stacks as done
+	 * in Linux. As a best effort only a failure setting the new
+	 * value in the udp stack is considered, as that's the value
+	 * that will be exposed when tools/users try to read rmem/wmem
+	 * values.
+	 *
+	 * WARNING:
+	 * lxpr_write_sctp|icmp uses uiocopy to reuse uio
+	 * between calls.
+	 */
+
+	(void) lxpr_write_sctp_property(lxpnp, uio, cr, ct, attr, NULL);
+	(void) lxpr_write_icmp_property(lxpnp, uio, cr, ct, attr, NULL);
+
+	return (lxpr_write_udp_property(lxpnp, uio, cr, ct, attr, NULL));
 }
 
 static int
