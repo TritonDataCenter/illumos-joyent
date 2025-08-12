@@ -13,6 +13,7 @@
 
 #
 # Copyright (c) 2014 Joyent, Inc.  All rights reserved.
+# Copyright 2025 Edgecast Cloud LLC.
 #
 
 #
@@ -20,13 +21,13 @@
 # brand. This file should be included by the brand-specific files.
 #
 
-jattach_kvm_final_setup()
+jattach_hvm_final_setup()
 {
 	ZRAM=$(zonecfg -z ${ZONENAME} info attr name=ram | \
 		grep "value: " | cut -d ':' -f2 | tr -d ' ')
 
 	if [[ -z ${ZRAM} ]]; then
-		echo "Unable to find RAM value for KVM VM"
+		echo "Unable to find RAM value for HVM VM"
 		exit $ZONE_SUBPROC_FATAL
 	fi
 

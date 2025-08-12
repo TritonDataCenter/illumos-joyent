@@ -26,7 +26,7 @@ jst_tmplopt="yes"
 
 function jcommon_attach_hook
 {
-	jattach_kvm_final_setup
+	jattach_hvm_final_setup
 }
 
 . /usr/lib/brand/jcommon/cinstall
