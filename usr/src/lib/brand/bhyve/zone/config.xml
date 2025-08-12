@@ -27,7 +27,7 @@
 	<forcedlogin_cmd />
 	<user_cmd />
 
-	<install>/usr/lib/brand/bhyve/install -z %z -R %R</install>
+	<install>/usr/lib/brand/bhyve/binstall -z %z -R %R</install>
 	<installopts>R:t:U:q:z:</installopts>
 	<boot>/usr/lib/brand/bhyve/boot %z %R</boot>
 	<halt />
