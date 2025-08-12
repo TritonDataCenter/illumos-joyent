@@ -21,6 +21,7 @@
 
 /*
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /*
@@ -30,6 +31,7 @@
  * - Starting ipmgmtd
  * - Configuring network interfaces
  * - Adding a default route
+ * - Normalize netstack buffer sizes
  */
 
 #include <ctype.h>
@@ -57,6 +59,7 @@
 #include <libcustr.h>
 
 #include <netinet/dhcp.h>
+#include <inet/tunables.h>
 #include <dhcpagent_util.h>
 #include <dhcpagent_ipc.h>
 
@@ -81,6 +84,8 @@ static void lxi_err(char *msg, ...);
 
 #define	RTMBUFSZ	(sizeof (struct rt_msghdr) + \
 		(3 * sizeof (struct sockaddr_in)))
+
+#define	NETSTACK_BUFSZ 524288
 
 ipadm_handle_t iph;
 
@@ -289,6 +294,50 @@ static void
 lxi_net_ipadm_close()
 {
 	ipadm_close(iph);
+}
+
+/*
+ * As part of adding support for /proc/sys/net/core/{r|w}mem_{default|max}
+ * kernel tunables, we need to normalize values for the four stacks in order
+ * to report an accurate value for these nodes.
+ * More information in usr/src/uts/common/brand/lx/procfs/lx_prvnops.c
+ */
+static void
+lxi_normalize_netstacks()
+{
+	ipadm_status_t status;
+	char val[16];
+	char val_max[16];
+	size_t proto_cnt;
+	size_t i;
+	uint_t proto_entries[] = {
+		MOD_PROTO_TCP,
+		MOD_PROTO_UDP,
+		MOD_PROTO_SCTP,
+		MOD_PROTO_RAWIP
+	};
+	proto_cnt = sizeof (proto_entries)/ sizeof (proto_entries[0]);
+
+	(void) snprintf(val, sizeof (val), "%ld", NETSTACK_BUFSZ);
+	(void) snprintf(val_max, sizeof (val_max), "%ld", NETSTACK_BUFSZ * 2);
+
+	for (i = 0; i < proto_cnt; i++) {
+		if ((status = ipadm_set_prop(iph, "max_buf", val_max,
+		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
+			lxi_warn("%s buf ipadm_set_prop error %d: %s",
+			    __FUNCTION__, status, ipadm_status2str(status));
+		}
+		if ((status = ipadm_set_prop(iph, "send_buf", val,
+		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
+			lxi_warn("%s buf ipadm_set_prop error %d: %s",
+			    __FUNCTION__, status, ipadm_status2str(status));
+		}
+		if ((status = ipadm_set_prop(iph, "recv_buf", val,
+		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
+			lxi_warn("%s buf ipadm_set_prop error %d: %s",
+			    __FUNCTION__, status, ipadm_status2str(status));
+		}
+	}
 }
 
 void
@@ -581,6 +630,7 @@ lxi_iface_gateway(const char *iface, const char *dst, int dstpfx,
 	return (lxi_route_send_msg(rtm));
 }
 
+
 static void
 lxi_net_loopback()
 {
@@ -708,6 +758,7 @@ lxi_net_setup(zone_dochandle_t handle)
 	if (do_addrconf) {
 		lxi_net_ndpd_start();
 	}
+
 
 	(void) zonecfg_endnwifent(handle);
 }
@@ -1000,7 +1051,6 @@ main(int argc, char *argv[])
 
 	lxi_net_ipmgmtd_start();
 	lxi_net_ipadm_open();
-
 	handle = lxi_config_open();
 	lxi_net_loopback();
 	lxi_net_setup(handle);
@@ -1011,6 +1061,8 @@ main(int argc, char *argv[])
 	lxi_config_close(handle);
 
 	lxi_net_static_routes();
+
+	lxi_normalize_netstacks();
 
 	lxi_net_ipadm_close();
 

@@ -321,6 +321,8 @@ static int lxpr_write_sys_net_ipv4_tcp_winscale(lxpr_node_t *, uio_t *,
     cred_t *, caller_context_t *);
 static int lxpr_write_sys_kernel_corepatt(lxpr_node_t *, uio_t *, cred_t *,
     caller_context_t *);
+static int lxpr_write_sys_kernel_panic_on_oops(lxpr_node_t *, uio_t *, cred_t *,
+    caller_context_t *);
 
 /*
  * Simple conversion
@@ -739,6 +741,7 @@ static wftab_t wr_tab[] = {
 	{LXPR_SYS_VM_DIRTY_WB_CS, NULL},
 	{LXPR_SYS_VM_OVERCOMMIT_MEM, NULL},
 	{LXPR_SYS_VM_SWAPPINESS, NULL},
+	{LXPR_SYS_KERNEL_PANIC_ON_OOPS, lxpr_write_sys_kernel_panic_on_oops},
 	{LXPR_INVALID, NULL}
 };
 
@@ -4947,7 +4950,7 @@ lxpr_read_sys_kernel_overflowgid(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 }
 
 /*
- * In Linux rmem_max, rmem_default, wmem_max and wmem_default are tunnables
+ * In Linux rmem_max, rmem_default, wmem_max and wmem_default are tunables
  * that control the default and maximum socket receive/send buffer sizes.
  * Their values are in bytes.
  */
@@ -4978,7 +4981,7 @@ static void
 lxpr_read_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 {
 	netstack_t	*ns;
-	udp_stack_t	*udps;
+	tcp_stack_t	*tcps;
 
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_MAX ||
 	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_MAX);
@@ -4989,8 +4992,8 @@ lxpr_read_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 		return;
 	}
 
-	udps = ns->netstack_udp;
-	lxpr_uiobuf_printf(uiobuf, "%d\n", udps->us_max_buf);
+	tcps = ns->netstack_tcp;
+	lxpr_uiobuf_printf(uiobuf, "%d\n", tcps->tcps_max_buf);
 	netstack_rele(ns);
 }
 
@@ -5253,6 +5256,19 @@ lxpr_read_sys_kernel_panic_on_oops(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 	uint_t val = 1;
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_KERNEL_PANIC_ON_OOPS);
 	lxpr_uiobuf_printf(uiobuf, "%u\n", val);
+}
+
+static int
+lxpr_write_sys_kernel_panic_on_oops(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct)
+{
+	/*
+	 * We don't keep a state for this tunable, is hardcoded to 1
+	 * so we drop whatever user has supplied.
+	 */
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_KERNEL_PANIC_ON_OOPS);
+	uioskip(uio, uio->uio_resid);
+	return (0);
 }
 
 static void
@@ -7759,70 +7775,42 @@ lxpr_write_tcp_property(lxpr_node_t *lxpnp, struct uio *uio,
 	return (res);
 }
 
+/*
+ * lxpr_write_netstack_property will set the @proto attribute @prop,
+ * to the supplied value.
+ * if @move is true then, uiomove will be used, else * uiocopy will be used
+ * if the value is out of range, then it's value is normalized to be in
+ * the range of allowed values for the network stack of interest.
+ */
+#define	RWMEM_MIN_ALLOWED(a, b)	((a) < (b) ? (b) : (a))
+#define	RWMEM_MAX_ALLOWED(a, b)	((a) > (b) ? (b) : (a))
+#define	PTBL_FROM_NETSTACK(ns, proto)\
+	((proto) == MOD_PROTO_UDP   ? (ns)->netstack_udp->us_propinfo_tbl :\
+	(proto) == MOD_PROTO_SCTP  ? (ns)->netstack_sctp->sctps_propinfo_tbl :\
+	(proto) == MOD_PROTO_RAWIP ? (ns)->netstack_icmp->is_propinfo_tbl :\
+	(ns)->netstack_tcp->tcps_propinfo_tbl)
 static int
-lxpr_write_udp_property(lxpr_node_t *lxpnp, struct uio *uio,
-    struct cred *cr, caller_context_t *ct, char *prop,
-    int (*xlate)(char *, int))
-{
-	int error;
-	int res = 0;
-	size_t olen;
-	char val[16];	/* big enough for a uint numeric string */
-	netstack_t *ns;
-	mod_prop_info_t *ptbl = NULL;
-	mod_prop_info_t *pinfo = NULL;
-
-	if (uio->uio_loffset != 0)
-		return (EINVAL);
-
-	if (uio->uio_resid == 0)
-		return (0);
-
-	olen = uio->uio_resid;
-	if (olen > sizeof (val) - 1)
-		return (EINVAL);
-
-	bzero(val, sizeof (val));
-	error = uiomove(val, olen, UIO_WRITE, uio);
-	if (error != 0)
-		return (error);
-
-	if (val[olen - 1] == '\n')
-		val[olen - 1] = '\0';
-
-	if (val[0] == '\0') /* no input */
-		return (EINVAL);
-
-	ns = lxpr_netstack(lxpnp);
-	if (ns == NULL)
-		return (EINVAL);
-
-	if (xlate != NULL && xlate(val, sizeof (val)) != 0) {
-		netstack_rele(ns);
-		return (EINVAL);
-	}
-
-	ptbl = ns->netstack_udp->us_propinfo_tbl;
-	pinfo = mod_prop_lookup(ptbl, prop, MOD_PROTO_UDP);
-	if (pinfo == NULL || pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0)
-		res = EINVAL;
-
-	netstack_rele(ns);
-	return (res);
-}
-
-static int
-lxpr_write_sctp_property(lxpr_node_t *lxpnp, struct uio *uio,
-    struct cred *cr, caller_context_t *ct, char *prop,
-    int (*xlate)(char *, int))
+lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct, char *prop, int proto,
+    boolean_t move, int (*xlate)(char *, int))
 {
 	int error;
 	int res = 0;
 	size_t olen, cbytes;
+	unsigned long newval;
+	uint32_t min, max;
 	char val[16];	/* big enough for a uint numeric string */
+	char *end;
 	netstack_t *ns;
 	mod_prop_info_t *ptbl = NULL;
 	mod_prop_info_t *pinfo = NULL;
+	mod_prop_info_t *maxbuf_pinfo = NULL;
+
+	if ((proto != MOD_PROTO_UDP) &&
+	    (proto != MOD_PROTO_SCTP) &&
+	    (proto != MOD_PROTO_TCP) &&
+	    (proto != MOD_PROTO_RAWIP))
+		return (EINVAL);
 
 	if (uio->uio_loffset != 0)
 		return (EINVAL);
@@ -7835,7 +7823,13 @@ lxpr_write_sctp_property(lxpr_node_t *lxpnp, struct uio *uio,
 		return (EINVAL);
 
 	bzero(val, sizeof (val));
-	error = uiocopy(val, olen, UIO_WRITE, uio, &cbytes);
+
+	if (move == B_FALSE) {
+		error = uiocopy(val, olen, UIO_WRITE, uio, &cbytes);
+	} else {
+		error = uiomove(val, olen, UIO_WRITE, uio);
+	}
+
 	if (error != 0)
 		return (error);
 
@@ -7854,61 +7848,38 @@ lxpr_write_sctp_property(lxpr_node_t *lxpnp, struct uio *uio,
 		return (EINVAL);
 	}
 
-	ptbl = ns->netstack_sctp->sctps_propinfo_tbl;
-	pinfo = mod_prop_lookup(ptbl, prop, MOD_PROTO_SCTP);
-	if (pinfo == NULL || pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0)
-		res = EINVAL;
+	ptbl = PTBL_FROM_NETSTACK(ns, proto);
 
-	netstack_rele(ns);
-	return (res);
-}
-
-static int
-lxpr_write_icmp_property(lxpr_node_t *lxpnp, struct uio *uio,
-    struct cred *cr, caller_context_t *ct, char *prop,
-    int (*xlate)(char *, int))
-{
-	int error;
-	int res = 0;
-	size_t olen, cbytes;
-	char val[16];	/* big enough for a uint numeric string */
-	netstack_t *ns;
-	mod_prop_info_t *ptbl = NULL;
-	mod_prop_info_t *pinfo = NULL;
-
-	if (uio->uio_loffset != 0)
+	pinfo = mod_prop_lookup(ptbl, prop, proto);
+	if (pinfo == NULL)
 		return (EINVAL);
 
-	if (uio->uio_resid == 0)
-		return (0);
-
-	olen = uio->uio_resid;
-	if (olen > sizeof (val) - 1)
+	if (ddi_strtoul(val, &end, 10, &newval) != 0 || *end != '\0')
 		return (EINVAL);
 
-	bzero(val, sizeof (val));
-	error = uiocopy(val, olen, UIO_WRITE, uio, &cbytes);
-	if (error != 0)
-		return (error);
+	/*
+	 * We are trying to avoid ERANGE errors when updating the
+	 * property, so we first get the min and max values for
+	 * the netstack and try to normalize the user supplied value to the
+	 * nearest value if it's out of range.
+	 */
 
-	if (val[olen - 1] == '\n')
-		val[olen - 1] = '\0';
-
-	if (val[0] == '\0') /* no input */
-		return (EINVAL);
-
-	ns = lxpr_netstack(lxpnp);
-	if (ns == NULL)
-		return (EINVAL);
-
-	if (xlate != NULL && xlate(val, sizeof (val)) != 0) {
-		netstack_rele(ns);
-		return (EINVAL);
+	min = pinfo->prop_min_uval;
+	if (strncmp(prop, "max_buf", 7) == 0) {
+		maxbuf_pinfo = mod_prop_lookup(ptbl, "max_buf",
+		    pinfo->mpi_proto);
+		if (maxbuf_pinfo == NULL)
+			return (EINVAL);
+		max = maxbuf_pinfo->prop_max_uval;
+	} else {
+		max = pinfo->prop_max_uval;
 	}
 
-	ptbl = ns->netstack_icmp->is_propinfo_tbl;
-	pinfo = mod_prop_lookup(ptbl, prop, MOD_PROTO_RAWIP);
-	if (pinfo == NULL || pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0)
+	newval = RWMEM_MIN_ALLOWED(newval, min);
+	newval = RWMEM_MAX_ALLOWED(newval, max);
+	(void) snprintf(val, sizeof (val), "%ld", newval);
+
+	if (pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0)
 		res = EINVAL;
 
 	netstack_rele(ns);
@@ -7925,39 +7896,52 @@ lxpr_write_sys_net_core_somaxc(lxpr_node_t *lxpnp, struct uio *uio,
 }
 
 /*
- * In Linux rmem_default and wmem_default are the default receive
- * and send socket buffer sizes.
- * While rmem_max and wmem_max are the maximum receive and send
- * socket buffer sizes.
+ * LX procfs network buffer tunables vs. ipadm(8) buffer tunables.
  *
- * The values are mapped to:
+ * In Linux's procfs, it has the following read/write tunables for network
+ * buffer sizes across all possible network socket/protocol types (TCP, UDP,
+ * SCTP, ICMP (aka rawip)).
  *
- *    rmem_default -> tcp_recv_hiwat
- *    wmem_default -> tcp_xmit_hiwat
- *    rmem_max|wmem_max-> tcp_max_buf
+ * rmem_default ==> Default read/receive buffer size on a socket.
+ * wmem_default ==> Default write/send buffer size on a socket.
  *
- * In illumos these values are defined as:
+ * rmem_max ==> Maximum possible read/receive buffer size on a socket.
+ * wmem_max ==> Maximum possible write/send buffer size on a socket.
  *
- *    tcp_recv_hiwat is the default TCP receive window size
- *    tcp_xmit_hiwat is the default TCP send window size
- *    tcp_max_buf is the maximum TCP send and receive buffer size
+ * Now illumos does things differently, it uses the ipadm(8) command for
+ * various properties THAT ARE UNIQUE PER PROTOCOL. So for each of TCP, UDP,
+ * SCTP, and ICMP/rawip we have these properties:
  *
- * In Linux, these tunables control TCP and UDP buffer sizes.
- * However, in illumos, we have separate receive and send buffers
- * for each stack: ICMP, TCP, UDP, and SCTP.
+ * recv_buf ==> Default read/receive buffer size on a socket (per-protocol).
+ * send_buf ==> Default write/send buffer size on a socket (per-protocol).
  *
- * Testing in a baremetal instance modifying values for rmem/wmem default
- * affects the send/recv values for UDP, SCTP, raw/IP buffers.
+ * max_buf ==> Maximum buffer size for both read/receive buffers and write/
+ * send buffers on a socket.
  *
+ * So we have two inconsistent ways of adjustinct this LX zone's network
+ * socket buffer parameters.
  *
- * There is a caveat, when reading from this lxprocfs node, the reported value
- * will reflect the UDP stack settings. On writing to this lxprocfs node
- * we will try to update sctp, udp and raw/ip buffers with the supplied values.
- * As the range of possible values are different between each stack is
- * different, if the supplied value is not on the range of possible values for
- * one of the stacks, then that stack will not be updated.
- * Is up to the user to inspect ipadm(8) show-prop output for recv_buf, send_buf
- * and max_buf to choose/set the appropiate value.
+ * To make it at least understandable, we need to document and enforce a set
+ * of behaviors that LX zone administrators can understand.  The highest-level
+ * view of this is that:
+ *
+ * - lxprocfs writes to {r|w}mem_{default|max} act as a toggle, adjusting ALL
+ *   FOUR PROTOCOLS' settings.
+ *
+ * - lxprocfs reads to {r|w}mem_{default|max} report from ONLY ONE protocol
+ *   (currently TCP) and it must be the same for all four of the lxprocfs
+ *   entries.
+ *
+ * LX zone adminstrators can use /native/usr/sbin/ipadm to adjust per-protocol
+ * buffer settings. As long as the lxprocfs behavior still works as documented
+ * above (XXX KEBE SAYS WE GOTTA ANSWER THE QUESTIONS FIRST!), and LX zone
+ * administrators understand the behaviors, things should at worse not be
+ * surprising and unexplainable, and at best, better for people who use
+ * Linux.
+ *
+ * At startup a LX branded zone netstacks buffers are normalized to 512KiB for
+ * send and receive buffers and 1MiB for max buffer size.
+ *
  */
 static int
 lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
@@ -7971,19 +7955,18 @@ lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
 	attr = (lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ?
 	    "recv_buf" : "send_buf");
 
-	/*
-	 * Update recv_buf/send_buf  for sctp, udp and raw/ip stacks as done
-	 * in Linux.
-	 *
-	 * WARNING:
-	 * lxpr_write_sctp|icmp uses uiocopy to reuse uio
-	 * between calls.
-	 */
+	(void) lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	    MOD_PROTO_SCTP, B_FALSE, NULL);
 
-	(void) lxpr_write_sctp_property(lxpnp, uio, cr, ct, attr, NULL);
-	(void) lxpr_write_icmp_property(lxpnp, uio, cr, ct, attr, NULL);
+	(void) lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	    MOD_PROTO_RAWIP, B_FALSE, NULL);
 
-	return (lxpr_write_udp_property(lxpnp, uio, cr, ct, attr, NULL));
+	(void) lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	    MOD_PROTO_UDP, B_FALSE, NULL);
+
+	return (lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	    MOD_PROTO_TCP, B_TRUE, NULL));
+
 }
 
 static int
@@ -8001,16 +7984,19 @@ lxpr_write_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, struct uio *uio,
 	 * value in the udp stack is considered, as that's the value
 	 * that will be exposed when tools/users try to read rmem/wmem
 	 * values.
-	 *
-	 * WARNING:
-	 * lxpr_write_sctp|icmp uses uiocopy to reuse uio
-	 * between calls.
 	 */
 
-	(void) lxpr_write_sctp_property(lxpnp, uio, cr, ct, attr, NULL);
-	(void) lxpr_write_icmp_property(lxpnp, uio, cr, ct, attr, NULL);
+	(void) lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	    MOD_PROTO_SCTP, B_FALSE, NULL);
 
-	return (lxpr_write_udp_property(lxpnp, uio, cr, ct, attr, NULL));
+	(void) lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	    MOD_PROTO_RAWIP, B_FALSE, NULL);
+
+	(void) lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	    MOD_PROTO_UDP, B_FALSE, NULL);
+
+	return (lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	    MOD_PROTO_TCP, B_TRUE, NULL));
 }
 
 static int
