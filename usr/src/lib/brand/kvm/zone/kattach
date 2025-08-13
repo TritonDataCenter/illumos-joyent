@@ -13,13 +13,14 @@
 
 #
 # Copyright (c) 2014 Joyent, Inc.  All rights reserved.
+# Copyright 2025 Edgecast Cloud LLC.
 #
 
 . /usr/lib/brand/jcommon/libhooks.ksh
 
 function jcommon_attach_hook
 {
-	jattach_kvm_final_setup
+	jattach_hvm_final_setup
 }
 
 ps_brand="kvm"
