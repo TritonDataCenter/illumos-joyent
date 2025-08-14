@@ -317,7 +317,10 @@ lxi_normalize_netstacks()
 		MOD_PROTO_RAWIP
 	};
 	proto_cnt = sizeof (proto_entries)/ sizeof (proto_entries[0]);
-
+	/*
+	 * We increase max_buf in order to setup recv/send buffers
+	 * to avoid ERANGE errors.
+	 */
 	(void) snprintf(val, sizeof (val), "%ld", NETSTACK_BUFSZ);
 	(void) snprintf(val_max, sizeof (val_max), "%ld", NETSTACK_BUFSZ * 2);
 
