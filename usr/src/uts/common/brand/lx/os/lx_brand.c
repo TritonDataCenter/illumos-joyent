@@ -28,6 +28,7 @@
  * Copyright 2020 Joyent, Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2024 MNX Cloud, Inc.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /*

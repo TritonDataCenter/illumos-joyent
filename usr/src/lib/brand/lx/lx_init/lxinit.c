@@ -87,9 +87,9 @@ static void lxi_err(char *msg, ...);
 		(3 * sizeof (struct sockaddr_in)))
 
 #define	NETSTACK_BUFSZ 524288
-#define MIN_NETSTACK_BUFSZ(a,b) ((a) < (b) ? (a) : (b))
-#define MAX_NETSTACK_BUFSZ(a,b) ((a) > (b) ? (a) : (b))
-#define PAGESHIFT 12
+#define	MIN_NETSTACK_BUFSZ(a, b) ((a) < (b) ? (a) : (b))
+#define	MAX_NETSTACK_BUFSZ(a, b) ((a) > (b) ? (a) : (b))
+#define	PAGESHIFT 12
 
 ipadm_handle_t iph;
 
@@ -315,15 +315,15 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
 	int i = 0;
 	int res = 0;
 
-	bzero(&attrtab, sizeof(attrtab));
+	bzero(&attrtab, sizeof (attrtab));
 	(void) strlcpy(attrtab.zone_attr_name, "kernel-version",
-		sizeof(attrtab.zone_attr_name));
+	    sizeof (attrtab.zone_attr_name));
 
 	if ((res = zonecfg_lookup_attr(handle, &attrtab)) == Z_OK) {
 		(void) sscanf(attrtab.zone_attr_value, "%d.%d.%d", &zvers[0],
-			&zvers[1], &zvers[2]);
+		    &zvers[1], &zvers[2]);
 		(void) sscanf(vers, "%d.%d.%d", &cvers[0], &cvers[1],
-			&cvers[2]);
+		    &cvers[2]);
 		for (i = 0; i < 3; i++) {
 			if (zvers[i] > cvers[i]) {
 				return (1);
@@ -331,11 +331,11 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
 				return (-1);
 			}
 		}
-		lxi_warn("%s ver %d.%d.%d vers %d.%d.%d", zvers[0],zvers[1], zvers[2]
-		, cvers[0], cvers[1], cvers[2]);
+		lxi_warn("%s ver %d.%d.%d vers %d.%d.%d", zvers[0],
+		    zvers[1], zvers[2], cvers[0], cvers[1], cvers[2]);
 	} else {
 		lxi_err("%s kernel-version zonecfg_get_attr_string: %s\n",
-			__FUNCTION__, zonecfg_strerror(res));
+		    __FUNCTION__, zonecfg_strerror(res));
 	}
 	return (0);
 }
@@ -345,7 +345,7 @@ lxi_get_max_physical_memory(zone_dochandle_t handle, unsigned long long *mem)
 {
 	struct zone_rctlvaltab *valptr;
 	struct zone_rctltab ent;
-	char* endp;
+	char *endp;
 	int res;
 	boolean_t ok = B_FALSE;
 
@@ -353,11 +353,11 @@ lxi_get_max_physical_memory(zone_dochandle_t handle, unsigned long long *mem)
 
 	if ((res = zonecfg_setrctlent(handle)) != Z_OK) {
 		lxi_err("%s zonecfg_setrctlen: %s\n",
-			__FUNCTION__, zonecfg_strerror(res));
+		    __FUNCTION__, zonecfg_strerror(res));
 	}
 	while (zonecfg_getrctlent(handle, &ent) == Z_OK) {
-		if (strcmp(ent.zone_rctl_name, "zone.max-physical-memory")
-			== 0) {
+		if (strcmp(ent.zone_rctl_name,
+		    "zone.max-physical-memory") == 0) {
 			valptr = ent.zone_rctl_valptr;
 			errno = 0;
 			*mem = strtoull(valptr->zone_rctlval_limit, &endp, 10);
@@ -365,7 +365,7 @@ lxi_get_max_physical_memory(zone_dochandle_t handle, unsigned long long *mem)
 			if (*endp != '\0' || errno != 0) {
 				lxi_warn("could not parse limit: %s error: %s",
 				    valptr->zone_rctlval_limit,
-					strerror(errno));
+				    strerror(errno));
 				ok = B_FALSE;
 			}
 			lxi_warn("mem %llu", *mem);
@@ -420,7 +420,7 @@ lxi_normalize_netstacks(zone_dochandle_t handle)
 	if (lxi_kern_release_cmp(handle, "3.4.0") < 0) {
 		max_buf = 4*1024*1024;
 	} else if ((lxi_kern_release_cmp(handle, "6.9.0") < 0) ||
-		(lxi_get_max_physical_memory(handle, &max_memory) == B_FALSE)){
+	    (lxi_get_max_physical_memory(handle, &max_memory) == B_FALSE)) {
 		max_buf = 6*1024*1024;
 	} else {
 		/*
@@ -441,10 +441,7 @@ lxi_normalize_netstacks(zone_dochandle_t handle)
 		max_buf = MAX_NETSTACK_BUFSZ(131072UL, max);
 		lxi_warn("dynamic max_buff %u",  max_buf);
 	}
-        /*
-	 * We increase max_buf in order to setup recv/send buffers
-	 * to avoid ERANGE errors.
-	 */
+
 	(void) snprintf(val, sizeof (val), "%u", NETSTACK_BUFSZ * 2);
 	(void) snprintf(val_max, sizeof (val_max), "%u", max_buf);
 
