@@ -381,15 +381,16 @@ lxi_get_max_physical_memory(zone_dochandle_t handle, unsigned long long *mem)
 
 /*
  * As part of adding support for /proc/sys/net/core/{r|w}mem_{default|max}
- * kernel tunables, we need to normalize values for the four stacks in order
- * to report an accurate value for these nodes.
+ * kernel tunables, we need to normalize values for the four protocols in the
+ * netstack in order to report more Linux-like uniform values for the netstack
+ * of this zone.
  * More information in usr/src/uts/common/brand/lx/procfs/lx_prvnops.c
  *
  * The default limit for TCP buffer sizing on illumos is smaller than its
  * counterparts on Linux.  Adjust it to meet minimum expectations.
  */
 static void
-lxi_normalize_netstacks(zone_dochandle_t handle)
+lxi_normalize_protocols(zone_dochandle_t handle)
 {
 	ipadm_status_t status;
 	char val[16];
@@ -1177,7 +1178,7 @@ main(int argc, char *argv[])
 
 	lxi_net_linklocal_routes();
 	lxi_net_setup_gateways(handle);
-	lxi_normalize_netstacks(handle);
+	lxi_normalize_protocols(handle);
 
 	lxi_config_close(handle);
 
