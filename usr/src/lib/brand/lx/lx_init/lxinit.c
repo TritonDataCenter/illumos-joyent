@@ -331,8 +331,8 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
 				return (-1);
 			}
 		}
-		lxi_warn("%s ver %d.%d.%d vers %d.%d.%d", zvers[0],
-		    zvers[1], zvers[2], cvers[0], cvers[1], cvers[2]);
+		lxi_warn("%s ver %d.%d.%d vers %d.%d.%d",__FUNCTION__,
+		    zvers[0], zvers[1], zvers[2], cvers[0], cvers[1], cvers[2]);
 	} else {
 		lxi_err("%s kernel-version zonecfg_get_attr_string: %s\n",
 		    __FUNCTION__, zonecfg_strerror(res));
@@ -1182,7 +1182,6 @@ main(int argc, char *argv[])
 	lxi_config_close(handle);
 
 	lxi_net_static_routes();
-
 
 	lxi_net_ipadm_close();
 
