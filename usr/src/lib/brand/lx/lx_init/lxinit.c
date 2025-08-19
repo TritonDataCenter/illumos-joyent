@@ -432,14 +432,10 @@ lxi_normalize_netstacks(zone_dochandle_t handle)
 		 * /linux.git/tree/net/ipv4/tcp.c?h=v6.9#n4780
 		 */
 		nrpages = max_memory/PAGESIZE;
-		lxi_warn("max_memory %llu", max_memory);
-		lxi_warn("dynamic nrpages %lu PAGESIZE %lu PAGESHIFT %lu",
-		    nrpages, PAGESIZE, PAGESHIFT);
 		limit  = nrpages << (PAGESHIFT - 7);
 		max = MIN_NETSTACK_BUFSZ(6UL*1024*1024, limit);
-		lxi_warn("dynamic max %llu limit %llu", max, limit);
 		max_buf = MAX_NETSTACK_BUFSZ(131072UL, max);
-		lxi_warn("dynamic max_buff %u",  max_buf);
+		lxi_warn("dynamically setting max_buff %u",  max_buf);
 	}
 
 	(void) snprintf(val, sizeof (val), "%u", NETSTACK_BUFSZ * 2);
