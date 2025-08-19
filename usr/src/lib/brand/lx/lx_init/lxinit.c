@@ -417,10 +417,10 @@ lxi_normalize_protocols(zone_dochandle_t handle)
 	 *
 	 */
 	if (lxi_kern_release_cmp(handle, "3.4.0") < 0) {
-		max_buf = 4*1024*1024;
+		max_buf = 4 * 1024 * 1024;
 	} else if ((lxi_kern_release_cmp(handle, "6.9.0") < 0) ||
 	    (lxi_get_max_physical_memory(handle, &max_memory) == B_FALSE)) {
-		max_buf = 6*1024*1024;
+		max_buf = 6 * 1024 * 1024;
 	} else {
 		/*
 		 * We try to emulate the dynamic value for tcp rmem/wmem
