@@ -331,8 +331,6 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
 				return (-1);
 			}
 		}
-		lxi_warn("%s ver %d.%d.%d vers %d.%d.%d", __FUNCTION__,
-		    zvers[0], zvers[1], zvers[2], cvers[0], cvers[1], cvers[2]);
 	} else {
 		lxi_err("%s kernel-version zonecfg_get_attr_string: %s\n",
 		    __FUNCTION__, zonecfg_strerror(res));
@@ -436,7 +434,6 @@ lxi_normalize_protocols(zone_dochandle_t handle)
 		limit  = nrpages << (PAGESHIFT - 7);
 		max = MIN_NETSTACK_BUFSZ(6UL*1024*1024, limit);
 		max_buf = MAX_NETSTACK_BUFSZ(131072UL, max);
-		lxi_warn("dynamically setting max_buff %u",  max_buf);
 	}
 
 	(void) snprintf(val, sizeof (val), "%u", NETSTACK_BUFSZ * 2);
