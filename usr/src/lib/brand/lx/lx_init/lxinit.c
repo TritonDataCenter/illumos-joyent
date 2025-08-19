@@ -90,7 +90,6 @@ static void lxi_err(char *msg, ...);
 #define MIN_NETSTACK_BUFSZ(a,b) ((a) < (b) ? (a) : (b))
 #define MAX_NETSTACK_BUFSZ(a,b) ((a) > (b) ? (a) : (b))
 #define PAGESHIFT 12
-#define	btop(x)	(((unsigned)(x)) / PAGESIZE)
 
 ipadm_handle_t iph;
 
@@ -342,7 +341,7 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
 }
 
 static boolean_t
-lxi_get_max_physical_memory(zone_dochandle_t handle, uint64_t* mem)
+lxi_get_max_physical_memory(zone_dochandle_t handle, unsigned long long *mem)
 {
 	struct zone_rctlvaltab *valptr;
 	struct zone_rctltab ent;
@@ -357,7 +356,8 @@ lxi_get_max_physical_memory(zone_dochandle_t handle, uint64_t* mem)
 			__FUNCTION__, zonecfg_strerror(res));
 	}
 	while (zonecfg_getrctlent(handle, &ent) == Z_OK) {
-		if (strcmp(ent.zone_rctl_name, "zone.max-physical-memory") == 0) {
+		if (strcmp(ent.zone_rctl_name, "zone.max-physical-memory")
+			== 0) {
 			valptr = ent.zone_rctl_valptr;
 			errno = 0;
 			*mem = strtoull(valptr->zone_rctlval_limit, &endp, 10);
@@ -368,6 +368,7 @@ lxi_get_max_physical_memory(zone_dochandle_t handle, uint64_t* mem)
 					strerror(errno));
 				ok = B_FALSE;
 			}
+			lxi_warn("mem %llu", *mem);
 			zonecfg_free_rctl_value_list(ent.zone_rctl_valptr);
 			break;
 		}
@@ -394,8 +395,9 @@ lxi_normalize_netstacks(zone_dochandle_t handle)
 	char val[16];
 	char val_max[16];
 	size_t proto_cnt, i;
-	uint32_t max_buf, limit, max;
-	uint64_t max_memory;
+	uint32_t max_buf;
+	unsigned long long max_memory;
+	uint64_t nrpages, limit, max;
 	uint_t proto_entries[] = {
 		MOD_PROTO_TCP,
 		MOD_PROTO_UDP,
@@ -426,12 +428,18 @@ lxi_normalize_netstacks(zone_dochandle_t handle)
 		 * using the current memory assigned for this lx branded zone.
 		 * Set  limits to no more than 1/128 of the max_physical
 		 * memory
+		 * https://git.kernel.org/pub/scm/linux/kernel/git/stable\
+		 * /linux.git/tree/net/ipv4/tcp.c?h=v6.9#n4780
 		 */
-		limit  = btop(max_memory) << (PAGESHIFT - 7);
+		nrpages = max_memory/PAGESIZE;
+		lxi_warn("max_memory %llu", max_memory);
+		lxi_warn("dynamic nrpages %lu PAGESIZE %lu PAGESHIFT %lu",
+		    nrpages, PAGESIZE, PAGESHIFT);
+		limit  = nrpages << (PAGESHIFT - 7);
 		max = MIN_NETSTACK_BUFSZ(6UL*1024*1024, limit);
+		lxi_warn("dynamic max %llu limit %llu", max, limit);
 		max_buf = MAX_NETSTACK_BUFSZ(131072UL, max);
-		lxi_warn("dynamic max %lu limit %lu max_buf %lu max_memory %lu",
-		    max, limit, max_buf, max_memory);
+		lxi_warn("dynamic max_buff %u",  max_buf);
 	}
         /*
 	 * We increase max_buf in order to setup recv/send buffers
