@@ -3499,7 +3499,7 @@ d usr/include/ipp/meters 0755 root bin
 f usr/include/ipp/meters/meter.h 0644 root bin
 f usr/include/ipsec_util.h 0644 root bin
 d usr/include/iso 0755 root bin
-s usr/include/iso/assert_iso.h=../assert.h
+f usr/include/iso/assert_iso.h 0644 root bin
 f usr/include/iso/ctype_iso.h 0644 root bin
 s usr/include/iso/errno_iso.h=../errno.h
 s usr/include/iso/float_iso.h=../float.h

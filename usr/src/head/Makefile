@@ -229,6 +229,7 @@ HDRS=   $($(MACH)_HDRS)	\
 	zone.h
 
 ISOHDRS = \
+	assert_iso.h	\
 	ctype_iso.h	\
 	limits_iso.h	\
 	locale_iso.h	\
@@ -293,7 +294,6 @@ RPCSVC_GEN_HDRS = \
 	ufs_prot.h	\
 	nfs_acl.h
 
-SYMHDRASSERT = $(ROOT)/usr/include/iso/assert_iso.h
 SYMHDRERRNO = $(ROOT)/usr/include/iso/errno_iso.h
 SYMHDRFLOAT = $(ROOT)/usr/include/iso/float_iso.h
 SYMHDRISO646 = $(ROOT)/usr/include/iso/iso646_iso.h
@@ -417,7 +417,7 @@ $(ROOT)/usr/include/%: %
 
 .PARALLEL:	$(ROOTHDRS) $(CHECKHDRS)
 
-install_h:	$(ROOTDIRS) .WAIT $(ROOTHDRS) $(SYMHDRASSERT) $(SYMHDRERRNO) \
+install_h:	$(ROOTDIRS) .WAIT $(ROOTHDRS) $(SYMHDRERRNO) \
 		$(SYMHDRFLOAT) $(SYMHDRISO646)
 
 check:	$(CHECKHDRS)
@@ -427,9 +427,6 @@ clean clobber:
 
 $(ROOTDIRS):
 	$(INS.dir)
-
-$(SYMHDRASSERT):
-	-$(RM) $@; $(SYMLINK) ../assert.h $@
 
 $(SYMHDRERRNO):
 	-$(RM) $@; $(SYMLINK) ../errno.h $@
