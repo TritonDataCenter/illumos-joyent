@@ -7776,7 +7776,7 @@ lxpr_write_tcp_property(lxpr_node_t *lxpnp, struct uio *uio,
 }
 
 /*
- * lxpr_write_netstacks_property will set attribute @prop for all netstacks
+ * lxpr_write_netstack_property will set attribute @prop for all netstacks
  * to the supplied value. If the value is out of range, then no update is done.
  */
 #define	PTBL_FROM_NETSTACK(ns, proto)\
@@ -7785,7 +7785,7 @@ lxpr_write_tcp_property(lxpr_node_t *lxpnp, struct uio *uio,
 	(proto) == MOD_PROTO_RAWIP ? (ns)->netstack_icmp->is_propinfo_tbl :\
 	(ns)->netstack_tcp->tcps_propinfo_tbl)
 static int
-lxpr_write_netstacks_property(lxpr_node_t *lxpnp, struct uio *uio,
+lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
     struct cred *cr, caller_context_t *ct, char *prop,
     int (*xlate)(char *, int))
 {
@@ -7940,7 +7940,7 @@ lxpr_write_sys_net_core_somaxc(lxpr_node_t *lxpnp, struct uio *uio,
  * LX zone adminstrators can use /native/usr/sbin/ipadm to adjust per-protocol
  * buffer settings.
  *
- * At startup a LX branded zone netstacks buffers are normalized to 512KiB for
+ * At startup a LX branded zone netstack's buffers are normalized to 1MiB for
  * send and receive buffers.
  *
  */
@@ -7956,7 +7956,7 @@ lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
 	attr = (lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ?
 	    "recv_buf" : "send_buf");
 
-	return (lxpr_write_netstacks_property(lxpnp, uio, cr, ct, attr,
+	return (lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
 	    NULL));
 
 }
@@ -7970,7 +7970,7 @@ lxpr_write_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, struct uio *uio,
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_MAX ||
 	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_MAX);
 
-	return (lxpr_write_netstacks_property(lxpnp, uio, cr, ct, attr,
+	return (lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
 	    NULL));
 }
 

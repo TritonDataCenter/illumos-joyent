@@ -53,6 +53,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/varargs.h>
+#include <sys/param.h>
 #include <unistd.h>
 #include <libintl.h>
 #include <locale.h>
@@ -86,6 +87,10 @@ static void lxi_err(char *msg, ...);
 		(3 * sizeof (struct sockaddr_in)))
 
 #define	NETSTACK_BUFSZ 524288
+#define MIN_NETSTACK_BUFSZ(a,b) ((a) < (b) ? (a) : (b))
+#define MAX_NETSTACK_BUFSZ(a,b) ((a) > (b) ? (a) : (b))
+#define PAGESHIFT 12
+#define	btop(x)	(((unsigned)(x)) / PAGESIZE)
 
 ipadm_handle_t iph;
 
@@ -297,19 +302,100 @@ lxi_net_ipadm_close()
 }
 
 /*
+ * Compare linux kernel version to the one set kernel-version attr in
+ * the zone document.
+ * Returns greater than 0 if zone version is higher, less than 0 if the zone
+ * version is lower, and 0 if the versions are equal.
+ */
+static int
+lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
+{
+	struct zone_attrtab attrtab;
+	int zvers[3] = {0, 0, 0};
+	int cvers[3] = {0, 0, 0};
+	int i = 0;
+	int res = 0;
+
+	bzero(&attrtab, sizeof(attrtab));
+	(void) strlcpy(attrtab.zone_attr_name, "kernel-version",
+		sizeof(attrtab.zone_attr_name));
+
+	if ((res = zonecfg_lookup_attr(handle, &attrtab)) == Z_OK) {
+		(void) sscanf(attrtab.zone_attr_value, "%d.%d.%d", &zvers[0],
+			&zvers[1], &zvers[2]);
+		(void) sscanf(vers, "%d.%d.%d", &cvers[0], &cvers[1],
+			&cvers[2]);
+		for (i = 0; i < 3; i++) {
+			if (zvers[i] > cvers[i]) {
+				return (1);
+			} else if (zvers[i] < cvers[i]) {
+				return (-1);
+			}
+		}
+		lxi_warn("%s ver %d.%d.%d vers %d.%d.%d", zvers[0],zvers[1], zvers[2]
+		, cvers[0], cvers[1], cvers[2]);
+	} else {
+		lxi_err("%s kernel-version zonecfg_get_attr_string: %s\n",
+			__FUNCTION__, zonecfg_strerror(res));
+	}
+	return (0);
+}
+
+static boolean_t
+lxi_get_max_physical_memory(zone_dochandle_t handle, uint64_t* mem)
+{
+	struct zone_rctlvaltab *valptr;
+	struct zone_rctltab ent;
+	char* endp;
+	int res;
+	boolean_t ok = B_FALSE;
+
+	*mem = 0;
+
+	if ((res = zonecfg_setrctlent(handle)) != Z_OK) {
+		lxi_err("%s zonecfg_setrctlen: %s\n",
+			__FUNCTION__, zonecfg_strerror(res));
+	}
+	while (zonecfg_getrctlent(handle, &ent) == Z_OK) {
+		if (strcmp(ent.zone_rctl_name, "zone.max-physical-memory") == 0) {
+			valptr = ent.zone_rctl_valptr;
+			errno = 0;
+			*mem = strtoull(valptr->zone_rctlval_limit, &endp, 10);
+			ok = B_TRUE;
+			if (*endp != '\0' || errno != 0) {
+				lxi_warn("could not parse limit: %s error: %s",
+				    valptr->zone_rctlval_limit,
+					strerror(errno));
+				ok = B_FALSE;
+			}
+			zonecfg_free_rctl_value_list(ent.zone_rctl_valptr);
+			break;
+		}
+		zonecfg_free_rctl_value_list(ent.zone_rctl_valptr);
+	}
+	(void) zonecfg_endrctlent(handle);
+
+	return (ok);
+}
+
+/*
  * As part of adding support for /proc/sys/net/core/{r|w}mem_{default|max}
  * kernel tunables, we need to normalize values for the four stacks in order
  * to report an accurate value for these nodes.
  * More information in usr/src/uts/common/brand/lx/procfs/lx_prvnops.c
+ *
+ * The default limit for TCP buffer sizing on illumos is smaller than its
+ * counterparts on Linux.  Adjust it to meet minimum expectations.
  */
 static void
-lxi_normalize_netstacks()
+lxi_normalize_netstacks(zone_dochandle_t handle)
 {
 	ipadm_status_t status;
 	char val[16];
 	char val_max[16];
-	size_t proto_cnt;
-	size_t i;
+	size_t proto_cnt, i;
+	uint32_t max_buf, limit, max;
+	uint64_t max_memory;
 	uint_t proto_entries[] = {
 		MOD_PROTO_TCP,
 		MOD_PROTO_UDP,
@@ -317,28 +403,58 @@ lxi_normalize_netstacks()
 		MOD_PROTO_RAWIP
 	};
 	proto_cnt = sizeof (proto_entries)/ sizeof (proto_entries[0]);
+
 	/*
+	 * Prior to kernel 3.4, Linux defaulted to a max of 4MB for both the
+	 * tcp_rmem and tcp_wmem tunables.  Kernels since then increase the
+	 * tcp_rmem default max to 6MB, now kernels from 6.9 this value is
+	 * dynamically assigned to a factor of available memory, more
+	 * information in linux/net/ipv4/tcp.c
+	 * Since illumos lacks separate tunables
+	 * to cap sizing for read and write buffers, the higher value is
+	 * selected for compatibility.
+	 *
+	 */
+	if (lxi_kern_release_cmp(handle, "3.4.0") < 0) {
+		max_buf = 4*1024*1024;
+	} else if ((lxi_kern_release_cmp(handle, "6.9.0") < 0) ||
+		(lxi_get_max_physical_memory(handle, &max_memory) == B_FALSE)){
+		max_buf = 6*1024*1024;
+	} else {
+		/*
+		 * We try to emulate the dynamic value for tcp rmem/wmem
+		 * using the current memory assigned for this lx branded zone.
+		 * Set  limits to no more than 1/128 of the max_physical
+		 * memory
+		 */
+		limit  = btop(max_memory) << (PAGESHIFT - 7);
+		max = MIN_NETSTACK_BUFSZ(6UL*1024*1024, limit);
+		max_buf = MAX_NETSTACK_BUFSZ(131072UL, max);
+		lxi_warn("dynamic max %lu limit %lu max_buf %lu max_memory %lu",
+		    max, limit, max_buf, max_memory);
+	}
+        /*
 	 * We increase max_buf in order to setup recv/send buffers
 	 * to avoid ERANGE errors.
 	 */
-	(void) snprintf(val, sizeof (val), "%ld", NETSTACK_BUFSZ);
-	(void) snprintf(val_max, sizeof (val_max), "%ld", NETSTACK_BUFSZ * 2);
+	(void) snprintf(val, sizeof (val), "%u", NETSTACK_BUFSZ * 2);
+	(void) snprintf(val_max, sizeof (val_max), "%u", max_buf);
 
 	for (i = 0; i < proto_cnt; i++) {
 		if ((status = ipadm_set_prop(iph, "max_buf", val_max,
 		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
-			lxi_warn("%s buf ipadm_set_prop error %d: %s",
-			    __FUNCTION__, status, ipadm_status2str(status));
+			lxi_warn("%s buf ipadm_set_prop error %d index %d: %s",
+			    __FUNCTION__, status, i, ipadm_status2str(status));
 		}
 		if ((status = ipadm_set_prop(iph, "send_buf", val,
 		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
-			lxi_warn("%s buf ipadm_set_prop error %d: %s",
-			    __FUNCTION__, status, ipadm_status2str(status));
+			lxi_warn("%s buf ipadm_set_prop error %d index %d: %s",
+			    __FUNCTION__, status, i, ipadm_status2str(status));
 		}
 		if ((status = ipadm_set_prop(iph, "recv_buf", val,
 		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
-			lxi_warn("%s buf ipadm_set_prop error %d: %s",
-			    __FUNCTION__, status, ipadm_status2str(status));
+			lxi_warn("%s buf ipadm_set_prop error %d index %d: %s",
+			    __FUNCTION__, status, i, ipadm_status2str(status));
 		}
 	}
 }
@@ -1060,12 +1176,12 @@ main(int argc, char *argv[])
 
 	lxi_net_linklocal_routes();
 	lxi_net_setup_gateways(handle);
+	lxi_normalize_netstacks(handle);
 
 	lxi_config_close(handle);
 
 	lxi_net_static_routes();
 
-	lxi_normalize_netstacks();
 
 	lxi_net_ipadm_close();
 
