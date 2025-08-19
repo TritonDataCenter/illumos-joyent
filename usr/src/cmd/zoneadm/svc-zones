@@ -247,27 +247,8 @@ case "$1" in
 			    # LX SHUTDOWN
 			    zoneadm -z $zone shutdown 2>&1 > /dev/null &
 			elif [ "$brand" == "kvm" ]; then
-			    # KVM SHUTDOWN - use QMP. Pardon indentation, and
-			    # both the shell and JS really want spaces!
-			    ZONE=$zone /usr/node/bin/node -e " \
-var zone=process.env.ZONE; \
-var Qmp = require('/usr/vm/node_modules/qmp').Qmp; \
-var q = new Qmp(); \
-var path='/zones/' + zone + '/root/tmp/vm.qmp'; \
- \
-q.connect(path, function (error) { \
-    if (error) { \
-        console.log('connect (' +path + ') fail'); \
-        return; \
-    } \
- \
-    q.command('system_powerdown', null, function(e, result) { \
-        if (e) { \
-            console.log('system_powerdown failed'); \
-        } \
-        q.disconnect(); \
-    }); \
-});"
+			    # New-and-improved OS-8684 KVM SHUTDOWN
+			    pkill -TERM -z $zone qemu 2>&1 &
 			elif [ "$brand" == "bhyve" ]; then
 			    # BHYVE SHUTDOWN
 			    pkill -TERM -z $zone bhyve 2>&1 &
