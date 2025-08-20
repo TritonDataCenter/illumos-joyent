@@ -7893,10 +7893,10 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 			break;
 		}
 	}
-
 	/*
-	 * If any of the protocol's property updates fails, then we reset them
-	 * all to their default values.
+	 * Fallback: if any of the protocol's property updates fails, then we
+	 * reset them to their default values. If an error happens here, then
+	 * we have no way to recover/sync all protocols to a  previous state.
 	 */
 	if (update_failed) {
 		for (i = 0; i < proto_cnt; i++) {
@@ -7907,7 +7907,7 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 				return (EINVAL);
 			}
 			if (pinfo->mpi_setf(ns, cr, pinfo, NULL, val,
-					MOD_PROP_DEFAULT)!= 0) {
+			    MOD_PROP_DEFAULT) != 0) {
 				netstack_rele(ns);
 				return (EINVAL);
 			}

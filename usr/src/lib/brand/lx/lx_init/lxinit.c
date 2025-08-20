@@ -343,9 +343,6 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
  * netstack in order to report more Linux-like uniform values for the netstack
  * of this zone.
  * More information in usr/src/uts/common/brand/lx/procfs/lx_prvnops.c
- *
- * The default limit for TCP buffer sizing on illumos is smaller than its
- * counterparts on Linux.  Adjust it to meet minimum expectations.
  */
 static void
 lxi_normalize_protocols(zone_dochandle_t handle)
@@ -355,8 +352,6 @@ lxi_normalize_protocols(zone_dochandle_t handle)
 	char val_max[16];
 	size_t proto_cnt, i;
 	uint32_t max_buf;
-	unsigned long long max_memory;
-	uint64_t limit, max;
 	uint_t proto_entries[] = {
 		MOD_PROTO_TCP,
 		MOD_PROTO_UDP,
@@ -377,9 +372,9 @@ lxi_normalize_protocols(zone_dochandle_t handle)
 	 *
 	 * We are not emulating dynamic TCP buffer sizing because the computed
 	 * value  would not match exactly and thus adds little value. If needed,
-	 * buffer sizes can be adjusted with ipadm(8), or via the kernel tunables
-	 * /proc/sys/net/core/{r|w}mem_{default|max}. The tunables are not as
-	 * fine-grained as ipadm.
+	 * buffer sizes can be adjusted with ipadm(8), or via the kernel
+	 * tunables  /proc/sys/net/core/{r|w}mem_{default|max}.
+	 * These tunables are not as fine-grained as ipadm.
 	 */
 	if (lxi_kern_release_cmp(handle, "3.4.0") < 0) {
 		max_buf = 4 * 1024 * 1024;
