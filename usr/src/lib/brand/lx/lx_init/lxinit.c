@@ -89,7 +89,6 @@ static void lxi_err(char *msg, ...);
 #define	NETSTACK_BUFSZ 524288
 #define	MIN_NETSTACK_BUFSZ(a, b) ((a) < (b) ? (a) : (b))
 #define	MAX_NETSTACK_BUFSZ(a, b) ((a) > (b) ? (a) : (b))
-#define	PAGESHIFT 12
 
 ipadm_handle_t iph;
 
@@ -338,45 +337,6 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
 	return (0);
 }
 
-static boolean_t
-lxi_get_max_physical_memory(zone_dochandle_t handle, unsigned long long *mem)
-{
-	struct zone_rctlvaltab *valptr;
-	struct zone_rctltab ent;
-	char *endp;
-	int res;
-	boolean_t ok = B_FALSE;
-
-	*mem = 0;
-
-	if ((res = zonecfg_setrctlent(handle)) != Z_OK) {
-		lxi_err("%s zonecfg_setrctlen: %s\n",
-		    __FUNCTION__, zonecfg_strerror(res));
-	}
-	while (zonecfg_getrctlent(handle, &ent) == Z_OK) {
-		if (strcmp(ent.zone_rctl_name,
-		    "zone.max-physical-memory") == 0) {
-			valptr = ent.zone_rctl_valptr;
-			errno = 0;
-			*mem = strtoull(valptr->zone_rctlval_limit, &endp, 10);
-			ok = B_TRUE;
-			if (*endp != '\0' || errno != 0) {
-				lxi_warn("could not parse limit: %s error: %s",
-				    valptr->zone_rctlval_limit,
-				    strerror(errno));
-				ok = B_FALSE;
-			}
-			lxi_warn("mem %llu", *mem);
-			zonecfg_free_rctl_value_list(ent.zone_rctl_valptr);
-			break;
-		}
-		zonecfg_free_rctl_value_list(ent.zone_rctl_valptr);
-	}
-	(void) zonecfg_endrctlent(handle);
-
-	return (ok);
-}
-
 /*
  * As part of adding support for /proc/sys/net/core/{r|w}mem_{default|max}
  * kernel tunables, we need to normalize values for the four protocols in the
@@ -396,7 +356,7 @@ lxi_normalize_protocols(zone_dochandle_t handle)
 	size_t proto_cnt, i;
 	uint32_t max_buf;
 	unsigned long long max_memory;
-	uint64_t nrpages, limit, max;
+	uint64_t limit, max;
 	uint_t proto_entries[] = {
 		MOD_PROTO_TCP,
 		MOD_PROTO_UDP,
@@ -407,33 +367,24 @@ lxi_normalize_protocols(zone_dochandle_t handle)
 
 	/*
 	 * Prior to kernel 3.4, Linux defaulted to a max of 4MB for both the
-	 * tcp_rmem and tcp_wmem tunables.  Kernels since then increase the
-	 * tcp_rmem default max to 6MB, now kernels from 6.9 this value is
-	 * dynamically assigned to a factor of available memory, more
-	 * information in linux/net/ipv4/tcp.c
-	 * Since illumos lacks separate tunables
-	 * to cap sizing for read and write buffers, the higher value is
-	 * selected for compatibility.
+	 * tcp_rmem and tcp_wmem tunables. Kernels since then have increased the
+	 * tcp_rmem default max to 6MB. Today kernels since version 6.9 this
+	 * value is dynamically assigned more information in
+	 * linux/net/ipv4/tcp.c.
+	 * Prior to OS-6096, as the TCP buffer sizing in illumos is smaller
+	 * than Linux LX Branded zones experience setsockopt() errors, this is
+	 * replicated here.
 	 *
+	 * We are not emulating dynamic TCP buffer sizing because the computed
+	 * value  would not match exactly and thus adds little value. If needed,
+	 * buffer sizes can be adjusted with ipadm(8), or via the kernel tunables
+	 * /proc/sys/net/core/{r|w}mem_{default|max}. The tunables are not as
+	 * fine-grained as ipadm.
 	 */
 	if (lxi_kern_release_cmp(handle, "3.4.0") < 0) {
 		max_buf = 4 * 1024 * 1024;
-	} else if ((lxi_kern_release_cmp(handle, "6.9.0") < 0) ||
-	    (lxi_get_max_physical_memory(handle, &max_memory) == B_FALSE)) {
-		max_buf = 6 * 1024 * 1024;
 	} else {
-		/*
-		 * We try to emulate the dynamic value for tcp rmem/wmem
-		 * using the current memory assigned for this lx branded zone.
-		 * Set  limits to no more than 1/128 of the max_physical
-		 * memory
-		 * https://git.kernel.org/pub/scm/linux/kernel/git/stable\
-		 * /linux.git/tree/net/ipv4/tcp.c?h=v6.9#n4780
-		 */
-		nrpages = max_memory/PAGESIZE;
-		limit  = nrpages << (PAGESHIFT - 7);
-		max = MIN_NETSTACK_BUFSZ(6UL*1024*1024, limit);
-		max_buf = MAX_NETSTACK_BUFSZ(131072UL, max);
+		max_buf = 6 * 1024 * 1024;
 	}
 
 	(void) snprintf(val, sizeof (val), "%u", NETSTACK_BUFSZ * 2);

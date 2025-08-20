@@ -4992,6 +4992,7 @@ lxpr_read_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 		return;
 	}
 
+/* Why TCP? See lxpr_write_sys_net_core_rwmem_default(). */
 	tcps = ns->netstack_tcp;
 	lxpr_uiobuf_printf(uiobuf, "%d\n", tcps->tcps_max_buf);
 	netstack_rele(ns);
@@ -7800,6 +7801,7 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 	mod_prop_info_t *ptbl = NULL;
 	mod_prop_info_t *pinfo = NULL;
 	mod_prop_info_t *maxbuf_pinfo = NULL;
+	boolean_t update_failed = B_FALSE;
 	uint_t proto_entries[] = {
 		MOD_PROTO_TCP,
 		MOD_PROTO_UDP,
@@ -7887,8 +7889,28 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 			return (EINVAL);
 		}
 		if (pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0) {
-			netstack_rele(ns);
-			return (EINVAL);
+			update_failed = B_TRUE;
+			break;
+		}
+	}
+
+	/*
+	 * If any of the protocol's property updates fails, then we reset them
+	 * all to their default values.
+	 */
+	if (update_failed) {
+		for (i = 0; i < proto_cnt; i++) {
+			ptbl = PTBL_FROM_NETSTACK(ns, proto_entries[i]);
+			pinfo = mod_prop_lookup(ptbl, prop, proto_entries[i]);
+			if (pinfo == NULL) {
+				netstack_rele(ns);
+				return (EINVAL);
+			}
+			if (pinfo->mpi_setf(ns, cr, pinfo, NULL, val,
+					MOD_PROP_DEFAULT)!= 0) {
+				netstack_rele(ns);
+				return (EINVAL);
+			}
 		}
 	}
 
