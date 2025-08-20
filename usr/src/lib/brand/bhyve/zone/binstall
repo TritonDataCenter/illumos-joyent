@@ -12,9 +12,15 @@
 #
 
 #
-# Copyright (c) 2018, Joyent, Inc.
+# Copyright (c) 2014 Joyent, Inc.  All rights reserved.
 # Copyright 2025 Edgecast Cloud LLC.
 #
+
+# Does this brand support reprovisioning?
+jst_reprovision="yes"
+
+# Is a template image optional?
+jst_tmplopt="yes"
 
 . /usr/lib/brand/jcommon/libhooks.ksh
 
@@ -23,5 +29,4 @@ function jcommon_attach_hook
 	jattach_hvm_final_setup
 }
 
-ps_brand="bhyve"
-. /usr/lib/brand/jcommon/cattach
+. /usr/lib/brand/jcommon/cinstall
