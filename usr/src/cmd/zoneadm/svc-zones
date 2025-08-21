@@ -240,8 +240,7 @@ case "$1" in
 		# This is new with OS-8684, and new brands or changes in
 		# brand implementations will require revisiting this.
 		for zonedata in $zonelist; do
-			zone=`echo $zonedata | awk -F: '{print $2}'`
-			brand=`echo $zonedata | awk -F: '{print $6}'`
+			IFS=: read X zone X X X brand X <<< "$zonedata"
 			echo " $zone($brand)\c"
 			if [ "$brand" == "lx" ]; then
 			    # LX SHUTDOWN
