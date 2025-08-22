@@ -7777,37 +7777,70 @@ lxpr_write_tcp_property(lxpr_node_t *lxpnp, struct uio *uio,
 }
 
 /*
- * lxpr_write_netstack_property will set attribute @prop for all netstacks
- * to the supplied value. If the value is out of range, then no update is done.
+ * lxpr_write_netstack_property (lxpr_node_t *lxpnp, struct uio *uio,
+ *    struct cred *cr, char *prop, int (*xlate)(char *, int))
+ *
+ * Arguments:
+ *      *lxpnp  lxprocfs node that received a write request.
+ *      *uio    uio struct holding input data from write request.
+ *      *cr     credential data.
+ *      *prop   netstack property name to update.
+ *      *xlate  translation function to modify input_value from uio.
+ *
+ * Returns:
+ *
+ *     (0) on success
+ *     (EINVAL) On failure updating a netstack protocol property.
+ *     (EFAULT) On uiomove failure copying data to input_val buffer.
+ *
+ * Notes:
+ *
+ * Before an attempt to update @prop with @input_value the value is validated
+ * to avoid ERANGE errors, and the current values for the protocol property
+ * are cached. If the value supplied for @prop is in the range of possible
+ * values for each protocol, then an update of the property is attempted.
+ * If there is any error on the update, then all protocols @prop will be
+ * updated to the previous cached value.
+ *
  */
-#define	PTBL_FROM_NETSTACK(ns, proto)\
-	((proto) == MOD_PROTO_UDP  ? (ns)->netstack_udp->us_propinfo_tbl :\
-	(proto) == MOD_PROTO_SCTP  ? (ns)->netstack_sctp->sctps_propinfo_tbl :\
-	(proto) == MOD_PROTO_RAWIP ? (ns)->netstack_icmp->is_propinfo_tbl :\
-	(ns)->netstack_tcp->tcps_propinfo_tbl)
+#define PTBL_FROM_NETSTACK(ns, proto) \
+      ((ns) == NULL ? NULL : \
+       (proto) == MOD_PROTO_UDP && (ns)->netstack_udp ? \
+           (ns)->netstack_udp->us_propinfo_tbl : \
+       (proto) == MOD_PROTO_SCTP && (ns)->netstack_sctp ? \
+           (ns)->netstack_sctp->sctps_propinfo_tbl : \
+       (proto) == MOD_PROTO_RAWIP && (ns)->netstack_icmp ? \
+           (ns)->netstack_icmp->is_propinfo_tbl : \
+       (ns)->netstack_tcp ? (ns)->netstack_tcp->tcps_propinfo_tbl : NULL)
 static int
 lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
-    struct cred *cr, caller_context_t *ct, char *prop,
-    int (*xlate)(char *, int))
+    struct cred *cr, char *prop, int (*xlate)(char *, int))
 {
-	int error;
-	int res = 0;
-	size_t olen, proto_cnt, i;
-	unsigned long newval;
-	uint32_t min, max;
-	char val[16];	/* big enough for a uint numeric string */
-	char *end;
-	netstack_t *ns;
-	mod_prop_info_t *ptbl = NULL;
-	mod_prop_info_t *pinfo = NULL;
-	mod_prop_info_t *maxbuf_pinfo = NULL;
-	boolean_t update_failed = B_FALSE;
-	uint_t proto_entries[] = {
-		MOD_PROTO_TCP,
-		MOD_PROTO_UDP,
-		MOD_PROTO_SCTP,
-		MOD_PROTO_RAWIP
+	struct {
+		mod_prop_info_t *ptbl;
+		mod_prop_info_t *pinfo;
+		mod_prop_info_t *maxbuf_pinfo;
+		ulong_t cur_uval;
+		uint_t proto;
+	} proto_infos [] = {
+		{NULL, NULL, NULL, 0, MOD_PROTO_TCP},
+		{NULL, NULL, NULL, 0, MOD_PROTO_UDP},
+		{NULL, NULL, NULL, 0, MOD_PROTO_SCTP},
+		{NULL, NULL, NULL, 0, MOD_PROTO_RAWIP}
 	};
+	boolean_t update_failed = B_FALSE; /* rollback required */
+	char input_val[16]; /* will hold the user supplied input */
+	size_t proto_cnt;  /* size of proto_infos array */
+	char curval[16];  /* Will hold the current value for the property */
+	ulong_t new_val; /* user supplied value as ulong_t */
+	ulong_t min_val; /* minimal value for property */
+	ulong_t max_val; /* max value for property */
+	netstack_t *ns;
+	char *endptr;
+	int ret = 0;
+	size_t olen;
+	size_t i;
+	int err;
 
 	if (uio->uio_loffset != 0)
 		return (EINVAL);
@@ -7816,106 +7849,122 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 		return (0);
 
 	olen = uio->uio_resid;
-	if (olen > sizeof (val) - 1)
+	if (olen > sizeof (input_val) - 1)
 		return (EINVAL);
 
-	bzero(val, sizeof (val));
+	bzero(input_val, sizeof (input_val));
 
-	error = uiomove(val, olen, UIO_WRITE, uio);
+	err = uiomove(input_val, olen, UIO_WRITE, uio);
 
-	if (error != 0)
-		return (error);
+	if (err != 0)
+		return (err);
 
-	if (val[olen - 1] == '\n')
-		val[olen - 1] = '\0';
+	if (input_val[olen - 1] == '\n')
+		input_val[olen - 1] = '\0';
 
-	if (val[0] == '\0') /* no input */
+	if (input_val[0] == '\0') /* no input */
 		return (EINVAL);
 
 	ns = lxpr_netstack(lxpnp);
 	if (ns == NULL)
 		return (EINVAL);
 
-	if (xlate != NULL && xlate(val, sizeof (val)) != 0) {
+	if (xlate != NULL && xlate(input_val, sizeof (input_val)) != 0) {
 		netstack_rele(ns);
 		return (EINVAL);
 	}
 
-	if (ddi_strtoul(val, &end, 10, &newval) != 0 || *end != '\0')
-		return (EINVAL);
 	/*
 	 * We are trying to catch ERANGE errors when updating the
 	 * property, so we first get the min and max values for
 	 * the netstack and if it's out of range we do bail out.
+	 * If the value is between ranges then we store it in case
+	 * we need to restore it.
 	 */
+	if (ddi_strtoul(input_val, &endptr, 10, &new_val) != 0 ||
+	    *endptr != '\0') {
+		netstack_rele(ns);
+		return (EINVAL);
+	}
 
-	proto_cnt = sizeof (proto_entries)/ sizeof (proto_entries[0]);
+	proto_cnt = sizeof (proto_infos)/ sizeof (proto_infos[0]);
 	for (i = 0; i < proto_cnt; i++) {
-		ptbl = PTBL_FROM_NETSTACK(ns, proto_entries[i]);
-		pinfo = mod_prop_lookup(ptbl, prop, proto_entries[i]);
-		if (pinfo == NULL) {
+		proto_infos[i].ptbl = PTBL_FROM_NETSTACK(ns, proto_infos[i].proto);
+
+		if (proto_infos[i].ptbl == NULL) {
 			netstack_rele(ns);
 			return (EINVAL);
 		}
 
-		maxbuf_pinfo = mod_prop_lookup(ptbl, "max_buf",
-		    pinfo->mpi_proto);
-		if (maxbuf_pinfo == NULL) {
+		proto_infos[i].pinfo =
+		    mod_prop_lookup(proto_infos[i].ptbl, prop,
+		    proto_infos[i].proto);
+
+		if (proto_infos[i].pinfo == NULL) {
 			netstack_rele(ns);
 			return (EINVAL);
 		}
 
-		min = pinfo->prop_min_uval;
-		max = maxbuf_pinfo->prop_max_uval;
+		proto_infos[i].maxbuf_pinfo =
+		    mod_prop_lookup(proto_infos[i].ptbl, "max_buf",
+		    proto_infos[i].pinfo->mpi_proto);
 
-		if (newval < min || newval > max) {
+		if (proto_infos[i].maxbuf_pinfo == NULL) {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+
+		min_val = proto_infos[i].pinfo->prop_min_uval;
+		max_val = proto_infos[i].maxbuf_pinfo->prop_max_uval;
+
+		if (new_val < min_val || new_val > max_val) {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+
+		if (proto_infos[i].pinfo->mpi_getf(ns, proto_infos[i].pinfo,
+		    NULL, curval, sizeof (curval), 0) != 0 ) {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+
+		if (ddi_strtoul(curval, &endptr, 10,
+		    &proto_infos[i].cur_uval) != 0 || *endptr != '\0') {
 			netstack_rele(ns);
 			return (EINVAL);
 		}
 	}
-
 	/*
-	 * At this point the value supplied should be in the possible ranges.
-	 * So we apply the new value to the property specified.
+	 * If any of the property updates fail, we need to rollback to the
+	 * previous state.
 	 */
-
-	(void) snprintf(val, sizeof (val), "%ld", newval);
-
 	for (i = 0; i < proto_cnt; i++) {
-		ptbl = PTBL_FROM_NETSTACK(ns, proto_entries[i]);
-		pinfo = mod_prop_lookup(ptbl, prop, proto_entries[i]);
-		if (pinfo == NULL) {
-			netstack_rele(ns);
-			return (EINVAL);
-		}
-		if (pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0) {
+		if (proto_infos[i].pinfo->mpi_setf(ns, cr,
+		    proto_infos[i].pinfo, NULL, input_val, 0) != 0) {
 			update_failed = B_TRUE;
+			ret = EINVAL;
 			break;
 		}
 	}
-	/*
-	 * Fallback: if any of the protocol's property updates fails, then we
-	 * reset them to their default values. If an error happens here, then
-	 * we have no way to recover/sync all protocols to a  previous state.
+	 /*
+	 * A failure to  restore the previous value will be logged, and we'll
+	 * try to soldier on to revert the rest protocols values.
 	 */
 	if (update_failed) {
 		for (i = 0; i < proto_cnt; i++) {
-			ptbl = PTBL_FROM_NETSTACK(ns, proto_entries[i]);
-			pinfo = mod_prop_lookup(ptbl, prop, proto_entries[i]);
-			if (pinfo == NULL) {
-				netstack_rele(ns);
-				return (EINVAL);
-			}
-			if (pinfo->mpi_setf(ns, cr, pinfo, NULL, val,
-			    MOD_PROP_DEFAULT) != 0) {
-				netstack_rele(ns);
-				return (EINVAL);
+			(void) snprintf(curval, sizeof (curval), "%lu",
+			    proto_infos[i].cur_uval);
+			if (proto_infos[i].pinfo->mpi_setf(ns, cr,
+			    proto_infos[i].pinfo, NULL, curval, 0) != 0) {
+				cmn_err(CE_WARN,
+				"%s Error rolling back %lu for netstack at %lu",
+				__FUNCTION__, proto_infos[i].cur_uval, i);
 			}
 		}
 	}
 
 	netstack_rele(ns);
-	return (res);
+	return (ret);
 }
 
 static int
@@ -7978,7 +8027,7 @@ lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
 	attr = (lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ?
 	    "recv_buf" : "send_buf");
 
-	return (lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	return (lxpr_write_netstack_property(lxpnp, uio, cr, attr,
 	    NULL));
 
 }
@@ -7992,7 +8041,7 @@ lxpr_write_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, struct uio *uio,
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_MAX ||
 	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_MAX);
 
-	return (lxpr_write_netstack_property(lxpnp, uio, cr, ct, attr,
+	return (lxpr_write_netstack_property(lxpnp, uio, cr, attr,
 	    NULL));
 }
 
