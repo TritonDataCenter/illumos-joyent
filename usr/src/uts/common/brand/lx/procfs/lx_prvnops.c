@@ -4969,6 +4969,7 @@ lxpr_read_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 		return;
 	}
 
+	/* Why TCP? See lxpr_write_sys_net_core_rwmem_default(). */
 	tcps = ns->netstack_tcp;
 
 	lxpr_uiobuf_printf(uiobuf, "%d\n",
@@ -4992,7 +4993,7 @@ lxpr_read_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 		return;
 	}
 
-/* Why TCP? See lxpr_write_sys_net_core_rwmem_default(). */
+	/* Why TCP? See lxpr_write_sys_net_core_rwmem_default(). */
 	tcps = ns->netstack_tcp;
 	lxpr_uiobuf_printf(uiobuf, "%d\n", tcps->tcps_max_buf);
 	netstack_rele(ns);
