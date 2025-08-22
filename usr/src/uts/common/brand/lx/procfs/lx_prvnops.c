@@ -7960,6 +7960,14 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 				"%s Error rolling back %lu for netstack at %lu",
 				__FUNCTION__, proto_infos[i].cur_uval, i);
 			}
+			#ifdef _DEBUG
+			else {
+				cmn_err(CE_NOTE,
+				    "%s rollback  %s to %lu for proto %lu",
+				__FUNCTION__, prop, proto_infos[i].cur_uval,
+				proto_infos[i].proto);
+			}
+			#endif
 		}
 	}
 
