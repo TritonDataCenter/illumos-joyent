@@ -7803,15 +7803,16 @@ lxpr_write_tcp_property(lxpr_node_t *lxpnp, struct uio *uio,
  * updated to the previous cached value.
  *
  */
-#define PTBL_FROM_NETSTACK(ns, proto) \
-      ((ns) == NULL ? NULL : \
-       (proto) == MOD_PROTO_UDP && (ns)->netstack_udp ? \
-           (ns)->netstack_udp->us_propinfo_tbl : \
-       (proto) == MOD_PROTO_SCTP && (ns)->netstack_sctp ? \
-           (ns)->netstack_sctp->sctps_propinfo_tbl : \
-       (proto) == MOD_PROTO_RAWIP && (ns)->netstack_icmp ? \
-           (ns)->netstack_icmp->is_propinfo_tbl : \
-       (ns)->netstack_tcp ? (ns)->netstack_tcp->tcps_propinfo_tbl : NULL)
+#define	PTBL_FROM_NETSTACK(ns, proto)					\
+	((ns) == NULL ? NULL :						\
+		(proto) == MOD_PROTO_UDP && (ns)->netstack_udp ?	\
+		(ns)->netstack_udp->us_propinfo_tbl :			\
+		(proto) == MOD_PROTO_SCTP && (ns)->netstack_sctp ?	\
+		(ns)->netstack_sctp->sctps_propinfo_tbl :		\
+		(proto) == MOD_PROTO_RAWIP && (ns)->netstack_icmp ?	\
+		(ns)->netstack_icmp->is_propinfo_tbl :			\
+		(ns)->netstack_tcp ? (ns)->netstack_tcp->tcps_propinfo_tbl \
+		: NULL)
 static int
 lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
     struct cred *cr, char *prop, int (*xlate)(char *, int))
@@ -7889,7 +7890,8 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 
 	proto_cnt = sizeof (proto_infos)/ sizeof (proto_infos[0]);
 	for (i = 0; i < proto_cnt; i++) {
-		proto_infos[i].ptbl = PTBL_FROM_NETSTACK(ns, proto_infos[i].proto);
+		proto_infos[i].ptbl = PTBL_FROM_NETSTACK(ns,
+		    proto_infos[i].proto);
 
 		if (proto_infos[i].ptbl == NULL) {
 			netstack_rele(ns);
@@ -7923,7 +7925,7 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 		}
 
 		if (proto_infos[i].pinfo->mpi_getf(ns, proto_infos[i].pinfo,
-		    NULL, curval, sizeof (curval), 0) != 0 ) {
+		    NULL, curval, sizeof (curval), 0) != 0) {
 			netstack_rele(ns);
 			return (EINVAL);
 		}
@@ -7946,7 +7948,7 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 			break;
 		}
 	}
-	 /*
+	/*
 	 * A failure to  restore the previous value will be logged, and we'll
 	 * try to soldier on to revert the rest protocols values.
 	 */
@@ -7958,16 +7960,16 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 			    proto_infos[i].pinfo, NULL, curval, 0) != 0) {
 				cmn_err(CE_WARN,
 				"%s Error rolling back %lu for netstack at %lu",
-				__FUNCTION__, proto_infos[i].cur_uval, i);
+				    __FUNCTION__, proto_infos[i].cur_uval, i);
 			}
-			#ifdef _DEBUG
+#ifdef _DEBUG
 			else {
 				cmn_err(CE_NOTE,
 				    "%s rollback  %s to %lu for proto %lu",
-				__FUNCTION__, prop, proto_infos[i].cur_uval,
-				proto_infos[i].proto);
+				    __FUNCTION__, prop, proto_infos[i].cur_uval,
+				    proto_infos[i].proto);
 			}
-			#endif
+#endif
 		}
 	}
 

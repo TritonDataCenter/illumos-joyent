@@ -426,12 +426,12 @@ lxi_normalize_protocols(zone_dochandle_t handle, ipadm_handle_t iph)
 	proto_cnt = sizeof (proto_entries)/ sizeof (proto_entries[0]);
 
 	/*
-	*  To avoid ERANGE errors, max_buf is updated first then the
-	*  rest of the protocols.
-	*  In case of a failure, we log the error and let the lx zone continue
-	*  it's boot process. Administrators could still setup the protocols
-	*  buffers if needed later via ipadm(8).
-	*/
+	 *  To avoid ERANGE errors, max_buf is updated first then the
+	 *  rest of the protocols.
+	 *  In case of a failure, we log the error and let the lx zone continue
+	 *  it's boot process. Administrators could still setup the protocols
+	 *  buffers if needed later via ipadm(8).
+	 */
 	for (i = 0; i < proto_cnt; i++) {
 		if ((status = ipadm_set_prop(iph, "max_buf", val_max,
 		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
