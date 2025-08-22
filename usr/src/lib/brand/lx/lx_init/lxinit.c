@@ -300,10 +300,22 @@ lxi_net_ipadm_close()
 }
 
 /*
- * Compare linux kernel version to the one set kernel-version attr in
- * the zone document.
- * Returns greater than 0 if zone version is higher, less than 0 if the zone
- * version is lower, and 0 if the versions are equal.
+ * lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
+ *     Compare linux kernel version to the one set kernel-version attr in
+ *     the zone document.
+ *
+ * Arguments:
+ *     handle  zone document handle for xml properties parsing.
+ *     *vers   kernel version in major.minor.patch format to compare with zone
+ *             defined kernel-version attribute property.
+ * Returns:
+ *
+ *    > 0 if zone kernel-version attribute > *vers
+ *    < 0 if zone kernel-version attribute < *vers
+ *    = 0 if zone kernel-version attribute = *vers
+ *
+ * Notes:
+ *     In case of an error the lxi_err will exit the program.
  */
 static int
 lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
@@ -311,8 +323,16 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
 	struct zone_attrtab attrtab;
 	int zvers[3] = {0, 0, 0};
 	int cvers[3] = {0, 0, 0};
-	int i = 0;
 	int res = 0;
+	int i = 0;
+
+	if (handle == NULL) {
+		lxi_err("%s zone handle is NULL", __FUNCTION__);
+	}
+
+	if (vers == NULL) {
+		lxi_err("%s kernel version is NULL", __FUNCTION__);
+	}
 
 	bzero(&attrtab, sizeof (attrtab));
 	(void) strlcpy(attrtab.zone_attr_name, "kernel-version",
@@ -331,13 +351,26 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
 			}
 		}
 	} else {
-		lxi_err("%s kernel-version zonecfg_get_attr_string: %s\n",
+		lxi_err("%s kernel-version zonecfg_lookup_attr: %s\n",
 		    __FUNCTION__, zonecfg_strerror(res));
 	}
 	return (0);
 }
-
 /*
+ * lxi_normalize_protocols(zone_dochandle_t handle)
+ *     Sets all four netstack protocols recv/send buffers to
+ *     the same value (currently 1MiB), and max_buf to values expected by Linux
+ *     applications.
+ *
+ * Arguments:
+ *     handle    zone document handler for xml properties parsing.
+ *     iph       ipadm handle for updating netstack protocol's properties.
+ *
+ * Returns:
+ *     No return value.
+ *
+ * Notes:
+ *
  * As part of adding support for /proc/sys/net/core/{r|w}mem_{default|max}
  * kernel tunables, we need to normalize values for the four protocols in the
  * netstack in order to report more Linux-like uniform values for the netstack
@@ -345,21 +378,23 @@ lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
  * More information in usr/src/uts/common/brand/lx/procfs/lx_prvnops.c
  */
 static void
-lxi_normalize_protocols(zone_dochandle_t handle)
+lxi_normalize_protocols(zone_dochandle_t handle, ipadm_handle_t iph)
 {
-	ipadm_status_t status;
-	char val[16];
-	char val_max[16];
-	size_t proto_cnt, i;
-	uint32_t max_buf;
 	uint_t proto_entries[] = {
 		MOD_PROTO_TCP,
 		MOD_PROTO_UDP,
 		MOD_PROTO_SCTP,
 		MOD_PROTO_RAWIP
 	};
-	proto_cnt = sizeof (proto_entries)/ sizeof (proto_entries[0]);
+	ipadm_status_t status;
+	size_t proto_cnt, i;
+	char val_max[16];
+	uint32_t max_buf;
+	char val[16];
 
+	if (iph == NULL) {
+		lxi_err("%s ipadm handle is NULL", __FUNCTION__);
+	}
 	/*
 	 * Prior to kernel 3.4, Linux defaulted to a max of 4MB for both the
 	 * tcp_rmem and tcp_wmem tunables. Kernels since then have increased the
@@ -381,10 +416,22 @@ lxi_normalize_protocols(zone_dochandle_t handle)
 	} else {
 		max_buf = 6 * 1024 * 1024;
 	}
-
+	/*
+	 * Normalize recv/send buffers to 1MiB and max_buf to Linux expected
+	 * default values defined by kernel version.
+	 */
 	(void) snprintf(val, sizeof (val), "%u", NETSTACK_BUFSZ * 2);
 	(void) snprintf(val_max, sizeof (val_max), "%u", max_buf);
 
+	proto_cnt = sizeof (proto_entries)/ sizeof (proto_entries[0]);
+
+	/*
+	*  To avoid ERANGE errors, max_buf is updated first then the
+	*  rest of the protocols.
+	*  In case of a failure, we log the error and let the lx zone continue
+	*  it's boot process. Administrators could still setup the protocols
+	*  buffers if needed later via ipadm(8).
+	*/
 	for (i = 0; i < proto_cnt; i++) {
 		if ((status = ipadm_set_prop(iph, "max_buf", val_max,
 		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
@@ -1121,7 +1168,7 @@ main(int argc, char *argv[])
 
 	lxi_net_linklocal_routes();
 	lxi_net_setup_gateways(handle);
-	lxi_normalize_protocols(handle);
+	lxi_normalize_protocols(handle, iph);
 
 	lxi_config_close(handle);
 
