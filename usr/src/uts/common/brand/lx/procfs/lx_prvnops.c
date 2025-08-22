@@ -74,10 +74,10 @@
 #include <inet/tcp.h>
 #include <inet/tcp_impl.h>
 #include <inet/udp_impl.h>
-#include <inet/rawip_impl.h>
-#include <inet/sctp/sctp_impl.h>
 #include <inet/ipclassifier.h>
 #include <sys/socketvar.h>
+#include <inet/rawip_impl.h>
+#include <inet/sctp/sctp_impl.h>
 #include <fs/sockfs/socktpi.h>
 #include <sys/random.h>
 #include <sys/procfs.h>
