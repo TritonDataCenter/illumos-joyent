@@ -87,8 +87,6 @@ static void lxi_err(char *msg, ...);
 		(3 * sizeof (struct sockaddr_in)))
 
 #define	NETSTACK_BUFSZ 524288
-#define	MIN_NETSTACK_BUFSZ(a, b) ((a) < (b) ? (a) : (b))
-#define	MAX_NETSTACK_BUFSZ(a, b) ((a) > (b) ? (a) : (b))
 
 ipadm_handle_t iph;
 
