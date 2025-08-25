@@ -7963,7 +7963,7 @@ lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
 				"%s Error rolling back %lu for netstack at\
                                 MOD_PROTO %u",
 				    __FUNCTION__, proto_infos[i].cur_uval,
-				proto_infos[i].proto);
+				    proto_infos[i].proto);
 			}
 #ifdef DEBUG
 			else {
