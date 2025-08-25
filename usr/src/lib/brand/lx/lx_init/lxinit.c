@@ -21,6 +21,7 @@
 
 /*
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /*
@@ -30,6 +31,7 @@
  * - Starting ipmgmtd
  * - Configuring network interfaces
  * - Adding a default route
+ * - Normalize netstack buffer sizes
  */
 
 #include <ctype.h>
@@ -51,12 +53,14 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/varargs.h>
+#include <sys/param.h>
 #include <unistd.h>
 #include <libintl.h>
 #include <locale.h>
 #include <libcustr.h>
 
 #include <netinet/dhcp.h>
+#include <inet/tunables.h>
 #include <dhcpagent_util.h>
 #include <dhcpagent_ipc.h>
 
@@ -81,6 +85,8 @@ static void lxi_err(char *msg, ...);
 
 #define	RTMBUFSZ	(sizeof (struct rt_msghdr) + \
 		(3 * sizeof (struct sockaddr_in)))
+
+#define	NETSTACK_BUFSZ 524288
 
 ipadm_handle_t iph;
 
@@ -289,6 +295,158 @@ static void
 lxi_net_ipadm_close()
 {
 	ipadm_close(iph);
+}
+
+/*
+ * lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
+ *     Compare linux kernel version to the one set kernel-version attr in
+ *     the zone document.
+ *
+ * Arguments:
+ *     handle  zone document handle for xml properties parsing.
+ *     *vers   kernel version in major.minor.patch format to compare with zone
+ *             defined kernel-version attribute property.
+ * Returns:
+ *
+ *    > 0 if zone kernel-version attribute > *vers
+ *    < 0 if zone kernel-version attribute < *vers
+ *    = 0 if zone kernel-version attribute = *vers
+ *
+ * Notes:
+ *     In case of an error the lxi_err will exit the program.
+ */
+static int
+lxi_kern_release_cmp(zone_dochandle_t handle, const char *vers)
+{
+	struct zone_attrtab attrtab;
+	int zvers[3] = {0, 0, 0};
+	int cvers[3] = {0, 0, 0};
+	int res = 0;
+	int i = 0;
+
+	if (handle == NULL) {
+		lxi_err("%s zone handle is NULL", __FUNCTION__);
+	}
+
+	if (vers == NULL) {
+		lxi_err("%s kernel version is NULL", __FUNCTION__);
+	}
+
+	bzero(&attrtab, sizeof (attrtab));
+	(void) strlcpy(attrtab.zone_attr_name, "kernel-version",
+	    sizeof (attrtab.zone_attr_name));
+
+	if ((res = zonecfg_lookup_attr(handle, &attrtab)) == Z_OK) {
+		(void) sscanf(attrtab.zone_attr_value, "%d.%d.%d", &zvers[0],
+		    &zvers[1], &zvers[2]);
+		(void) sscanf(vers, "%d.%d.%d", &cvers[0], &cvers[1],
+		    &cvers[2]);
+		for (i = 0; i < 3; i++) {
+			if (zvers[i] > cvers[i]) {
+				return (1);
+			} else if (zvers[i] < cvers[i]) {
+				return (-1);
+			}
+		}
+	} else {
+		lxi_err("%s kernel-version zonecfg_lookup_attr: %s\n",
+		    __FUNCTION__, zonecfg_strerror(res));
+	}
+	return (0);
+}
+/*
+ * lxi_normalize_protocols(zone_dochandle_t handle)
+ *     Sets all four netstack protocols recv/send buffers to
+ *     the same value (currently 1MiB), and max_buf to values expected by Linux
+ *     applications.
+ *
+ * Arguments:
+ *     handle    zone document handler for xml properties parsing.
+ *     iph       ipadm handle for updating netstack protocol's properties.
+ *
+ * Returns:
+ *     No return value.
+ *
+ * Notes:
+ *
+ * As part of adding support for /proc/sys/net/core/{r|w}mem_{default|max}
+ * kernel tunables, we need to normalize values for the four protocols in the
+ * netstack in order to report more Linux-like uniform values for the netstack
+ * of this zone.
+ * More information in usr/src/uts/common/brand/lx/procfs/lx_prvnops.c
+ */
+static void
+lxi_normalize_protocols(zone_dochandle_t handle, ipadm_handle_t iph)
+{
+	uint_t proto_entries[] = {
+		MOD_PROTO_TCP,
+		MOD_PROTO_UDP,
+		MOD_PROTO_SCTP,
+		MOD_PROTO_RAWIP
+	};
+	ipadm_status_t status;
+	size_t proto_cnt, i;
+	char val_max[16];
+	uint32_t max_buf;
+	char val[16];
+
+	if (iph == NULL) {
+		lxi_err("%s ipadm handle is NULL", __FUNCTION__);
+	}
+	/*
+	 * Prior to kernel 3.4, Linux defaulted to a max of 4MB for both the
+	 * tcp_rmem and tcp_wmem tunables. Kernels since then have increased the
+	 * tcp_rmem default max to 6MB. Today kernels since version 6.9 this
+	 * value is dynamically assigned more information in
+	 * linux/net/ipv4/tcp.c.
+	 * Prior to OS-6096, as the TCP buffer sizing in illumos is smaller
+	 * than Linux LX Branded zones experience setsockopt() errors, this is
+	 * replicated here.
+	 *
+	 * We are not emulating dynamic TCP buffer sizing because the computed
+	 * value  would not match exactly and thus adds little value. If needed,
+	 * buffer sizes can be adjusted with ipadm(8), or via the kernel
+	 * tunables  /proc/sys/net/core/{r|w}mem_{default|max}.
+	 * These tunables are not as fine-grained as ipadm.
+	 */
+	if (lxi_kern_release_cmp(handle, "3.4.0") < 0) {
+		max_buf = 4 * 1024 * 1024;
+	} else {
+		max_buf = 6 * 1024 * 1024;
+	}
+	/*
+	 * Normalize recv/send buffers to 1MiB and max_buf to Linux expected
+	 * default values defined by kernel version.
+	 */
+	(void) snprintf(val, sizeof (val), "%u", NETSTACK_BUFSZ * 2);
+	(void) snprintf(val_max, sizeof (val_max), "%u", max_buf);
+
+	proto_cnt = sizeof (proto_entries)/ sizeof (proto_entries[0]);
+
+	/*
+	 *  To avoid ERANGE errors, max_buf is updated first then the
+	 *  rest of the protocols.
+	 *  In case of a failure, we log the error and let the lx zone continue
+	 *  it's boot process. Administrators could still setup the protocols
+	 *  buffers if needed later via ipadm(8).
+	 */
+	for (i = 0; i < proto_cnt; i++) {
+		if ((status = ipadm_set_prop(iph, "max_buf", val_max,
+		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
+			lxi_warn("%s buf ipadm_set_prop error %d index %d: %s",
+			    __FUNCTION__, status, i, ipadm_status2str(status));
+		}
+		if ((status = ipadm_set_prop(iph, "send_buf", val,
+		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
+			lxi_warn("%s buf ipadm_set_prop error %d index %d: %s",
+			    __FUNCTION__, status, i, ipadm_status2str(status));
+		}
+		if ((status = ipadm_set_prop(iph, "recv_buf", val,
+		    proto_entries[i], IPADM_OPT_ACTIVE)) != IPADM_SUCCESS) {
+			lxi_warn("%s buf ipadm_set_prop error %d index %d: %s",
+			    __FUNCTION__, status, i, ipadm_status2str(status));
+		}
+	}
 }
 
 void
@@ -581,6 +739,7 @@ lxi_iface_gateway(const char *iface, const char *dst, int dstpfx,
 	return (lxi_route_send_msg(rtm));
 }
 
+
 static void
 lxi_net_loopback()
 {
@@ -708,6 +867,7 @@ lxi_net_setup(zone_dochandle_t handle)
 	if (do_addrconf) {
 		lxi_net_ndpd_start();
 	}
+
 
 	(void) zonecfg_endnwifent(handle);
 }
@@ -1000,13 +1160,13 @@ main(int argc, char *argv[])
 
 	lxi_net_ipmgmtd_start();
 	lxi_net_ipadm_open();
-
 	handle = lxi_config_open();
 	lxi_net_loopback();
 	lxi_net_setup(handle);
 
 	lxi_net_linklocal_routes();
 	lxi_net_setup_gateways(handle);
+	lxi_normalize_protocols(handle, iph);
 
 	lxi_config_close(handle);
 
