@@ -28,6 +28,7 @@
  * Copyright 2020 Joyent, Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2024 MNX Cloud, Inc.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /*
@@ -1162,43 +1163,6 @@ lx_fix_ns_eports(netstack_t *ns)
 	mutex_exit(lock);
 }
 
-/*
- * The default limit for TCP buffer sizing on illumos is smaller than its
- * counterparts on Linux.  Adjust it to meet minimum expectations.
- */
-static void
-lx_fix_ns_buffers(netstack_t *ns)
-{
-	mod_prop_info_t *pinfo;
-	ulong_t target, parsed;
-	char buf[16];
-
-	/*
-	 * Prior to kernel 3.4, Linux defaulted to a max of 4MB for both the
-	 * tcp_rmem and tcp_wmem tunables.  Kernels since then increase the
-	 * tcp_rmem default max to 6MB.  Since illumos lacks separate tunables
-	 * to cap sizing for read and write buffers, the higher value is
-	 * selected for compatibility.
-	 */
-	if (lx_kern_release_cmp(curzone, "3.4.0") < 0) {
-		target = 4*1024*1024;
-	} else {
-		target = 6*1024*1024;
-	}
-
-	pinfo = mod_prop_lookup(ns->netstack_tcp->tcps_propinfo_tbl,
-	    "max_buf", MOD_PROTO_TCP);
-	if (pinfo == NULL ||
-	    pinfo->mpi_getf(ns, pinfo, NULL, buf, sizeof (buf), 0) != 0 ||
-	    ddi_strtoul(buf, NULL, 10, &parsed) != 0 ||
-	    parsed >= target) {
-		return;
-	}
-
-	(void) snprintf(buf, sizeof (buf), "%lu", target);
-	(void) pinfo->mpi_setf(ns, CRED(), pinfo, NULL, buf, 0);
-}
-
 static void
 lx_bootup_hooks()
 {
@@ -1209,7 +1173,6 @@ lx_bootup_hooks()
 		return;
 
 	lx_fix_ns_eports(ns);
-	lx_fix_ns_buffers(ns);
 
 	netstack_rele(ns);
 }
