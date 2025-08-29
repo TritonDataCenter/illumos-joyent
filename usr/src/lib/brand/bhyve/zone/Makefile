@@ -15,7 +15,7 @@ include $(SRC)/cmd/Makefile.cmd
 include ../Makefile.bhyve
 include $(SRC)/cmd/Makefile.cmd.64
 
-PROGS =		attach detach statechange uninstall
+PROGS =		attach binstall detach statechange uninstall
 
 PROG1 =		boot
 PROG2 =		bhhwcompat
