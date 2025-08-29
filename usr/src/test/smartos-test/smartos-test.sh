@@ -14,6 +14,7 @@
 #
 # Copyright 2020 Joyent, Inc.
 # Copyright 2025 MNX Cloud, Inc.
+# Copyright 2025 Edgecast Cloud LLC.
 #
 
 #
@@ -203,38 +204,6 @@ function shadow_fix {
 function extract_remaining_test_bits {
     log_must tar -xzf $1 -C / \
         opt kernel tests.manifest.gen tests.buildstamp
-}
-
-function setup_pkgsrc {
-
-    if [[ -f /opt/tools/etc/pkgin/repositories.conf ]]; then
-        log "Pkgsrc bootstrap already setup, continuing"
-        return
-    fi
-
-    # We should always use the same pkgsrc version as we have installed
-    # on the build machine in case any of our tests link against libraries
-    # in /opt/tools
-    PKGSRC_STEM="https://pkgsrc.smartos.org/packages/SmartOS/bootstrap"
-    BOOTSTRAP_TAR="bootstrap-2021Q4-tools.tar.gz"
-    BOOTSTRAP_SHA="c427cb1ed664fd161d8e12c5191adcae7aee68b4"
-
-    # Ensure we are in a directory with enough space for the bootstrap
-    # download, by default the SmartOS /root directory is limited to the size
-    # of the ramdisk.
-    cd /var/tmp
-
-    # Download the bootstrap kit to the current directory.  Note that we
-    # currently pass "-k" to skip SSL certificate checks as the GZ doesn't
-    # install them.
-    log_must curl -kO ${PKGSRC_STEM}/${BOOTSTRAP_TAR}
-
-    # Verify the SHA1 checksum.
-    [[ "${BOOTSTRAP_SHA}" = "$(/bin/digest -a sha1 ${BOOTSTRAP_TAR})" ]] || \
-        fatal "checksum failure for ${BOOTSTRAP_TAR}, expected ${BOOTSTRAP_SHA}"
-
-    # Install bootstrap kit to /opt/tools
-    log_must tar -zxpf ${BOOTSTRAP_TAR} -C /
 }
 
 # The pkgsrc packages we will install are now a single metapackage.
@@ -489,7 +458,7 @@ if [[ $do_configure = true ]]; then
     add_loopback_mounts $test_archive
     extract_remaining_test_bits $test_archive
     add_test_accounts
-    setup_pkgsrc
+    /smartdc/bin/pkgsrc-setup
     install_required_pkgs
     # Enable per-process coredumps, some tests assume they're pre-set.
     log_must coreadm -e process

@@ -23,6 +23,7 @@
 # Copyright (c) 2004, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright 2014 Nexenta Systems, Inc. All rights reserved.
 # Copyright (c) 2012, Joyent Inc. All rights reserved.
+# Copyright 2025 Edgecast Cloud LLC.
 
 set -o xtrace
 
@@ -144,19 +145,6 @@ setup_manifests()
 	done
 }
 
-#
-# Return a list of running, non-global zones for which a shutdown via
-# "/sbin/init 0" may work (typically only Solaris zones.)
-#
-shutdown_zones()
-{
-	zoneadm list -p | nawk -F: '{
-		if ($2 != "global") {
-			print $2
-		}
-	}'
-}
-
 [ ! -x /usr/sbin/zoneadm ] && exit 0	# SUNWzoneu not installed
 
 if [ -z "$SMF_FMRI" ]; then
@@ -232,37 +220,66 @@ case "$1" in
 	SVC_TIMEOUT=`svcprop -p stop/timeout_seconds $SMF_FMRI`
 
 	#
-	# First, try shutting down any running zones for which an "init 0" may
-	# work.
+	# First, try shutting down any running zones, using the best-known
+	# clean-shutdown methods. This varies by zone brand.
 	#
 	MAXSHUT=`expr 3 \* $SVC_TIMEOUT \/ 4` # 3/4 of time to zone shutdown
 	MAXHALT=`expr $SVC_TIMEOUT \/ 4`      # rest of time goes to halt
 
-	zonelist=`shutdown_zones`
+	zonelist=`zoneadm list -p | grep -v ^0:global`
 
 	if [ -n "$zonelist" ]; then
 		SHUTDOWN=0
 		echo "Shutting down running zones (for up to $MAXSHUT" \
 		    "seconds):\c"
 
-		for zone in $zonelist; do
-			echo " $zone\c"
-			zlogin -S $zone /sbin/init 0 < /dev/null >&0 2>&0 &
+		# Try and do any special brand-specific shutdown procedures,
+		# otherwise treat the zone like a native zone where you can
+		# both `zlogin -S` and `/sbin/init 0` in-zone.
+		#
+		# This is new with OS-8684, and new brands or changes in
+		# brand implementations will require revisiting this.
+		for zonedata in $zonelist; do
+			IFS=: read X zone X X X brand X <<< "$zonedata"
+			echo " $zone($brand)\c"
+			if [ "$brand" == "lx" ]; then
+			    # LX SHUTDOWN
+			    zoneadm -z $zone shutdown 2>&1 > /dev/null &
+			elif [ "$brand" == "kvm" ]; then
+			    # New-and-improved OS-8684 KVM SHUTDOWN
+			    pkill -TERM -z $zone qemu 2>&1 &
+			elif [ "$brand" == "bhyve" ]; then
+			    # BHYVE SHUTDOWN
+			    pkill -TERM -z $zone bhyve 2>&1 &
+			else
+			    # Default case: Treat like full-native brand.
+			    zlogin -S $zone /sbin/init 0 < /dev/null >&0 2>&0 &
+			fi
 			SHUTDOWN=1
 		done
 
-		[ $SHUTDOWN -eq 1 ] && echo "."
+		if [ $SHUTDOWN -eq 1 ]; then
+			echo "."
+		else
+			echo "(none)"
+		fi
+	fi
 
-		# Allow time for zones to shutdown cleanly
+	# Allow time for zones to shutdown cleanly
 
-		while [ $MAXSHUT -gt 0 -a "`shutdown_zones`" != "" ]; do
-			MAXSHUT=`expr $MAXSHUT - 1`
-			sleep 1	# wait a bit longer
-		done
+	while [ $MAXSHUT -gt 0 -a "`zoneadm list`" != "global" ]
+	do
+	    MAXSHUT=`expr $MAXSHUT - 1`
+	    sleep 1	# wait a bit longer
+	done
+
+	# Add any remaining shutdown-clean time past 5 secs to halt time.
+	if [ $MAXSHUT -gt 5 ]; then
+		MAXHALT=`expr $MAXHALT + $MAXSHUT - 5`
 	fi
 
 	#
-	# Second, try halting any non-global zones still running
+	# Second, try halting any non-global zones still running.
 	#
 	WAITPIDS=""
 	for zone in `zoneadm list`; do
@@ -280,6 +297,10 @@ case "$1" in
 	# Wait for the 'zoneadm halt' commands to complete.  We will let this
 	# run forever, since the restart daemon will eventually kill us off
 	# anyway if the halts do not complete after a certain period of time.
+	#
+	# TODO: If illumos#12748 (wait-for-seconds in pwait(1)) gets built, we
+	# should TOTALLY take advantage of it here for better observabilty,
+	# which is already in the lines below this.
 	wait $WAITPIDS
 
 	# If the halts complete but a zone is still not shutdown, it might

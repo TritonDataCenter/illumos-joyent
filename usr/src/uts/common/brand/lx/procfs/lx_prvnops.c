@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /*
@@ -75,6 +76,8 @@
 #include <inet/udp_impl.h>
 #include <inet/ipclassifier.h>
 #include <sys/socketvar.h>
+#include <inet/rawip_impl.h>
+#include <inet/sctp/sctp_impl.h>
 #include <fs/sockfs/socktpi.h>
 #include <sys/random.h>
 #include <sys/procfs.h>
@@ -252,6 +255,8 @@ static void lxpr_read_sys_kernel_shmall(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_kernel_shmmax(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_kernel_shmmni(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_kernel_threads_max(lxpr_node_t *, lxpr_uiobuf_t *);
+static void lxpr_read_sys_kernel_panic_on_oops(lxpr_node_t *lxpnp,
+    lxpr_uiobuf_t *uiobuf);
 static void lxpr_read_sys_net_core_somaxc(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_net_ipv4_icmp_eib(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_net_ipv4_ip_forward(lxpr_node_t *, lxpr_uiobuf_t *);
@@ -275,6 +280,10 @@ static void lxpr_read_sys_vm_minfr_kb(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_vm_nhpages(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_vm_overcommit_mem(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_vm_swappiness(lxpr_node_t *, lxpr_uiobuf_t *);
+static void lxpr_read_sys_net_core_rwmem_default(lxpr_node_t *lxpnp,
+    lxpr_uiobuf_t *uiobuf);
+static void lxpr_read_sys_net_core_rwmem_max(lxpr_node_t *lxpnp,
+    lxpr_uiobuf_t *uiobuf);
 
 static int lxpr_write_pid_tid_comm(lxpr_node_t *, uio_t *, cred_t *,
     caller_context_t *);
@@ -284,6 +293,10 @@ static int lxpr_write_sys_fs_pipe_max(lxpr_node_t *, uio_t *, cred_t *,
     caller_context_t *);
 static int lxpr_write_sys_net_core_somaxc(lxpr_node_t *, uio_t *, cred_t *,
     caller_context_t *);
+static int lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *, uio_t *,
+    cred_t *, caller_context_t *);
+static int lxpr_write_sys_net_core_rwmem_max(lxpr_node_t *, uio_t *,
+    cred_t *, caller_context_t *);
 static int lxpr_write_sys_net_ipv4_icmp_eib(lxpr_node_t *, uio_t *,
     cred_t *, caller_context_t *);
 static int lxpr_write_sys_net_ipv4_ip_lport_range(lxpr_node_t *, uio_t *,
@@ -307,6 +320,8 @@ static int lxpr_write_sys_net_ipv4_tcp_sack(lxpr_node_t *, uio_t *,
 static int lxpr_write_sys_net_ipv4_tcp_winscale(lxpr_node_t *, uio_t *,
     cred_t *, caller_context_t *);
 static int lxpr_write_sys_kernel_corepatt(lxpr_node_t *, uio_t *, cred_t *,
+    caller_context_t *);
+static int lxpr_write_sys_kernel_panic_on_oops(lxpr_node_t *, uio_t *, cred_t *,
     caller_context_t *);
 
 /*
@@ -583,6 +598,7 @@ static lxpr_dirent_t sys_kerneldir[] = {
 	{ LXPR_SYS_KERNEL_SHMMAX,	"shmmax" },
 	{ LXPR_SYS_KERNEL_SHMMNI,	"shmmni" },
 	{ LXPR_SYS_KERNEL_THREADS_MAX,	"threads-max" },
+	{ LXPR_SYS_KERNEL_PANIC_ON_OOPS,	"panic_on_oops" },
 };
 
 #define	SYS_KERNELDIRFILES (sizeof (sys_kerneldir) / sizeof (sys_kerneldir[0]))
@@ -613,6 +629,10 @@ static lxpr_dirent_t sys_netdir[] = {
  */
 static lxpr_dirent_t sys_net_coredir[] = {
 	{ LXPR_SYS_NET_CORE_SOMAXCON,	"somaxconn" },
+	{ LXPR_SYS_NET_CORE_WMEM_MAX,	"wmem_max" },
+	{ LXPR_SYS_NET_CORE_WMEM_DEFAULT,	"wmem_default" },
+	{ LXPR_SYS_NET_CORE_RMEM_MAX,	"rmem_max" },
+	{ LXPR_SYS_NET_CORE_RMEM_DEFAULT,	"rmem_default" },
 };
 
 #define	SYS_NET_COREDIRFILES \
@@ -691,6 +711,10 @@ static wftab_t wr_tab[] = {
 	{LXPR_SYS_KERNEL_SHMMAX, NULL},
 	{LXPR_SYS_FS_PIPE_MAX, lxpr_write_sys_fs_pipe_max},
 	{LXPR_SYS_NET_CORE_SOMAXCON, lxpr_write_sys_net_core_somaxc},
+	{LXPR_SYS_NET_CORE_WMEM_MAX, lxpr_write_sys_net_core_rwmem_max},
+	{LXPR_SYS_NET_CORE_WMEM_DEFAULT, lxpr_write_sys_net_core_rwmem_default},
+	{LXPR_SYS_NET_CORE_RMEM_MAX, lxpr_write_sys_net_core_rwmem_max},
+	{LXPR_SYS_NET_CORE_RMEM_DEFAULT, lxpr_write_sys_net_core_rwmem_default},
 	{LXPR_SYS_NET_IPV4_ICMP_EIB, lxpr_write_sys_net_ipv4_icmp_eib},
 	{LXPR_SYS_NET_IPV4_IP_FORWARD, NULL},
 	{LXPR_SYS_NET_IPV4_IP_LPORT_RANGE,
@@ -717,6 +741,7 @@ static wftab_t wr_tab[] = {
 	{LXPR_SYS_VM_DIRTY_WB_CS, NULL},
 	{LXPR_SYS_VM_OVERCOMMIT_MEM, NULL},
 	{LXPR_SYS_VM_SWAPPINESS, NULL},
+	{LXPR_SYS_KERNEL_PANIC_ON_OOPS, lxpr_write_sys_kernel_panic_on_oops},
 	{LXPR_INVALID, NULL}
 };
 
@@ -930,8 +955,8 @@ static void (*lxpr_read_function[])() = {
 	lxpr_read_sys_kernel_caplcap,	/* /proc/sys/kernel/cap_last_cap */
 	lxpr_read_sys_kernel_corepatt,	/* /proc/sys/kernel/core_pattern */
 	lxpr_read_sys_kernel_hostname,	/* /proc/sys/kernel/hostname */
-	lxpr_read_sys_kernel_overflowuid,	/* /proc/sys/kernel/overflowuid */
-	lxpr_read_sys_kernel_overflowgid,	/* /proc/sys/kernel/overflowgid */
+	lxpr_read_sys_kernel_overflowuid,  /* /proc/sys/kernel/overflowuid */
+	lxpr_read_sys_kernel_overflowgid,  /* /proc/sys/kernel/overflowgid */
 	lxpr_read_sys_kernel_msgmax,	/* /proc/sys/kernel/msgmax */
 	lxpr_read_sys_kernel_msgmnb,	/* /proc/sys/kernel/msgmnb */
 	lxpr_read_sys_kernel_msgmni,	/* /proc/sys/kernel/msgmni */
@@ -947,9 +972,14 @@ static void (*lxpr_read_function[])() = {
 	lxpr_read_sys_kernel_shmmax,	/* /proc/sys/kernel/shmmax */
 	lxpr_read_sys_kernel_shmmni,	/* /proc/sys/kernel/shmmni */
 	lxpr_read_sys_kernel_threads_max, /* /proc/sys/kernel/threads-max */
+	lxpr_read_sys_kernel_panic_on_oops, /* /proc/sys/kernel/panic_on_oops */
 	lxpr_read_invalid,		/* /proc/sys/net	*/
 	lxpr_read_invalid,		/* /proc/sys/net/core	*/
 	lxpr_read_sys_net_core_somaxc,	/* /proc/sys/net/core/somaxconn	*/
+	lxpr_read_sys_net_core_rwmem_max, /* /proc/sys/net/core/rmem_max */
+	lxpr_read_sys_net_core_rwmem_default,
+	lxpr_read_sys_net_core_rwmem_max, /* /proc/sys/net/core/wmem_max */
+	lxpr_read_sys_net_core_rwmem_default,
 	lxpr_read_invalid,		/* /proc/sys/net/ipv4	*/
 	lxpr_read_sys_net_ipv4_icmp_eib, /* .../icmp_echo_ignore_broadcasts */
 	lxpr_read_sys_net_ipv4_ip_forward, /* .../ipv4/ip_forward */
@@ -1123,9 +1153,14 @@ static vnode_t *(*lxpr_lookup_function[])() = {
 	lxpr_lookup_not_a_dir,		/* /proc/sys/kernel/shmmax */
 	lxpr_lookup_not_a_dir,		/* /proc/sys/kernel/shmmni */
 	lxpr_lookup_not_a_dir,		/* /proc/sys/kernel/threads-max */
+	lxpr_lookup_not_a_dir,		/* /proc/sys/kernel/panic_on_oops */
 	lxpr_lookup_sys_netdir,		/* /proc/sys/net */
 	lxpr_lookup_sys_net_coredir,	/* /proc/sys/net/core */
 	lxpr_lookup_not_a_dir,		/* /proc/sys/net/core/somaxconn */
+	lxpr_lookup_not_a_dir,		/* /proc/sys/net/core/rmem_default */
+	lxpr_lookup_not_a_dir,		/* /proc/sys/net/core/rmem_max */
+	lxpr_lookup_not_a_dir,		/* /proc/sys/net/core/wmem_max */
+	lxpr_lookup_not_a_dir,		/* /proc/sys/net/core/wmem_default */
 	lxpr_lookup_sys_net_ipv4dir,	/* /proc/sys/net/ipv4 */
 	lxpr_lookup_not_a_dir,		/* .../icmp_echo_ignore_broadcasts */
 	lxpr_lookup_not_a_dir,		/* .../net/ipv4/ip_forward */
@@ -1299,9 +1334,14 @@ static int (*lxpr_readdir_function[])() = {
 	lxpr_readdir_not_a_dir,		/* /proc/sys/kernel/shmmax */
 	lxpr_readdir_not_a_dir,		/* /proc/sys/kernel/shmmni */
 	lxpr_readdir_not_a_dir,		/* /proc/sys/kernel/threads-max */
+	lxpr_readdir_not_a_dir,		/* /proc/sys/kernel/panic_on_oops */
 	lxpr_readdir_sys_netdir,	/* /proc/sys/net */
 	lxpr_readdir_sys_net_coredir,	/* /proc/sys/net/core */
 	lxpr_readdir_not_a_dir,		/* /proc/sys/net/core/somaxconn */
+	lxpr_readdir_not_a_dir,		/* /proc/sys/net/core/rmem_max */
+	lxpr_readdir_not_a_dir,		/* /proc/sys/net/core/rmem_default */
+	lxpr_readdir_not_a_dir,		/* /proc/sys/net/core/wmem_max */
+	lxpr_readdir_not_a_dir,		/* /proc/sys/net/core/wmem_default */
 	lxpr_readdir_sys_net_ipv4dir,	/* /proc/sys/net/ipv4 */
 	lxpr_readdir_not_a_dir,		/* .../icmp_echo_ignore_broadcasts */
 	lxpr_readdir_not_a_dir,		/* .../net/ipv4/ip_forward */
@@ -4876,7 +4916,9 @@ lxpr_read_sys_kernel_hostname(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 	lxpr_uiobuf_printf(uiobuf, "%s\n", uts_nodename());
 }
 
-/* 
+/*
+ * lxpr_read_sys_kernel_overflowuid(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf):
+ *
  * Some programs, such as steamcmd, expect overflowuid and overflowgid
  * entries to exist. The default value for both entries is hardcoded to 65534,
  * unlike Linux, where it is a sysctl tunable.
@@ -4907,7 +4949,55 @@ lxpr_read_sys_kernel_overflowgid(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 	lxpr_uiobuf_printf(uiobuf, "%u\n", val);
 }
 
+/*
+ * In Linux rmem_max, rmem_default, wmem_max and wmem_default are tunables
+ * that control the default and maximum socket receive/send buffer sizes.
+ * Their values are in bytes.
+ */
+static void
+lxpr_read_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	netstack_t	*ns;
+	tcp_stack_t	*tcps;
 
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_DEFAULT);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL) {
+		lxpr_uiobuf_seterr(uiobuf, ENXIO);
+		return;
+	}
+
+	/* Why TCP? See lxpr_write_sys_net_core_rwmem_default(). */
+	tcps = ns->netstack_tcp;
+
+	lxpr_uiobuf_printf(uiobuf, "%d\n",
+	    (lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ?
+	    tcps->tcps_recv_hiwat : tcps->tcps_xmit_hiwat));
+	netstack_rele(ns);
+}
+
+static void
+lxpr_read_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	netstack_t	*ns;
+	tcp_stack_t	*tcps;
+
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_MAX ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_MAX);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL) {
+		lxpr_uiobuf_seterr(uiobuf, ENXIO);
+		return;
+	}
+
+	/* Why TCP? See lxpr_write_sys_net_core_rwmem_default(). */
+	tcps = ns->netstack_tcp;
+	lxpr_uiobuf_printf(uiobuf, "%d\n", tcps->tcps_max_buf);
+	netstack_rele(ns);
+}
 
 static void
 lxpr_read_sys_kernel_msgmax(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
@@ -5154,6 +5244,33 @@ lxpr_read_sys_kernel_threads_max(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 {
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_KERNEL_THREADS_MAX);
 	lxpr_uiobuf_printf(uiobuf, "%d\n", LXPTOZ(lxpnp)->zone_nlwps_ctl);
+}
+
+/*
+ * Some applications check /proc/sys/kernel/panic_on_oops, the purpose
+ * of setting this bit in Linux is to call panic() in case of
+ * an 'oops' (a serious non-fatal error in the kernel).
+ * So we just returned 1 as is the expected value for some applications.
+ */
+static void
+lxpr_read_sys_kernel_panic_on_oops(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	uint_t val = 1;
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_KERNEL_PANIC_ON_OOPS);
+	lxpr_uiobuf_printf(uiobuf, "%u\n", val);
+}
+
+static int
+lxpr_write_sys_kernel_panic_on_oops(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct)
+{
+	/*
+	 * We don't keep a state for this tunable, is hardcoded to 1
+	 * so we drop whatever user has supplied.
+	 */
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_KERNEL_PANIC_ON_OOPS);
+	uioskip(uio, uio->uio_resid);
+	return (0);
 }
 
 static void
@@ -7660,6 +7777,210 @@ lxpr_write_tcp_property(lxpr_node_t *lxpnp, struct uio *uio,
 	return (res);
 }
 
+/*
+ * lxpr_write_netstack_property (lxpr_node_t *lxpnp, struct uio *uio,
+ *    struct cred *cr, char *prop, int (*xlate)(char *, int))
+ *
+ * Arguments:
+ *      *lxpnp  lxprocfs node that received a write request.
+ *      *uio    uio struct holding input data from write request.
+ *      *cr     credential data.
+ *      *prop   netstack property name to update.
+ *      *xlate  translation function to modify input_value from uio.
+ *
+ * Returns:
+ *
+ *     (0) on success
+ *     (EINVAL) On failure updating a netstack protocol property.
+ *     (EFAULT) On uiomove failure copying data to input_val buffer.
+ *
+ * Notes:
+ *
+ * Before an attempt to update @prop with @input_value the value is validated
+ * to avoid ERANGE errors, and the current values for the protocol property
+ * are cached. If the value supplied for @prop is in the range of possible
+ * values for each protocol, then an update of the property is attempted.
+ * If there is any error on the update, then all protocols @prop will be
+ * updated to the previous cached value.
+ *
+ */
+#define	PTBL_FROM_NETSTACK(ns, proto)					\
+	((ns) == NULL ? NULL :						\
+		(proto) == MOD_PROTO_UDP && (ns)->netstack_udp ?	\
+		(ns)->netstack_udp->us_propinfo_tbl :			\
+		(proto) == MOD_PROTO_SCTP && (ns)->netstack_sctp ?	\
+		(ns)->netstack_sctp->sctps_propinfo_tbl :		\
+		(proto) == MOD_PROTO_RAWIP && (ns)->netstack_icmp ?	\
+		(ns)->netstack_icmp->is_propinfo_tbl :			\
+		(ns)->netstack_tcp ? (ns)->netstack_tcp->tcps_propinfo_tbl \
+		: NULL)
+static int
+lxpr_write_netstack_property(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, char *prop, int (*xlate)(char *, int))
+{
+	struct {
+		mod_prop_info_t *ptbl;
+		mod_prop_info_t *pinfo;
+		mod_prop_info_t *maxbuf_pinfo;
+		ulong_t cur_uval;
+		uint_t proto;
+	} proto_infos [] = {
+		{NULL, NULL, NULL, 0, MOD_PROTO_TCP},
+		{NULL, NULL, NULL, 0, MOD_PROTO_UDP},
+		{NULL, NULL, NULL, 0, MOD_PROTO_SCTP},
+		{NULL, NULL, NULL, 0, MOD_PROTO_RAWIP}
+	};
+	boolean_t update_failed = B_FALSE; /* rollback required */
+	char input_val[16]; /* will hold the user supplied input */
+	size_t proto_cnt;  /* size of proto_infos array */
+	char curval[16];  /* Will hold the current value for the property */
+	ulong_t new_val; /* user supplied value as ulong_t */
+	ulong_t min_val; /* minimal value for property */
+	ulong_t max_val; /* max value for property */
+	netstack_t *ns;
+	char *endptr;
+	int ret = 0;
+	size_t olen;
+	size_t i;
+	int err;
+
+	if (uio->uio_loffset != 0)
+		return (EINVAL);
+
+	if (uio->uio_resid == 0)
+		return (0);
+
+	olen = uio->uio_resid;
+	if (olen > sizeof (input_val) - 1)
+		return (EINVAL);
+
+	bzero(input_val, sizeof (input_val));
+
+	err = uiomove(input_val, olen, UIO_WRITE, uio);
+
+	if (err != 0)
+		return (err);
+
+	if (input_val[olen - 1] == '\n')
+		input_val[olen - 1] = '\0';
+
+	if (input_val[0] == '\0') /* no input */
+		return (EINVAL);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL)
+		return (EINVAL);
+
+	if (xlate != NULL && xlate(input_val, sizeof (input_val)) != 0) {
+		netstack_rele(ns);
+		return (EINVAL);
+	}
+
+	/*
+	 * We are trying to catch ERANGE errors when updating the
+	 * property, so we first get the min and max values for
+	 * the netstack and if it's out of range we do bail out.
+	 * If the value is between ranges then we store it in case
+	 * we need to restore it.
+	 */
+	if (ddi_strtoul(input_val, &endptr, 10, &new_val) != 0 ||
+	    *endptr != '\0') {
+		netstack_rele(ns);
+		return (EINVAL);
+	}
+
+	proto_cnt = sizeof (proto_infos)/ sizeof (proto_infos[0]);
+	for (i = 0; i < proto_cnt; i++) {
+		proto_infos[i].ptbl = PTBL_FROM_NETSTACK(ns,
+		    proto_infos[i].proto);
+
+		if (proto_infos[i].ptbl == NULL) {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+
+		proto_infos[i].pinfo =
+		    mod_prop_lookup(proto_infos[i].ptbl, prop,
+		    proto_infos[i].proto);
+
+		if (proto_infos[i].pinfo == NULL) {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+
+		proto_infos[i].maxbuf_pinfo =
+		    mod_prop_lookup(proto_infos[i].ptbl, "max_buf",
+		    proto_infos[i].pinfo->mpi_proto);
+
+		if (proto_infos[i].maxbuf_pinfo == NULL) {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+
+		min_val = proto_infos[i].pinfo->prop_min_uval;
+		max_val = proto_infos[i].maxbuf_pinfo->prop_max_uval;
+
+		if (new_val < min_val || new_val > max_val) {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+
+		if (proto_infos[i].pinfo->mpi_getf(ns, proto_infos[i].pinfo,
+		    NULL, curval, sizeof (curval), 0) != 0) {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+
+		if (ddi_strtoul(curval, &endptr, 10,
+		    &proto_infos[i].cur_uval) != 0 || *endptr != '\0') {
+			netstack_rele(ns);
+			return (EINVAL);
+		}
+	}
+	/*
+	 * If any of the property updates fail, we need to rollback to the
+	 * previous state.
+	 */
+	for (i = 0; i < proto_cnt; i++) {
+		if (proto_infos[i].pinfo->mpi_setf(ns, cr,
+		    proto_infos[i].pinfo, NULL, input_val, 0) != 0) {
+			update_failed = B_TRUE;
+			ret = EINVAL;
+			break;
+		}
+	}
+	/*
+	 * A failure to  restore the previous value will be logged, and we'll
+	 * try to soldier on to revert the rest protocols values.
+	 */
+	if (update_failed) {
+		for (i = 0; i < proto_cnt; i++) {
+			(void) snprintf(curval, sizeof (curval), "%lu",
+			    proto_infos[i].cur_uval);
+			if (proto_infos[i].pinfo->mpi_setf(ns, cr,
+			    proto_infos[i].pinfo, NULL, curval, 0) != 0) {
+				cmn_err(CE_WARN,
+				"%s Error rolling back %lu for netstack at "
+				"MOD_PROTO %u",
+				    __FUNCTION__, proto_infos[i].cur_uval,
+				    proto_infos[i].proto);
+			}
+#ifdef DEBUG
+			else {
+				cmn_err(CE_NOTE,
+				    "%s rollback  %s to %lu for netstack at "
+				    "MOD_PROTO %u",
+				    __FUNCTION__, prop, proto_infos[i].cur_uval,
+				    proto_infos[i].proto);
+			}
+#endif
+		}
+	}
+
+	netstack_rele(ns);
+	return (ret);
+}
+
 static int
 lxpr_write_sys_net_core_somaxc(lxpr_node_t *lxpnp, struct uio *uio,
     struct cred *cr, caller_context_t *ct)
@@ -7667,6 +7988,75 @@ lxpr_write_sys_net_core_somaxc(lxpr_node_t *lxpnp, struct uio *uio,
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_SOMAXCON);
 	return (lxpr_write_tcp_property(lxpnp, uio, cr, ct,
 	    "_conn_req_max_q", NULL));
+}
+
+/*
+ * LX procfs network buffer tunables vs. ipadm(8) buffer tunables.
+ *
+ * In Linux's procfs, it has the following read/write tunables for network
+ * buffer sizes across all possible network socket/protocol types (TCP, UDP,
+ * SCTP, ICMP (aka rawip)).
+ *
+ * rmem_default ==> Default read/receive buffer size on a socket.
+ * wmem_default ==> Default write/send buffer size on a socket.
+ *
+ * rmem_max ==> Maximum possible read/receive buffer size on a socket.
+ * wmem_max ==> Maximum possible write/send buffer size on a socket.
+ *
+ * Now illumos does things differently, it uses the ipadm(8) command for
+ * various properties THAT ARE UNIQUE PER PROTOCOL. So for each of TCP, UDP,
+ * SCTP, and ICMP/RAWIP we have these properties:
+ *
+ * recv_buf ==> Default read/receive buffer size on a socket (per-protocol).
+ * send_buf ==> Default write/send buffer size on a socket (per-protocol).
+ *
+ * max_buf ==> Maximum buffer size for both read/receive buffers and write/
+ * send buffers on a socket.
+ *
+ * So we have two inconsistent ways of adjustinct this LX zone's network
+ * socket buffer parameters.
+ *
+ * - lxprocfs writes to {r|w}mem_{default|max} act as a toggle, adjusting ALL
+ *   FOUR PROTOCOLS' settings.
+ *
+ * - lxprocfs reads to {r|w}mem_{default|max} report from ONLY ONE protocol
+ *   (currently TCP).
+ *
+ * LX zone adminstrators can use /native/usr/sbin/ipadm to adjust per-protocol
+ * buffer settings.
+ *
+ * At startup a LX branded zone netstack's buffers are normalized to 1MiB for
+ * send and receive buffers.
+ *
+ */
+static int
+lxpr_write_sys_net_core_rwmem_default(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct)
+{
+	char *attr;
+
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_DEFAULT);
+
+	attr = (lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_DEFAULT ?
+	    "recv_buf" : "send_buf");
+
+	return (lxpr_write_netstack_property(lxpnp, uio, cr, attr,
+	    NULL));
+
+}
+
+static int
+lxpr_write_sys_net_core_rwmem_max(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct)
+{
+	char *attr = "max_buf";
+
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_CORE_RMEM_MAX ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_CORE_WMEM_MAX);
+
+	return (lxpr_write_netstack_property(lxpnp, uio, cr, attr,
+	    NULL));
 }
 
 static int
