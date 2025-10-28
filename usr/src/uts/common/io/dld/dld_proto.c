@@ -1376,9 +1376,6 @@ dld_capab_direct(dld_str_t *dsp, void *data, uint_t flags)
 
 	ASSERT(MAC_PERIM_HELD(dsp->ds_mh));
 
-	if (dsp->ds_sap == ETHERTYPE_IPV6)
-		return (ENOTSUP);
-
 	switch (flags) {
 	case DLD_ENABLE:
 		dls_rx_set(dsp, (dls_rx_t)direct->di_rx_cf,
@@ -1489,9 +1486,6 @@ dld_capab_poll(dld_str_t *dsp, void *data, uint_t flags)
 
 	ASSERT(MAC_PERIM_HELD(dsp->ds_mh));
 
-	if (dsp->ds_sap == ETHERTYPE_IPV6)
-		return (ENOTSUP);
-
 	switch (flags) {
 	case DLD_ENABLE:
 		return (dld_capab_poll_enable(dsp, poll));
@@ -1526,9 +1520,6 @@ dld_capab_lso(dld_str_t *dsp, void *data, uint_t flags)
 	dld_capab_lso_t		*lso = data;
 
 	ASSERT(MAC_PERIM_HELD(dsp->ds_mh));
-
-	if (dsp->ds_sap == ETHERTYPE_IPV6)
-		return (ENOTSUP);
 
 	switch (flags) {
 	case DLD_ENABLE: {
