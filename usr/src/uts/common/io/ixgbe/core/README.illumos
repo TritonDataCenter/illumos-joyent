@@ -1,5 +1,6 @@
 This directory contains the 'common code' to the ixgbe driver. This code
-comes from FreeBSD.
+comes from FreeBSD. Last commit of github.com/freebsd/freebsd-src main branch
+used for synching:  275f7d72ff6a71bbe46b4282a88f0ea9a24be22a
 
 The following are a subset of the current modifications that are being
 made to this common code to facilitate illumos specific features:
@@ -13,12 +14,20 @@ ixgbe_hw of the ixgbe_t. Importantly, we also remove the current
 definition of IXGBE_REMOVED in ixbe_common.h and instead use the
 definition in ixgbe_osdep.h.
 
-o ixgbe_get_oem_prod_version()
+o E610 ACI locking
 
-This function has a smatch error. It checks for:
+The E610 chip has a Admin Command Interface (not unlike 700 and 800 series?),
+and it has a lock around it. The common code demands an osdep definition of
+"struct ixgbe_lock", and locking primitives.  We provide two of them as macro
+remappings to mutex_{enter,exit}().  The initialization/destruction of the
+ACI lock is moved into our own ixgbe_{init,destroy}_locks() functions.
 
-	if (offset == 0x0 && offset == NVM_INVALID_PTR)
+ixgbe_e610.[ch] have __illumos__ CPP blocks where appropriate.  IF the
+ixgbe_{init,shutdown}_aci() functions grow to beyond "initialize the mutex",
+we will need to revisit what we've done here.
 
-That condition can never occur. It should instead be:
+o E610 Memory allocation
 
-	if (offset == 0x0 || offset == NVM_INVALID_PTR)
+E610 thinks everything has malloc/calloc/free. We need to lie to them about
+it, unfortunately. It *does* allow us to track E610's allocations if/when we
+want to get clever about it someday.

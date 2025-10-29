@@ -113,14 +113,22 @@ boolean_t ixgbe_removed(struct ixgbe_hw *);
 #ifdef _BIG_ENDIAN
 #define	IXGBE_CPU_TO_LE16	BSWAP_16
 #define	IXGBE_CPU_TO_LE32	BSWAP_32
+/* Uggh, have to paramaterize this because of _CPUS after this... */
+#define	IXGBE_LE16_TO_CPU(x)	BSWAP_32(x)
+#define	IXGBE_LE32_TO_CPU(x)	BSWAP_32(x)
 #define	IXGBE_LE32_TO_CPUS(x)	*(x) = BSWAP_32(*(x))
+#define	IXGBE_LE64_TO_CPU(x)	BSWAP_64(x)
 #define	IXGBE_CPU_TO_BE16(x)	(x)
 #define	IXGBE_CPU_TO_BE32(x)	(x)
+#define	IXGBE_CPU_TO_BE64(x)	(x)
 #define	IXGBE_BE32_TO_CPU(x)	(x)
 #else
 #define	IXGBE_CPU_TO_LE16(x)	(x)
 #define	IXGBE_CPU_TO_LE32(x)	(x)
+#define	IXGBE_LE16_TO_CPU(x)	(x)
+#define	IXGBE_LE32_TO_CPU(x)	(x)
 #define	IXGBE_LE32_TO_CPUS(x)	(x)
+#define	IXGBE_LE64_TO_CPU(x)	(x)
 #define	IXGBE_CPU_TO_BE16	BSWAP_16
 #define	IXGBE_CPU_TO_BE32	BSWAP_32
 #define	IXGBE_BE32_TO_CPU	BSWAP_32
@@ -157,6 +165,39 @@ struct ixgbe_osdep {
 	ddi_acc_handle_t cfg_handle;
 	struct ixgbe *ixgbe;
 };
+
+/*
+ * Starting with the E610 support, the core/ code needs a few more things
+ * from osdep.
+ */
+
+/* 1. A lock, and routines for it. */
+struct ixgbe_lock {
+	kmutex_t il_mutex;
+};
+
+/*
+ * E610 locking functions. Let's see if we can use stupid-CPP-tricks here.
+ * Intel common code wants these to be `struct ixgbe_lock *` arguments.
+ * Instead of recasting, use the (convoluted) &((il)->il_mutex) construct so
+ * we can let the compiler catch more stupid mistakes if there are any.  The
+ * init/destroy eqivalents are not needed. See core/README.illumos for why.
+ */
+#define	ixgbe_acquire_lock(il) mutex_enter(&((il)->il_mutex))
+#define	ixgbe_release_lock(il) mutex_exit(&((il)->il_mutex))
+
+/*
+ * E610 also demands an ixgbe_{malloc,calloc,free}() like C has.
+ * Given how illumos does kernel memory, we'll reimplement them here.
+ * If we, someday down the road, consolidate and present kernel-land with
+ * a "nice" set of these, we should still discourage their use, given kmem's
+ * way of doing business.
+ */
+
+extern void *ixgbe_calloc(struct ixgbe_hw __unused *, size_t, size_t);
+extern void *ixgbe_malloc(struct ixgbe_hw __unused *, size_t);
+extern void ixgbe_free(struct ixgbe_hw __unused *, void *);
+	
 
 #ifdef __cplusplus
 }

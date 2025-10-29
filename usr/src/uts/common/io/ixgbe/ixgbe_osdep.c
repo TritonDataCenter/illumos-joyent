@@ -67,3 +67,55 @@ ixgbe_removed(struct ixgbe_hw *hw)
 	}
 	return (B_FALSE);
 }
+
+/* Here begins the E610-required capabilities. */
+
+/*
+ * E610 wants alloc/calloc/free.  Humor them.
+ */
+
+typedef struct {
+	size_t mm_size;
+	uint8_t mm_data[0];
+} mallocmem_t;
+
+void *
+ixgbe_calloc(struct ixgbe_hw __unused *hw, size_t count, size_t size)
+{
+	mallocmem_t *new_alloc;
+	size_t new_size = count * size + sizeof (size_t);
+
+	/* XXX KEBE ASKS: Check for the ridiculously oversized here?!? */
+
+	/* XXX KEBE ASKS, use KM_NOSLEEP_LAZY ? */
+	new_alloc = kmem_zalloc(new_size, KM_NOSLEEP);
+	if (new_alloc == NULL)
+		return (NULL);
+	new_alloc->mm_size = new_size;
+	return ((void *)&(new_alloc->mm_data));
+}
+
+void *
+ixgbe_malloc(struct ixgbe_hw __unused *hw, size_t size)
+{
+	mallocmem_t *new_alloc;
+	size_t new_size = size + sizeof (size_t);
+
+	/* XXX KEBE ASKS: Check for the ridiculously oversized here?!? */
+
+	/* XXX KEBE ASKS, use KM_NOSLEEP_LAZY ? */
+	new_alloc = kmem_alloc(new_size, KM_NOSLEEP);
+	if (new_alloc == NULL)
+		return (NULL);
+	new_alloc->mm_size = new_size;
+	return ((void *)&(new_alloc->mm_data));
+}
+
+void
+ixgbe_free(struct ixgbe_hw __unused *hw, void *tofree)
+{
+	mallocmem_t *actually_free =
+	    (mallocmem_t *)((uint8_t *)tofree - sizeof (size_t));
+
+	kmem_free(actually_free, actually_free->mm_size);
+}

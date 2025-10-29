@@ -1260,6 +1260,15 @@ ixgbe_init_locks(ixgbe_t *ixgbe)
 
 	mutex_init(&ixgbe->watchdog_lock, NULL,
 	    MUTEX_DRIVER, DDI_INTR_PRI(ixgbe->intr_pri));
+
+	if (ixgbe->hw.mac.type == ixgbe_mac_E610) {
+		/*
+		 * We need to initialize the E610's ACI lock. See
+		 * core/README.illumos for why.
+		 */
+		mutex_init(&(ixgbe->hw.aci.lock.il_mutex), NULL, MUTEX_DRIVER,
+		    DDI_INTR_PRI(ixgbe->intr_pri));
+	}
 }
 
 /*
@@ -1287,6 +1296,13 @@ ixgbe_destroy_locks(ixgbe_t *ixgbe)
 
 	mutex_destroy(&ixgbe->gen_lock);
 	mutex_destroy(&ixgbe->watchdog_lock);
+	if (ixgbe->hw.mac.type == ixgbe_mac_E610) {
+		/*
+		 * We need to destroy the E610's ACI lock. See
+		 * core/README.illumos for why.
+		 */
+		mutex_destroy(&(ixgbe->hw.aci.lock.il_mutex));
+	}
 }
 
 /*
