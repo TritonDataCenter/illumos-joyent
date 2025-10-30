@@ -28,6 +28,7 @@
  * Copyright (c) 2020, George Amanakis. All rights reserved.
  * Copyright (c) 2020, The FreeBSD Foundation [1]
  * Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
+ * Copyright 2025 Edgecast Cloud LLC.
  *
  * [1] Portions of this software were developed by Allan Jude
  *     under sponsorship from the FreeBSD Foundation.
@@ -313,9 +314,8 @@ int arc_procfd;
 #endif
 
 /*
- * This thread's job is to keep enough free memory in the system, by
- * calling arc_kmem_reap_now() plus arc_shrink(), which improves
- * arc_available_memory().
+ * This thread's job is to keep enough free memory in the system, by calling
+ * arc_reap_cb(), which improves arc_available_memory().
  */
 static zthr_t		*arc_reap_zthr;
 
@@ -7134,12 +7134,27 @@ arc_init(void)
 	 */
 	arc_c_min = MIN(arc_c_min, 1 << 30);
 
-	/* set max to 3/4 of all memory, or all but 1GB, whichever is more */
+	/*
+	 * Initial setting of the largest amount of memory the ZFS ARC can
+	 * use.
+	 *
+	 * XXX SmartOS -- upstream illumos sets this to:
+	 * - All available memory minus 1GiB on a system with more than 1GiB.
+	 * OR
+	 * - The largest of 3/4 of system memory or the ARC size floor.
+	 *
+	 * SmartOS will opt for the much smaller default of 1/8th of available
+	 * memory or minimum ARC size, whichever is bigger.
+	 */
+#if 0 /* Upstream */
 	if (allmem >= 1 << 30)
 		arc_c_max = allmem - (1 << 30);
 	else
 		arc_c_max = arc_c_min;
 	arc_c_max = MAX(allmem * 3 / 4, arc_c_max);
+#else /* XXX SmartOS */
+	arc_c_max = MAX(allmem >> 3, arc_c_min);
+#endif
 
 	/*
 	 * In userland, there's only the memory pressure that we artificially
