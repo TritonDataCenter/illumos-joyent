@@ -410,6 +410,13 @@ int zfs_arc_p_min_shift = 0;
 int zfs_arc_average_blocksize = 8 * 1024; /* 8KB */
 
 /*
+ * Defaults for this system, set up once in arc_init(), assumes no
+ * dynamic reconfiguration (DR) of memory.
+ */
+static uint64_t zfs_default_arc_max;
+static uint64_t zfs_default_arc_min;
+
+/*
  * ARC dirty data constraints for arc_tempreserve_space() throttle
  */
 uint_t zfs_arc_dirty_limit_percent = 50;	/* total dirty data limit */
@@ -7113,25 +7120,46 @@ arc_max_bytes(void)
 int
 arc_dynamic_resize(void *arg)
 {
-	zfs_cmd_t *zc = (zfs_cmd_t *)arg;
-	int err = EIO;
-
 	/*
 	 * We just recycle the overly-large zfs_cmd_t for our own
 	 * nefarious purposes. The uint64_t pointers should do nicely.
 	 * "read" means we read from it, "write" means we write to it.
 	 *
 	 * zc_pad2 => cmd (0 == read arc sizes, non-0 == resize arc)
-	 * zc_nvlist_src => new_min (read/write)
-	 * zc_nvlist_src_size => new_max (read/write)
+	 * zc_nvlist_src => new_min/arc_c_min (read/write)
+	 * zc_nvlist_src_size => new_max/arc_c_max (read/write)
 	 * zc_nvlist_dst => zfs_arc_min (write)
-	 * zc_nflist_dst_size => zfs_arc_max (write)
+	 * zc_nvlist_dst_size => zfs_arc_max (write)
+	 * zc_nvlist_dst_filled => default min with no mods (write)
+	 * zc_history => default max with no mods (write)
 	 * XXX KEBE ASKS MORE TO COME?
 	 */
+	zfs_cmd_t *zc = (zfs_cmd_t *)arg;
+	int err = EINVAL;
+	int cmd = zc->zc_pad2;
+	uint64_t new_min = zc->zc_nvlist_src;
+	uint64_t new_max = zc->zc_nvlist_src_size;
 
-	if (zc->zc_pad2 != 0) {
-		uint64_t new_min = zc->zc_nvlist_src;
-		uint64_t new_max = zc->zc_nvlist_src_size;
+	if (cmd != 0) {
+		/* Reality check args that don't need locks. */
+		if (new_min > new_max) /* really, caller? */
+			return (ERANGE);
+
+		/*
+		 * XXX KEBE ASKS: if we get both 0, should we reset to
+		 * factory?
+		 */
+		if (new_min < 64 << 20)	/* Too small a minimum */
+			return (EINVAL);
+
+#ifdef _KERNEL
+		uint64_t allmem = ptob(physmem - swapfs_minfree);
+#else
+		uint64_t allmem = (physmem * PAGESIZE) / 2;
+#endif
+		/* XXX KEBE ASKS any *extra* guard rails? */
+		if (new_max >= allmem)
+			return (ENOMEM);
 
 		/* Use a light touch for now. */
 		if (mutex_tryenter(&arc_adjust_lock) == 0)
@@ -7141,24 +7169,34 @@ arc_dynamic_resize(void *arg)
 		 * At this point we have arc_adjust_lock, and won't let it go
 		 * until we reach bottom after filling in all "write" fields.
 		 */
+		arc_c_min = new_min;
+		arc_c_max = new_max;
 
-		/* XXX KEBE SAYS FILL ME IN! */
+		/* Make sure arc_adjust is triggerd. */
+		arc_adjust_needed = B_TRUE;
+		/* XXX KEBE ASKS cv_signal() a waiter? */
 
+		/* mutex drop happens after filling in ioctl results. */
 	} else {
 		/* Don't bother locking, just report back */
 		err = 0;
 	}
 
 	if (err == 0) {
-		/* Fill in all pertinent fields, even if written anew above! */
+		/*
+		 * Fill in all pertinent fields, even if written anew above!
+		 * "read" (cmd != 0) can be unreliable-ish due to concurrency.
+		 */
 		zc->zc_nvlist_src = arc_c_min;
 		zc->zc_nvlist_src_size = arc_c_max;
 		zc->zc_nvlist_dst = zfs_arc_min;
 		zc->zc_nvlist_dst_size = zfs_arc_max;
+		zc->zc_nvlist_dst_filled = zfs_default_arc_min;
+		zc->zc_history = zfs_default_arc_max;
 		/* XXX KEBE ASKS MORE TO COME? */
 	}
 
-	if (zc->zc_pad2 != 0)
+	if (cmd != 0)
 		mutex_exit(&arc_adjust_lock);
 
 	return (err);
@@ -7189,6 +7227,7 @@ arc_init(void)
 	 * growth of the value at 1GB.
 	 */
 	arc_c_min = MIN(arc_c_min, 1 << 30);
+	zfs_default_arc_min = arc_c_min;
 
 	/* set max to 3/4 of all memory, or all but 1GB, whichever is more */
 	if (allmem >= 1 << 30)
@@ -7196,6 +7235,7 @@ arc_init(void)
 	else
 		arc_c_max = arc_c_min;
 	arc_c_max = MAX(allmem * 3 / 4, arc_c_max);
+	zfs_default_arc_max = arc_c_max;
 
 	/*
 	 * In userland, there's only the memory pressure that we artificially
