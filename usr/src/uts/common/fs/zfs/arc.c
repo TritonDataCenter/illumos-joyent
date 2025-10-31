@@ -28,6 +28,7 @@
  * Copyright (c) 2020, George Amanakis. All rights reserved.
  * Copyright (c) 2020, The FreeBSD Foundation [1]
  * Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
+ * Copyright 2025 Edgecast Cloud LLC.
  *
  * [1] Portions of this software were developed by Allan Jude
  *     under sponsorship from the FreeBSD Foundation.
@@ -280,6 +281,7 @@
 #include <sys/zio_compress.h>
 #include <sys/zio_checksum.h>
 #include <sys/zfs_context.h>
+#include <sys/zfs_ioctl.h>
 #include <sys/arc.h>
 #include <sys/refcount.h>
 #include <sys/vdev.h>
@@ -7106,6 +7108,60 @@ uint64_t
 arc_max_bytes(void)
 {
 	return (arc_c_max);
+}
+
+int
+arc_dynamic_resize(void *arg)
+{
+	zfs_cmd_t *zc = (zfs_cmd_t *)arg;
+	int err = EIO;
+
+	/*
+	 * We just recycle the overly-large zfs_cmd_t for our own
+	 * nefarious purposes. The uint64_t pointers should do nicely.
+	 * "read" means we read from it, "write" means we write to it.
+	 *
+	 * zc_pad2 => cmd (0 == read arc sizes, non-0 == resize arc)
+	 * zc_nvlist_src => new_min (read/write)
+	 * zc_nvlist_src_size => new_max (read/write)
+	 * zc_nvlist_dst => zfs_arc_min (write)
+	 * zc_nflist_dst_size => zfs_arc_max (write)
+	 * XXX KEBE ASKS MORE TO COME?
+	 */
+
+	if (zc->zc_pad2 != 0) {
+		uint64_t new_min = zc->zc_nvlist_src;
+		uint64_t new_max = zc->zc_nvlist_src_size;
+
+		/* Use a light touch for now. */
+		if (mutex_tryenter(&arc_adjust_lock) == 0)
+			return (EAGAIN);
+
+		/*
+		 * At this point we have arc_adjust_lock, and won't let it go
+		 * until we reach bottom after filling in all "write" fields.
+		 */
+
+		/* XXX KEBE SAYS FILL ME IN! */
+
+	} else {
+		/* Don't bother locking, just report back */
+		err = 0;
+	}
+
+	if (err == 0) {
+		/* Fill in all pertinent fields, even if written anew above! */
+		zc->zc_nvlist_src = arc_c_min;
+		zc->zc_nvlist_src_size = arc_c_max;
+		zc->zc_nvlist_dst = zfs_arc_min;
+		zc->zc_nvlist_dst_size = zfs_arc_max;
+		/* XXX KEBE ASKS MORE TO COME? */
+	}
+
+	if (zc->zc_pad2 != 0)
+		mutex_exit(&arc_adjust_lock);
+
+	return (err);
 }
 
 void
