@@ -7142,14 +7142,19 @@ arc_dynamic_resize(void *arg)
 
 	if (cmd != 0) {
 		/* Reality check args that don't need locks. */
-		if (new_min > new_max) /* really, caller? */
-			return (ERANGE);
 
 		/*
 		 * XXX KEBE ASKS: if we get both 0, should we reset to
-		 * factory?
+		 * factory instead?  If so, check here.
+		 *
+		 * right now 0 means "use existing arc_c_* values", even if
+		 * both 
 		 */
-		if (new_min < 64 << 20)	/* Too small a minimum */
+
+		if (new_max != 0 && new_min > new_max) /* really, caller? */
+			return (ERANGE);
+
+		if (new_min != 0 && new_min < 64 << 20)	/* Too small */
 			return (EINVAL);
 
 #ifdef _KERNEL
@@ -7165,16 +7170,28 @@ arc_dynamic_resize(void *arg)
 		if (mutex_tryenter(&arc_adjust_lock) == 0)
 			return (EAGAIN);
 
-		/*
-		 * At this point we have arc_adjust_lock, and won't let it go
-		 * until we reach bottom after filling in all "write" fields.
-		 */
-		arc_c_min = new_min;
-		arc_c_max = new_max;
+		/* Check for 0s and new_* values, in case caller is dumb. */
+		if (new_max == 0)
+			new_max = arc_c_max;
+		if (new_min == 0)
+			new_min = arc_c_min;
+		/* Need to check again in case of the single-0 case. */
+		if (new_max >= new_min) {
+			/*
+			 * At this point we have arc_adjust_lock, and won't
+			 * let it go until we reach bottom after filling in
+			 * all "write" fields.
+			 */
+			arc_c_max = new_max;
+			arc_c_min = new_min;
 
-		/* Make sure arc_adjust is triggerd. */
-		arc_adjust_needed = B_TRUE;
-		/* XXX KEBE ASKS cv_signal() a waiter? */
+			/* Make sure arc_adjust is triggerd. */
+			arc_adjust_needed = B_TRUE;
+			/* XXX KEBE ASKS cv_signal() a waiter? */
+			err = 0;
+		} else {
+			err = EINVAL;
+		}
 
 		/* mutex drop happens after filling in ioctl results. */
 	} else {
