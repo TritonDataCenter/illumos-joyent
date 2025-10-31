@@ -23,6 +23,7 @@
  * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
  * Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 #ifndef	_SYS_ARC_H
@@ -250,6 +251,7 @@ int arc_tempreserve_space(spa_t *spa, uint64_t reserve, uint64_t txg);
 boolean_t arc_memory_is_low(void);
 uint64_t arc_all_memory(void);
 uint64_t arc_max_bytes(void);
+int arc_dynamic_resize(void *);
 void arc_init(void);
 void arc_fini(void);
 

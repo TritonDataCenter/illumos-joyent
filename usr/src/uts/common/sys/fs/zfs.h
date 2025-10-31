@@ -27,6 +27,7 @@
  * Copyright 2020 Joyent, Inc.
  * Copyright (c) 2017 Datto Inc.
  * Copyright (c) 2017, Intel Corporation.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /* Portions Copyright 2010 Robert Milkowski */
@@ -1278,6 +1279,8 @@ typedef enum zfs_ioc {
 	ZFS_IOC_UNJAIL,				/* 0x86 (FreeBSD) */
 	ZFS_IOC_SET_BOOTENV,			/* 0x87 */
 	ZFS_IOC_GET_BOOTENV,			/* 0x88 */
+	/* XXX SmartOS experimental, subject to change per PI release */
+	ZFS_IOC_ARC,				/* 0x89 (illumos?) */
 	ZFS_IOC_LAST
 } zfs_ioc_t;
 
