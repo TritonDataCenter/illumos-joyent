@@ -7126,14 +7126,16 @@ arc_dynamic_resize(void *arg)
 	 * "read" means we read from it, "write" means we write to it.
 	 *
 	 * zc_pad2 => cmd (0 == read arc sizes, non-0 == resize arc)
-	 * zc_nvlist_src => new_min/arc_c_min (read/write)
-	 * zc_nvlist_src_size => new_max/arc_c_max (read/write)
-	 * zc_nvlist_dst => zfs_arc_min (write)
-	 * zc_nvlist_dst_size => zfs_arc_max (write)
-	 * zc_nvlist_dst_filled => default min with no mods (write)
-	 * zc_history => default max with no mods (write)
+	 * zc_name => uint64_t array of 6 elements:
+	 * [0] => new_min/arc_c_min (read/write)
+	 * [1] => new_max/arc_c_max (read/write)
+	 * [2] => system default min with no mods (write)
+	 * [3] => system default max with no mods (write)
+	 * [4] => zfs_arc_min (write)
+	 * [5] => zfs_arc_max (write)
 	 * XXX KEBE ASKS MORE TO COME?
 	 */
+	CTASSERT(6 * sizeof (uint64_t) <= MAXPATHLEN);
 	zfs_cmd_t *zc = (zfs_cmd_t *)arg;
 	int err = 0;
 	int cmd = zc->zc_pad2;
@@ -7223,12 +7225,13 @@ arc_dynamic_resize(void *arg)
 	 * "read" (cmd == 0) can be unreliable-ish due to concurrency.
 	 * "write" (cmd != 0) is under arc_adjust_lock protection.
 	 */
-	zc->zc_nvlist_src = arc_c_min;
-	zc->zc_nvlist_src_size = arc_c_max;
-	zc->zc_nvlist_dst = zfs_arc_min;
-	zc->zc_nvlist_dst_size = zfs_arc_max;
-	zc->zc_nvlist_dst_filled = zfs_default_arc_min;
-	zc->zc_history = zfs_default_arc_max;
+	uint64_t *return_data = (uint64_t *)zc->zc_name;
+	return_data[0] = arc_c_min;
+	return_data[1] = arc_c_max;
+	return_data[2] = zfs_default_arc_min;
+	return_data[3] = zfs_default_arc_max;
+	return_data[4] = zfs_arc_min;
+	return_data[5] = zfs_arc_max;
 	/* XXX KEBE ASKS MORE TO COME? */
 
 	if (cmd != 0)

@@ -38,6 +38,7 @@
 #include <unistd.h>
 #include <err.h>
 
+#include <sys/types.h>
 #include <sys/zfs_ioctl.h>
 
 static int do_ioctl(int, int, uint64_t, uint64_t);
@@ -58,7 +59,7 @@ static int
 do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 {
 	zfs_cmd_t zc = {
-		.zc_nvlist_src = min,
+		.zc_guid = min,
 		.zc_nvlist_src_size = max,
 		.zc_pad2 = op
 	};
@@ -90,19 +91,19 @@ do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 	}
 
 	/* Print what the kernel gave us! */
-	(void) printf("arc_c_min: %lu\n", zc.zc_nvlist_src);
-	(void) printf("arc_c_max: %lu\n", zc.zc_nvlist_src_size);
-	(void) printf("system default arc_c_min: %lu\n",
-	    zc.zc_nvlist_dst_filled);
-	(void) printf("system default arc_c_max: %lu\n", zc.zc_history);
-	(void) printf("/etc/system zfs_arc_min: %lu\n", zc.zc_nvlist_dst);
-	(void) printf("/etc/system zfs_arc_max: %lu\n", zc.zc_nvlist_dst_size);
+	uint64_t *return_data = &zc.zc_name;
+	(void) printf("arc_c_min: %lu\n", return_data[0]);
+	(void) printf("arc_c_max: %lu\n", return_data[1]);
+	(void) printf("system default arc_c_min: %lu\n", return_data[2]);
+	(void) printf("system default arc_c_max: %lu\n", return_data[3]);
+	(void) printf("/etc/system zfs_arc_min: %lu\n", return_data[4]);
+	(void) printf("/etc/system zfs_arc_max: %lu\n", return_data[5]);
 
 	return (0);
 }
 
 int
-main(int argc, char **argv)
+main(int argc, char *argv[])
 {
 	int zfs_fd;
 	int c;
@@ -115,12 +116,35 @@ main(int argc, char **argv)
 	if (argc == 1)
 		return (do_read(zfs_fd));
 
-	while ((c = getopt(argc, argv, "l:u:")) != 1) {
+	while ((c = getopt(argc, argv, ":l:u:")) != EOF) {
 		switch (c) {
 		case 'l':
+			arc_min = strtoull(optarg, NULL, 0);
+			if (arc_min == UINT64_MAX && errno != 0) {
+				(void) fprintf(stderr,
+				    "Option -%c requires a number\n",
+				    optopt);
+				return (1);
+			}
 			break;
 		case 'u':
+			arc_max = strtoull(optarg, NULL, 0);
+			if (arc_max == UINT64_MAX && errno != 0) {
+				(void) fprintf(stderr,
+				    "Option -%c requires a number\n",
+				    optopt);
+				return (1);
+			}
 			break;
+		case ':':
+			(void) fprintf(stderr, "Option -%c requires a number\n",
+			    optopt);
+			return (1);
+		case '?':
+			(void) fprintf(stderr, "invalid option '%c'\n",
+			    optopt);
+			return (2);
+
 		}
 	}
 
