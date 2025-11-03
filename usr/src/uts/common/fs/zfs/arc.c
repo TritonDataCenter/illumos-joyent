@@ -7135,83 +7135,99 @@ arc_dynamic_resize(void *arg)
 	 * XXX KEBE ASKS MORE TO COME?
 	 */
 	zfs_cmd_t *zc = (zfs_cmd_t *)arg;
-	int err = EINVAL;
+	int err = 0;
 	int cmd = zc->zc_pad2;
 	uint64_t new_min = zc->zc_nvlist_src;
 	uint64_t new_max = zc->zc_nvlist_src_size;
 
 	if (cmd != 0) {
-		/* Reality check args that don't need locks. */
+		/* Reality check args that don't need locks first. */
 
 		/*
-		 * XXX KEBE ASKS: if we get both 0, should we reset to
-		 * factory instead?  If so, check here.
+		 * Check for reset-to-default, which is min == 0 and
+		 * max == UINT64_MAX.
 		 *
-		 * right now 0 means "use existing arc_c_* values", even if
-		 * both 
+		 * Keep zeroes in place for no-change.
 		 */
+		if (new_min == 0) {
+			if (new_max == UINT64_MAX) {
+				/* Reset to the system's default tunings! */
+				new_min = zfs_default_arc_min;
+				new_max = zfs_default_arc_max;
+			}
+			/* Keep it at 0 to grab arc_c_* under the lock. */
+		} else {
+			/* Floor minimum ARC size at 64GiB, like arc_init(). */
+			if (new_min < 64 << 20)
+				return (EINVAL);
+		}
 
-		if (new_max != 0 && new_min > new_max) /* really, caller? */
-			return (ERANGE);
+		/* Last unlocked reality-check case. */
+		boolean_t force_arc_adjust;
 
-		if (new_min != 0 && new_min < 64 << 20)	/* Too small */
-			return (EINVAL);
+		if (new_max != 0 && new_min != 0) {
+			if (new_min > new_max)
+				return (ERANGE);
+			force_arc_adjust = B_TRUE;
+		} else if (new_max == 0 && new_min == 0) {
+			force_arc_adjust = B_FALSE;
+		} else {
+			force_arc_adjust = B_TRUE;
+		}
 
 #ifdef _KERNEL
 		uint64_t allmem = ptob(physmem - swapfs_minfree);
 #else
 		uint64_t allmem = (physmem * PAGESIZE) / 2;
 #endif
-		/* XXX KEBE ASKS any *extra* guard rails? */
-		if (new_max >= allmem)
-			return (ENOMEM);
 
 		/* Use a light touch for now. */
 		if (mutex_tryenter(&arc_adjust_lock) == 0)
 			return (EAGAIN);
 
-		/* Check for 0s and new_* values, in case caller is dumb. */
-		if (new_max == 0)
-			new_max = arc_c_max;
+		/*
+		 * At this point we have arc_adjust_lock, and won't let it go
+		 * until we reach bottom after filling in all "write" fields.
+		 * We also can count on no non-mdb scribbling of arc_c_*.
+		 */
+
+		/*
+		 * If either new_{min,max} is zero, set it to the current
+		 * arc_c_{min,max} value.
+		 */
 		if (new_min == 0)
 			new_min = arc_c_min;
-		/* Need to check again in case of the single-0 case. */
-		if (new_max >= new_min) {
-			/*
-			 * At this point we have arc_adjust_lock, and won't
-			 * let it go until we reach bottom after filling in
-			 * all "write" fields.
-			 */
+
+		if (new_max == 0)
+			new_max = arc_c_max;
+
+		if (new_min > new_max) {
+			err = ERANGE;
+		} else if (new_max >= allmem) {
+			err = ENOMEM;
+		} else {
+			ASSERT0(err);
 			arc_c_max = new_max;
 			arc_c_min = new_min;
-
-			/* Make sure arc_adjust is triggerd. */
-			arc_adjust_needed = B_TRUE;
-			/* XXX KEBE ASKS cv_signal() a waiter? */
-			err = 0;
-		} else {
-			err = EINVAL;
 		}
 
-		/* mutex drop happens after filling in ioctl results. */
-	} else {
-		/* Don't bother locking, just report back */
-		err = 0;
-	}
+		/* Make sure arc_adjust is triggered if need be. */
+		arc_adjust_needed = (arc_adjust_needed || force_arc_adjust);
+		/* XXX KEBE ASKS cv_signal() a waiter? */
+	} /* Else don't bother locking, just report back */
 
-	if (err == 0) {
-		/*
-		 * Fill in all pertinent fields, even if written anew above!
-		 * "read" (cmd != 0) can be unreliable-ish due to concurrency.
-		 */
-		zc->zc_nvlist_src = arc_c_min;
-		zc->zc_nvlist_src_size = arc_c_max;
-		zc->zc_nvlist_dst = zfs_arc_min;
-		zc->zc_nvlist_dst_size = zfs_arc_max;
-		zc->zc_nvlist_dst_filled = zfs_default_arc_min;
-		zc->zc_history = zfs_default_arc_max;
-		/* XXX KEBE ASKS MORE TO COME? */
-	}
+	/*
+	 * Fill in all pertinent fields, even if written anew above!
+	 * "read" (cmd == 0) can be unreliable-ish due to concurrency.
+	 * "write" (cmd != 0) is under arc_adjust_lock protection.
+	 */
+	zc->zc_nvlist_src = arc_c_min;
+	zc->zc_nvlist_src_size = arc_c_max;
+	zc->zc_nvlist_dst = zfs_arc_min;
+	zc->zc_nvlist_dst_size = zfs_arc_max;
+	zc->zc_nvlist_dst_filled = zfs_default_arc_min;
+	zc->zc_history = zfs_default_arc_max;
+	/* XXX KEBE ASKS MORE TO COME? */
 
 	if (cmd != 0)
 		mutex_exit(&arc_adjust_lock);
