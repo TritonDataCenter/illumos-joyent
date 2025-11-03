@@ -91,7 +91,7 @@ do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 	}
 
 	/* Print what the kernel gave us! */
-	uint64_t *return_data = &zc.zc_name;
+	uint64_t *return_data = (uint64_t *)&zc.zc_name;
 	(void) printf("arc_c_min: %lu\n", return_data[0]);
 	(void) printf("arc_c_max: %lu\n", return_data[1]);
 	(void) printf("system default arc_c_min: %lu\n", return_data[2]);
