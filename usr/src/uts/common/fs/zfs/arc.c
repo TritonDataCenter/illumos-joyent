@@ -7213,7 +7213,9 @@ arc_dynamic_resize(void *arg)
 
 		/* Make sure arc_adjust is triggered if need be. */
 		arc_adjust_needed = (arc_adjust_needed || force_arc_adjust);
-		/* XXX KEBE ASKS cv_signal() a waiter? */
+		/* arc_get_data_impl() does this with the lock held! */
+		if (force_arc_adjust)
+			zthr_wakeup(arc_adjust_zthr);
 	} /* Else don't bother locking, just report back */
 
 	/*

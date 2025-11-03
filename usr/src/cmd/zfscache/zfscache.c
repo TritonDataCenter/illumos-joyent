@@ -1,0 +1,119 @@
+/*
+ * CDDL HEADER START
+ *
+ * The contents of this file are subject to the terms of the
+ * Common Development and Distribution License (the "License").
+ * You may not use this file except in compliance with the License.
+ *
+ * You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE
+ * or http://www.opensolaris.org/os/licensing.
+ * See the License for the specific language governing permissions
+ * and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL HEADER in each
+ * file and include the License file at usr/src/OPENSOLARIS.LICENSE.
+ * If applicable, add the following below this CDDL HEADER, with the
+ * fields enclosed by brackets "[]" replaced with your own identifying
+ * information: Portions Copyright [yyyy] [name of copyright owner]
+ *
+ * CDDL HEADER END
+ */
+
+/*
+ * Copyright 2025 Edgecast Cloud LLC.
+ */
+
+/*
+ * zfscache(8) is a simple front-end to the lone ZFS_IOC_ARC ioctl.
+ *
+ * This command will force ZFS to adjust its arc_c_min and arc_c_max
+ * parameters, and indicate to reaping threads to start 
+ */
+
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
+#include <unistd.h>
+#include <err.h>
+
+#include <sys/zfs_ioctl.h>
+
+static int do_ioctl(int, int, uint64_t, uint64_t);
+
+static inline int
+do_read(int zfs_fd)
+{
+	return (do_ioctl(zfs_fd, 0, 0, 0));
+}
+
+static inline int
+do_write(int zfs_fd, uint64_t min, uint64_t max)
+{
+	return (do_ioctl(zfs_fd, 1, min, max));
+}
+
+static int
+do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
+{
+	zfs_cmd_t zc = {
+		.zc_nvlist_src = min,
+		.zc_nvlist_src_size = max,
+		.zc_pad2 = op
+	};
+
+	if (ioctl(zfs_fd, ZFS_IOC_ARC, &zc) != 0) {
+		switch (errno) {
+		case EAGAIN:
+			errx(1, "ZFS is busy, please try again.\n");
+			break;
+		case ERANGE:
+			errx(1, "Request forces "
+			    "minimum to be more than maximum.\n");
+			break;
+		case EINVAL:
+			errx(1, "Requested minimum %lu is too small.\n", min);
+			break;
+		case ENOMEM:
+			errx(1, "Requested maximum %lu is too large.\n", max);
+			break;
+		default:
+			if (errno >= 1024) {
+				/* One of the ZFS errors! */
+				err(1, "ZFS error %d\n", errno);
+			} else {
+				err(1, "Unexpected ioctl() error");
+			}
+			break;
+		}
+	}
+
+	return (0);
+}
+
+int
+main(int argc, char **argv)
+{
+	int zfs_fd;
+	int c;
+	uint64_t arc_min = 0, arc_max = 0;
+
+	zfs_fd = open(ZFS_DEV, O_RDWR);
+	if (zfs_fd < 0)
+		err(1, "failed to open ZFS device (%s)", ZFS_DEV);
+
+	if (argc == 1)
+		return (do_read(zfs_fd));
+
+	while ((c = getopt(argc, argv, "l:u:")) != 1) {
+		switch (c) {
+		case 'l':
+			break;
+		case 'u':
+			break;
+		}
+	}
+
+	return (do_write(zfs_fd, arc_min, arc_max));
+}
