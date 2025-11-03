@@ -93,7 +93,7 @@ do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 	(void) printf("arc_c_min: %lu\n", zc.zc_nvlist_src);
 	(void) printf("arc_c_max: %lu\n", zc.zc_nvlist_src_size);
 	(void) printf("system default arc_c_min: %lu\n",
-	    zc.zc_nvlist_dst_size_filled);
+	    zc.zc_nvlist_dst_filled);
 	(void) printf("system default arc_c_max: %lu\n", zc.zc_history);
 	(void) printf("/etc/system zfs_arc_min: %lu\n", zc.zc_nvlist_dst);
 	(void) printf("/etc/system zfs_arc_max: %lu\n", zc.zc_nvlist_dst_size);
