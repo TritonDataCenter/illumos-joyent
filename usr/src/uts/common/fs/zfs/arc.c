@@ -7137,10 +7137,11 @@ arc_dynamic_resize(void *arg)
 	 */
 	CTASSERT(6 * sizeof (uint64_t) <= MAXPATHLEN);
 	zfs_cmd_t *zc = (zfs_cmd_t *)arg;
+	uint64_t *return_data = (uint64_t *)zc->zc_name;
 	int err = 0;
 	int cmd = zc->zc_pad2;
-	uint64_t new_min = zc->zc_nvlist_src;
-	uint64_t new_max = zc->zc_nvlist_src_size;
+	uint64_t new_min = return_data[0];
+	uint64_t new_max = return_data[1];
 
 	if (cmd != 0) {
 		/* Reality check args that don't need locks first. */
@@ -7225,7 +7226,6 @@ arc_dynamic_resize(void *arg)
 	 * "read" (cmd == 0) can be unreliable-ish due to concurrency.
 	 * "write" (cmd != 0) is under arc_adjust_lock protection.
 	 */
-	uint64_t *return_data = (uint64_t *)zc->zc_name;
 	return_data[0] = arc_c_min;
 	return_data[1] = arc_c_max;
 	return_data[2] = zfs_default_arc_min;

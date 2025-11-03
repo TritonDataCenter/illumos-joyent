@@ -58,12 +58,12 @@ do_write(int zfs_fd, uint64_t min, uint64_t max)
 static int
 do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 {
-	zfs_cmd_t zc = {
-		.zc_guid = min,
-		.zc_nvlist_src_size = max,
-		.zc_pad2 = op
-	};
+	zfs_cmd_t zc = { .zc_pad2 = op };
+	uint64_t *return_data = (uint64_t *)&zc.zc_name;
 
+	return_data[0] = min;
+	return_data[1] = max;
+	
 	if (ioctl(zfs_fd, ZFS_IOC_ARC, &zc) != 0) {
 		switch (errno) {
 		case EAGAIN:
@@ -91,7 +91,6 @@ do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 	}
 
 	/* Print what the kernel gave us! */
-	uint64_t *return_data = (uint64_t *)&zc.zc_name;
 	(void) printf("arc_c_min: %lu\n", return_data[0]);
 	(void) printf("arc_c_max: %lu\n", return_data[1]);
 	(void) printf("system default arc_c_min: %lu\n", return_data[2]);
