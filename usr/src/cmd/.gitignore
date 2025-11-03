@@ -2427,6 +2427,8 @@ zdump/zdump
 
 zfs/zfs
 
+zfscache/zfscache
+
 zhack/zhack
 
 zhyve/zhyve
