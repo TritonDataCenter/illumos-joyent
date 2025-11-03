@@ -81,7 +81,7 @@ do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 		default:
 			if (errno >= 1024) {
 				/* One of the ZFS errors! */
-				err(1, "ZFS error %d\n", errno);
+				errx(1, "ZFS error %d\n", errno);
 			} else {
 				err(1, "Unexpected ioctl() error");
 			}
