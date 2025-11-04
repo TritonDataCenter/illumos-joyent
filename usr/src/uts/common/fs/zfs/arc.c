@@ -7212,6 +7212,7 @@ arc_dynamic_resize(void *arg)
 			ASSERT0(err);
 			arc_c_max = new_max;
 			arc_c_min = new_min;
+			arc_c = MIN(arc_c, arc_c_max);
 		}
 
 		/* Make sure arc_adjust is triggered if need be. */
