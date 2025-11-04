@@ -27,7 +27,8 @@
  * zfscache(8) is a simple front-end to the lone ZFS_IOC_ARC ioctl.
  *
  * This command will force ZFS to adjust its arc_c_min and arc_c_max
- * parameters, and indicate to reaping threads to start 
+ * parameters, and indicate things can be sent back if shrinking, or
+ * available if growing.
  */
 
 #include <errno.h>
@@ -63,7 +64,7 @@ do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 
 	return_data[0] = min;
 	return_data[1] = max;
-	
+
 	if (ioctl(zfs_fd, ZFS_IOC_ARC, &zc) != 0) {
 		switch (errno) {
 		case EAGAIN:
