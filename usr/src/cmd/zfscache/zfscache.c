@@ -136,7 +136,7 @@ prof_to_bytes(uint64_t *bytes, arc_profile_type_t ap_type, uint64_t ap_val,
 	case APTYPE_PERCENT:
 		hundredth = allmem / 100UL;
 		retbytes = hundredth * ap_val;
-		if (retbytes >= hundredth) {
+		if (retbytes < hundredth) {
 			errx(3, "Internal corruption, percentage multiply "
 			    "allmem is %lu, 1%% is %lu, %ld%% is %lu\n",
 			    allmem, hundredth, ap_val, retbytes);
@@ -271,6 +271,19 @@ do_ioctl(int op, uint64_t min, uint64_t max)
 	return (0);
 }
 
+static void
+profile_info(void)
+{
+	const arc_profile_t *profile;
+
+	(void) printf("Available profiles\n");
+	(void) printf("==================\n");
+	for (profile = arc_profiles; profile->ap_name != NULL ; profile++) {
+		/* Make this better later. puts() is safe for our strings. */
+		(void) puts(profile->ap_name);
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -310,6 +323,10 @@ main(int argc, char *argv[])
 				return (3);
 			break;
 		case ':':
+			if (optopt == 'p') {
+				profile_info();
+				return (0);
+			}
 			(void) fprintf(stderr, "Option -%c requires a number\n",
 			    optopt);
 			return (1);
