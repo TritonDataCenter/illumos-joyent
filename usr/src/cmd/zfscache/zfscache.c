@@ -74,7 +74,7 @@ const arc_profile_t arc_profiles[] = {
 	/* See code for arc_init() in $UTS/common/fs/zfs/arc.c */
 	{ "illumos", false,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	      APTYPE_SHIFT, 0, 1 << 30, 64 << 20, 0 },
+	      APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0 },
 	/* 3/4 of available memory for sufficiently small systems. */
 	{ "illumos-low", true,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
