@@ -65,7 +65,7 @@ typedef struct arc_profile {
 	uint64_t ap_maxhicap;
 } arc_profile_t;
 
-arc_profile_t profiles[] = {
+arc_profile_t arc_profiles[] = {
 	/* See code for arc_init() in $UTS/common/fs/zfs/arc.c */
 	{ "illumos", false,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
@@ -171,13 +171,13 @@ do_profile(const char *profname, uint64_t *arc_min, uint64_t *arc_max)
 {
 	arc_profile_t *profile;
 
-	for (profile = profiles; profiles->ap_name != NULL; profile++) {
-		/* strcmp() is safe because we trust "profiles" entries. */
-		if (strcmp(profiles->ap_name, profname) == 0)
+	for (profile = arc_profiles; profile->ap_name != NULL; profile++) {
+		/* strcmp() is safe because we trust arc_profiles entries. */
+		if (strcmp(profile->ap_name, profname) == 0)
 			break; /* Found it! */
 	}
 
-	if (profiles->ap_name == NULL) {
+	if (profile->ap_name == NULL) {
 		warnx("Profile name \"%s\" not found.", profname);
 		return (false);
 	}
