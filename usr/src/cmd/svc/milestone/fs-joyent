@@ -12,6 +12,7 @@
 
 #
 # Copyright 2020 Joyent, Inc.
+# Copyright 2025 Edgecast Cloud LLC.
 #
 
 set -o xtrace
@@ -87,6 +88,18 @@ function unlock_pool
 
     exit $SMF_EXIT_ERR_FATAL
 }
+
+# Even before we import any ZFS pools, let's see if we can use zfscache(8)
+# if an `arc_profile` was specified as a bootparam.
+arc_profile=$(/bin/bootparams | grep "^arc_profile=" | cut -d= -f2)
+if [[ "$arc_profile" != "" ]]; then
+    # Don't fail harshly, but do indicate a failure.
+    zfscache -p "$arc_profile" > /dev/null
+    if [[ $? == 0 ]]; then
+	echo "Failed to set ZFS ARC profile" "$arc_profile" | \
+	    tee -a /dev/console >&2
+    fi
+fi
 
 /bin/bootparams | grep "^noimport=true" >/dev/null
 if [ $? -ne 0 ]; then
