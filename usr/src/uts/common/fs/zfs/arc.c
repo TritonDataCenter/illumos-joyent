@@ -411,10 +411,11 @@ int zfs_arc_average_blocksize = 8 * 1024; /* 8KB */
 
 /*
  * Defaults for this system, set up once in arc_init(), assumes no
- * dynamic reconfiguration (DR) of memory.
+ * dynamic reconfiguration (DR) of memory for now.
  */
 static uint64_t zfs_default_arc_max;
 static uint64_t zfs_default_arc_min;
+static uint64_t zfs_init_allmem;
 
 /*
  * ARC dirty data constraints for arc_tempreserve_space() throttle
@@ -7131,8 +7132,9 @@ arc_dynamic_resize(void *arg)
 	 * [1] => new_max/arc_c_max (read/write)
 	 * [2] => system default min with no mods (write)
 	 * [3] => system default max with no mods (write)
-	 * [4] => zfs_arc_min (write)
-	 * [5] => zfs_arc_max (write)
+	 * [4] => zfs_init_allmem ("allmem" at arc_init() time) (write)
+	 * [5] => zfs_arc_min (write)
+	 * [6] => zfs_arc_max (write)
 	 * XXX KEBE ASKS MORE TO COME?
 	 */
 	CTASSERT(6 * sizeof (uint64_t) <= MAXPATHLEN);
@@ -7183,6 +7185,8 @@ arc_dynamic_resize(void *arg)
 #else
 		uint64_t allmem = (physmem * PAGESIZE) / 2;
 #endif
+		DTRACE_PROBE2(arc__dynamic__resize__allmem__check,
+		    uint64_t, allmem, uint64_t, zfs_init_allmem);
 
 		/* Use a light touch for now. */
 		if (mutex_tryenter(&arc_adjust_lock) == 0)
@@ -7231,8 +7235,9 @@ arc_dynamic_resize(void *arg)
 	return_data[1] = arc_c_max;
 	return_data[2] = zfs_default_arc_min;
 	return_data[3] = zfs_default_arc_max;
-	return_data[4] = zfs_arc_min;
-	return_data[5] = zfs_arc_max;
+	return_data[4] = zfs_init_allmem;
+	return_data[5] = zfs_arc_min;
+	return_data[6] = zfs_arc_max;
 	/* XXX KEBE ASKS MORE TO COME? */
 
 	if (cmd != 0)
@@ -7252,6 +7257,9 @@ arc_init(void)
 #else
 	uint64_t allmem = (physmem * PAGESIZE) / 2;
 #endif
+	/* Writing reality checks for arc_dynamic_resize() to cache (sic). */
+	zfs_init_allmem = allmem;
+
 	mutex_init(&arc_adjust_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&arc_adjust_waiters_cv, NULL, CV_DEFAULT, NULL);
 
@@ -7288,7 +7296,12 @@ arc_init(void)
 
 	/*
 	 * Allow the tunables to override our calculations if they are
-	 * reasonable (ie. over 64MB)
+	 * reasonable (ie. over 64MB).
+	 *
+	 * With the existence of arc_dynamic_resize(), these tunables can
+	 * again be overridden. These guardrails are less strict with the
+	 * (undocumented) ioctl, but callers (like zfscache(8) will keep these
+	 * in mind.
 	 */
 	if (zfs_arc_max > 64 << 20 && zfs_arc_max < allmem) {
 		arc_c_max = zfs_arc_max;

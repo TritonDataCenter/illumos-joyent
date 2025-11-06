@@ -43,6 +43,11 @@
 #include <sys/types.h>
 #include <sys/zfs_ioctl.h>
 
+/* "allmem", which if non-zero should be compared to other queries of it. */
+static uint64_t allmem = 0;
+/* We need to query allmem, so the open ZFS device file needs to be global. */
+static int zfs_fd;
+
 typedef enum {
 	APTYPE_ABSOLUTE = 0,	/* In bytes! */
 	/* These start with allmem and massage it. */
@@ -65,7 +70,7 @@ typedef struct arc_profile {
 	uint64_t ap_maxhicap;
 } arc_profile_t;
 
-arc_profile_t arc_profiles[] = {
+const arc_profile_t arc_profiles[] = {
 	/* See code for arc_init() in $UTS/common/fs/zfs/arc.c */
 	{ "illumos", false,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
@@ -97,32 +102,28 @@ arc_profile_t arc_profiles[] = {
  */
 static bool
 prof_to_bytes(uint64_t *bytes, arc_profile_type_t ap_type, uint64_t ap_val,
-    int64_t ap_adjust, uint64_t ap_hicap, uint64_t ap_lowcap)
+    int64_t ap_adjust, uint64_t ap_lowcap, uint64_t ap_hicap)
 {
+	uint64_t retbytes, hundredth;
+	bool useadj = (ap_adjust != 0);
+	zfs_cmd_t zc = { 0 };
+
 	if (ap_type == APTYPE_ABSOLUTE) {
 		*bytes = ap_val;
 		return (true);
 	}
 
-	/* All other types require knowing `allmem`. */
-	long pagesize = sysconf(_SC_PAGESIZE);
-	long npages = sysconf(_SC_PHYS_PAGES);
-	uint64_t allmem, retbytes, hundredth;
-	bool useadj = (ap_adjust != 0);
-
-	if (pagesize == -1 || npages == -1) {
-		/* Bail! */
-		errx(3,
-		    "Can't determine memory, pagesize = %ld, npages = %ld",
-		    pagesize, npages);
-	}
-
-	allmem = pagesize * npages;
 	/*
-	 * swapfs_minfree is in arc.c. It's computed with: "1/8 capped at
-	 * 512MiB," per $UTS/commmon/fs/swapfs/swap_subr.c
+	 * Unless we introduce new ap_type values, we need arc_init()'s
+	 * "allmem". "allmem" as computed by $UTS/commmon/fs/zfs/arc.c is not
+	 * readily available via normal interfaces.  We will do an extra read
+	 * of the state of things to get arc_init()-time "allmem".
 	 */
-	allmem -= MIN((allmem >> 3), 512 << 20);
+	if (ioctl(zfs_fd, ZFS_IOC_ARC, &zc) != 0) {
+		/* Just err() out, this should rarely/never happen. */
+		err(3, "Getting 'allmem' from kernel");
+	}
+	allmem = ((uint64_t *)&zc)[4];
 
 	/*
 	 * NOTE: If a future ap_type cannot use adj, fix "useadj" in its case
@@ -130,7 +131,7 @@ prof_to_bytes(uint64_t *bytes, arc_profile_type_t ap_type, uint64_t ap_val,
 	 */
 	switch (ap_type) {
 	case APTYPE_SHIFT:
-		retbytes = allmem >> ap_val;
+		retbytes = (allmem >> ap_val);
 		break;
 	case APTYPE_PERCENT:
 		hundredth = allmem / 100UL;
@@ -169,7 +170,7 @@ prof_to_bytes(uint64_t *bytes, arc_profile_type_t ap_type, uint64_t ap_val,
 static bool
 do_profile(const char *profname, uint64_t *arc_min, uint64_t *arc_max)
 {
-	arc_profile_t *profile;
+	const arc_profile_t *profile;
 
 	for (profile = arc_profiles; profile->ap_name != NULL; profile++) {
 		/* strcmp() is safe because we trust arc_profiles entries. */
@@ -183,11 +184,11 @@ do_profile(const char *profname, uint64_t *arc_min, uint64_t *arc_max)
 	}
 
 	if (!prof_to_bytes(arc_min, profile->ap_mintype, profile->ap_minval,
-	    profile->ap_minadj, profile->ap_minhicap, profile->ap_minlowcap))
+	    profile->ap_minadj, profile->ap_minlowcap, profile->ap_minhicap))
 		return (false);
 
 	if (!prof_to_bytes(arc_max, profile->ap_maxtype, profile->ap_maxval,
-	    profile->ap_maxadj, profile->ap_maxhicap, profile->ap_maxlowcap))
+	    profile->ap_maxadj, profile->ap_maxlowcap, profile->ap_maxhicap))
 		return (false);
 
 	if (*arc_min > *arc_max) {
@@ -204,22 +205,22 @@ do_profile(const char *profname, uint64_t *arc_min, uint64_t *arc_max)
 	return (true);
 }
 
-static int do_ioctl(int, int, uint64_t, uint64_t);
+static int do_ioctl(int, uint64_t, uint64_t);
 
 static inline int
-do_read(int zfs_fd)
+do_read(void)
 {
-	return (do_ioctl(zfs_fd, 0, 0, 0));
+	return (do_ioctl(0, 0, 0));
 }
 
 static inline int
-do_write(int zfs_fd, uint64_t min, uint64_t max)
+do_write(uint64_t min, uint64_t max)
 {
-	return (do_ioctl(zfs_fd, 1, min, max));
+	return (do_ioctl(1, min, max));
 }
 
 static int
-do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
+do_ioctl(int op, uint64_t min, uint64_t max)
 {
 	zfs_cmd_t zc = { .zc_pad2 = op };
 	uint64_t *return_data = (uint64_t *)&zc.zc_name;
@@ -255,11 +256,17 @@ do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 
 	/* Print what the kernel gave us! */
 	(void) printf("arc_c_min: %lu\n", return_data[0]);
-	(void) printf("arc_c_max: %lu\n", return_data[1]);
+	(void) printf("arc_c_max: %lu\n\n", return_data[1]);
 	(void) printf("system default arc_c_min: %lu\n", return_data[2]);
 	(void) printf("system default arc_c_max: %lu\n", return_data[3]);
-	(void) printf("/etc/system zfs_arc_min: %lu\n", return_data[4]);
-	(void) printf("/etc/system zfs_arc_max: %lu\n", return_data[5]);
+	(void) printf("system arc_init()-time of maximum available memory "
+	    "(allmem): %lu\n\n", return_data[4]);
+	if (allmem != 0 && allmem != return_data[4]) {
+		warnx("first allmem %lu, current allmem %lu\n",
+		    allmem, return_data[4]);
+	}
+	(void) printf("/etc/system zfs_arc_min: %lu\n", return_data[5]);
+	(void) printf("/etc/system zfs_arc_max: %lu\n", return_data[6]);
 
 	return (0);
 }
@@ -267,7 +274,6 @@ do_ioctl(int zfs_fd, int op, uint64_t min, uint64_t max)
 int
 main(int argc, char *argv[])
 {
-	int zfs_fd;
 	int c;
 	uint64_t arc_min = 0, arc_max = 0;
 
@@ -276,7 +282,7 @@ main(int argc, char *argv[])
 		err(1, "failed to open ZFS device (%s)", ZFS_DEV);
 
 	if (argc == 1)
-		return (do_read(zfs_fd));
+		return (do_read());
 
 	while ((c = getopt(argc, argv, ":l:u:p:")) != EOF) {
 		switch (c) {
@@ -315,5 +321,5 @@ main(int argc, char *argv[])
 		}
 	}
 
-	return (do_write(zfs_fd, arc_min, arc_max));
+	return (do_write(arc_min, arc_max));
 }
