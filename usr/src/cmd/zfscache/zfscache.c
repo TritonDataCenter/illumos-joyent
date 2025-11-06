@@ -69,12 +69,11 @@ arc_profile_t profiles[] = {
 	/* See code for arc_init() in $UTS/common/fs/zfs/arc.c */
 	{ "illumos", false,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	      APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0 },
+	      APTYPE_SHIFT, 0, 1 << 30, 64 << 20, 0 },
 	/* 3/4 of available memory for sufficiently small systems. */
 	{ "illumos-low", true,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
 	      APTYPE_PERCENT, 75, 0, 64 << 20, 0 },
-	}, 
 	/* Similar to illumos, but use half-of-memory. */
 	{ "halfsies", false,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
@@ -108,12 +107,13 @@ prof_to_bytes(uint64_t *bytes, arc_profile_type_t ap_type, uint64_t ap_val,
 	/* All other types require knowing `allmem`. */
 	long pagesize = sysconf(_SC_PAGESIZE);
 	long npages = sysconf(_SC_PHYS_PAGES);
-	uint64_t allmem, retbytes;
-	bool useadj = (ap_adj != 0);
+	uint64_t allmem, retbytes, hundredth;
+	bool useadj = (ap_adjust != 0);
 
 	if (pagesize == -1 || npages == -1) {
 		/* Bail! */
-		errx(3, "Can't determine memory, pagesize = %l, npages = %l",
+		errx(3,
+		    "Can't determine memory, pagesize = %ld, npages = %ld",
 		    pagesize, npages);
 	}
 
@@ -133,11 +133,11 @@ prof_to_bytes(uint64_t *bytes, arc_profile_type_t ap_type, uint64_t ap_val,
 		retbytes = allmem >> ap_val;
 		break;
 	case APTYPE_PERCENT:
-		uint64_t hundreth = allmem / 100;
-		retbytes = hundreth * ap_val;
+		hundredth = allmem / 100UL;
+		retbytes = hundredth * ap_val;
 		if (retbytes >= hundredth) {
 			errx(3, "Internal corruption, percentage multiply "
-			    allmem is %lu, 1% is %lu, %d% is %lu"\n",
+			    "allmem is %lu, 1%% is %lu, %ld%% is %lu\n",
 			    allmem, hundredth, ap_val, retbytes);
 		}
 		break;
@@ -162,20 +162,22 @@ prof_to_bytes(uint64_t *bytes, arc_profile_type_t ap_type, uint64_t ap_val,
 	if (ap_lowcap != 0 && ap_lowcap > retbytes)
 		retbytes = ap_lowcap;
 
-	*bytes = retbyes;
+	*bytes = retbytes;
 	return (true);
 }
 
 static bool
 do_profile(const char *profname, uint64_t *arc_min, uint64_t *arc_max)
 {
-	arc_profile_t *profile = profiles;
+	arc_profile_t *profile;
 
-	/* strcmp() is safe because we trust "profiles" entries. */
-	while (profiles->name != NULL && strcmp(profiles->name, profname) != 0)
-		profiles++;
+	for (profile = profiles; profiles->ap_name != NULL; profile++) {
+		/* strcmp() is safe because we trust "profiles" entries. */
+		if (strcmp(profiles->ap_name, profname) == 0)
+			break; /* Found it! */
+	}
 
-	if (profiles->name == NULL) {
+	if (profiles->ap_name == NULL) {
 		warnx("Profile name \"%s\" not found.", profname);
 		return (false);
 	}
@@ -192,8 +194,8 @@ do_profile(const char *profname, uint64_t *arc_min, uint64_t *arc_max)
 		if (!profile->ap_clamp_to_min) {
 			warnx("Profile \"%s\" computed min is %lu, "
 			    "computed max is %lu.\nThis is an error for "
-			    "profile \"%s\".\n", *arc_min, *arc_max,
-			    profname);
+			    "profile \"%s\".\n", profname, *arc_min,
+			    *arc_max, profname);
 			return (false);
 		}
 		*arc_max = *arc_min;
