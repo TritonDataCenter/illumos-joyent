@@ -35,12 +35,172 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <strings.h>
 #include <unistd.h>
 #include <err.h>
 
 #include <sys/types.h>
 #include <sys/zfs_ioctl.h>
+
+typedef enum {
+	APTYPE_ABSOLUTE = 0,	/* In bytes! */
+	/* These start with allmem and massage it. */
+	APTYPE_SHIFT,	/* Add or subtract after shift. */
+	APTYPE_PERCENT	/* Add or subtract after percentage. */
+} arc_profile_type_t;
+
+typedef struct arc_profile {
+	const char *ap_name;
+	bool ap_clamp_to_min;  /* If max < min, don't error, clamp to min. */
+	arc_profile_type_t ap_mintype;
+	uint64_t ap_minval;
+	int64_t ap_minadj;
+	uint64_t ap_minlowcap;
+	uint64_t ap_minhicap;
+	arc_profile_type_t ap_maxtype;
+	uint64_t ap_maxval;
+	int64_t ap_maxadj;
+	uint64_t ap_maxlowcap;
+	uint64_t ap_maxhicap;
+} arc_profile_t;
+
+arc_profile_t profiles[] = {
+	/* See code for arc_init() in $UTS/common/fs/zfs/arc.c */
+	{ "illumos", false,
+	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	      APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0 },
+	/* 3/4 of available memory for sufficiently small systems. */
+	{ "illumos-low", true,
+	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	      APTYPE_PERCENT, 75, 0, 64 << 20, 0 },
+	}, 
+	/* Similar to illumos, but use half-of-memory. */
+	{ "halfsies", false,
+	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	      APTYPE_SHIFT, 1, 0, 64 << 20, 0 },
+	/*
+	 * Inspired by Triton Data Center's default value of 15% reserved for
+	 * "kernel memory" for a compute node, take 1/8 (12.5%) for the ARC
+	 * and the other 2.5% will definitely be eaten. Minimum is the same as
+	 * all of the other profiles.
+	 */
+	{ "triton_hvm", true,
+	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	      APTYPE_SHIFT, 3, 0, 64 << 20, 0 },
+	{ NULL } /* Always must be the last one. */
+};
+
+/*
+ * We assume everything passed-in is sane and sensible here.
+ * If we move to populate-table-from-file, we should do severe sanity checks
+ * in file-to-table population.
+ */
+static bool
+prof_to_bytes(uint64_t *bytes, arc_profile_type_t ap_type, uint64_t ap_val,
+    int64_t ap_adjust, uint64_t ap_hicap, uint64_t ap_lowcap)
+{
+	if (ap_type == APTYPE_ABSOLUTE) {
+		*bytes = ap_val;
+		return (true);
+	}
+
+	/* All other types require knowing `allmem`. */
+	long pagesize = sysconf(_SC_PAGESIZE);
+	long npages = sysconf(_SC_PHYS_PAGES);
+	uint64_t allmem, retbytes;
+	bool useadj = (ap_adj != 0);
+
+	if (pagesize == -1 || npages == -1) {
+		/* Bail! */
+		errx(3, "Can't determine memory, pagesize = %l, npages = %l",
+		    pagesize, npages);
+	}
+
+	allmem = pagesize * npages;
+	/*
+	 * swapfs_minfree is in arc.c. It's computed with: "1/8 capped at
+	 * 512MiB," per $UTS/commmon/fs/swapfs/swap_subr.c
+	 */
+	allmem -= MIN((allmem >> 3), 512 << 20);
+
+	/*
+	 * NOTE: If a future ap_type cannot use adj, fix "useadj" in its case
+	 * handling.
+	 */
+	switch (ap_type) {
+	case APTYPE_SHIFT:
+		retbytes = allmem >> ap_val;
+		break;
+	case APTYPE_PERCENT:
+		uint64_t hundreth = allmem / 100;
+		retbytes = hundreth * ap_val;
+		if (retbytes >= hundredth) {
+			errx(3, "Internal corruption, percentage multiply "
+			    allmem is %lu, 1% is %lu, %d% is %lu"\n",
+			    allmem, hundredth, ap_val, retbytes);
+		}
+		break;
+	default:
+		errx(3, "Internal corruption, unknown ap_type %d\n", ap_type);
+		break;
+	}
+
+	if (useadj) {
+		if (ap_adjust > 0) {
+			retbytes += (uint64_t)ap_adjust;
+		} else {
+			uint64_t unsigned_adjust = (uint64_t)(-ap_adjust);
+
+			retbytes -= unsigned_adjust;
+		}
+	}
+
+	/* Handle hicap/lowcap. */
+	if (ap_hicap != 0 && ap_hicap < retbytes)
+		retbytes = ap_hicap;
+	if (ap_lowcap != 0 && ap_lowcap > retbytes)
+		retbytes = ap_lowcap;
+
+	*bytes = retbyes;
+	return (true);
+}
+
+static bool
+do_profile(const char *profname, uint64_t *arc_min, uint64_t *arc_max)
+{
+	arc_profile_t *profile = profiles;
+
+	/* strcmp() is safe because we trust "profiles" entries. */
+	while (profiles->name != NULL && strcmp(profiles->name, profname) != 0)
+		profiles++;
+
+	if (profiles->name == NULL) {
+		warnx("Profile name \"%s\" not found.", profname);
+		return (false);
+	}
+
+	if (!prof_to_bytes(arc_min, profile->ap_mintype, profile->ap_minval,
+	    profile->ap_minadj, profile->ap_minhicap, profile->ap_minlowcap))
+		return (false);
+
+	if (!prof_to_bytes(arc_max, profile->ap_maxtype, profile->ap_maxval,
+	    profile->ap_maxadj, profile->ap_maxhicap, profile->ap_maxlowcap))
+		return (false);
+
+	if (*arc_min > *arc_max) {
+		if (!profile->ap_clamp_to_min) {
+			warnx("Profile \"%s\" computed min is %lu, "
+			    "computed max is %lu.\nThis is an error for "
+			    "profile \"%s\".\n", *arc_min, *arc_max,
+			    profname);
+			return (false);
+		}
+		*arc_max = *arc_min;
+	}
+
+	return (true);
+}
 
 static int do_ioctl(int, int, uint64_t, uint64_t);
 
@@ -116,7 +276,7 @@ main(int argc, char *argv[])
 	if (argc == 1)
 		return (do_read(zfs_fd));
 
-	while ((c = getopt(argc, argv, ":l:u:")) != EOF) {
+	while ((c = getopt(argc, argv, ":l:u:p:")) != EOF) {
 		switch (c) {
 		case 'l':
 			arc_min = strtoull(optarg, NULL, 0);
@@ -135,6 +295,11 @@ main(int argc, char *argv[])
 				    optopt);
 				return (1);
 			}
+			break;
+		case 'p':
+			/* Select a profile */
+			if (!do_profile(optarg, &arc_min, &arc_max))
+				return (3);
 			break;
 		case ':':
 			(void) fprintf(stderr, "Option -%c requires a number\n",
