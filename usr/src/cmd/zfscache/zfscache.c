@@ -73,16 +73,16 @@ typedef struct arc_profile {
 const arc_profile_t arc_profiles[] = {
 	/* See code for arc_init() in $UTS/common/fs/zfs/arc.c */
 	{ "illumos", false,
-	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	      APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0 },
+	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	    APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0 },
 	/* 3/4 of available memory for sufficiently small systems. */
 	{ "illumos-low", true,
-	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	      APTYPE_PERCENT, 75, 0, 64 << 20, 0 },
+	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	    APTYPE_PERCENT, 75, 0, 64 << 20, 0 },
 	/* Similar to illumos, but use half-of-memory. */
 	{ "balanced", false,
-	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	      APTYPE_SHIFT, 1, 0, 64 << 20, 0 },
+	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	    APTYPE_SHIFT, 1, 0, 64 << 20, 0 },
 	/*
 	 * Inspired by Triton Data Center's default value of 15% reserved for
 	 * "kernel memory" for a compute node, take 1/8 (12.5%) for the ARC
@@ -93,11 +93,11 @@ const arc_profile_t arc_profiles[] = {
 	 * arc_c_max.
 	 */
 	{ "compute-hvm", true,
-	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	      APTYPE_SHIFT, 3, 0, 64 << 20, 0 },
+	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	    APTYPE_SHIFT, 3, 0, 64 << 20, 0 },
 	{ "compute-hvm-64", true,
-	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	      APTYPE_SHIFT, 3, 0, 64 << 20, 64 << 30 },
+	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	    APTYPE_SHIFT, 3, 0, 64 << 20, 64 << 30 },
 	{ NULL } /* Always must be the last one. */
 };
 
@@ -284,7 +284,7 @@ profile_info(void)
 
 	(void) printf("Available profiles\n");
 	(void) printf("==================\n");
-	for (profile = arc_profiles; profile->ap_name != NULL ; profile++) {
+	for (profile = arc_profiles; profile->ap_name != NULL; profile++) {
 		/* Make this better later. puts() is safe for our strings. */
 		(void) puts(profile->ap_name);
 	}
