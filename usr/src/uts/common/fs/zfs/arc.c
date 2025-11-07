@@ -7262,9 +7262,11 @@ arc_dynamic_resize(void *arg)
 			    vmem_size(heap_arena, VMEM_ALLOC | VMEM_FREE) / 2);
 #endif
 			/*
-			 * If we restore ALL /etc/system tunables, the
-			 * following adjustments will need to be /etc/system
-			 * checked and maybe changed as well. This includes
+			 * If we restore ALL /etc/system performance analysis
+			 * tunables, the following adjustments will need to be
+			 * /etc/system checked and maybe changed as well. This
+			 * includes some not-derived items in arc_init(), e.g.
+			 * arc_meta_min and arc_grow_retry (and more).
 			 */
 			arc_meta_min = arc_c_min / 2;
 
@@ -7273,9 +7275,7 @@ arc_dynamic_resize(void *arg)
 			 * this path. root@gz/admin should know what they're
 			 * doing if they're using this.
 			 */
-		}
 
-		if (err == 0) {
 			/* Make sure arc_adjust is triggered if need be. */
 			arc_adjust_needed =
 			    (arc_adjust_needed || force_arc_adjust);
