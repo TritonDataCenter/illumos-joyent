@@ -97,7 +97,7 @@ const arc_profile_t arc_profiles[] = {
 	    APTYPE_SHIFT, 3, 0, 64 << 20, 0 },
 	{ "compute-hvm-64", true,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_SHIFT, 3, 0, 64 << 20, 64 << 30 },
+	    APTYPE_SHIFT, 3, 0, 64 << 20, 64UL << 30UL },
 	{ NULL } /* Always must be the last one. */
 };
 
