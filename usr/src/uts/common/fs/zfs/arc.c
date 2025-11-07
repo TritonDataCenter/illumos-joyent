@@ -7160,17 +7160,23 @@ arc_dynamic_resize(void *arg)
 			 */
 			switch (new_max) {
 			case UINT64_MAX:
-			case (UINT64_MAX - 1UL):
 				/* Reset to the system's default tunings! */
 				new_min = zfs_default_arc_min;
 				new_max = zfs_default_arc_max;
-				if (new_max == UINT64_MAX - 1UL) {
-					/* Reset to /etc/system if possible. */
-					new_min = (zfs_arc_min != 0) ?
-					    zfs_arc_min : new_min;
-					new_max = (zfs_arc_max != 0) ?
-					    zfs_arc_max : new_max;
-				}
+				break;
+			case (UINT64_MAX - 1UL):
+				/* Reset to /etc/system if possible. */
+				new_min = (zfs_arc_min != 0) ?
+				    zfs_arc_min : arc_c_min;
+				new_max = (zfs_arc_max != 0) ?
+				    zfs_arc_max : arc_c_max;
+				/*
+				 * If this results in bad settings, nothing
+				 * will get written and an error will return.
+				 *
+				 * NOTE: Other /etc/system tunables may need
+				 * to be reported AND addressed here.
+				 */
 				break;
 			default:
 				/*
@@ -7232,16 +7238,51 @@ arc_dynamic_resize(void *arg)
 			err = ENOMEM;
 		} else {
 			ASSERT0(err);
+
 			arc_c_max = new_max;
 			arc_c_min = new_min;
+
+			/* Don't grow arc_c immediately, but do shrink it. */
 			arc_c = MIN(arc_c, arc_c_max);
+
+			/*
+			 * Readjust parameters that are functions of arc_c_min
+			 * or arc_c_max. Some of these parameters may self-
+			 * adjust but let's be careful for now.
+			 */
+			arc_p = (arc_c >> 1);
+			/* See /etc/system comment below... */
+			arc_meta_limit = arc_c_max / 4;
+#ifdef _KERNEL
+			/*
+			 * Metadata is stored in the kernel's heap.  Don't let
+			 * us use more than half the heap for the ARC.
+			 */
+			arc_meta_limit = MIN(arc_meta_limit,
+			    vmem_size(heap_arena, VMEM_ALLOC | VMEM_FREE) / 2);
+#endif
+			/*
+			 * If we restore ALL /etc/system tunables, the
+			 * following adjustments will need to be /etc/system
+			 * checked and maybe changed as well. This includes
+			 */
+			arc_meta_min = arc_c_min / 2;
+
+			/*
+			 * NOTE: We also ignore kmem_debugging() halving in
+			 * this path. root@gz/admin should know what they're
+			 * doing if they're using this.
+			 */
 		}
 
-		/* Make sure arc_adjust is triggered if need be. */
-		arc_adjust_needed = (arc_adjust_needed || force_arc_adjust);
-		/* arc_get_data_impl() does this with the lock held! */
-		if (force_arc_adjust)
-			zthr_wakeup(arc_adjust_zthr);
+		if (err == 0) {
+			/* Make sure arc_adjust is triggered if need be. */
+			arc_adjust_needed =
+			    (arc_adjust_needed || force_arc_adjust);
+			/* arc_get_data_impl() does this with the lock held! */
+			if (force_arc_adjust)
+				zthr_wakeup(arc_adjust_zthr);
+		}
 	} /* Else don't bother locking, just report back */
 
 	/*
