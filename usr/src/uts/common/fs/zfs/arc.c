@@ -7135,7 +7135,6 @@ arc_dynamic_resize(void *arg)
 	 * [4] => zfs_init_allmem ("allmem" at arc_init() time) (write)
 	 * [5] => zfs_arc_min (write)
 	 * [6] => zfs_arc_max (write)
-	 * XXX KEBE ASKS MORE TO COME?
 	 */
 	CTASSERT(6 * sizeof (uint64_t) <= MAXPATHLEN);
 	zfs_cmd_t *zc = (zfs_cmd_t *)arg;
@@ -7238,7 +7237,6 @@ arc_dynamic_resize(void *arg)
 	return_data[4] = zfs_init_allmem;
 	return_data[5] = zfs_arc_min;
 	return_data[6] = zfs_arc_max;
-	/* XXX KEBE ASKS MORE TO COME? */
 
 	if (cmd != 0)
 		mutex_exit(&arc_adjust_lock);

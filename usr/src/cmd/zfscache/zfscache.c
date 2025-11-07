@@ -80,7 +80,7 @@ const arc_profile_t arc_profiles[] = {
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
 	      APTYPE_PERCENT, 75, 0, 64 << 20, 0 },
 	/* Similar to illumos, but use half-of-memory. */
-	{ "halfsies", false,
+	{ "balanced", false,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
 	      APTYPE_SHIFT, 1, 0, 64 << 20, 0 },
 	/*
@@ -88,10 +88,16 @@ const arc_profile_t arc_profiles[] = {
 	 * "kernel memory" for a compute node, take 1/8 (12.5%) for the ARC
 	 * and the other 2.5% will definitely be eaten. Minimum is the same as
 	 * all of the other profiles.
+	 *
+	 * On very large systems (> 512GiB RAM), we may want a hard cap on
+	 * arc_c_max.
 	 */
-	{ "triton_hvm", true,
+	{ "compute-hvm", true,
 	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
 	      APTYPE_SHIFT, 3, 0, 64 << 20, 0 },
+	{ "compute-hvm-64", true,
+	      APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
+	      APTYPE_SHIFT, 3, 0, 64 << 20, 64 << 30 },
 	{ NULL } /* Always must be the last one. */
 };
 
