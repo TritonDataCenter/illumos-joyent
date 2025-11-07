@@ -315,9 +315,8 @@ int arc_procfd;
 #endif
 
 /*
- * This thread's job is to keep enough free memory in the system, by
- * calling arc_kmem_reap_now() plus arc_shrink(), which improves
- * arc_available_memory().
+ * This thread's job is to keep enough free memory in the system, by calling
+ * arc_reap_cb(), which improves arc_available_memory().
  */
 static zthr_t		*arc_reap_zthr;
 
@@ -7154,12 +7153,32 @@ arc_dynamic_resize(void *arg)
 		 * Keep zeroes in place for no-change.
 		 */
 		if (new_min == 0) {
-			if (new_max == UINT64_MAX) {
+			/*
+			 * Assume some special values for new_max.
+			 * the top 256 (UINT64_MAX - [0-255]) values can be
+			 * repurposed.
+			 */
+			switch (new_max) {
+			case UINT64_MAX:
+			case (UINT64_MAX - 1UL):
 				/* Reset to the system's default tunings! */
 				new_min = zfs_default_arc_min;
 				new_max = zfs_default_arc_max;
+				if (new_max == UINT64_MAX - 1UL) {
+					/* Reset to /etc/system if possible. */
+					new_min = (zfs_arc_min != 0) ?
+					    zfs_arc_min : new_min;
+					new_max = (zfs_arc_max != 0) ?
+					    zfs_arc_max : new_max;
+				}
+				break;
+			default:
+				/*
+				 * Keep new_min at 0 to grab arc_c_* under the
+				 * lock.
+				 */
+				break;
 			}
-			/* Keep it at 0 to grab arc_c_* under the lock. */
 		} else {
 			/* Floor minimum ARC size at 64GiB, like arc_init(). */
 			if (new_min < 64 << 20)

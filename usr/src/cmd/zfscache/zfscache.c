@@ -75,6 +75,15 @@ const arc_profile_t arc_profiles[] = {
 	{ "illumos", false,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
 	    APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0 },
+
+	/* Special profiles for resetting, using ioctl min=0, max=SPECIALS */
+	{ "reset-system-defaults", false,
+	    APTYPE_ABSOLUTE, 0, 0, 0, 0,
+	    APTYPE_ABSOLUTE, UINT64_MAX, 0, 0, 0 },
+	{ "reset-etc-system", false,
+	    APTYPE_ABSOLUTE, 0, 0, 0, 0,
+	    APTYPE_ABSOLUTE, (UINT64_MAX - 1UL), 0, 0, 0 },
+
 	/* 3/4 of available memory for sufficiently small systems. */
 	{ "illumos-low", true,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
