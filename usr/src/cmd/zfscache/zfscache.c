@@ -110,7 +110,7 @@ const arc_profile_t arc_profiles[] = {
 	    APTYPE_SHIFT, 1, 0, 64 << 20, 0,
 	    "  ARC defaults trying to balance native workloads and HVMs:\n"
 	    "    - Minimum matches \"illumos\" above\n"
-	    "    - Maximum is higher of minimum or 50%\n"
+	    "    - Maximum is higher of minimum or 50% of allowable memory.\n"
 	},
 	/*
 	 * Inspired by Triton Data Center's default value of 15% reserved for
