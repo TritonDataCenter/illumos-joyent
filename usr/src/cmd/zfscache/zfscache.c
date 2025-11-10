@@ -68,30 +68,51 @@ typedef struct arc_profile {
 	int64_t ap_maxadj;
 	uint64_t ap_maxlowcap;
 	uint64_t ap_maxhicap;
+	const char *ap_description;
 } arc_profile_t;
 
 const arc_profile_t arc_profiles[] = {
 	/* See code for arc_init() in $UTS/common/fs/zfs/arc.c */
 	{ "illumos", false,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0 },
+	    APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0,
+	    "  ARC defaults from illumos-gate:\n"
+	    "    - Minimum will be either 64MiB, 1GiB, or 1/64 of physical\n"
+	    "      memory if it fits between those two.\n"
+	    "    - Maximum will be all physical memory save 1GiB, or minimum.\n"
+	},
 
 	/* Special profiles for resetting, using ioctl min=0, max=SPECIALS */
 	{ "reset-system-defaults", false,
 	    APTYPE_ABSOLUTE, 0, 0, 0, 0,
-	    APTYPE_ABSOLUTE, UINT64_MAX, 0, 0, 0 },
+	    APTYPE_ABSOLUTE, UINT64_MAX, 0, 0, 0 ,
+	    "  SmartOS ARC defaults: currently the same as illumos-gate.\n"
+	},
 	{ "reset-etc-system", false,
 	    APTYPE_ABSOLUTE, 0, 0, 0, 0,
-	    APTYPE_ABSOLUTE, (UINT64_MAX - 1UL), 0, 0, 0 },
+	    APTYPE_ABSOLUTE, (UINT64_MAX - 1UL), 0, 0, 0 ,
+	    /* Pardon odd split here for 80cols in source. */
+	    "  Use values in /etc/system tunables zfs_arc_min and zfs_arc_max,"
+	    "\n  where 0 means keep the existing value.\n"
+	},
 
 	/* 3/4 of available memory for sufficiently small systems. */
 	{ "illumos-low", true,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_PERCENT, 75, 0, 64 << 20, 0 },
+	    APTYPE_PERCENT, 75, 0, 64 << 20, 0 ,
+	    "  ARC defaults for lower-physical-memory situations in illumos,\n"
+	    "  or to give some small space to HVMs:\n"
+	    "    - Minimum matches \"illumos\" above\n"
+	    "    - Maximum is higher of minimum or 75% of physical memory.\n"
+	},
 	/* Similar to illumos, but use half-of-memory. */
 	{ "balanced", false,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_SHIFT, 1, 0, 64 << 20, 0 },
+	    APTYPE_SHIFT, 1, 0, 64 << 20, 0 ,
+	    "  ARC defaults trying to balance native workloads and HVMs:\n"
+	    "    - Minimum matches \"illumos\" above\n"
+	    "    - Maximum is higher of minimum or 50%\n"
+	},
 	/*
 	 * Inspired by Triton Data Center's default value of 15% reserved for
 	 * "kernel memory" for a compute node, take 1/8 (12.5%) for the ARC
@@ -103,12 +124,42 @@ const arc_profile_t arc_profiles[] = {
 	 */
 	{ "compute-hvm", true,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_SHIFT, 3, 0, 64 << 20, 0 },
+	    APTYPE_SHIFT, 3, 0, 64 << 20, 0 ,
+	    "  ARC defaults favoring HVMs:\n"
+	    "    - Minimum matches \"illumos\" above\n"
+	    "    - Maximum is higher of minimum or 1/8 of physical memory.\n"
+	},
 	{ "compute-hvm-64", true,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_SHIFT, 3, 0, 64 << 20, 64UL << 30UL },
+	    APTYPE_SHIFT, 3, 0, 64 << 20, 64UL << 30UL ,
+	    "  ARC defaults favoring HVMs with a 64GiB cap on maximum:\n"
+	    "    - Minimum matches \"illumos\" above\n"
+	    "    - Maximum is higher of minimum or 1/8 of physical memory,\n"
+	    "      but capped at 64GiB.\n"
+	},
 	{ NULL } /* Always must be the last one. */
 };
+
+static void
+usage(void)
+{
+	(void) fprintf(stderr, "Usage:\n");
+	(void) fprintf(stderr,
+	    "zfscache                   (prints ZFS ARC parameters)\n");
+	(void) fprintf(stderr,
+	    "zfscache -h                (prints this message)\n");
+	(void) fprintf(stderr,
+	    "zfscache -l BYTES -u BYTES (sets ZFS ARC lower-bound/c_min (-l)\n"
+	    "                            and upper-bound/c_max size.\n"
+	    "                            NOTE: BYTES is a signed 64-bit\n"
+	    "                            value, negative values are reserved)\n"
+		);
+	(void) fprintf(stderr,
+	    "zfscache -p                (prints available ZFS ARC profiles)\n");
+	(void) fprintf(stderr,
+	    "zfscache -p PROFILE        (sets ZFS ARC to PROFILE's specs)\n");
+	
+}
 
 /*
  * We assume everything passed-in is sane and sensible here.
@@ -194,7 +245,8 @@ do_profile(const char *profname, uint64_t *arc_min, uint64_t *arc_max)
 	}
 
 	if (profile->ap_name == NULL) {
-		warnx("Profile name \"%s\" not found.", profname);
+		warnx("Profile name \"%s\" not found.\n", profname);
+		usage();
 		return (false);
 	}
 
@@ -295,7 +347,8 @@ profile_info(void)
 	(void) printf("==================\n");
 	for (profile = arc_profiles; profile->ap_name != NULL; profile++) {
 		/* Make this better later. puts() is safe for our strings. */
-		(void) puts(profile->ap_name);
+		(void) fprintf(stderr, "%s\n%s\n", profile->ap_name,
+		    profile->ap_description);
 	}
 }
 
@@ -304,6 +357,7 @@ main(int argc, char *argv[])
 {
 	int c;
 	uint64_t arc_min = 0, arc_max = 0;
+	const char *errstr = NULL;
 
 	zfs_fd = open(ZFS_DEV, O_RDWR);
 	if (zfs_fd < 0)
@@ -312,28 +366,39 @@ main(int argc, char *argv[])
 	if (argc == 1)
 		return (do_read());
 
-	while ((c = getopt(argc, argv, ":l:u:p:")) != EOF) {
+	while ((c = getopt(argc, argv, ":hl:u:p:")) != EOF) {
 		switch (c) {
+		case 'h':
+			usage();
+			return (0);
 		case 'l':
-			arc_min = strtoull(optarg, NULL, 0);
-			if (arc_min == UINT64_MAX && errno != 0) {
+			errno = 0;
+			arc_min = (uint64_t)strtonumx(optarg, INT64_MIN,
+			    INT64_MAX, &errstr, 0);
+			if (arc_min == 0 && errno != 0) {
 				(void) fprintf(stderr,
-				    "Option -%c requires a number\n",
-				    optopt);
+				    "Option -%c requires a number: %s (%s)\n\n",
+				    optopt, errstr, strerror(errno));
+				usage();
 				return (1);
 			}
 			break;
 		case 'u':
-			arc_max = strtoull(optarg, NULL, 0);
-			if (arc_max == UINT64_MAX && errno != 0) {
+			errno = 0;
+			arc_max = (uint64_t)strtonumx(optarg, INT64_MIN,
+			    INT64_MAX, &errstr, 0);
+			if (arc_max == 0 && errno != 0) {
 				(void) fprintf(stderr,
-				    "Option -%c requires a number\n",
-				    optopt);
+				    "Option -%c requires a number: %s (%s)\n\n",
+				    optopt, errstr, strerror(errno));
+				usage();
 				return (1);
 			}
 			break;
 		case 'p':
-			/* Select a profile */
+			/*
+			 * Select a profile. No usage() on failure is intended.
+			 */
 			if (!do_profile(optarg, &arc_min, &arc_max))
 				return (3);
 			break;
@@ -342,12 +407,15 @@ main(int argc, char *argv[])
 				profile_info();
 				return (0);
 			}
-			(void) fprintf(stderr, "Option -%c requires a number\n",
+			(void) fprintf(stderr,
+			    "Option -%c requires a number\n\n",
 			    optopt);
+			usage();
 			return (1);
 		case '?':
-			(void) fprintf(stderr, "invalid option '%c'\n",
+			(void) fprintf(stderr, "invalid option '%c'\n\n",
 			    optopt);
+			usage();
 			return (2);
 
 		}
