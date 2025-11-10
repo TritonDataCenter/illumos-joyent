@@ -77,21 +77,20 @@ const arc_profile_t arc_profiles[] = {
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
 	    APTYPE_SHIFT, 0, -(1 << 30), 64 << 20, 0,
 	    "  ARC defaults from illumos-gate:\n"
-	    "    - Minimum will be either 64MiB, 1GiB, or 1/64 of physical\n"
+	    "    - Minimum will be either 64MiB, 1GiB, or 1/64 of allowable\n"
 	    "      memory if it fits between those two.\n"
-	    "    - Maximum will be all physical memory save 1GiB, or minimum.\n"
+	    "    - Maximum will be all allowable memory but 1GiB, or minimum.\n"
 	},
 
 	/* Special profiles for resetting, using ioctl min=0, max=SPECIALS */
 	{ "reset-system-defaults", false,
 	    APTYPE_ABSOLUTE, 0, 0, 0, 0,
-	    APTYPE_ABSOLUTE, UINT64_MAX, 0, 0, 0 ,
+	    APTYPE_ABSOLUTE, UINT64_MAX, 0, 0, 0,
 	    "  SmartOS ARC defaults: currently the same as illumos-gate.\n"
 	},
 	{ "reset-etc-system", false,
 	    APTYPE_ABSOLUTE, 0, 0, 0, 0,
-	    APTYPE_ABSOLUTE, (UINT64_MAX - 1UL), 0, 0, 0 ,
-	    /* Pardon odd split here for 80cols in source. */
+	    APTYPE_ABSOLUTE, (UINT64_MAX - 1UL), 0, 0, 0,
 	    "  Use values in /etc/system tunables zfs_arc_min and zfs_arc_max,"
 	    "\n  where 0 means keep the existing value.\n"
 	},
@@ -99,16 +98,16 @@ const arc_profile_t arc_profiles[] = {
 	/* 3/4 of available memory for sufficiently small systems. */
 	{ "illumos-low", true,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_PERCENT, 75, 0, 64 << 20, 0 ,
-	    "  ARC defaults for lower-physical-memory situations in illumos,\n"
+	    APTYPE_PERCENT, 75, 0, 64 << 20, 0,
+	    "  ARC defaults for lower-allowable-memory situations in illumos,\n"
 	    "  or to give some small space to HVMs:\n"
 	    "    - Minimum matches \"illumos\" above\n"
-	    "    - Maximum is higher of minimum or 75% of physical memory.\n"
+	    "    - Maximum is higher of minimum or 75% of allowable memory.\n"
 	},
 	/* Similar to illumos, but use half-of-memory. */
 	{ "balanced", false,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_SHIFT, 1, 0, 64 << 20, 0 ,
+	    APTYPE_SHIFT, 1, 0, 64 << 20, 0,
 	    "  ARC defaults trying to balance native workloads and HVMs:\n"
 	    "    - Minimum matches \"illumos\" above\n"
 	    "    - Maximum is higher of minimum or 50%\n"
@@ -124,17 +123,17 @@ const arc_profile_t arc_profiles[] = {
 	 */
 	{ "compute-hvm", true,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_SHIFT, 3, 0, 64 << 20, 0 ,
+	    APTYPE_SHIFT, 3, 0, 64 << 20, 0,
 	    "  ARC defaults favoring HVMs:\n"
 	    "    - Minimum matches \"illumos\" above\n"
-	    "    - Maximum is higher of minimum or 1/8 of physical memory.\n"
+	    "    - Maximum is higher of minimum or 1/8 of allowable memory.\n"
 	},
 	{ "compute-hvm-64", true,
 	    APTYPE_SHIFT, 6, 0, 64 << 20, 1 << 30,
-	    APTYPE_SHIFT, 3, 0, 64 << 20, 64UL << 30UL ,
+	    APTYPE_SHIFT, 3, 0, 64 << 20, 64UL << 30UL,
 	    "  ARC defaults favoring HVMs with a 64GiB cap on maximum:\n"
 	    "    - Minimum matches \"illumos\" above\n"
-	    "    - Maximum is higher of minimum or 1/8 of physical memory,\n"
+	    "    - Maximum is higher of minimum or 1/8 of allowable memory,\n"
 	    "      but capped at 64GiB.\n"
 	},
 	{ NULL } /* Always must be the last one. */
@@ -150,15 +149,14 @@ usage(void)
 	    "zfscache -h                (prints this message)\n");
 	(void) fprintf(stderr,
 	    "zfscache -l BYTES -u BYTES (sets ZFS ARC lower-bound/c_min (-l)\n"
-	    "                            and upper-bound/c_max size.\n"
+	    "                            and upper-bound/c_max (-u) size.\n"
 	    "                            NOTE: BYTES is a signed 64-bit\n"
-	    "                            value, negative values are reserved)\n"
-		);
+	    "                            value, negative values are reserved)"
+	    "\n");
 	(void) fprintf(stderr,
 	    "zfscache -p                (prints available ZFS ARC profiles)\n");
 	(void) fprintf(stderr,
 	    "zfscache -p PROFILE        (sets ZFS ARC to PROFILE's specs)\n");
-	
 }
 
 /*
