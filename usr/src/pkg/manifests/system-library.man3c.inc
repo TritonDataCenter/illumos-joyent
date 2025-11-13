@@ -17,6 +17,7 @@
 # Copyright 2018 Jason King
 # Copyright 2020 Joyent, Inc.
 # Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+# Copyright 2025 Hans Rosenfeld
 #
 
 link path=usr/share/man/man3c/FD_CLR.3c target=select.3c
@@ -314,6 +315,7 @@ link path=usr/share/man/man3c/door_setparam.3c target=door_getparam.3c
 file path=usr/share/man/man3c/door_ucred.3c
 link path=usr/share/man/man3c/door_unbind.3c target=door_bind.3c
 link path=usr/share/man/man3c/double_to_decimal.3c target=floating_to_decimal.3c
+link path=usr/share/man/man3c/dprintf.3c target=printf.3c
 file path=usr/share/man/man3c/drand48.3c
 file path=usr/share/man/man3c/dup2.3c
 link path=usr/share/man/man3c/dup3.3c target=dup2.3c
@@ -359,6 +361,7 @@ file path=usr/share/man/man3c/fcloseall.3c
 link path=usr/share/man/man3c/fconvert.3c target=econvert.3c
 link path=usr/share/man/man3c/fcvt.3c target=ecvt.3c
 file path=usr/share/man/man3c/fdatasync.3c
+file path=usr/share/man/man3c/fdclose.3c
 file path=usr/share/man/man3c/fdetach.3c
 file path=usr/share/man/man3c/fdopen.3c
 link path=usr/share/man/man3c/fdopendir.3c target=opendir.3c
@@ -469,6 +472,7 @@ file path=usr/share/man/man3c/gethrtime.3c
 link path=usr/share/man/man3c/gethrvtime.3c target=gethrtime.3c
 file path=usr/share/man/man3c/getline.3c
 file path=usr/share/man/man3c/getloadavg.3c
+file path=usr/share/man/man3c/getlocalename_l.3c
 file path=usr/share/man/man3c/getlogin.3c
 link path=usr/share/man/man3c/getlogin_r.3c target=getlogin.3c
 link path=usr/share/man/man3c/getmntany.3c target=getmntent.3c
@@ -663,6 +667,7 @@ link path=usr/share/man/man3c/llabs.3c target=abs.3c
 link path=usr/share/man/man3c/lldiv.3c target=div.3c
 link path=usr/share/man/man3c/lltostr.3c target=strtol.3c
 file path=usr/share/man/man3c/localeconv.3c
+link path=usr/share/man/man3c/localeconv_l.3c target=localeconv.3c
 link path=usr/share/man/man3c/localtime.3c target=ctime.3c
 link path=usr/share/man/man3c/localtime_r.3c target=ctime.3c
 file path=usr/share/man/man3c/lockf.3c
@@ -1381,6 +1386,7 @@ file path=usr/share/man/man3c/strftime.3c
 link path=usr/share/man/man3c/strftime_l.3c target=strftime.3c
 file path=usr/share/man/man3c/string.3c
 file path=usr/share/man/man3c/string_to_decimal.3c
+link path=usr/share/man/man3c/string_to_decimal_l.3c target=string_to_decimal.3c
 link path=usr/share/man/man3c/strlcat.3c target=string.3c
 link path=usr/share/man/man3c/strlcpy.3c target=string.3c
 link path=usr/share/man/man3c/strlen.3c target=string.3c
@@ -1402,12 +1408,15 @@ file path=usr/share/man/man3c/strsignal.3c
 link path=usr/share/man/man3c/strspn.3c target=string.3c
 link path=usr/share/man/man3c/strstr.3c target=string.3c
 file path=usr/share/man/man3c/strtod.3c
+link path=usr/share/man/man3c/strtod_l.3c target=strtod.3c
 link path=usr/share/man/man3c/strtof.3c target=strtod.3c
+link path=usr/share/man/man3c/strtof_l.3c target=strtod.3c
 file path=usr/share/man/man3c/strtoimax.3c
 link path=usr/share/man/man3c/strtok.3c target=string.3c
 link path=usr/share/man/man3c/strtok_r.3c target=string.3c
 file path=usr/share/man/man3c/strtol.3c
 link path=usr/share/man/man3c/strtold.3c target=strtod.3c
+link path=usr/share/man/man3c/strtold_l.3c target=strtod.3c
 link path=usr/share/man/man3c/strtoll.3c target=strtol.3c
 file path=usr/share/man/man3c/strtonum.3c
 link path=usr/share/man/man3c/strtonumx.3c target=strtonum.3c
@@ -1559,6 +1568,7 @@ link path=usr/share/man/man3c/utmpname.3c target=getutent.3c
 link path=usr/share/man/man3c/utmpxname.3c target=getutxent.3c
 link path=usr/share/man/man3c/valloc.3c target=malloc.3c
 link path=usr/share/man/man3c/vasprintf.3c target=vprintf.3c
+link path=usr/share/man/man3c/vdprintf.3c target=vprintf.3c
 link path=usr/share/man/man3c/verr.3c target=err.3c
 link path=usr/share/man/man3c/verrc.3c target=err.3c
 link path=usr/share/man/man3c/verrx.3c target=err.3c
@@ -1609,6 +1619,7 @@ link path=usr/share/man/man3c/wcscspn.3c target=wcstring.3c
 file path=usr/share/man/man3c/wcsdup.3c
 link path=usr/share/man/man3c/wcsetno.3c target=cset.3c
 file path=usr/share/man/man3c/wcsftime.3c
+link path=usr/share/man/man3c/wcsftime_l.3c target=wcsftime.3c
 file path=usr/share/man/man3c/wcslcat.3c
 file path=usr/share/man/man3c/wcslcpy.3c
 file path=usr/share/man/man3c/wcslen.3c

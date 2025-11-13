@@ -39,6 +39,7 @@
  * Copyright (c) 2017, Datto, Inc. All rights reserved.
  * Copyright 2021 The University of Queensland
  * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /*
@@ -5321,6 +5322,12 @@ zfs_ioc_send_progress(zfs_cmd_t *zc)
 }
 
 static int
+zfs_ioc_arc(zfs_cmd_t *zc)
+{
+	return (arc_dynamic_resize(zc));
+}
+
+static int
 zfs_ioc_inject_fault(zfs_cmd_t *zc)
 {
 	int id, error;
@@ -6927,6 +6934,8 @@ zfs_ioctl_init(void)
 	    zfs_ioc_clear_fault, zfs_secpolicy_inject);
 	zfs_ioctl_register_pool_meta(ZFS_IOC_INJECT_LIST_NEXT,
 	    zfs_ioc_inject_list_next, zfs_secpolicy_inject);
+	zfs_ioctl_register_pool_meta(ZFS_IOC_ARC,
+	    zfs_ioc_arc, zfs_secpolicy_inject);
 
 	/*
 	 * pool destroy, and export don't log the history as part of

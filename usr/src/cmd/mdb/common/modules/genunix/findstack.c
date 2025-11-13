@@ -23,6 +23,7 @@
  * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2013, Josef 'Jeff' Sipek <jeffpc@josefsipek.net>
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include <mdb/mdb_modapi.h>
@@ -54,11 +55,19 @@ static int
 print_stack(uintptr_t sp, uintptr_t pc, uintptr_t addr,
     int argc, const mdb_arg_t *argv, int free_state)
 {
-	int showargs = 0, count, err;
+	boolean_t showargs = B_FALSE;
+	boolean_t types = B_FALSE;
+	boolean_t sizes = B_FALSE;
+	boolean_t addrs = B_FALSE;
+	int count, err;
 	char tdesc[128] = "";
 
 	count = mdb_getopts(argc, argv,
-	    'v', MDB_OPT_SETBITS, TRUE, &showargs, NULL);
+	    'n', MDB_OPT_SETBITS, TRUE, &addrs,
+	    's', MDB_OPT_SETBITS, TRUE, &sizes,
+	    't', MDB_OPT_SETBITS, TRUE, &types,
+	    'v', MDB_OPT_SETBITS, TRUE, &showargs,
+	    NULL);
 	argc -= count;
 	argv += count;
 
@@ -75,12 +84,17 @@ print_stack(uintptr_t sp, uintptr_t pc, uintptr_t addr,
 	mdb_inc_indent(2);
 	mdb_set_dot(sp);
 
-	if (argc == 1)
+	if (argc == 1) {
 		err = mdb_eval(argv->a_un.a_str);
-	else if (showargs)
-		err = mdb_eval("<.$C");
-	else
-		err = mdb_eval("<.$C0");
+	} else {
+		(void) mdb_snprintf(tdesc, sizeof (tdesc),
+		    "<.$C%s%s%s%s",
+		    addrs ? " -n" : "",
+		    sizes ? " -s" : "",
+		    types ? " -t" : "",
+		    showargs ? "" : " 0");
+		err = mdb_eval(tdesc);
+	}
 
 	mdb_dec_indent(2);
 

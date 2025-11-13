@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 /*
@@ -345,6 +345,15 @@ struct pcieadm_cfgspace_print {
 	pcieadm_cfgspace_print_f pcp_print;
 	const void *pcp_arg;
 };
+
+static uint32_t
+pcieadm_cfgspace_getcap32(pcieadm_cfgspace_walk_t *walkp, uint32_t off)
+{
+	off += walkp->pcw_capoff;
+	VERIFY3U(off, <, PCIE_CONF_HDR_SIZE);
+	VERIFY0(off % 4);
+	return (walkp->pcw_data->pcb_u32[off / 4]);
+}
 
 static void
 pcieadm_field_printf(pcieadm_cfgspace_walk_t *walkp, const char *shortf,
@@ -815,6 +824,16 @@ pcieadm_cfgspace_print_dpa_paa(pcieadm_cfgspace_walk_t *walkp,
 	}
 }
 
+static void
+pcieadm_cfgspace_print_table(pcieadm_cfgspace_walk_t *walkp,
+    const pcieadm_cfgspace_print_t *print)
+{
+	for (; print->pcp_short != NULL; print++) {
+		VERIFY3P(print->pcp_print, !=, NULL);
+		print->pcp_print(walkp, print, print->pcp_arg);
+	}
+}
+
 /*
  * Config Space Header Table Definitions
  */
@@ -878,7 +897,7 @@ static const pcieadm_regdef_t pcieadm_regdef_status[] = {
  */
 static const pcieadm_regdef_t pcieadm_regdef_class[] = {
 	{ 16, 23, "class", "Class Code", PRDV_HEX },
-	{ 7, 15, "sclass", "Sub-Class Code", PRDV_HEX },
+	{ 8, 15, "sclass", "Sub-Class Code", PRDV_HEX },
 	{ 0, 7, "pi", "Programming Interface", PRDV_HEX },
 	{ -1, -1, NULL }
 };
@@ -1016,7 +1035,7 @@ static const pcieadm_regdef_t pcieadm_regdef_exprom[] = {
 	{ -1, -1, NULL }
 };
 
-static pcieadm_strmap_t pcieadm_strmap_ipin[] = {
+static const pcieadm_strmap_t pcieadm_strmap_ipin[] = {
 	{ "none", 0 },
 	{ "INTA", PCI_INTA },
 	{ "INTB", PCI_INTB },
@@ -2576,15 +2595,117 @@ static const pcieadm_cfgspace_print_t pcieadm_cap_mcast[] = {
 /*
  * Various vendor extensions
  */
+
+/*
+ * Red Hat Virtio capabilities.
+ */
+
+#define	VIRTIO_PCI_CAP_COMMON_CFG	0x1	/* Common config */
+#define	VIRTIO_PCI_CAP_NOTIFY_CFG	0x2	/* Notifications */
+#define	VIRTIO_PCI_CAP_ISR_CFG		0x3	/* ISR Status */
+#define	VIRTIO_PCI_CAP_DEVICE_CFG	0x4	/* Device-specific config */
+#define	VIRTIO_PCI_CAP_PCI_CFG		0x5	/* PCI config access */
+
+static const pcieadm_strmap_t pcieadm_strmap_vs_virtio_type[] = {
+	{ "Virtio Common Configuration", VIRTIO_PCI_CAP_COMMON_CFG },
+	{ "Virtio Notifications", VIRTIO_PCI_CAP_NOTIFY_CFG },
+	{ "Virtio ISR Status", VIRTIO_PCI_CAP_ISR_CFG },
+	{ "Virtio Device-specific Configuration", VIRTIO_PCI_CAP_DEVICE_CFG },
+	{ "Virtio PCI Configuration Access", VIRTIO_PCI_CAP_PCI_CFG },
+	{ NULL }
+};
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs_virtio_common[] = {
+	{ 0x3, 1, "type", "Type",
+	    pcieadm_cfgspace_print_strmap, pcieadm_strmap_vs_virtio_type },
+	{ 0x4, 1, "bar", "BAR", pcieadm_cfgspace_print_hex },
+	{ 0x8, 2, "offset", "Offset", pcieadm_cfgspace_print_hex },
+	{ 0xc, 2, "len", "Length", pcieadm_cfgspace_print_hex },
+	{ -1, -1, NULL }
+};
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs_virtio_notify[] = {
+	{ 0x10, 2, "mult", "Multiplier", pcieadm_cfgspace_print_hex },
+	{ -1, -1, NULL }
+};
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs_virtio_pci[] = {
+	{ 0x10, 4, "data", "Data", pcieadm_cfgspace_print_hex },
+	{ -1, -1, NULL }
+};
+
+static boolean_t
+pcieadm_cfgspace_print_vs_virtio(pcieadm_cfgspace_walk_t *walkp,
+    const pcieadm_cfgspace_print_t *print, const void *arg)
+{
+	uint8_t caplen, type;
+
+	caplen = walkp->pcw_data->pcb_u8[walkp->pcw_capoff + 2];
+	if (caplen < 0x10)
+		return (B_FALSE);
+
+	type = walkp->pcw_data->pcb_u8[walkp->pcw_capoff + 3];
+
+	if (type > VIRTIO_PCI_CAP_PCI_CFG)
+		return (B_FALSE);
+
+	pcieadm_cfgspace_print_table(walkp, pcieadm_cap_vs_virtio_common);
+
+	switch (type) {
+	case VIRTIO_PCI_CAP_NOTIFY_CFG:
+		pcieadm_cfgspace_print_table(walkp,
+		    pcieadm_cap_vs_virtio_notify);
+		break;
+	case VIRTIO_PCI_CAP_PCI_CFG:
+		pcieadm_cfgspace_print_table(walkp,
+		    pcieadm_cap_vs_virtio_pci);
+		break;
+	default:
+		break;
+	}
+
+	return (B_TRUE);
+}
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs_unknown[] = {
+	{ 0x2, 1, "length", "Length", pcieadm_cfgspace_print_hex },
+	{ -1, -1, NULL }
+};
+
+static void
+pcieadm_cfgspace_print_vs(pcieadm_cfgspace_walk_t *walkp,
+    const pcieadm_cfgspace_print_t *print, const void *arg)
+{
+	uint16_t vid = walkp->pcw_data->pcb_u8[PCI_CONF_VENID] +
+	    (walkp->pcw_data->pcb_u8[PCI_CONF_VENID + 1] << 8);
+	uint16_t did = walkp->pcw_data->pcb_u8[PCI_CONF_DEVID] +
+	    (walkp->pcw_data->pcb_u8[PCI_CONF_DEVID + 1] << 8);
+
+	/*
+	 * Red Hat virtio
+	 */
+	if (vid == 0x1af4 && did >= 0x1000 && did <= 0x107f) {
+		if (pcieadm_cfgspace_print_vs_virtio(walkp, print, arg))
+			return;
+	}
+
+	/*
+	 * For any unknown vendor-specific capability there is not a lot we can
+	 * print since all of the data after the first three bytes is
+	 * vendor-specific.
+	 */
+	pcieadm_cfgspace_print_table(walkp, pcieadm_cap_vs_unknown);
+}
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs[] = {
+	{ 0x0, 1, "vs", "Vendor Specific", pcieadm_cfgspace_print_vs },
+	{ -1, -1, NULL }
+};
+
 static const pcieadm_regdef_t pcieadm_regdef_vsec[] = {
 	{ 0, 15, "id", "ID", PRDV_HEX },
 	{ 16, 19, "rev", "Revision", PRDV_HEX },
 	{ 20, 31, "len", "Length", PRDV_HEX },
-	{ -1, -1, NULL }
-};
-
-static const pcieadm_cfgspace_print_t pcieadm_cap_vs[] = {
-	{ 0x2, 2, "length", "Length", pcieadm_cfgspace_print_hex },
 	{ -1, -1, NULL }
 };
 
@@ -2855,7 +2976,7 @@ pcieadm_cfgspace_print_tphst(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
 	uint_t nents;
-	uint32_t tphcap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t tphcap = pcieadm_cfgspace_getcap32(walkp, 4);
 
 	if (bitx32(tphcap, 10, 9) != 1) {
 		return;
@@ -3367,7 +3488,7 @@ static void
 pcieadm_cfgspace_print_dpc_rppio(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 
 	if (bitx32(cap, 5, 5) == 0) {
 		return;
@@ -3380,7 +3501,7 @@ static void
 pcieadm_cfgspace_print_dpc_piohead(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	uint32_t nwords = bitx32(cap, 11, 8);
 
 	if (bitx32(cap, 5, 5) == 0 || nwords < 4) {
@@ -3394,7 +3515,7 @@ static void
 pcieadm_cfgspace_print_dpc_impspec(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	uint32_t nwords = bitx32(cap, 11, 8);
 
 	if (bitx32(cap, 5, 5) == 0 || nwords < 5) {
@@ -3408,7 +3529,7 @@ static void
 pcieadm_cfgspace_print_dpc_tlplog(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	int32_t nwords = (int32_t)bitx32(cap, 11, 8);
 
 	if (nwords == 0 || bitx32(cap, 5, 5) == 0) {
@@ -3554,7 +3675,7 @@ static void
 pcieadm_cfgspace_print_vc_rsrc(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	uint32_t nents = bitx32(cap, 2, 0) + 1;
 
 	for (uint32_t i = 0; i < nents; i++) {
@@ -4650,7 +4771,7 @@ static void
 pcieadm_cfgspace_print_ap_sen(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t ap_cap = walkp->pcw_data->pcb_u32[walkp->pcw_capoff + 4];
+	uint32_t ap_cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	pcieadm_cfgspace_print_t p;
 
 	if (bitx32(ap_cap, 8, 8) == 0)
@@ -4898,7 +5019,11 @@ static const pcieadm_pci_cap_t pcieadm_pcie_caps[] = {
 	    "Flit Performance Measurement" },
 	{ PCIE_EXT_CAP_ID_FLIT_ERR, "flterr", "Flit Error Injection" },
 	{ PCIE_EXT_CAP_ID_SVC, "svc", "Streamlined Virtual Channel" },
-	{ PCIE_EXT_CAP_ID_MMIO_RBL, "mrbl", "MMIO Register Block Locator" }
+	{ PCIE_EXT_CAP_ID_MMIO_RBL, "mrbl", "MMIO Register Block Locator" },
+	{ PCIE_EXT_CAP_ID_NOP_FLIT, "nop", "NOP Flit" },
+	{ PCIE_EXT_CAP_ID_SIOV, "siov", "Scalable I/O Virtualization" },
+	{ PCIE_EXT_CAP_ID_PL128GT, "pl128g", "Physical Layer 128.0 GT/s" },
+	{ PCIE_EXT_CAP_ID_CAP_DATA, "cdata", "Captured Data" }
 };
 
 static const pcieadm_pci_cap_t *
@@ -4991,15 +5116,8 @@ pcieadm_cfgspace_print_cap(pcieadm_cfgspace_walk_t *walkp, uint_t capid,
 	}
 
 	if (vers_info != NULL) {
-		const pcieadm_cfgspace_print_t *print;
-
 		pcieadm_indent();
-		for (print = vers_info->ppr_print;
-		    print->pcp_short != NULL; print++) {
-			VERIFY3P(print->pcp_print, !=, NULL);
-			print->pcp_print(walkp, print,
-			    print->pcp_arg);
-		}
+		pcieadm_cfgspace_print_table(walkp, vers_info->ppr_print);
 		pcieadm_deindent();
 	} else {
 		if (subcap != NULL) {
@@ -5108,8 +5226,6 @@ pcieadm_cfgspace(pcieadm_t *pcip, pcieadm_cfgspace_op_t op,
 	if (op == PCIEADM_CFGSPACE_OP_WRITE) {
 		pcieadm_cfgspace_write(fd, &data.pcb_u8[0], PCI_CAP_PTR_OFF);
 	} else if (op == PCIEADM_CFGSPACE_OP_PRINT) {
-		const pcieadm_cfgspace_print_t *print;
-
 		if (walk.pcw_ofmt == NULL &&
 		    pcieadm_cfgspace_filter(&walk, headshort)) {
 			if ((flags & PCIEADM_CFGSPACE_F_SHORT) != 0) {
@@ -5123,9 +5239,7 @@ pcieadm_cfgspace(pcieadm_t *pcip, pcieadm_cfgspace_op_t op,
 
 		pcieadm_strfilt_push(&walk, headshort);
 		pcieadm_indent();
-		for (print = header; print->pcp_short != NULL; print++) {
-			print->pcp_print(&walk, print, print->pcp_arg);
-		}
+		pcieadm_cfgspace_print_table(&walk, header);
 		pcieadm_deindent();
 		pcieadm_strfilt_pop(&walk);
 	}

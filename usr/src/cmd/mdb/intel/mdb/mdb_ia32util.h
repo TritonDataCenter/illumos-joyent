@@ -24,6 +24,7 @@
  */
 /*
  * Copyright (c) 2018, Joyent, Inc.  All rights reserved.
+ * Copyright 2025 Oxide Computer Company
  */
 
 #ifndef _MDB_IA32UTIL_H
@@ -48,8 +49,7 @@ extern int mdb_ia32_kvm_stack_iter(mdb_tgt_t *, const mdb_tgt_gregset_t *,
 
 extern int mdb_ia32_kvm_frame(void *, uintptr_t, uint_t, const long *,
     const mdb_tgt_gregset_t *);
-extern int mdb_ia32_kvm_framev(void *, uintptr_t, uint_t, const long *,
-    const mdb_tgt_gregset_t *);
+extern boolean_t mdb_ia32_prev_callcheck(uintptr_t);
 
 #ifdef __cplusplus
 }

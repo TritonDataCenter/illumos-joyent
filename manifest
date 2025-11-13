@@ -19,6 +19,7 @@
 # CDDL HEADER END
 #
 #
+# Copyright 2025 Edgecast Cloud LLC.
 # Copyright 2025 MNX Cloud, Inc.
 # Copyright 2020 Joyent, Inc.
 # Copyright 2017 ASS-Einrichtungssysteme GmbH
@@ -2081,7 +2082,18 @@ f platform/i86pc/ucode/AuthenticAMD/A780-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/A7C0-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/AA01-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/AA02-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B021-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B110-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/equivalence-table 0444 root sys
+d platform/i86pc/ucode/AuthenticAMD/fallback 0755 root sys
+f platform/i86pc/ucode/AuthenticAMD/fallback/8012-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/fallback/8310-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/fallback/A011-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/fallback/A012-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/fallback/A111-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/fallback/A112-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/fallback/A612-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/fallback/AA02-00 0444 root sys
 d platform/i86pc/ucode/GenuineIntel 0755 root sys
 f platform/i86pc/ucode/GenuineIntel/00000650-01 0444 root sys
 f platform/i86pc/ucode/GenuineIntel/00000650-02 0444 root sys
@@ -2360,13 +2372,6 @@ h platform/i86pc/ucode/GenuineIntel/00050655-04=platform/i86pc/ucode/GenuineInte
 h platform/i86pc/ucode/GenuineIntel/00050655-10=platform/i86pc/ucode/GenuineIntel/00050655-01
 h platform/i86pc/ucode/GenuineIntel/00050655-20=platform/i86pc/ucode/GenuineIntel/00050655-01
 h platform/i86pc/ucode/GenuineIntel/00050655-80=platform/i86pc/ucode/GenuineIntel/00050655-01
-f platform/i86pc/ucode/GenuineIntel/00050656-01 0444 root sys
-h platform/i86pc/ucode/GenuineIntel/00050656-02=platform/i86pc/ucode/GenuineIntel/00050656-01
-h platform/i86pc/ucode/GenuineIntel/00050656-04=platform/i86pc/ucode/GenuineIntel/00050656-01
-h platform/i86pc/ucode/GenuineIntel/00050656-08=platform/i86pc/ucode/GenuineIntel/00050656-01
-h platform/i86pc/ucode/GenuineIntel/00050656-10=platform/i86pc/ucode/GenuineIntel/00050656-01
-h platform/i86pc/ucode/GenuineIntel/00050656-20=platform/i86pc/ucode/GenuineIntel/00050656-01
-h platform/i86pc/ucode/GenuineIntel/00050656-80=platform/i86pc/ucode/GenuineIntel/00050656-01
 f platform/i86pc/ucode/GenuineIntel/00050657-01 0444 root sys
 h platform/i86pc/ucode/GenuineIntel/00050657-02=platform/i86pc/ucode/GenuineIntel/00050657-01
 h platform/i86pc/ucode/GenuineIntel/00050657-04=platform/i86pc/ucode/GenuineIntel/00050657-01
@@ -2485,9 +2490,19 @@ h platform/i86pc/ucode/GenuineIntel/000A06A4-04=platform/i86pc/ucode/GenuineInte
 h platform/i86pc/ucode/GenuineIntel/000A06A4-20=platform/i86pc/ucode/GenuineIntel/000A06A4-02
 h platform/i86pc/ucode/GenuineIntel/000A06A4-40=platform/i86pc/ucode/GenuineIntel/000A06A4-02
 h platform/i86pc/ucode/GenuineIntel/000A06A4-80=platform/i86pc/ucode/GenuineIntel/000A06A4-02
+f platform/i86pc/ucode/GenuineIntel/000A06D1-01 0444 root sys
+h platform/i86pc/ucode/GenuineIntel/000A06D1-04=platform/i86pc/ucode/GenuineIntel/000A06D1-01
+h platform/i86pc/ucode/GenuineIntel/000A06D1-10=platform/i86pc/ucode/GenuineIntel/000A06D1-01
+f platform/i86pc/ucode/GenuineIntel/000A06D1-20 0444 root sys
+h platform/i86pc/ucode/GenuineIntel/000A06D1-80=platform/i86pc/ucode/GenuineIntel/000A06D1-01
+f platform/i86pc/ucode/GenuineIntel/000A06F3-01 0444 root sys
+f platform/i86pc/ucode/GenuineIntel/000B0650-80 0444 root sys
 f platform/i86pc/ucode/GenuineIntel/000B0671-02 0444 root sys
 h platform/i86pc/ucode/GenuineIntel/000B0671-10=platform/i86pc/ucode/GenuineIntel/000B0671-02
 h platform/i86pc/ucode/GenuineIntel/000B0671-20=platform/i86pc/ucode/GenuineIntel/000B0671-02
+h platform/i86pc/ucode/GenuineIntel/000B0674-02=platform/i86pc/ucode/GenuineIntel/000B0671-02
+h platform/i86pc/ucode/GenuineIntel/000B0674-10=platform/i86pc/ucode/GenuineIntel/000B0671-02
+h platform/i86pc/ucode/GenuineIntel/000B0674-20=platform/i86pc/ucode/GenuineIntel/000B0671-02
 f platform/i86pc/ucode/GenuineIntel/000B06A2-20 0444 root sys
 h platform/i86pc/ucode/GenuineIntel/000B06A2-40=platform/i86pc/ucode/GenuineIntel/000B06A2-20
 h platform/i86pc/ucode/GenuineIntel/000B06A2-80=platform/i86pc/ucode/GenuineIntel/000B06A2-20
@@ -2497,6 +2512,7 @@ h platform/i86pc/ucode/GenuineIntel/000B06A3-80=platform/i86pc/ucode/GenuineInte
 h platform/i86pc/ucode/GenuineIntel/000B06A8-20=platform/i86pc/ucode/GenuineIntel/000B06A2-20
 h platform/i86pc/ucode/GenuineIntel/000B06A8-40=platform/i86pc/ucode/GenuineIntel/000B06A2-20
 h platform/i86pc/ucode/GenuineIntel/000B06A8-80=platform/i86pc/ucode/GenuineIntel/000B06A2-20
+f platform/i86pc/ucode/GenuineIntel/000B06D1-80 0444 root sys
 f platform/i86pc/ucode/GenuineIntel/000B06E0-01 0444 root sys
 h platform/i86pc/ucode/GenuineIntel/000B06E0-08=platform/i86pc/ucode/GenuineIntel/000B06E0-01
 h platform/i86pc/ucode/GenuineIntel/000B06E0-10=platform/i86pc/ucode/GenuineIntel/000B06E0-01
@@ -2506,6 +2522,20 @@ h platform/i86pc/ucode/GenuineIntel/000B06F2-04=platform/i86pc/ucode/GenuineInte
 h platform/i86pc/ucode/GenuineIntel/000B06F5-01=platform/i86pc/ucode/GenuineIntel/00090672-01
 h platform/i86pc/ucode/GenuineIntel/000B06F5-02=platform/i86pc/ucode/GenuineIntel/00090672-01
 h platform/i86pc/ucode/GenuineIntel/000B06F5-04=platform/i86pc/ucode/GenuineIntel/00090672-01
+h platform/i86pc/ucode/GenuineIntel/000B06F6-01=platform/i86pc/ucode/GenuineIntel/00090672-01
+h platform/i86pc/ucode/GenuineIntel/000B06F6-02=platform/i86pc/ucode/GenuineIntel/00090672-01
+h platform/i86pc/ucode/GenuineIntel/000B06F6-04=platform/i86pc/ucode/GenuineIntel/00090672-01
+h platform/i86pc/ucode/GenuineIntel/000B06F7-01=platform/i86pc/ucode/GenuineIntel/00090672-01
+h platform/i86pc/ucode/GenuineIntel/000B06F7-02=platform/i86pc/ucode/GenuineIntel/00090672-01
+h platform/i86pc/ucode/GenuineIntel/000B06F7-04=platform/i86pc/ucode/GenuineIntel/00090672-01
+f platform/i86pc/ucode/GenuineIntel/000C0652-02 0444 root sys
+h platform/i86pc/ucode/GenuineIntel/000C0652-80=platform/i86pc/ucode/GenuineIntel/000C0652-02
+h platform/i86pc/ucode/GenuineIntel/000C0662-02=platform/i86pc/ucode/GenuineIntel/000C0652-02
+h platform/i86pc/ucode/GenuineIntel/000C0662-80=platform/i86pc/ucode/GenuineIntel/000C0652-02
+h platform/i86pc/ucode/GenuineIntel/000C0664-02=platform/i86pc/ucode/GenuineIntel/000C0652-02
+h platform/i86pc/ucode/GenuineIntel/000C0664-80=platform/i86pc/ucode/GenuineIntel/000C0652-02
+h platform/i86pc/ucode/GenuineIntel/000C06A2-02=platform/i86pc/ucode/GenuineIntel/000C0652-02
+h platform/i86pc/ucode/GenuineIntel/000C06A2-80=platform/i86pc/ucode/GenuineIntel/000C0652-02
 f platform/i86pc/ucode/GenuineIntel/000C06F1-01 0444 root sys
 h platform/i86pc/ucode/GenuineIntel/000C06F1-02=platform/i86pc/ucode/GenuineIntel/000C06F1-01
 h platform/i86pc/ucode/GenuineIntel/000C06F1-04=platform/i86pc/ucode/GenuineIntel/000C06F1-01
@@ -2760,7 +2790,7 @@ f usr/bin/fdformat 4555 root bin
 h usr/bin/fg=usr/bin/alias
 h usr/bin/fgrep=usr/bin/grep
 f usr/bin/ficl-sys 0555 root bin
-f usr/bin/file 0555 root bin
+s usr/bin/file=../has/bin/file
 f usr/bin/filesync 0555 root bin
 f usr/bin/find 0555 root bin
 f usr/bin/fmt 0555 root bin
@@ -3130,10 +3160,13 @@ d usr/gnu/share/man/man3 0755 root bin
 d usr/gnu/share/man/man5 0755 root bin
 d usr/gnu/share/man/man7 0755 root bin
 d usr/has 0755 root bin
+d usr/has/bin 0755 root bin
+f usr/has/bin/file 0755 root bin
 d usr/has/man 0755 root bin
 d usr/has/man/man1has 0755 root bin
 f usr/has/man/man1has/csh.1has 0444 root bin
 f usr/has/man/man1has/edit.1has 0444 root bin
+f usr/has/man/man1has/file.1has 0444 root bin
 f usr/has/man/man1has/vi.1has 0444 root bin
 d usr/include 0755 root bin
 f usr/include/aclutils.h 0644 root bin
@@ -3478,7 +3511,7 @@ d usr/include/ipp/meters 0755 root bin
 f usr/include/ipp/meters/meter.h 0644 root bin
 f usr/include/ipsec_util.h 0644 root bin
 d usr/include/iso 0755 root bin
-s usr/include/iso/assert_iso.h=../assert.h
+f usr/include/iso/assert_iso.h 0644 root bin
 f usr/include/iso/ctype_iso.h 0644 root bin
 s usr/include/iso/errno_iso.h=../errno.h
 s usr/include/iso/float_iso.h=../float.h
@@ -4636,6 +4669,7 @@ f usr/include/sys/nvme/micron_9550.h 0644 root bin
 f usr/include/sys/nvme/micron_x500.h 0644 root bin
 f usr/include/sys/nvme/ocp.h 0644 root bin
 f usr/include/sys/nvme/phison.h 0644 root bin
+f usr/include/sys/nvme/samsung.h 0644 root bin
 f usr/include/sys/nvme/solidigm.h 0644 root bin
 f usr/include/sys/nvme/solidigm_p5xxx.h 0644 root bin
 f usr/include/sys/nvme/solidigm_ps10x0.h 0644 root bin
@@ -5074,7 +5108,6 @@ f usr/include/time.h 0644 root bin
 f usr/include/tiuser.h 0644 root bin
 d usr/include/tsol 0755 root bin
 f usr/include/tsol/label.h 0644 root bin
-f usr/include/tzfile.h 0644 root bin
 f usr/include/uchar.h 0644 root bin
 f usr/include/ucontext.h 0644 root bin
 f usr/include/ucred.h 0644 root bin
@@ -5675,6 +5708,7 @@ d usr/lib/brand 0755 root bin
 d usr/lib/brand/bhyve 0555 root sys
 f usr/lib/brand/bhyve/attach 0555 root sys
 f usr/lib/brand/bhyve/bhhwcompat 0555 root sys
+f usr/lib/brand/bhyve/binstall 0755 root root
 f usr/lib/brand/bhyve/boot 0555 root sys
 f usr/lib/brand/bhyve/config.xml 0444 root sys
 f usr/lib/brand/bhyve/detach 0555 root sys
@@ -5682,6 +5716,9 @@ f usr/lib/brand/bhyve/platform.xml 0444 root sys
 f usr/lib/brand/bhyve/statechange 0555 root sys
 f usr/lib/brand/bhyve/uninstall 0555 root sys
 f usr/lib/brand/bhyve/zhyve 0555 root sys
+d usr/lib/brand/builder 0555 root sys
+f usr/lib/brand/builder/config.xml 0444 root root
+f usr/lib/brand/builder/platform.xml 0444 root root
 d usr/lib/brand/jcommon 0755 root bin
 f usr/lib/brand/jcommon/cattach 0444 root root
 f usr/lib/brand/jcommon/cdetach 0444 root root
@@ -10267,7 +10304,7 @@ f usr/lib/mdb/proc/amd64/libavl.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libc.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libnvpair.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libproc.so 0555 root sys
-f usr/lib/mdb/proc/amd64/libpython3.9.so 0555 root sys
+f usr/lib/mdb/proc/amd64/libpython3.12.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libsmbios.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libsysevent.so 0555 root sys
 f usr/lib/mdb/proc/amd64/libtopo.so 0555 root sys
@@ -10742,10 +10779,7 @@ f usr/lib/xhci/xhci_portsc 0555 root bin
 d usr/lib/zfs 0755 root bin
 f usr/lib/zfs/availdevs 0555 root bin
 d usr/lib/zones 0755 root bin
-d usr/lib/zones/amd64 0755 root bin
-f usr/lib/zones/amd64/zoneadmd 0555 root bin
-d usr/lib/zones/i86 0755 root bin
-h usr/lib/zones/zoneadmd=usr/lib/isaexec
+f usr/lib/zones/zoneadmd 0555 root bin
 f usr/lib/zones/zoneshare 0555 root bin
 f usr/lib/zones/zoneunshare 0555 root bin
 d usr/libexec 07555 root bin
@@ -11212,6 +11246,7 @@ f usr/sbin/ypset 0555 root bin
 f usr/sbin/zdb 0555 root bin
 f usr/sbin/zdump 0555 root bin
 s usr/sbin/zfs=../../sbin/zfs
+f usr/sbin/zfscache 0555 root bin
 f usr/sbin/zic 0555 root bin
 f usr/sbin/zinject 0555 root bin
 f usr/sbin/zlogin 0555 root bin
@@ -11551,6 +11586,7 @@ f usr/share/lib/zoneinfo/America/Ciudad_Juarez 0644 root bin
 h usr/share/lib/zoneinfo/America/Coral_Harbour=usr/share/lib/zoneinfo/America/Panama
 h usr/share/lib/zoneinfo/America/Cordoba=usr/share/lib/zoneinfo/America/Argentina/Cordoba
 f usr/share/lib/zoneinfo/America/Costa_Rica 0644 root bin
+f usr/share/lib/zoneinfo/America/Coyhaique 0644 root bin
 h usr/share/lib/zoneinfo/America/Creston=usr/share/lib/zoneinfo/America/Phoenix
 f usr/share/lib/zoneinfo/America/Cuiaba 0644 root bin
 h usr/share/lib/zoneinfo/America/Curacao=usr/share/lib/zoneinfo/America/Puerto_Rico
@@ -11712,7 +11748,7 @@ f usr/share/lib/zoneinfo/Asia/Bishkek 0644 root bin
 h usr/share/lib/zoneinfo/Asia/Brunei=usr/share/lib/zoneinfo/Asia/Kuching
 h usr/share/lib/zoneinfo/Asia/Calcutta=usr/share/lib/zoneinfo/Asia/Kolkata
 f usr/share/lib/zoneinfo/Asia/Chita 0644 root bin
-f usr/share/lib/zoneinfo/Asia/Choibalsan 0644 root bin
+h usr/share/lib/zoneinfo/Asia/Choibalsan=usr/share/lib/zoneinfo/Asia/Ulaanbaatar
 h usr/share/lib/zoneinfo/Asia/Chongqing=usr/share/lib/zoneinfo/Asia/Shanghai
 h usr/share/lib/zoneinfo/Asia/Chungking=usr/share/lib/zoneinfo/Asia/Shanghai
 f usr/share/lib/zoneinfo/Asia/Colombo 0644 root bin
@@ -11834,8 +11870,8 @@ h usr/share/lib/zoneinfo/Brazil/Acre=usr/share/lib/zoneinfo/America/Rio_Branco
 f usr/share/lib/zoneinfo/Brazil/DeNoronha 0644 root bin
 f usr/share/lib/zoneinfo/Brazil/East 0644 root bin
 f usr/share/lib/zoneinfo/Brazil/West 0644 root bin
-f usr/share/lib/zoneinfo/CET 0644 root bin
-f usr/share/lib/zoneinfo/CST6CDT 0644 root bin
+h usr/share/lib/zoneinfo/CET=usr/share/lib/zoneinfo/Europe/Brussels
+h usr/share/lib/zoneinfo/CST6CDT=usr/share/lib/zoneinfo/America/Chicago
 d usr/share/lib/zoneinfo/Canada 0755 root bin
 f usr/share/lib/zoneinfo/Canada/Atlantic 0644 root bin
 f usr/share/lib/zoneinfo/Canada/Central 0644 root bin
@@ -11849,9 +11885,9 @@ d usr/share/lib/zoneinfo/Chile 0755 root bin
 f usr/share/lib/zoneinfo/Chile/Continental 0644 root bin
 f usr/share/lib/zoneinfo/Chile/EasterIsland 0644 root bin
 f usr/share/lib/zoneinfo/Cuba 0644 root bin
-f usr/share/lib/zoneinfo/EET 0644 root bin
-f usr/share/lib/zoneinfo/EST 0644 root bin
-f usr/share/lib/zoneinfo/EST5EDT 0644 root bin
+h usr/share/lib/zoneinfo/EET=usr/share/lib/zoneinfo/Europe/Athens
+h usr/share/lib/zoneinfo/EST=usr/share/lib/zoneinfo/America/Panama
+h usr/share/lib/zoneinfo/EST5EDT=usr/share/lib/zoneinfo/America/New_York
 f usr/share/lib/zoneinfo/Egypt 0644 root bin
 f usr/share/lib/zoneinfo/Eire 0644 root bin
 d usr/share/lib/zoneinfo/Etc 0755 root bin
@@ -11963,7 +11999,7 @@ h usr/share/lib/zoneinfo/GMT+0=usr/share/lib/zoneinfo/GMT
 h usr/share/lib/zoneinfo/GMT-0=usr/share/lib/zoneinfo/GMT
 h usr/share/lib/zoneinfo/GMT0=usr/share/lib/zoneinfo/GMT
 h usr/share/lib/zoneinfo/Greenwich=usr/share/lib/zoneinfo/GMT
-f usr/share/lib/zoneinfo/HST 0644 root bin
+h usr/share/lib/zoneinfo/HST=usr/share/lib/zoneinfo/Pacific/Honolulu
 f usr/share/lib/zoneinfo/Hongkong 0644 root bin
 h usr/share/lib/zoneinfo/Iceland=usr/share/lib/zoneinfo/Africa/Abidjan
 d usr/share/lib/zoneinfo/Indian 0755 root bin
@@ -11984,9 +12020,9 @@ f usr/share/lib/zoneinfo/Jamaica 0644 root bin
 f usr/share/lib/zoneinfo/Japan 0644 root bin
 f usr/share/lib/zoneinfo/Kwajalein 0644 root bin
 f usr/share/lib/zoneinfo/Libya 0644 root bin
-f usr/share/lib/zoneinfo/MET 0644 root bin
-f usr/share/lib/zoneinfo/MST 0644 root bin
-f usr/share/lib/zoneinfo/MST7MDT 0644 root bin
+h usr/share/lib/zoneinfo/MET=usr/share/lib/zoneinfo/Europe/Brussels
+h usr/share/lib/zoneinfo/MST=usr/share/lib/zoneinfo/America/Phoenix
+h usr/share/lib/zoneinfo/MST7MDT=usr/share/lib/zoneinfo/America/Denver
 d usr/share/lib/zoneinfo/Mexico 0755 root bin
 h usr/share/lib/zoneinfo/Mexico/BajaNorte=usr/share/lib/zoneinfo/America/Tijuana
 f usr/share/lib/zoneinfo/Mexico/BajaSur 0644 root bin
@@ -11995,7 +12031,7 @@ f usr/share/lib/zoneinfo/NZ 0644 root bin
 f usr/share/lib/zoneinfo/NZ-CHAT 0644 root bin
 h usr/share/lib/zoneinfo/Navajo=usr/share/lib/zoneinfo/US/Mountain
 f usr/share/lib/zoneinfo/PRC 0644 root bin
-f usr/share/lib/zoneinfo/PST8PDT 0644 root bin
+h usr/share/lib/zoneinfo/PST8PDT=usr/share/lib/zoneinfo/America/Los_Angeles
 d usr/share/lib/zoneinfo/Pacific 0755 root bin
 f usr/share/lib/zoneinfo/Pacific/Apia 0644 root bin
 f usr/share/lib/zoneinfo/Pacific/Auckland 0644 root bin
@@ -12064,7 +12100,7 @@ f usr/share/lib/zoneinfo/US/Samoa 0644 root bin
 f usr/share/lib/zoneinfo/UTC 0644 root bin
 h usr/share/lib/zoneinfo/Universal=usr/share/lib/zoneinfo/UTC
 f usr/share/lib/zoneinfo/W-SU 0644 root bin
-f usr/share/lib/zoneinfo/WET 0644 root bin
+h usr/share/lib/zoneinfo/WET=usr/share/lib/zoneinfo/Europe/Lisbon
 h usr/share/lib/zoneinfo/Zulu=usr/share/lib/zoneinfo/UTC
 s usr/share/lib/zoneinfo/posixrules=US/Eastern
 d usr/share/lib/zoneinfo/src 0755 root bin
@@ -12204,7 +12240,7 @@ s usr/share/man/man1/fc.1=history.1
 f usr/share/man/man1/fdformat.1 0444 root bin
 s usr/share/man/man1/fg.1=jobs.1
 s usr/share/man/man1/fgrep.1=grep.1
-f usr/share/man/man1/file.1 0444 root bin
+s usr/share/man/man1/file.1=../../../has/man/man1has/file.1has
 f usr/share/man/man1/filesync.1 0444 root bin
 f usr/share/man/man1/find.1 0444 root bin
 f usr/share/man/man1/fmt.1 0444 root bin
@@ -13121,6 +13157,7 @@ s usr/share/man/man3c/door_setparam.3c=door_getparam.3c
 f usr/share/man/man3c/door_ucred.3c 0444 root bin
 s usr/share/man/man3c/door_unbind.3c=door_bind.3c
 s usr/share/man/man3c/double_to_decimal.3c=floating_to_decimal.3c
+s usr/share/man/man3c/dprintf.3c=printf.3c
 f usr/share/man/man3c/drand48.3c 0444 root bin
 f usr/share/man/man3c/dup2.3c 0444 root bin
 s usr/share/man/man3c/dup3.3c=dup2.3c
@@ -13165,6 +13202,7 @@ f usr/share/man/man3c/fcloseall.3c 0444 root bin
 s usr/share/man/man3c/fconvert.3c=econvert.3c
 s usr/share/man/man3c/fcvt.3c=ecvt.3c
 f usr/share/man/man3c/fdatasync.3c 0444 root bin
+f usr/share/man/man3c/fdclose.3c 0444 root bin
 f usr/share/man/man3c/fdetach.3c 0444 root bin
 f usr/share/man/man3c/fdopen.3c 0444 root bin
 s usr/share/man/man3c/fdopendir.3c=opendir.3c
@@ -13275,6 +13313,7 @@ f usr/share/man/man3c/gethrtime.3c 0444 root bin
 s usr/share/man/man3c/gethrvtime.3c=gethrtime.3c
 f usr/share/man/man3c/getline.3c 0444 root bin
 f usr/share/man/man3c/getloadavg.3c 0444 root bin
+f usr/share/man/man3c/getlocalename_l.3c 0444 root bin
 f usr/share/man/man3c/getlogin.3c 0444 root bin
 s usr/share/man/man3c/getlogin_r.3c=getlogin.3c
 s usr/share/man/man3c/getmntany.3c=getmntent.3c
@@ -13473,6 +13512,7 @@ s usr/share/man/man3c/llabs.3c=abs.3c
 s usr/share/man/man3c/lldiv.3c=div.3c
 s usr/share/man/man3c/lltostr.3c=strtol.3c
 f usr/share/man/man3c/localeconv.3c 0444 root bin
+s usr/share/man/man3c/localeconv_l.3c=localeconv.3c
 s usr/share/man/man3c/localtime.3c=ctime.3c
 s usr/share/man/man3c/localtime_r.3c=ctime.3c
 f usr/share/man/man3c/lockf.3c 0444 root bin
@@ -14069,6 +14109,7 @@ f usr/share/man/man3c/strftime.3c 0444 root bin
 s usr/share/man/man3c/strftime_l.3c=strftime.3c
 f usr/share/man/man3c/string.3c 0444 root bin
 f usr/share/man/man3c/string_to_decimal.3c 0444 root bin
+s usr/share/man/man3c/string_to_decimal_l.3c=string_to_decimal.3c
 s usr/share/man/man3c/strlcat.3c=string.3c
 s usr/share/man/man3c/strlcpy.3c=string.3c
 s usr/share/man/man3c/strlen.3c=string.3c
@@ -14090,12 +14131,15 @@ f usr/share/man/man3c/strsignal.3c 0444 root bin
 s usr/share/man/man3c/strspn.3c=string.3c
 s usr/share/man/man3c/strstr.3c=string.3c
 f usr/share/man/man3c/strtod.3c 0444 root bin
+s usr/share/man/man3c/strtod_l.3c=strtod.3c
 s usr/share/man/man3c/strtof.3c=strtod.3c
+s usr/share/man/man3c/strtof_l.3c=strtod.3c
 f usr/share/man/man3c/strtoimax.3c 0444 root bin
 s usr/share/man/man3c/strtok.3c=string.3c
 s usr/share/man/man3c/strtok_r.3c=string.3c
 f usr/share/man/man3c/strtol.3c 0444 root bin
 s usr/share/man/man3c/strtold.3c=strtod.3c
+s usr/share/man/man3c/strtold_l.3c=strtod.3c
 s usr/share/man/man3c/strtoll.3c=strtol.3c
 f usr/share/man/man3c/strtonum.3c 0444 root bin
 s usr/share/man/man3c/strtonumx.3c=strtonum.3c
@@ -14247,6 +14291,7 @@ s usr/share/man/man3c/utmpname.3c=getutent.3c
 s usr/share/man/man3c/utmpxname.3c=getutxent.3c
 s usr/share/man/man3c/valloc.3c=malloc.3c
 s usr/share/man/man3c/vasprintf.3c=vprintf.3c
+s usr/share/man/man3c/vdprintf.3c=vprintf.3c
 s usr/share/man/man3c/verr.3c=err.3c
 s usr/share/man/man3c/verrc.3c=err.3c
 s usr/share/man/man3c/verrx.3c=err.3c
@@ -14297,6 +14342,7 @@ s usr/share/man/man3c/wcscspn.3c=wcstring.3c
 f usr/share/man/man3c/wcsdup.3c 0444 root bin
 s usr/share/man/man3c/wcsetno.3c=cset.3c
 f usr/share/man/man3c/wcsftime.3c 0444 root bin
+s usr/share/man/man3c/wcsftime_l.3c=wcsftime.3c
 f usr/share/man/man3c/wcslcat.3c 0444 root bin
 f usr/share/man/man3c/wcslcpy.3c 0444 root bin
 f usr/share/man/man3c/wcslen.3c 0444 root bin
@@ -19519,6 +19565,7 @@ f usr/share/man/man5/timezone.5 0444 root bin
 f usr/share/man/man5/ts_dptbl.5 0444 root bin
 f usr/share/man/man5/ttydefs.5 0444 root bin
 f usr/share/man/man5/ttysrch.5 0444 root bin
+f usr/share/man/man5/tzfile.5 0444 root bin
 f usr/share/man/man5/ufsdump.5 0444 root bin
 f usr/share/man/man5/updaters.5 0444 root bin
 f usr/share/man/man5/user_attr.5 0444 root bin
@@ -20119,7 +20166,7 @@ s usr/share/man/man9e/ddi_ufm_op_fill_image.9e=ddi_ufm.9e
 s usr/share/man/man9e/ddi_ufm_op_fill_slot.9e=ddi_ufm.9e
 s usr/share/man/man9e/ddi_ufm_op_getcaps.9e=ddi_ufm.9e
 s usr/share/man/man9e/ddi_ufm_op_nimages.9e=ddi_ufm.9e
-s usr/share/man/man9e/ddi_ufm_op_nslots.9e=ddi_ufm.9e
+s usr/share/man/man9e/ddi_ufm_op_readimg.9e=ddi_ufm.9e
 f usr/share/man/man9e/detach.9e 0444 root bin
 f usr/share/man/man9e/devmap.9e 0444 root bin
 f usr/share/man/man9e/devmap_access.9e 0444 root bin
@@ -21569,6 +21616,7 @@ f usr/share/man/man9f/strqget.9f 0444 root bin
 f usr/share/man/man9f/strqset.9f 0444 root bin
 s usr/share/man/man9f/strrchr.9f=string.9f
 s usr/share/man/man9f/strspn.9f=string.9f
+s usr/share/man/man9f/strtok_r.9f=string.9f
 f usr/share/man/man9f/swab.9f 0444 root bin
 f usr/share/man/man9f/taskq.9f 0444 root bin
 f usr/share/man/man9f/testb.9f 0444 root bin

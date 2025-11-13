@@ -35,7 +35,10 @@
  * A full copy of the text of the CDDL should have accompanied this
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
- *
+ */
+/* This file is dual-licensed; see usr/src/contrib/bhyve/LICENSE */
+
+/*
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2018 Joyent, Inc.
  * Copyright 2022 Oxide Computer Company
@@ -181,8 +184,6 @@ static uint32_t exit_ctls, entry_ctls;
 static uint64_t cr0_ones_mask, cr0_zeros_mask;
 
 static uint64_t cr4_ones_mask, cr4_zeros_mask;
-
-static int vmx_initialized;
 
 /*
  * Optional capabilities
@@ -451,13 +452,6 @@ vpid_alloc(uint16_t *vpid, int num)
 	}
 }
 
-static int
-vmx_cleanup(void)
-{
-	/* This is taken care of by the hma registration */
-	return (0);
-}
-
 static void
 vmx_restore(void)
 {
@@ -677,7 +671,6 @@ vmx_init(void)
 	vmx_msr_init();
 
 	vmx_capabilities = avail_caps;
-	vmx_initialized = 1;
 
 	return (0);
 }
@@ -3868,7 +3861,6 @@ vmx_freq_ratio(uint64_t guest_hz, uint64_t host_hz, uint64_t *mult)
 
 struct vmm_ops vmm_ops_intel = {
 	.init		= vmx_init,
-	.cleanup	= vmx_cleanup,
 	.resume		= vmx_restore,
 
 	.vminit		= vmx_vminit,

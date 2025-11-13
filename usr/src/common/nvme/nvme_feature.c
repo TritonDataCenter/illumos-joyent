@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 /*
@@ -116,7 +116,7 @@ const nvme_field_info_t nvme_get_feat_fields[] = {
 	}
 };
 
-size_t nvme_get_feat_nfields = ARRAY_SIZE(nvme_get_feat_fields);
+const size_t nvme_get_feat_nfields = ARRAY_SIZE(nvme_get_feat_fields);
 
 static bool
 nvme_feat_write_cache_sup(const nvme_valid_ctrl_data_t *data,
@@ -305,9 +305,25 @@ const nvme_feat_info_t nvme_std_feats[] = { {
 	.nfeat_scope = NVME_FEAT_SCOPE_CTRL,
 	.nfeat_in_set = NVME_SET_FEAT_F_CDW11,
 	.nfeat_out_get = NVME_FEAT_OUTPUT_CDW0
-} };
+}, {
+	.nfeat_short = "hostsup",
+	.nfeat_spec = "Host Behavior Support",
+	.nfeat_fid = NVME_FEAT_HOST_BEHAVE,
+	.nfeat_vers = &nvme_vers_1v4,
+	/*
+	 * There is no specific way to tell if this feature is supported other
+	 * than to see if all of the various behaviors that a host could enable
+	 * are supported through various means.
+	 */
+	.nfeat_kind = NVME_FEAT_OPTIONAL,
+	.nfeat_scope = NVME_FEAT_SCOPE_CTRL,
+	.nfeat_in_get = NVME_GET_FEAT_F_DATA,
+	.nfeat_in_set = NVME_SET_FEAT_F_DATA,
+	.nfeat_out_get = NVME_FEAT_OUTPUT_DATA,
+	.nfeat_len = sizeof (nvme_host_behavior_t)
+}  };
 
-size_t nvme_std_nfeats = ARRAY_SIZE(nvme_std_feats);
+const size_t nvme_std_nfeats = ARRAY_SIZE(nvme_std_feats);
 
 /*
  * Now it's time to answer the only hard question here: is this feature actually

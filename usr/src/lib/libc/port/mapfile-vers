@@ -29,6 +29,7 @@
 # Copyright 2015 Garrett D'Amore <garrett@damore.org>
 # Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2025 Oxide Computer Company
+# Copyright 2025 Hans Rosenfeld
 #
 
 #
@@ -78,6 +79,32 @@ $endif
 $if _x86 && _ELF64
 $add amd64
 $endif
+
+SYMBOL_VERSION ILLUMOS_0.57 {
+    protected:
+	localeconv_l;
+	wcsftime_l;
+	strtof_l;
+	strtod_l;
+	strtold_l;
+	string_to_decimal_l;
+} ILLUMOS_0.56;
+
+SYMBOL_VERSION ILLUMOS_0.56 {
+    protected:
+	getlocalename_l;
+} ILLUMOS_0.55;
+
+SYMBOL_VERSION ILLUMOS_0.55 {
+    protected:
+	dprintf;
+	vdprintf;
+} ILLUMOS_0.54;
+
+SYMBOL_VERSION ILLUMOS_0.54 {
+    protected:
+	fdclose;
+} ILLUMOS_0.53;
 
 SYMBOL_VERSION ILLUMOS_0.53 {
     protected:
@@ -3401,6 +3428,11 @@ SYMBOL_VERSION SUNWprivate_1.1 {
 	_memcmp;
 	_memcpy			{ FLAGS = NODYNSORT; };
 	_memmove;
+	#
+	# This was originally added because Sun Studio would sometimes
+	# emit _memset, _memmove, and _memcpy. We also use _memset in a
+	# few spots in the system to deal with POSIX namespacing.
+	#
 	_memset;
 	_modff			{
 				  TYPE = FUNCTION;

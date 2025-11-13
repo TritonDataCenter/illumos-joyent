@@ -35,7 +35,10 @@
  * A full copy of the text of the CDDL should have accompanied this
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
- *
+ */
+/* This file is dual-licensed; see usr/src/contrib/bhyve/LICENSE */
+
+/*
  * Copyright 2018 Joyent, Inc.
  * Copyright 2023 Oxide Computer Company
  */
@@ -128,13 +131,6 @@ static __inline bool
 has_tsc_freq_ctl(void)
 {
 	return ((svm_feature & CPUID_AMD_EDX_TSC_RATE_MSR) != 0);
-}
-
-static int
-svm_cleanup(void)
-{
-	/* This is taken care of by the hma registration */
-	return (0);
 }
 
 static int
@@ -2631,7 +2627,6 @@ svm_freq_ratio(uint64_t guest_hz, uint64_t host_hz, uint64_t *mult)
 
 struct vmm_ops vmm_ops_amd = {
 	.init		= svm_init,
-	.cleanup	= svm_cleanup,
 	.resume		= svm_restore,
 
 	.vminit		= svm_vminit,

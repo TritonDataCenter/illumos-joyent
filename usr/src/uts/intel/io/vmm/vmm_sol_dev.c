@@ -208,11 +208,11 @@ vmmdev_devmem_create(vmm_softc_t *sc, struct vm_memseg *mseg, const char *name)
 		map_offset = VM_DEVMEM_START;
 	} else {
 		entry = list_tail(&sc->vmm_devmem_list);
-		map_offset = entry->vde_off + entry->vde_len;
-		if (map_offset < entry->vde_off) {
+		if (sum_overflows_off(entry->vde_off, (off_t)entry->vde_len)) {
 			/* Do not tolerate overflow */
 			return (ERANGE);
 		}
+		map_offset = entry->vde_off + (off_t)entry->vde_len;
 		/*
 		 * XXXJOY: We could choose to search the list for duplicate
 		 * names and toss an error.  Since we're using the offset
@@ -236,14 +236,14 @@ vmmdev_devmem_segid(vmm_softc_t *sc, off_t off, off_t len, int *segidp,
 {
 	list_t *dl = &sc->vmm_devmem_list;
 	vmm_devmem_entry_t *de = NULL;
-	const off_t map_end = off + len;
 
 	VERIFY(off >= VM_DEVMEM_START);
 
-	if (map_end < off) {
+	if (sum_overflows_off(off, len)) {
 		/* No match on overflow */
 		return (B_FALSE);
 	}
+	const off_t map_end = off + len;
 
 	for (de = list_head(dl); de != NULL; de = list_next(dl, de)) {
 		const off_t item_end = de->vde_off + de->vde_len;
@@ -984,7 +984,7 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 			break;
 		}
 		error = vm_mmap_getnext(sc->vmm_vm, &mm.gpa, &mm.segid,
-		    &mm.segoff, &mm.len, &mm.prot, &mm.flags);
+		    (uintptr_t *)&mm.segoff, &mm.len, &mm.prot, &mm.flags);
 		if (error == 0 && ddi_copyout(&mm, datap, sizeof (mm), md)) {
 			error = EFAULT;
 			break;
@@ -998,8 +998,8 @@ vmmdev_do_ioctl(vmm_softc_t *sc, int cmd, intptr_t arg, int md,
 			error = EFAULT;
 			break;
 		}
-		error = vm_mmap_memseg(sc->vmm_vm, mm.gpa, mm.segid, mm.segoff,
-		    mm.len, mm.prot, mm.flags);
+		error = vm_mmap_memseg(sc->vmm_vm, mm.gpa, mm.segid,
+		    (uintptr_t)mm.segoff, mm.len, mm.prot, mm.flags);
 		break;
 	}
 	case VM_MUNMAP_MEMSEG: {
@@ -3327,7 +3327,7 @@ vmm_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 
 fail:
 	if (vmm_loaded) {
-		VERIFY0(vmm_mod_unload());
+		vmm_mod_unload();
 	}
 	if (reg != NULL) {
 		hma_unregister(reg);
@@ -3379,7 +3379,7 @@ vmm_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 	ddi_remove_minor_node(dip, "ctl");
 	vmmdev_dip = NULL;
 
-	VERIFY0(vmm_mod_unload());
+	vmm_mod_unload();
 	VERIFY3U(vmmdev_hma_reg, ==, NULL);
 	vmm_sol_glue_cleanup();
 

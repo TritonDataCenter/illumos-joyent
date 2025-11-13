@@ -49,12 +49,16 @@ PROGS = \
 	c11_tss \
 	call_once \
 	closefrom \
+	dprintf \
 	endian \
 	env-7076 \
 	fnmatch \
+	getlocname \
 	isatty \
+	localeconv \
 	memchr \
 	memset_s \
+	mutex_attr \
 	mutex-16200 \
 	posix_memalign \
 	printf-15294 \
@@ -68,10 +72,13 @@ PROGS = \
 	stdbit \
 	strerror \
 	strtonum \
+	strtox \
 	timespec_get \
 	timespec_getres \
 	wcslcat \
 	wcslcpy \
+	wcsftime \
+	wcsftime_old \
 	wcsncasecmp \
 	wcsncasecmp-7344 \
 	wcsncasecmp-7350 \
@@ -100,18 +107,31 @@ posix_memalign.64 :=	LDLIBS64 += -lproc
 asprintf-14933.32 :=	CSTD=$(CSTD_GNU17)
 asprintf-14933.64 :=	CSTD=$(CSTD_GNU17)
 
+dprintf.32 :=	CSTD=$(CSTD_GNU17)
+dprintf.64 :=	CSTD=$(CSTD_GNU17)
+dprintf.32 :=	CPPFLAGS += -D_XOPEN_SOURCE=700 -D__EXTENSIONS__
+dprintf.64 :=	CPPFLAGS += -D_XOPEN_SOURCE=700 -D__EXTENSIONS__
+
 memset_s.32 :=	CPPFLAGS += -D__STDC_WANT_LIB_EXT1__=1
 memset_s.64 :=	CPPFLAGS += -D__STDC_WANT_LIB_EXT1__=1
 set_constraint_handler_s.32 := CPPFLAGS += -D__STDC_WANT_LIB_EXT1__=1
 set_constraint_handler_s.64 := CPPFLAGS += -D__STDC_WANT_LIB_EXT1__=1
 
+getlocname.32 := CSTD=$(CSTD_GNU17)
+getlocname.64 := CSTD=$(CSTD_GNU17)
+
 isatty.32 :=	CSTD=$(CSTD_GNU17)
 isatty.64 :=	CSTD=$(CSTD_GNU17)
+
+localeconv.32 :=	CSTD=$(CSTD_GNU17)
+localeconv.64 :=	CSTD=$(CSTD_GNU17)
 
 mutex-16200.32 :=	LDLIBS += -lproc
 mutex-16200.64 :=	LDLIBS64 += -lproc
 mutex-16200.32 :=	CSTD=$(CSTD_GNU17)
 mutex-16200.64 :=	CSTD=$(CSTD_GNU17)
+mutex_attr.32 :=	CSTD=$(CSTD_GNU17)
+mutex_attr.64 :=	CSTD=$(CSTD_GNU17)
 
 ptsname.32 :=		LDLIBS += -lsocket
 ptsname.64 :=		LDLIBS64 += -lsocket
@@ -122,10 +142,20 @@ stdbit.64 :=	CSTD=$(CSTD_GNU17)
 strtonum.32 :=		CSTD=$(CSTD_GNU17)
 strtonum.64 :=		CSTD=$(CSTD_GNU17)
 
+strtox.32 :=		CSTD=$(CSTD_GNU17)
+strtox.64 :=		CSTD=$(CSTD_GNU17)
+
 timespec_get.32 :=	CSTD=$(CSTD_GNU17)
 timespec_get.64 :=	CSTD=$(CSTD_GNU17)
 timespec_getres.32 :=	CSTD=$(CSTD_GNU17)
 timespec_getres.64 :=	CSTD=$(CSTD_GNU17)
+
+wcsftime.32 :=		CSTD=$(CSTD_GNU17)
+wcsftime.64 :=		CSTD=$(CSTD_GNU17)
+
+# This tests the XPG4 wcsftime(), so build it with XPG4-era C.
+wcsftime_old.32 :=	CSTD=$(CSTD_GNU89)
+wcsftime_old.64 :=	CSTD=$(CSTD_GNU89)
 
 wcslcat.32 :=		CSTD=$(CSTD_GNU17)
 wcslcat.64 :=		CSTD=$(CSTD_GNU17)

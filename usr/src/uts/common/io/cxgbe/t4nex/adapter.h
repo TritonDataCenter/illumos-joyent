@@ -21,7 +21,7 @@
  */
 
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #ifndef __CXGBE_ADAPTER_H
@@ -34,78 +34,55 @@
 #include <sys/containerof.h>
 #include <sys/ddi_ufm.h>
 
-#include "offload.h"
 #include "firmware/t4fw_interface.h"
 #include "shared.h"
 
 struct adapter;
 typedef struct adapter adapter_t;
 
-enum {
-	FW_IQ_QSIZE = 256,
-	FW_IQ_ESIZE = 64,	/* At least 64 mandated by the firmware spec */
+#define	FW_IQ_QSIZE	256
+#define	FW_IQ_ESIZE	64	/* At least 64 mandated by the firmware spec */
 
-	RX_IQ_QSIZE = 1024,
-	RX_IQ_ESIZE = 64,	/* At least 64 so CPL_RX_PKT will fit */
+#define	RX_IQ_QSIZE	1024
+#define	RX_IQ_ESIZE	64	/* At least 64 so CPL_RX_PKT will fit */
 
-	EQ_ESIZE = 64,		/* All egres queues use this entry size */
+#define	EQ_ESIZE	64	/* All egress queues use this entry size */
 
-	RX_FL_ESIZE = 64,	/* 8 64bit addresses */
+#define	RX_FL_ESIZE	64	/* 8 64bit addresses */
 
-	FL_BUF_SIZES = 4,
+#define	FL_BUF_SIZES	4
 
-	CTRL_EQ_QSIZE = 128,
+#define	CTRL_EQ_QSIZE	128
 
-	TX_EQ_QSIZE = 1024,
-	TX_SGL_SEGS = 36,
-	TX_WR_FLITS = SGE_MAX_WR_LEN / 8
-};
+#define	TX_EQ_QSIZE	1024
+#define	TX_SGL_SEGS	36
+#define	TX_WR_FLITS	(SGE_MAX_WR_LEN / 8)
 
-enum {
-	/* adapter flags */
-	FULL_INIT_DONE	= (1 << 0),
-	FW_OK		= (1 << 1),
-	INTR_FWD	= (1 << 2),
-	INTR_ALLOCATED	= (1 << 3),
-	MASTER_PF	= (1 << 4),
+#define	UDBS_SEG_SHIFT	7	/* log2(UDBS_SEG_SIZE) */
+#define	UDBS_DB_OFFSET	8	/* offset of the 4B doorbell in a segment */
+#define	UDBS_WR_OFFSET	64	/* offset of the work request in a segment */
 
-	CXGBE_BUSY	= (1 << 9),
+typedef enum t4_port_flags {
+	TPF_INIT_DONE	= (1 << 0),
+	TPF_OPEN	= (1 << 1),
+} t4_port_flags_t;
 
-	/* port flags */
-	DOOMED		= (1 << 0),
-	PORT_INIT_DONE	= (1 << 1),
-};
-
-enum {
-	/* Features */
+typedef enum t4_port_feat {
 	CXGBE_HW_LSO	= (1 << 0),
 	CXGBE_HW_CSUM	= (1 << 1),
-};
-
-enum {
-	UDBS_SEG_SHIFT	= 7,	/* log2(UDBS_SEG_SIZE) */
-	UDBS_DB_OFFSET	= 8,	/* offset of the 4B doorbell in a segment */
-	UDBS_WR_OFFSET	= 64,	/* offset of the work request in a segment */
-};
-
-#define	IS_DOOMED(pi)	(pi->flags & DOOMED)
-#define	SET_DOOMED(pi)	do { pi->flags |= DOOMED; } while (0)
-#define	IS_BUSY(sc)	(sc->flags & CXGBE_BUSY)
-#define	SET_BUSY(sc)	do { sc->flags |= CXGBE_BUSY; } while (0)
-#define	CLR_BUSY(sc)	do { sc->flags &= ~CXGBE_BUSY; } while (0)
+} t4_port_feat_t;
 
 struct port_info {
 	dev_info_t *dip;
 	mac_handle_t mh;
 	mac_callbacks_t *mc;
-	void *props;
 	int mtu;
 	uint8_t hw_addr[ETHERADDRL];
 
 	kmutex_t lock;
 	struct adapter *adapter;
 
-	unsigned int flags;
+	t4_port_flags_t flags;
 
 	uint16_t viid;
 	int16_t  xact_addr_filt; /* index of exact MAC address filter */
@@ -124,11 +101,14 @@ struct port_info {
 	uint8_t  rx_cchan;
 	uint8_t instance; /* Associated adapter instance */
 	uint8_t child_inst; /* Associated child instance */
+
 	uint8_t	tmr_idx;
 	int8_t	pktc_idx;
+	uint8_t	dbq_timer_idx;
+
 	struct link_config link_cfg;
 	struct port_stats stats;
-	uint32_t features;
+	t4_port_feat_t features;
 	uint8_t macaddr_cnt;
 	u8 rss_mode;
 	u16 viid_mirror;
@@ -153,33 +133,26 @@ struct tx_desc {
 	__be64 flit[8];
 };
 
-/* DMA maps used for tx */
-struct tx_maps {
-	ddi_dma_handle_t *map;
-	uint32_t map_total;	/* # of DMA maps */
-	uint32_t map_pidx;	/* next map to be used */
-	uint32_t map_cidx;	/* reclaimed up to this index */
-	uint32_t map_avail;	/* # of available maps */
-};
-
 struct tx_sdesc {
-	mblk_t *m;
+	mblk_t *mp_head;
+	mblk_t *mp_tail;
 	uint32_t txb_used;	/* # of bytes of tx copy buffer used */
 	uint16_t hdls_used;	/* # of dma handles used */
 	uint16_t desc_used;	/* # of hardware descriptors used */
+	uint64_t _pad;
 };
 
-enum {
-	/* iq flags */
+typedef enum t4_iq_flags {
 	IQ_ALLOCATED	= (1 << 0),	/* firmware resources allocated */
 	IQ_INTR		= (1 << 1),	/* iq takes direct interrupt */
 	IQ_HAS_FL	= (1 << 2),	/* iq has fl */
+} t4_iq_flags_t;
 
-	/* iq state */
+typedef enum t4_iq_state {
 	IQS_DISABLED	= 0,
 	IQS_BUSY	= 1,
 	IQS_IDLE	= 2,
-};
+} t4_iq_state_t;
 
 struct rxbuf_cache_params {
 	dev_info_t		*dip;
@@ -188,23 +161,45 @@ struct rxbuf_cache_params {
 	size_t			buf_size;
 };
 
+struct sge_iq_stats {
+	uint64_t sis_overflow;
+	uint64_t sis_processed;
+};
+
+/*
+ * These values are designed to match up with what is posted to GTS registers
+ * when processing an ingress queue.
+ *
+ * See: t4_iq_update_intr_cfg() and t4_iq_gts_update().
+ */
+typedef enum t4_intr_config {
+	TIC_SE_INTR_ARM		= 1,
+	TIC_TIMER0		= (0 << 1),
+	TIC_TIMER1		= (1 << 1),
+	TIC_TIMER2		= (2 << 1),
+	TIC_TIMER3		= (3 << 1),
+	TIC_TIMER4		= (4 << 1),
+	TIC_TIMER5		= (5 << 1),
+	TIC_START_COUNTER	= (6 << 1),
+} t4_intr_config_t;
+
 /*
  * Ingress Queue: T4 is producer, driver is consumer.
  */
 struct sge_iq {
-	unsigned int flags;
+	t4_iq_state_t state;
+	t4_iq_flags_t flags;
+	t4_intr_config_t intr_params;
+
 	ddi_dma_handle_t dhdl;
 	ddi_acc_handle_t ahdl;
 
-	volatile uint_t state;
 	__be64 *desc;		/* KVA of descriptor ring */
 	uint64_t ba;		/* bus address of descriptor ring */
 	const __be64 *cdesc;	/* current descriptor */
 	struct adapter *adapter; /* associated  adapter */
 	uint8_t  gen;		/* generation bit */
-	uint8_t  intr_params;	/* interrupt holdoff parameters */
 	int8_t   intr_pktc_idx;	/* packet count threshold index */
-	uint8_t  intr_next;	/* holdoff for next interrupt */
 	uint8_t  esize;		/* size (bytes) of each entry in the queue */
 	uint16_t qsize;		/* size (# of entries) of the queue */
 	uint16_t cidx;		/* consumer index */
@@ -214,30 +209,32 @@ struct sge_iq {
 	kmutex_t lock;		/* Rx access lock */
 	uint8_t polling;
 
+	struct sge_iq_stats stats;
+
 	STAILQ_ENTRY(sge_iq) link;
 };
 
-enum {
-	EQ_CTRL		= 1,
-	EQ_ETH		= 2,
+typedef enum t4_eq_flags {
+	/* Initialization state flags: */
+	EQ_ALLOCATED	= (1 << 0),	/* firmware resources allocated */
+	EQ_MTX		= (1 << 1),	/* mutex has been initialized */
 
-	/* eq flags */
-	EQ_TYPEMASK	= 7,		/* 3 lsbits hold the type */
-	EQ_ALLOCATED	= (1 << 3),	/* firmware resources allocated */
-	EQ_DOOMED	= (1 << 4),	/* about to be destroyed */
-	EQ_CRFLUSHED	= (1 << 5),	/* expecting an update from SGE */
-	EQ_STALLED	= (1 << 6),	/* out of hw descriptors or dmamaps */
-	EQ_MTX		= (1 << 7),	/* mutex has been initialized */
-	EQ_STARTED	= (1 << 8),	/* started */
-};
+	/* Runtime state flags: */
 
-/* Listed in order of preference.  Update t4_sysctls too if you change these */
-enum {
-	DOORBELL_UDB	= 0x1,
-	DOORBELL_WCWR	= 0x2,
-	DOORBELL_UDBWC	= 0x4,
-	DOORBELL_KDB	= 0x8
-};
+	/*
+	 * Short on resources (memory and/or descriptors) while attempting to
+	 * enqueue work in EQ
+	 */
+	EQ_CORKED	= (1 << 2),
+} t4_eq_flags_t;
+
+/* Listed in order of preference. */
+typedef enum t4_doorbells {
+	DOORBELL_UDB	= (1 << 0),
+	DOORBELL_WCWR	= (1 << 1),
+	DOORBELL_UDBWC	= (1 << 2),
+	DOORBELL_KDB	= (1 << 3),
+} t4_doorbells_t;
 
 /*
  * Egress Queue: driver is producer, T4 is consumer.
@@ -248,14 +245,14 @@ enum {
 struct sge_eq {
 	ddi_dma_handle_t desc_dhdl;
 	ddi_acc_handle_t desc_ahdl;
-	unsigned int flags;
+	t4_eq_flags_t flags;
 	kmutex_t lock;
 
 	struct tx_desc *desc;	/* KVA of descriptor ring */
 	uint64_t ba;		/* bus address of descriptor ring */
 	struct sge_qstat *spg;	/* status page, for convenience */
-	int doorbells;
-	volatile uint32_t *udb; /* KVA of doorbell (lies within BAR2) */
+	t4_doorbells_t doorbells;
+	caddr_t udb;		/* KVA of doorbell (lies within BAR2) */
 	uint_t udb_qid;		/* relative qid within the doorbell page */
 	uint16_t cap;		/* max # of desc, for convenience */
 	uint16_t avail;		/* available descriptors, for convenience */
@@ -268,18 +265,17 @@ struct sge_eq {
 	uint32_t cntxt_id;	/* SGE context id for the eq */
 };
 
-enum {
-	/* fl flags */
+typedef enum t4_fl_flags {
 	FL_MTX		= (1 << 0),	/* mutex has been initialized */
 	FL_STARVING	= (1 << 1),	/* on the list of starving fl's */
 	FL_DOOMED	= (1 << 2),	/* about to be destroyed */
-};
+} t4_fl_flags_t;
 
 #define	FL_RUNNING_LOW(fl)	(fl->cap - fl->needed <= fl->lowat)
 #define	FL_NOT_RUNNING_LOW(fl)	(fl->cap - fl->needed >= 2 * fl->lowat)
 
 struct sge_fl {
-	unsigned int flags;
+	t4_fl_flags_t flags;
 	kmutex_t lock;
 	ddi_dma_handle_t dhdl;
 	ddi_acc_handle_t ahdl;
@@ -352,7 +348,6 @@ struct sge_txq {
 	uint32_t dma_hdl_failed; /* couldn't obtain DMA handle */
 	uint32_t dma_map_failed; /* couldn't obtain DMA mapping */
 	uint32_t qfull;		/* out of hardware descriptors */
-	uint32_t qflush;	/* # of SGE_EGR_UPDATE notifications for txq */
 	uint32_t pullup_early;	/* # of pullups before starting frame's SGL */
 	uint32_t pullup_late;	/* # of pullups while building frame's SGL */
 	uint32_t pullup_failed;	/* # of failed pullups */
@@ -384,6 +379,8 @@ struct sge_rxq {
 struct sge {
 	int fl_starve_threshold;
 	int s_qpp;
+	uint64_t dbq_timer_tick;
+	uint16_t dbq_timers[SGE_NDBQTIMERS];
 
 	int nrxq;	/* total rx queues (all ports and the rest) */
 	int ntxq;	/* total tx queues (all ports and the rest) */
@@ -392,15 +389,17 @@ struct sge {
 	int stat_len;	/* length of status page at ring end */
 	int pktshift;	/* padding between CPL & packet data */
 	int fl_align;	/* response queue message alignment */
+	uint8_t fwq_tmr_idx;	/* Intr. coalesce timer for FWQ */
+	int8_t fwq_pktc_idx;	/* Intr. coalesce count for FWQ */
 
 	struct sge_iq fwq;	/* Firmware event queue */
 	struct sge_txq *txq;	/* NIC tx queues */
 	struct sge_rxq *rxq;	/* NIC rx queues */
 
-	int iq_start; /* iq context id map start index */
-	int eq_start; /* eq context id map start index */
-	int iqmap_sz; /* size of iq context id map */
-	int eqmap_sz; /* size of eq context id map */
+	uint_t iq_start; /* iq context id map start index */
+	uint_t eq_start; /* eq context id map start index */
+	uint_t iqmap_sz; /* size of iq context id map */
+	uint_t eqmap_sz; /* size of eq context id map */
 	struct sge_iq **iqmap;	/* iq->cntxt_id to iq mapping */
 	struct sge_eq **eqmap;	/* eq->cntxt_id to eq mapping */
 
@@ -418,7 +417,6 @@ struct sge {
 };
 
 struct driver_properties {
-	/* There is a driver.conf variable for each of these */
 	int max_ntxq_10g;
 	int max_nrxq_10g;
 	int max_ntxq_1g;
@@ -428,11 +426,14 @@ struct driver_properties {
 	int pktc_idx_10g;
 	int tmr_idx_1g;
 	int pktc_idx_1g;
+	uint8_t dbq_timer_idx;
+	uint8_t fwq_tmr_idx;
+	int8_t fwq_pktc_idx;
 	int qsize_txq;
 	int qsize_rxq;
 
-	int timer_val[SGE_NTIMERS];
-	int counter_val[SGE_NCOUNTERS];
+	uint_t holdoff_timer_us[SGE_NTIMERS];
+	uint_t holdoff_pktcnt[SGE_NCOUNTERS];
 
 	int wc;
 
@@ -440,17 +441,24 @@ struct driver_properties {
 	int t4_fw_install;
 };
 
-struct rss_header;
-typedef int (*cpl_handler_t)(struct sge_iq *, const struct rss_header *,
-    mblk_t *);
-typedef int (*fw_msg_handler_t)(struct adapter *, const __be64 *);
-
 struct t4_mbox_list {
 	STAILQ_ENTRY(t4_mbox_list) link;
 };
 
+typedef enum t4_adapter_flags {
+	/* Initialization progress status bits */
+	TAF_INIT_DONE	= (1 << 0),
+	TAF_FW_OK	= (1 << 1),
+	TAF_INTR_FWD	= (1 << 2),
+	TAF_INTR_ALLOC	= (1 << 3),
+
+	/* State & capability bits */
+	TAF_MASTER_PF	= (1 << 4),
+	TAF_DBQ_TIMER	= (1 << 5),
+} t4_adapter_flags_t;
+
 struct adapter {
-	SLIST_ENTRY(adapter) link;
+	list_node_t node;
 	dev_info_t *dip;
 	dev_t dev;
 
@@ -470,9 +478,9 @@ struct adapter {
 	/* MMIO register access handle */
 	ddi_acc_handle_t regh;
 	caddr_t regp;
-	/* BAR1 register access handle */
-	ddi_acc_handle_t reg1h;
-	caddr_t reg1p;
+	/* BAR2 register access handle */
+	ddi_acc_handle_t bar2_hdl;
+	caddr_t bar2_ptr;
 
 	/* Interrupt information */
 	int intr_type;
@@ -488,31 +496,14 @@ struct adapter {
 	struct sge sge;
 
 	struct port_info *port[MAX_NPORTS];
-	ddi_taskq_t *tq[NCHAN];
 	uint8_t chan_map[NCHAN];
 	uint32_t filter_mode;
 
-	struct l2t_data *l2t;	/* L2 table */
-	struct tid_info tids;
-
-	int doorbells;
-	int registered_device_map;
-	int open_device_map;
-	int flags;
+	t4_adapter_flags_t flags;
+	t4_doorbells_t doorbells;
 
 	unsigned int cfcsum;
 	struct adapter_params params;
-	struct t4_virt_res vres;
-
-	uint16_t linkcaps;
-	uint16_t niccaps;
-	uint16_t toecaps;
-	uint16_t rdmacaps;
-	uint16_t iscsicaps;
-	uint16_t fcoecaps;
-
-	fw_msg_handler_t fw_msg_handler[5]; /* NUM_FW6_TYPES */
-	cpl_handler_t cpl_handler[0xef]; /* NUM_CPL_CMDS */
 
 	kmutex_t lock;
 	kcondvar_t cv;
@@ -531,13 +522,6 @@ struct adapter {
 	/* support for single-threading access to adapter mailbox registers */
 	kmutex_t mbox_lock;
 	STAILQ_HEAD(, t4_mbox_list) mbox_list;
-};
-
-enum {
-	NIC_H = 0,
-	TOM_H,
-	IW_H,
-	ISCSI_H
 };
 
 struct memwin {
@@ -591,12 +575,6 @@ struct memwin {
 #define	for_each_rxq(pi, iter, rxq) \
 	rxq = &pi->adapter->sge.rxq[pi->first_rxq]; \
 	for (iter = 0; iter < pi->nrxq; ++iter, ++rxq)
-#define	for_each_ofld_txq(pi, iter, ofld_txq) \
-	ofld_txq = &pi->adapter->sge.ofld_txq[pi->first_ofld_txq]; \
-	for (iter = 0; iter < pi->nofldtxq; ++iter, ++ofld_txq)
-#define	for_each_ofld_rxq(pi, iter, ofld_rxq) \
-	ofld_rxq = &pi->adapter->sge.ofld_rxq[pi->first_ofld_rxq]; \
-	for (iter = 0; iter < pi->nofldrxq; ++iter, ++ofld_rxq)
 
 #define	NFIQ(sc) ((sc)->intr_count > 1 ? (sc)->intr_count - 1 : 1)
 
@@ -625,90 +603,10 @@ t4_mbox_list_first_entry(struct adapter *adap)
 	return (STAILQ_FIRST(&adap->mbox_list));
 }
 
-static inline uint32_t
-t4_read_reg(struct adapter *sc, uint32_t reg)
-{
-	/* LINTED: E_BAD_PTR_CAST_ALIGN */
-	return (ddi_get32(sc->regh, (uint32_t *)(sc->regp + reg)));
-}
-
-static inline void
-t4_write_reg(struct adapter *sc, uint32_t reg, uint32_t val)
-{
-	/* LINTED: E_BAD_PTR_CAST_ALIGN */
-	ddi_put32(sc->regh, (uint32_t *)(sc->regp + reg), val);
-}
-
-static inline void
-t4_os_pci_read_cfg1(struct adapter *sc, int reg, uint8_t *val)
-{
-	*val = pci_config_get8(sc->pci_regh, reg);
-}
-
-static inline void
-t4_os_pci_write_cfg1(struct adapter *sc, int reg, uint8_t val)
-{
-	pci_config_put8(sc->pci_regh, reg, val);
-}
-
-static inline void
-t4_os_pci_read_cfg2(struct adapter *sc, int reg, uint16_t *val)
-{
-	*val = pci_config_get16(sc->pci_regh, reg);
-}
-
-static inline void
-t4_os_pci_write_cfg2(struct adapter *sc, int reg, uint16_t val)
-{
-	pci_config_put16(sc->pci_regh, reg, val);
-}
-
-static inline void
-t4_os_pci_read_cfg4(struct adapter *sc, int reg, uint32_t *val)
-{
-	*val = pci_config_get32(sc->pci_regh, reg);
-}
-
-static inline void
-t4_os_pci_write_cfg4(struct adapter *sc, int reg, uint32_t val)
-{
-	pci_config_put32(sc->pci_regh, reg, val);
-}
-
-static inline uint32_t
-t4_read_reg32(struct adapter *sc, uint32_t reg)
-{
-	return (ddi_get32(sc->regh, (uint32_t *)(sc->regp + reg)));
-}
-
-static inline uint64_t
-t4_read_reg64(struct adapter *sc, uint32_t reg)
-{
-	return (ddi_get64(sc->regh, (uint64_t *)(sc->regp + reg)));
-}
-
-static inline void
-t4_write_reg64(struct adapter *sc, uint32_t reg, uint64_t val)
-{
-	ddi_put64(sc->regh, (uint64_t *)(sc->regp + reg), val);
-}
-
 static inline struct port_info *
 adap2pinfo(struct adapter *sc, int idx)
 {
 	return (sc->port[idx]);
-}
-
-static inline void
-t4_os_set_hw_addr(struct adapter *sc, int idx, uint8_t hw_addr[])
-{
-	bcopy(hw_addr, sc->port[idx]->hw_addr, ETHERADDRL);
-}
-
-static inline bool
-is_10G_port(const struct port_info *pi)
-{
-	return ((pi->link_cfg.pcaps & FW_PORT_CAP32_SPEED_10G) != 0);
 }
 
 static inline struct sge_rxq *
@@ -718,81 +616,16 @@ iq_to_rxq(struct sge_iq *iq)
 }
 
 static inline bool
-is_25G_port(const struct port_info *pi)
+t4_port_is_10xg(const struct port_info *pi)
 {
-	return ((pi->link_cfg.pcaps & FW_PORT_CAP32_SPEED_25G) != 0);
-}
-
-static inline bool
-is_40G_port(const struct port_info *pi)
-{
-	return ((pi->link_cfg.pcaps & FW_PORT_CAP32_SPEED_40G) != 0);
-}
-
-static inline bool
-is_50G_port(const struct port_info *pi)
-{
-	return ((pi->link_cfg.pcaps & FW_PORT_CAP32_SPEED_50G) != 0);
-}
-
-static inline bool
-is_100G_port(const struct port_info *pi)
-{
-	return ((pi->link_cfg.pcaps & FW_PORT_CAP32_SPEED_100G) != 0);
-}
-
-static inline bool
-is_10XG_port(const struct port_info *pi)
-{
-	return (is_10G_port(pi) || is_40G_port(pi) ||
-	    is_25G_port(pi) || is_50G_port(pi) ||
-	    is_100G_port(pi));
-}
-
-/*
- * t4_os_pci_read_seeprom - read four bytes of SEEPROM/VPD contents
- * @adapter: the adapter
- * @addr: SEEPROM/VPD Address to read
- * @valp: where to store the value read
- *
- * Read a 32-bit value from the given address in the SEEPROM/VPD.  The address
- * must be four-byte aligned.  Returns 0 on success, a negative erro number
- * on failure.
- */
-static inline int t4_os_pci_read_seeprom(adapter_t *adapter, int addr,
-    u32 *valp)
-{
-	int t4_seeprom_read(struct adapter *adapter, u32 addr, u32 *data);
-	int ret;
-
-	ret = t4_seeprom_read(adapter, addr, valp);
-
-	return (ret >= 0 ? 0 : ret);
-}
-
-/*
- * t4_os_pci_write_seeprom - write four bytes of SEEPROM/VPD contents
- * @adapter: the adapter
- * @addr: SEEPROM/VPD Address to write
- * @val: the value write
- *
- * Write a 32-bit value to the given address in the SEEPROM/VPD.  The address
- * must be four-byte aligned.  Returns 0 on success, a negative erro number
- * on failure.
- */
-static inline int t4_os_pci_write_seeprom(adapter_t *adapter, int addr, u32 val)
-{
-	int t4_seeprom_write(struct adapter *adapter, u32 addr, u32 data);
-	int ret;
-
-	ret = t4_seeprom_write(adapter, addr, val);
-
-	return (ret >= 0 ? 0 : ret);
-}
-
-static inline int t4_os_pci_set_vpd_size(struct adapter *adapter, size_t len)
-{
-	return (0);
+	return (pi->link_cfg.pcaps &
+	    (FW_PORT_CAP32_SPEED_400G |
+	    FW_PORT_CAP32_SPEED_200G |
+	    FW_PORT_CAP32_SPEED_100G |
+	    FW_PORT_CAP32_SPEED_50G |
+	    FW_PORT_CAP32_SPEED_40G |
+	    FW_PORT_CAP32_SPEED_25G |
+	    FW_PORT_CAP32_SPEED_10G));
 }
 
 static inline unsigned int t4_use_ldst(struct adapter *adap)
@@ -803,18 +636,29 @@ static inline unsigned int t4_use_ldst(struct adapter *adap)
 static inline void t4_db_full(struct adapter *adap) {}
 static inline void t4_db_dropped(struct adapter *adap) {}
 
+/* Is chip version equal to specified value? */
+static inline bool
+t4_cver_eq(const adapter_t *adap, uint8_t ver)
+{
+	return (CHELSIO_CHIP_VERSION(adap->params.chip) == ver);
+}
+
+/* Is chip version greater than or equal to specified value? */
+static inline bool
+t4_cver_ge(const adapter_t *adap, uint8_t ver)
+{
+	return (CHELSIO_CHIP_VERSION(adap->params.chip) >= ver);
+}
+
 /* t4_nexus.c */
-int t4_os_find_pci_capability(struct adapter *sc, int cap);
-void t4_os_portmod_changed(struct adapter *sc, int idx);
-int adapter_full_init(struct adapter *sc);
-int adapter_full_uninit(struct adapter *sc);
-int port_full_init(struct port_info *pi);
-int port_full_uninit(struct port_info *pi);
-void enable_port_queues(struct port_info *pi);
-void disable_port_queues(struct port_info *pi);
-int t4_register_cpl_handler(struct adapter *sc, int opcode, cpl_handler_t h);
-int t4_register_fw_msg_handler(struct adapter *, int, fw_msg_handler_t);
-void t4_iterate(void (*func)(int, void *), void *arg);
+int t4_port_full_init(struct port_info *);
+void t4_port_queues_enable(struct port_info *pi);
+void t4_port_queues_disable(struct port_info *pi);
+
+uint32_t t4_read_reg(struct adapter *, uint32_t);
+void t4_write_reg(struct adapter *, uint32_t, uint32_t);
+uint64_t t4_read_reg64(struct adapter *, uint32_t);
+void t4_write_reg64(struct adapter *, uint32_t, uint64_t);
 
 /* t4_debug.c */
 void t4_debug_init(void);
@@ -822,40 +666,34 @@ void t4_debug_fini(void);
 
 /* t4_sge.c */
 void t4_sge_init(struct adapter *sc);
-int t4_setup_adapter_queues(struct adapter *sc);
-int t4_teardown_adapter_queues(struct adapter *sc);
+int t4_alloc_fwq(struct adapter *);
+int t4_free_fwq(struct adapter *);
 int t4_setup_port_queues(struct port_info *pi);
 int t4_teardown_port_queues(struct port_info *pi);
 uint_t t4_intr_all(caddr_t arg1, caddr_t arg2);
 uint_t t4_intr(caddr_t arg1, caddr_t arg2);
 uint_t t4_intr_err(caddr_t arg1, caddr_t arg2);
+void t4_iq_gts_update(struct sge_iq *, t4_intr_config_t, uint16_t);
+void t4_iq_update_intr_cfg(struct sge_iq *, uint8_t, int8_t);
+void t4_eq_update_dbq_timer(struct sge_eq *, struct port_info *);
 int t4_mgmt_tx(struct adapter *sc, mblk_t *m);
-void memwin_info(struct adapter *, int, uint32_t *, uint32_t *);
-uint32_t position_memwin(struct adapter *, int, uint32_t);
 
 mblk_t *t4_eth_tx(void *, mblk_t *);
 mblk_t *t4_mc_tx(void *arg, mblk_t *m);
 mblk_t *t4_ring_rx(struct sge_rxq *rxq, int poll_bytes);
-int t4_alloc_tx_maps(struct adapter *sc, struct tx_maps *txmaps,  int count,
-    int flags);
 
 /* t4_mac.c */
-void t4_mc_init(struct port_info *pi);
 void t4_mc_cb_init(struct port_info *);
 void t4_os_link_changed(struct adapter *sc, int idx, int link_stat);
 void t4_mac_rx(struct port_info *pi, struct sge_rxq *rxq, mblk_t *m);
 void t4_mac_tx_update(struct port_info *pi, struct sge_txq *txq);
 int t4_addmac(void *arg, const uint8_t *ucaddr);
+const char **t4_get_priv_props(struct port_info *, size_t *);
+uint8_t t4_choose_holdoff_timer(struct adapter *, uint_t);
+int8_t t4_choose_holdoff_pktcnt(struct adapter *, int);
+uint_t t4_choose_dbq_timer(struct adapter *, uint_t);
 
 /* t4_ioctl.c */
 int t4_ioctl(struct adapter *sc, int cmd, void *data, int mode);
-
-struct l2t_data *t4_init_l2t(struct adapter *sc);
-int begin_synchronized_op(struct port_info *pi, int hold, int waitok);
-void end_synchronized_op(struct port_info *pi, int held);
-
-#define	setbit(a, i)	((a)[(i)/NBBY] |= 1<<((i)%NBBY))
-#define	clrbit(a, i)	((a)[(i)/NBBY] &= ~(1<<((i)%NBBY)))
-#define	isset(a, i)	((a)[(i)/NBBY] & (1<<((i)%NBBY)))
 
 #endif /* __CXGBE_ADAPTER_H */

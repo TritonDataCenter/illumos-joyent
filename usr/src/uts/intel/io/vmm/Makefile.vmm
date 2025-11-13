@@ -11,7 +11,7 @@
 
 #
 # Copyright 2019 Joyent, Inc.
-# Copyright 2023 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 #
 
 CONF_SRCDIR	= $(UTSBASE)/intel/io/vmm
@@ -32,8 +32,6 @@ CFLAGS		+= -DVMM_KEEP_STATS
 LDFLAGS		+= -N misc/pcie -N fs/dev
 LDFLAGS		+= -M $(MAPFILE)
 
-# devmem span calculations currently run afoul of overflow checks
-$(OBJS_DIR)/vmm_sol_dev.o := SMOFF += signed_integer_overflow_check
 # vmm_zsd_add_vm() failure unhandled in face of racing zone shutdown
 $(OBJS_DIR)/vmm_sol_dev.o := SMOFF += all_func_returns
 
@@ -73,6 +71,7 @@ VMM_OBJS = \
 	vmcb.o \
 	svm_support.o \
 	vmm_gpt.o \
+	vmm_gpt_indirect.o \
 	seg_vmm.o \
 	vmm_reservoir.o \
 	vmm_sol_glue.o \

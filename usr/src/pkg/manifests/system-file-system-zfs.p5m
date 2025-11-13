@@ -25,6 +25,7 @@
 # Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2020 Joyent, Inc.
+# Copyright 2025 Edgecast Cloud LLC.
 #
 
 set name=pkg.fmri value=pkg:/system/file-system/zfs@$(PKGVERS)
@@ -132,6 +133,7 @@ $(i386_ONLY)dir path=usr/sbin/$(ARCH32)
 dir  path=usr/sbin/$(ARCH64)
 file path=usr/sbin/zdb mode=0555
 link path=usr/sbin/zfs target=../../sbin/zfs
+file path=usr/sbin/zfscache mode=0555
 link path=usr/sbin/zpool target=../../sbin/zpool
 file path=usr/sbin/zstreamdump mode=0555
 file path=usr/share/man/man7/zpool-features.7

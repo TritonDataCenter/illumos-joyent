@@ -32,6 +32,7 @@
 
 /*
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 OmniOS Community Edition (OmniOSce) Association.
  */
 
 
@@ -44,6 +45,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#ifndef	__FreeBSD__
+#include <sys/limits.h>
+#endif
 
 #ifndef WITHOUT_CAPSICUM
 #include <capsicum_helpers.h>
@@ -285,7 +289,11 @@ pci_vtcon_sock_add(struct pci_vtcon_softc *sc, const char *port_name,
 	const char *name, *path;
 	char *cp, *pathcopy;
 	long port;
+#ifdef __FreeBSD__
 	int s = -1, fd = -1, error = 0;
+#else
+	int s = -1, error = 0;
+#endif
 #ifndef WITHOUT_CAPSICUM
 	cap_rights_t rights;
 #endif
@@ -345,7 +353,7 @@ pci_vtcon_sock_add(struct pci_vtcon_softc *sc, const char *port_name,
 	pathcopy = (char *)path;
 	addr.sun_family = AF_UNIX;
 	(void) strlcpy(addr.sun_path, pathcopy, sizeof (addr.sun_path));
-	if (bind(fd, (struct sockaddr *)&addr, sizeof (addr)) < 0) {
+	if (bind(s, (struct sockaddr *)&addr, sizeof (addr)) < 0) {
 		error = -1;
 		goto out;
 	}
@@ -391,8 +399,10 @@ pci_vtcon_sock_add(struct pci_vtcon_softc *sc, const char *port_name,
 	}
 
 out:
+#ifdef __FreeBSD__
 	if (fd != -1)
 		close(fd);
+#endif
 
 	if (error != 0) {
 		if (s != -1)
@@ -597,6 +607,9 @@ pci_vtcon_control_send(struct pci_vtcon_softc *sc,
 	struct iovec iov;
 	int n;
 
+	if (len > SIZE_T_MAX - sizeof(struct pci_vtcon_control))
+		return;
+
 	vq = pci_vtcon_port_to_vq(&sc->vsc_control_port, true);
 
 	if (!vq_has_descs(vq))
@@ -605,11 +618,15 @@ pci_vtcon_control_send(struct pci_vtcon_softc *sc,
 	n = vq_getchain(vq, &iov, 1, &req);
 	assert(n == 1);
 
+	if (iov.iov_len < sizeof(struct pci_vtcon_control) + len)
+		goto out;
+
 	memcpy(iov.iov_base, ctrl, sizeof(struct pci_vtcon_control));
-	if (payload != NULL && len > 0)
+	if (len > 0)
 		memcpy((uint8_t *)iov.iov_base +
 		    sizeof(struct pci_vtcon_control), payload, len);
 
+out:
 	vq_relchain(vq, req.idx, sizeof(struct pci_vtcon_control) + len);
 	vq_endchains(vq, 1);
 }

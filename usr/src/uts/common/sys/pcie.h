@@ -356,6 +356,7 @@ extern "C" {
 #define	PCIE_SLOTCTL_EMI_LOCK_CONTROL	0x0800	/* EMI Lock control */
 #define	PCIE_SLOTCTL_DLL_STATE_EN	0x1000	/* DLL State Changed En */
 #define	PCIE_SLOTCTL_AUTO_SLOT_PL_DIS	0x2000	/* Auto Slot Power Limit Dis */
+#define	PCIE_SLOTCTL_INB_PRES_DET_DIS	0x4000	/* Inband Presence Detect Dis */
 #define	PCIE_SLOTCTL_ATTN_INDICATOR_MASK 0x00C0	/* Attn Indicator mask */
 #define	PCIE_SLOTCTL_PWR_INDICATOR_MASK	0x0300	/* Power Indicator mask */
 #define	PCIE_SLOTCTL_INTR_MASK		0x103f	/* Supported intr mask */
@@ -538,6 +539,11 @@ extern "C" {
 #define	PCIE_LINKSTS2_DRS_MSG_RX	0x8000
 
 /*
+ * Slot Capabilities 2 Register (4 bytes)
+ */
+#define	PCIE_SLOTCAP2_INB_PRES_DET_DIS_SUP	0x1
+
+/*
  * PCI-Express Enhanced Capabilities Link Entry Bit Offsets
  */
 #define	PCIE_EXT_CAP			0x100	/* Base Address of Ext Cap */
@@ -608,6 +614,10 @@ extern "C" {
 #define	PCIE_EXT_CAP_ID_FLIT_ERR	0x34	/* Flit Error Injection */
 #define	PCIE_EXT_CAP_ID_SVC		0x35	/* Streamlined Virtual Chan. */
 #define	PCIE_EXT_CAP_ID_MMIO_RBL	0x36	/* MMIO Register Block Loc. */
+#define	PCIE_EXT_CAP_ID_NOP_FLIT	0x37	/* NOP Flit */
+#define	PCIE_EXT_CAP_ID_SIOV		0x38	/* Scalable I/O Virt. */
+#define	PCIE_EXT_CAP_ID_PL128GT		0x39	/* Physical Layer 128.0 GT/s */
+#define	PCIE_EXT_CAP_ID_CAP_DATA	0x3a	/* Captured Data */
 
 /*
  * PCI-Express Advanced Error Reporting Extended Capability Offsets

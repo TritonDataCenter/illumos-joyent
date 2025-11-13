@@ -24,18 +24,39 @@
  *
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2022 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #ifndef	_SYS_UCODE_AMD_H
 #define	_SYS_UCODE_AMD_H
 
+#include <sys/stddef.h>
+#include <sys/debug.h>
 #include <sys/types.h>
 #include <ucode/ucode_errno.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*
+ * AMD microcode is generally distributed in container files which start with a
+ * magic number and then contain multiple TLV-encoded sections. Typically such
+ * a file will contain an equivalence table section followed by one or more
+ * patches.
+ */
+#define	UCODE_AMD_CONTAINER_MAGIC	0x00414d44	/* "AMD\0" */
+#define	UCODE_AMD_CONTAINER_TYPE_EQUIV	0
+#define	UCODE_AMD_CONTAINER_TYPE_PATCH	1
+
+typedef struct ucode_section_amd {
+	uint32_t	usa_type;
+	uint32_t	usa_size;
+	uint8_t		usa_data[];
+} ucode_section_amd_t;
+
+CTASSERT(sizeof (ucode_section_amd_t) == 8);
+CTASSERT(offsetof(ucode_section_amd_t, usa_data) == 8);
 
 /*
  * AMD Microcode file information
@@ -54,18 +75,21 @@ typedef struct ucode_header_amd {
 	uint32_t uh_match[8];
 } ucode_header_amd_t;
 
+/*
+ * This is the maximum size of a microcode blob that we are prepared to load
+ * in the kernel. AMD Turin microcode files are 14KiB and the size has been
+ * increasing with each generation. This value provides some margin for the
+ * future.
+ */
+#define	UCODE_AMD_MAXSIZE	(256 * 1024)
+
 typedef struct ucode_file_amd {
-	/*
-	 * The combined size of these fields adds up to 8KiB (8192 bytes).
-	 * If support is needed for larger update files, increase the size of
-	 * the uf_encr element.
-	 */
 	ucode_header_amd_t uf_header;
 	uint8_t uf_data[896];
 	uint8_t uf_resv[896];
 	uint8_t uf_code_present;
 	uint8_t uf_code[191];
-	uint8_t uf_encr[6144];
+	uint8_t uf_encr[];
 } ucode_file_amd_t;
 
 typedef struct ucode_eqtbl_amd {

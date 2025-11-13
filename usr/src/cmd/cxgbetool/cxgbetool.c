@@ -15,7 +15,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include <stdio.h>
@@ -36,7 +36,6 @@
 #include <libdevinfo.h>
 
 #include "t4nex.h"
-#include "version.h"
 #include "osdep.h"
 #include "t4fw_interface.h"
 #include "cudbg.h"
@@ -49,6 +48,9 @@
 #ifndef MAX
 #define MAX(x, y)       ((x) > (y) ? (x) : (y))
 #endif
+
+#define	T4_NEXUS_NAME	"t4nex"
+#define	T4_PORT_NAME	"cxgbe"
 
 struct reg_info {
 	const char *name;
@@ -69,7 +71,6 @@ static char cxgbetool_nexus[PATH_MAX];
 char *option_list[] = {
 	"--collect",
 	"--view",
-	"--version",
 };
 
 enum {
@@ -420,11 +421,9 @@ get_regdump(int argc, char *argv[], int start_arg, const char *iff_name)
 	is_pcie = (regs->version & 0x80000000) != 0;
 
 	if (vers == 5) {
-		return dump_regs_t5(argc, argv, start_arg,
-				(uint32_t *)regs->data);
+		return dump_regs_t5(argc, argv, start_arg, regs->data);
 	} else if (vers == 6) {
-		return dump_regs_t6(argc, argv, start_arg,
-				(uint32_t *)regs->data);
+		return dump_regs_t6(argc, argv, start_arg, regs->data);
 	} else {
 		errx(1, "unknown card type %d.%d.%d", vers, revision, is_pcie);
 	}
@@ -1033,12 +1032,6 @@ main(int argc, char *argv[])
 		if (strcmp(argv[1], "-h") == 0 ||
 		    strcmp(argv[1], "--help") == 0) {
 			usage(stdout);
-		}
-
-		if (strcmp(argv[1], "-v") == 0 ||
-		    strcmp(argv[1], "--version") == 0) {
-			printf("cxgbetool version %s\n", DRV_VERSION);
-			exit(0);
 		}
 	}
 

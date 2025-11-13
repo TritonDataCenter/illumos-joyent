@@ -23,12 +23,15 @@
 # Use is subject to license terms.
 #
 # Copyright (c) 2018, Joyent, Inc.
+# Copyright 2025 Hans Rosenfeld
 
 #
 # Definitions for targets shared by some subdirs, which have
 # dependencies in rcap/common, the path to which must be the value of
 # COMMON_DIR.
 #
+
+include ../../Makefile.ctf
 
 LDFLAGS +=	$(MAPFILE.NGB:%=-Wl,-M%)
 
@@ -38,8 +41,9 @@ CERRWARN += -_gcc=-Wno-parentheses
 
 SMOFF += strcpy_overflow
 
-%.o: $(COMMON_DIR)/%.c
+%.c:	$(COMMON_DIR)/%.c
+	$(CP) $(COMMON_DIR)/$@ $@
+
+%.o:    %.c
 	$(COMPILE.c) $<
-%.po: $(COMMON_DIR)/%.c
-	$(COMPILE.cpp) $< > $<.i
-	$(BUILD.po)
+	$(POST_PROCESS_O)

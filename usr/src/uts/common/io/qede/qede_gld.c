@@ -20,21 +20,9 @@
 */
 
 /*
-* Copyright 2014-2017 Cavium, Inc. 
-* The contents of this file are subject to the terms of the Common Development 
-* and Distribution License, v.1,  (the "License").
-
-* You may not use this file except in compliance with the License.
-
-* You can obtain a copy of the License at available 
-* at http://opensource.org/licenses/CDDL-1.0
-
-* See the License for the specific language governing permissions and 
-* limitations under the License.
-*/
-
-/*
+ * Copyright 2014-2017 Cavium, Inc.
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include "qede.h"
@@ -835,11 +823,10 @@ qede_mac_stats(void *     arg,
         	break;
 
 	case ETHER_STAT_XCVR_INUSE:
-		switch (qede->props.link_speed) {
-		default:
-			*value = XCVR_UNDEFINED;
-		}
+		*value = (uint64_t)qede_link_to_media(&qede->curcfg,
+		    qede->props.link_speed);
 		break;
+
 #if (MAC_VERSION > 1)
 	case ETHER_STAT_CAP_10GFDX:
 		*value = 0;
@@ -2244,7 +2231,7 @@ qede_mac_set_property(void *        arg,
 			qede->forced_speed_10G = *(uint8_t *)pr_val;
 		}
 		if (qede->qede_state == QEDE_STATE_STARTED) {
-			qede_configure_link(qede,1);
+			qede_configure_link(qede, true);
 		} else {
 			mutex_exit(&qede->gld_lock);
 			return (0);
@@ -2322,6 +2309,7 @@ qede_mac_get_property(void *arg,
 	uint64_t        link_speed;
 	link_flowctrl_t link_flowctrl;
 	struct qede_link_cfg link_cfg;
+	mac_ether_media_t media;
 	qede_link_cfg_t  *hw_cfg  = &qede->hwinit;
 	int ret_val = 0;
 
@@ -2363,6 +2351,13 @@ qede_mac_get_property(void *arg,
 		bcopy(&link_state, pr_val, sizeof(link_state_t));
 		qede_info(qede, "mac_prop_status %d\n", link_state);
 		break;	
+
+	case MAC_PROP_MEDIA:
+
+		ASSERT(pr_valsize >= sizeof(mac_ether_media_t));
+		media = qede_link_to_media(&link_cfg, qede->props.link_speed);
+		bcopy(&media, pr_val, sizeof(mac_ether_media_t));
+		break;
 
 	case MAC_PROP_AUTONEG:
 

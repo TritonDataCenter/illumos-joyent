@@ -28,12 +28,13 @@
 #include "SYS.h"
 
 /*
- * hrtime_t gethrtime(void)
+ * hrtime_t __gethrtime(void)
  *
- * Returns the current hi-res real time.
+ * Returns the current hi-res real time (via fasttrap).
  */
 
-	ENTRY(gethrtime)
+#if !defined(__amd64) && !defined(__i386)
+	ENTRY(__gethrtime)
 	SYSFASTTRAP(GETHRTIME)
 #if defined(__sparcv9)
 	/*
@@ -44,7 +45,8 @@
 	or	%o1, %o0, %o0
 #endif
 	RET
-	SET_SIZE(gethrtime)
+	SET_SIZE(__gethrtime)
+#endif /* !defined(__amd64) && !defined(__i386) */
 
 /*
  * hrtime_t gethrvtime(void)

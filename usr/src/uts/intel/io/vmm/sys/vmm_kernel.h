@@ -34,7 +34,10 @@
  * A full copy of the text of the CDDL should have accompanied this
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
- *
+ */
+/* This file is dual-licensed; see usr/src/contrib/bhyve/LICENSE */
+
+/*
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2025 Oxide Computer Company
@@ -76,7 +79,6 @@ typedef enum {
 } freqratio_res_t;
 
 typedef int	(*vmm_init_func_t)(void);
-typedef int	(*vmm_cleanup_func_t)(void);
 typedef void	(*vmm_resume_func_t)(void);
 typedef void *	(*vmi_init_func_t)(struct vm *vm);
 typedef int	(*vmi_run_func_t)(void *vmi, int vcpu, uint64_t rip);
@@ -106,7 +108,6 @@ typedef freqratio_res_t	(*vmi_freqratio_t)(uint64_t guest_hz,
 
 struct vmm_ops {
 	vmm_init_func_t		init;		/* module wide initialization */
-	vmm_cleanup_func_t	cleanup;
 	vmm_resume_func_t	resume;
 
 	vmi_init_func_t		vminit;		/* vm-specific initialization */
@@ -159,9 +160,8 @@ int vm_npt_do_operation(struct vm *, uint64_t, size_t, uint32_t, uint8_t *,
 /*
  * APIs that modify the guest memory map require all vcpus to be frozen.
  */
-int vm_mmap_memseg(struct vm *vm, vm_paddr_t gpa, int segid, vm_ooffset_t off,
-    size_t len, int prot, int flags);
-int vm_munmap_memseg(struct vm *vm, vm_paddr_t gpa, size_t len);
+int vm_mmap_memseg(struct vm *, vm_paddr_t, int, uintptr_t, size_t, int, int);
+int vm_munmap_memseg(struct vm *, vm_paddr_t, size_t);
 int vm_alloc_memseg(struct vm *vm, int ident, size_t len, bool sysmem);
 void vm_free_memseg(struct vm *vm, int ident);
 int vm_map_mmio(struct vm *vm, vm_paddr_t gpa, size_t len, vm_paddr_t hpa);
@@ -174,8 +174,8 @@ int vm_unassign_pptdev(struct vm *vm, int pptfd);
  * be frozen. This acts like a read lock on the guest memory map since any
  * modification requires *all* vcpus to be frozen.
  */
-int vm_mmap_getnext(struct vm *vm, vm_paddr_t *gpa, int *segid,
-    vm_ooffset_t *segoff, size_t *len, int *prot, int *flags);
+int vm_mmap_getnext(struct vm *, vm_paddr_t *, int *, uintptr_t *, size_t *,
+    int *, int *);
 int vm_get_memseg(struct vm *vm, int ident, size_t *len, bool *sysmem,
     struct vm_object **objptr);
 vm_paddr_t vmm_sysmem_maxaddr(struct vm *vm);
@@ -445,7 +445,7 @@ void *vmm_contig_alloc(size_t);
 void vmm_contig_free(void *, size_t);
 
 int vmm_mod_load(void);
-int vmm_mod_unload(void);
+void vmm_mod_unload(void);
 
 bool vmm_check_iommu(void);
 
