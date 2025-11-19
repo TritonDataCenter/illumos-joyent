@@ -51,7 +51,9 @@
 
 #else
 
-#if __STDC_VERSION__ - 0 >= 199901L
+#include <sys/feature_tests.h>
+
+#if defined(_STDC_C99)
 #define	assert(EX) (void)((EX) || \
 	(__assert_c99(#EX, __FILE__, __LINE__, __func__), 0))
 #else
