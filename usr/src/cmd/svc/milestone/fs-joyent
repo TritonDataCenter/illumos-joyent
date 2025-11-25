@@ -95,7 +95,7 @@ arc_profile=$(/bin/bootparams | grep "^arc_profile=" | cut -d= -f2)
 if [[ "$arc_profile" != "" ]]; then
     # Don't fail harshly, but do indicate a failure.
     zfscache -p "$arc_profile" > /dev/null
-    if [[ $? == 0 ]]; then
+    if [[ $? != 0 ]]; then
 	echo "Failed to set ZFS ARC profile" "$arc_profile" | \
 	    tee -a /dev/console >&2
     fi
