@@ -116,6 +116,7 @@ typedef enum lxpr_nodetype {
 	LXPR_PID_CGROUP,	/* /proc/<pid>/cgroup	*/
 	LXPR_PID_CMDLINE,	/* /proc/<pid>/cmdline	*/
 	LXPR_PID_COMM,		/* /proc/<pid>/comm	*/
+	LXPR_PID_COREDUMP_FILTER, /* /proc/<pid>/coredump_filter */
 	LXPR_PID_CPU,		/* /proc/<pid>/cpu	*/
 	LXPR_PID_CURDIR,	/* /proc/<pid>/cwd	*/
 	LXPR_PID_ENV,		/* /proc/<pid>/environ	*/
@@ -144,6 +145,7 @@ typedef enum lxpr_nodetype {
 	LXPR_PID_TID_CGROUP,	/* /proc/<pid>/task/<tid>/cgroup	*/
 	LXPR_PID_TID_CMDLINE,	/* /proc/<pid>/task/<tid>/cmdline	*/
 	LXPR_PID_TID_COMM,	/* /proc/<pid>/task/<tid>/comm		*/
+	LXPR_PID_TID_COREDUMP_FILTER,/* /proc/<pid>/task/<tid>/coredmp_filter */
 	LXPR_PID_TID_CPU,	/* /proc/<pid>/task/<tid>/cpu		*/
 	LXPR_PID_TID_CURDIR,	/* /proc/<pid>/task/<tid>/cwd		*/
 	LXPR_PID_TID_ENV,	/* /proc/<pid>/task/<tid>/environ	*/
