@@ -364,7 +364,12 @@ typedef struct lx_proc_data {
 
 	/* Block all signals to all threads; used during vfork */
 	uint_t l_block_all_signals;
-	/* Coredump filter mask  /proc/<pid>/coredump_filter */
+	/*
+	 * Coredump filter mask  /proc/<pid>/coredump_filter
+	 * This has no effect on the running process, is
+	 * just a place holder to appease software that
+	 * needs to setup this mask.
+	 */
 	uint32_t l_coredump_filter;
 } lx_proc_data_t;
 
