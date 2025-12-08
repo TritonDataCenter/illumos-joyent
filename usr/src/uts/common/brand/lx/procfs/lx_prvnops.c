@@ -703,7 +703,7 @@ typedef struct wftab {
 
 static wftab_t wr_tab[] = {
 	{LXPR_PID_COMM, lxpr_write_pid_tid_comm},
-	{LXPR_PID_COREDUMP_FILTER, lxpr_write_pid_tid_coredump_filter},
+	{LXPR_PID_COREDUMP_FILTER, lxpr_write_pid_coredump_filter},
 	{LXPR_PID_FD_FD, NULL},
 	{LXPR_PID_LOGINUID, lxpr_write_pid_loginuid},
 	{LXPR_PID_OOM_SCR_ADJ, NULL},
