@@ -1730,7 +1730,7 @@ lxpr_write_pid_tid_comm(lxpr_node_t *lxpnp, struct uio *uio, struct cred *cr,
  * static int
  * lxpr_read_pid_coredump_filter(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
  *
- * Reads coredump filter mask
+ * Reads /proc/<pid>/coredump_filter mask
  *
  * Arguments:
  *      *lxpnp  lxprocfs node that received a read request.
@@ -1739,9 +1739,9 @@ lxpr_write_pid_tid_comm(lxpr_node_t *lxpnp, struct uio *uio, struct cred *cr,
 static void
 lxpr_read_pid_coredump_filter(lxpr_node_t * lxpnp, lxpr_uiobuf_t *uiobuf)
 {
-	proc_t *p;
-	lx_proc_data_t *pd;
 	uint32_t filter = LXPR_COREDUMP_FILTER_DEFAULT;
+	lx_proc_data_t *pd;
+	proc_t *p;
 
 	ASSERT3U(lxpnp->lxpr_type, ==, LXPR_PID_COREDUMP_FILTER);
 
@@ -1764,7 +1764,7 @@ lxpr_read_pid_coredump_filter(lxpr_node_t * lxpnp, lxpr_uiobuf_t *uiobuf)
  * lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop,
  *     cred_t *cr, caller_context_t *ct)
  *
- * Writes coredump filter mask
+ * Writes /proc/<pid>/coredump_filter mask
  *
  * Arguments:
  *      *lxpnp  lxprocfs node that received a write request.
@@ -1800,12 +1800,13 @@ static int
 lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	caller_context_t *ct)
 {
-	proc_t *p;
-	size_t olen;
-	int err = 0;
-	char buf[32];
-	uint32_t filter;
 	lx_proc_data_t *pd;
+	uint32_t filter;
+	char buf[32];
+	char *endptr;
+	int err = 0;
+	size_t olen;
+	proc_t *p;
 
 	ASSERT3U(lxpnp->lxpr_type, ==, LXPR_PID_COREDUMP_FILTER);
 
@@ -1826,18 +1827,17 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	if ((p = lxpr_lock(lxpnp, NO_ZOMB)) == NULL)
 		return (ENXIO);
 
+	if (ddi_strtoul(buf, &endptr, 0, (ulong_t *)&filter) != 0 ||
+	    *endptr != '\0') {
+		return (EINVAL);
+	}
+
 	ASSERT(MUTEX_HELD(&p->p_lock));
-
-	if (ddi_strtoul(buf, NULL, 0, (unsigned long *)&filter) != 0) {
-		err = EINVAL;
-		goto out_coredump_filter;
+	if ((pd = ptolxproc(p)) == NULL) {
+		lxpr_unlock(p);
+		return (EINVAL);
 	}
-
-	if ((pd = ptolxproc(p)) != NULL) {
-		pd->l_coredump_filter = filter & 0x1FF;
-	}
-
-out_coredump_filter:
+	pd->l_coredump_filter = filter & 0x1FF;
 	lxpr_unlock(p);
 
 	return (err);
