@@ -105,6 +105,17 @@ extern "C" {
 #define	LXPR_SDSIZE	16
 
 /*
+ * Linux coredump_filter allows to which memory segments
+ * will be dump when a pid dumps core.
+ * By default the filter value is 0x33
+ * https://github.com/torvalds/linux/blob/\
+ * ba65a4e7120a616d9c592750d9147f6dcafedffa/\
+ * Documentation/filesystems/proc.rst#\
+ * 34-procpidcoredump_filter---core-dump-filtering-settings 
+ */
+#define	LXPR_COREDUMP_FILTER_DEFAULT	0x33
+
+/*
  * Node/file types for lx /proc files
  * (directories and files contained therein).
  */

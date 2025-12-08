@@ -382,7 +382,7 @@ lx_setbrand(proc_t *p)
 {
 	/* Send SIGCHLD to parent by default when child exits */
 	ptolxproc(p)->l_signal = stol_signo[SIGCHLD];
-	ptolxproc(p)->l_coredump_filter = 0x33; // LINUX DEFAULT
+	ptolxproc(p)->l_coredump_filter = LXPR_COREDUMP_FILTER_DEFAULT;
 }
 
 /* ARGSUSED */

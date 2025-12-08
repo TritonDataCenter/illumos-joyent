@@ -1741,12 +1741,11 @@ lxpr_read_pid_coredump_filter(lxpr_node_t * lxpnp, lxpr_uiobuf_t *uiobuf)
 {
 	proc_t *p;
 	lx_proc_data_t *pd;
-	uint32_t filter = 0x33; /* always return 0x33 by default */
+	uint32_t filter = LXPR_COREDUMP_FILTER_DEFAULT;
 
 	ASSERT(lxpnp->lxpr_type == LXPR_PID_COREDUMP_FILTER);
 
-	p = lxpr_lock(lxpnp, ZOMB_OK);
-	if (p == NULL) {
+	if ((p = lxpr_lock(lxpnp, NO_ZOMB)) == NULL) {
 		lxpr_uiobuf_seterr(uiobuf, EINVAL);
 		return;
 	}
@@ -1802,7 +1801,7 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	caller_context_t *ct)
 {
 	proc_t *p;
-	size_t len;
+	size_t olen;
 	int err = 0;
 	char buf[32];
 	uint32_t filter;
@@ -1813,16 +1812,19 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	if (uiop->uio_offset != 0)
 		return (EINVAL);
 
-	len = MIN(uiop->uio_resid, sizeof (buf) - 1);
+	if (uiop->uio_resid == 0)
+		return (0);
+
+	olen = uiop->uio_resid;
+	if (olen > sizeof (buf) - 1)
+		return (EINVAL);
+
+	bzero(buf, sizeof (buf));
 	if ((err = uiomove(buf, len, UIO_WRITE, uiop)) != 0)
 		return (err);
 
-	buf[len] = '\0';
-
-	p = lxpr_lock(lxpnp, NO_ZOMB);
-	if (p == NULL) {
+	if ((p = lxpr_lock(lxpnp, NO_ZOMB)) == NULL)
 		return (ENXIO);
-	}
 
 	ASSERT(MUTEX_HELD(&p->p_lock));
 
