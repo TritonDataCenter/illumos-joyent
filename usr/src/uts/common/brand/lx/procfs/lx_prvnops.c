@@ -885,7 +885,7 @@ static void (*lxpr_read_function[])() = {
 	lxpr_read_pid_cgroup,		/* /proc/<pid>/task/<tid>/cgroup */
 	lxpr_read_pid_cmdline,		/* /proc/<pid>/task/<tid>/cmdline */
 	lxpr_read_pid_tid_comm,		/* /proc/<pid>/task/<tid>/comm	*/
-	lxpr_read_pid_tid_coredump_filter, /* /proc/../../coredump_filter*/
+	lxpr_read_pid_tid_coredump_filter, /* /proc/../../coredump_filter */
 	lxpr_read_empty,		/* /proc/<pid>/task/<tid>/cpu	*/
 	lxpr_read_invalid,		/* /proc/<pid>/task/<tid>/cwd	*/
 	lxpr_read_pid_env,		/* /proc/<pid>/task/<tid>/environ */
@@ -1068,7 +1068,7 @@ static vnode_t *(*lxpr_lookup_function[])() = {
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/cgroup */
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/cmdline */
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/comm	*/
-	lxpr_lookup_not_a_dir,          /* /proc/../../<tid>/coredump_filter */
+	lxpr_lookup_not_a_dir,		/* /proc/../../<tid>/coredump_filter */
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/cpu	*/
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/cwd	*/
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/environ */
@@ -1742,9 +1742,9 @@ lxpr_write_pid_tid_comm(lxpr_node_t *lxpnp, struct uio *uio, struct cred *cr,
  *      *uiobuf struct holding output data from read request.
  */
 static void
-lxpr_read_pid_tid_coredump_filter(lxpr_node_t* lxpnp, lxpr_uiobuf_t *uiobuf)
+lxpr_read_pid_tid_coredump_filter(lxpr_node_t * lxpnp, lxpr_uiobuf_t *uiobuf)
 {
-	 proc_t *p;
+	proc_t *p;
 	pid_t tid;
 	kthread_t *t;
 	lx_proc_data_t *pd;
@@ -1819,9 +1819,9 @@ lxpr_write_pid_tid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	proc_t *p;
 	pid_t tid;
 	size_t len;
+	int err = 0;
 	char buf[32];
 	kthread_t *t;
-	int err = 0 ;
 	uint32_t filter;
 	lx_proc_data_t *pd;
 
