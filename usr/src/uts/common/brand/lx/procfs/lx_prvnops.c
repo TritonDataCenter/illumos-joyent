@@ -1820,7 +1820,7 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 		return (EINVAL);
 
 	bzero(buf, sizeof (buf));
-	if ((err = uiomove(buf, len, UIO_WRITE, uiop)) != 0)
+	if ((err = uiomove(buf, olen, UIO_WRITE, uiop)) != 0)
 		return (err);
 
 	if ((p = lxpr_lock(lxpnp, NO_ZOMB)) == NULL)
