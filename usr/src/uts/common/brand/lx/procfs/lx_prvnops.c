@@ -856,7 +856,7 @@ static void (*lxpr_read_function[])() = {
 	lxpr_read_pid_cgroup,		/* /proc/<pid>/cgroup	*/
 	lxpr_read_pid_cmdline,		/* /proc/<pid>/cmdline	*/
 	lxpr_read_pid_tid_comm,		/* /proc/<pid>/comm	*/
-	lxpr_read_pid_tid_coredump_filter, /* /proc/<pid>/coredump_filter*/
+	lxpr_read_pid_tid_coredump_filter, /* /proc/<pid>/coredump_filter */
 	lxpr_read_empty,		/* /proc/<pid>/cpu	*/
 	lxpr_read_invalid,		/* /proc/<pid>/cwd	*/
 	lxpr_read_pid_env,		/* /proc/<pid>/environ	*/
@@ -885,8 +885,7 @@ static void (*lxpr_read_function[])() = {
 	lxpr_read_pid_cgroup,		/* /proc/<pid>/task/<tid>/cgroup */
 	lxpr_read_pid_cmdline,		/* /proc/<pid>/task/<tid>/cmdline */
 	lxpr_read_pid_tid_comm,		/* /proc/<pid>/task/<tid>/comm	*/
-	lxpr_read_pid_tid_coredump_filter, /* /proc/<pid>/task/<tid>/\
-					    * coredump_filter*/
+	lxpr_read_pid_tid_coredump_filter, /* /proc/../../coredump_filter*/
 	lxpr_read_empty,		/* /proc/<pid>/task/<tid>/cpu	*/
 	lxpr_read_invalid,		/* /proc/<pid>/task/<tid>/cwd	*/
 	lxpr_read_pid_env,		/* /proc/<pid>/task/<tid>/environ */
@@ -1069,7 +1068,7 @@ static vnode_t *(*lxpr_lookup_function[])() = {
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/cgroup */
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/cmdline */
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/comm	*/
-	lxpr_lookup_not_a_dir,	/* /proc/<pid>/task/<tid>/coredump_filter*/
+	lxpr_lookup_not_a_dir,          /* /proc/../../<tid>/coredump_filter */
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/cpu	*/
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/cwd	*/
 	lxpr_lookup_not_a_dir,		/* /proc/<pid>/task/<tid>/environ */
@@ -1223,7 +1222,7 @@ static int (*lxpr_readdir_function[])() = {
 	lxpr_readdir_not_a_dir,		/* /proc/<pid>/cgroup	*/
 	lxpr_readdir_not_a_dir,		/* /proc/<pid>/cmdline	*/
 	lxpr_readdir_not_a_dir,		/* /proc/<pid>/comm	*/
-	lxpr_readdir_not_a_dir,		/* /proc/<pid>/coredump_filter*/
+	lxpr_readdir_not_a_dir,		/* /proc/<pid>/coredump_filter */
 	lxpr_readdir_not_a_dir,		/* /proc/<pid>/cpu	*/
 	lxpr_readdir_not_a_dir,		/* /proc/<pid>/cwd	*/
 	lxpr_readdir_not_a_dir,		/* /proc/<pid>/environ	*/
@@ -1735,21 +1734,21 @@ lxpr_write_pid_tid_comm(lxpr_node_t *lxpnp, struct uio *uio, struct cred *cr,
 /*
  * static int
  * lxpr_read_pid_tid_coredump_filter(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
- * 
+ *
  * Reads coredump filter mask
- * 
+ *
  * Arguments:
  *      *lxpnp  lxprocfs node that received a read request.
  *      *uiobuf struct holding output data from read request.
  */
- static void
- lxpr_read_pid_tid_coredump_filter(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
- {
-        proc_t *p;
+static void
+lxpr_read_pid_tid_coredump_filter(lxpr_node_t* lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	 proc_t *p;
 	pid_t tid;
 	kthread_t *t;
 	lx_proc_data_t *pd;
-	uint32_t filter = 0x33; /* always return 0x33 by default */ 
+	uint32_t filter = 0x33; /* always return 0x33 by default */
 
 	ASSERT(lxpnp->lxpr_type == LXPR_PID_COREDUMP_FILTER ||
 		lxpnp->lxpr_type == LXPR_PID_TID_COREDUMP_FILTER);
@@ -1780,9 +1779,9 @@ lxpr_write_pid_tid_comm(lxpr_node_t *lxpnp, struct uio *uio, struct cred *cr,
  * static int
  * lxpr_write_pid_tid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop,
  *     cred_t *cr, caller_context_t *ct)
- * 
+ *
  * Writes coredump filter mask
- * 
+ *
  * Arguments:
  *      *lxpnp  lxprocfs node that received a write request.
  *      *uio    uio struct holding input data from write request.
@@ -1792,13 +1791,13 @@ lxpr_write_pid_tid_comm(lxpr_node_t *lxpnp, struct uio *uio, struct cred *cr,
  * Returns:
  *     (0) on success
  *     (EINVAL | ENXIO ) On failure
- *     
+ *
  * Notes:
- *  According to Linux CORE(5) man page and Linux kernel documentation: 
+ *  According to Linux CORE(5) man page and Linux kernel documentation:
  *  https://github.com/torvalds/linux/blob/\
  *  ba65a4e7120a616d9c592750d9147f6dcafedffa/Documentation/\
  *  filesystems/proc.rst#L41 the following values are supported:
- *  
+ *
  *  bit 0  Dump anonymous private mappings.
  *  bit 1  Dump anonymous shared mappings.
  *  bit 2  Dump file-backed private mappings.
@@ -1815,28 +1814,28 @@ lxpr_write_pid_tid_comm(lxpr_node_t *lxpnp, struct uio *uio, struct cred *cr,
  */
 static int
 lxpr_write_pid_tid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
-      caller_context_t *ct)
+	caller_context_t *ct)
 {
-        proc_t *p;
+	proc_t *p;
 	pid_t tid;
-        size_t len;
-        char buf[32];
+	size_t len;
+	char buf[32];
 	kthread_t *t;
-        int err = 0 ;
-        uint32_t filter;
-        lx_proc_data_t *pd;
+	int err = 0 ;
+	uint32_t filter;
+	lx_proc_data_t *pd;
 
-        ASSERT(lxpnp->lxpr_type == LXPR_PID_COREDUMP_FILTER ||
-            lxpnp->lxpr_type == LXPR_PID_TID_COREDUMP_FILTER);
+	ASSERT(lxpnp->lxpr_type == LXPR_PID_COREDUMP_FILTER ||
+		lxpnp->lxpr_type == LXPR_PID_TID_COREDUMP_FILTER);
 
-        if (uiop->uio_offset != 0)
-                return (EINVAL);
+	if (uiop->uio_offset != 0)
+		return (EINVAL);
 
-        len = MIN(uiop->uio_resid, sizeof (buf) - 1);
-        if ((err = uiomove(buf, len, UIO_WRITE, uiop)) != 0)
+	len = MIN(uiop->uio_resid, sizeof (buf) - 1);
+	if ((err = uiomove(buf, len, UIO_WRITE, uiop)) != 0)
 		return (err);
 
-        buf[len] = '\0';
+	buf[len] = '\0';
 
 	tid = (lxpnp->lxpr_desc == 0) ? lxpnp->lxpr_pid : lxpnp->lxpr_desc;
 	p = lxpr_lock_pid(lxpnp, tid, NO_ZOMB, &t);
@@ -1851,7 +1850,7 @@ lxpr_write_pid_tid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 
 	ASSERT(MUTEX_HELD(&p->p_lock));
 
-        if (ddi_strtoul(buf, NULL, 0, (unsigned long *)&filter) != 0) {
+	if (ddi_strtoul(buf, NULL, 0, (unsigned long *)&filter) != 0) {
 		err = EINVAL;
 		goto out_coredump_filter;
 	}
@@ -1861,9 +1860,9 @@ lxpr_write_pid_tid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	}
 
 out_coredump_filter:
-        lxpr_unlock(p);
+	lxpr_unlock(p);
 
-        return (err);
+	return (err);
 }
 
 /*
