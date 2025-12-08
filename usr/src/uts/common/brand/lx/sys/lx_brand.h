@@ -25,6 +25,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 #ifndef _LX_BRAND_H

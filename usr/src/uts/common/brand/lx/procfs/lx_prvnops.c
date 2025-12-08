@@ -1743,7 +1743,7 @@ lxpr_read_pid_coredump_filter(lxpr_node_t * lxpnp, lxpr_uiobuf_t *uiobuf)
 	lx_proc_data_t *pd;
 	uint32_t filter = LXPR_COREDUMP_FILTER_DEFAULT;
 
-	ASSERT(lxpnp->lxpr_type == LXPR_PID_COREDUMP_FILTER);
+	ASSERT3U(lxpnp->lxpr_type, ==, LXPR_PID_COREDUMP_FILTER);
 
 	if ((p = lxpr_lock(lxpnp, NO_ZOMB)) == NULL) {
 		lxpr_uiobuf_seterr(uiobuf, EINVAL);
@@ -1807,7 +1807,7 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	uint32_t filter;
 	lx_proc_data_t *pd;
 
-	ASSERT(lxpnp->lxpr_type == LXPR_PID_COREDUMP_FILTER);
+	ASSERT3U(lxpnp->lxpr_type, ==, LXPR_PID_COREDUMP_FILTER);
 
 	if (uiop->uio_offset != 0)
 		return (EINVAL);
