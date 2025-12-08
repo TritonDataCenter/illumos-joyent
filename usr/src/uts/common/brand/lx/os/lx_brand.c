@@ -154,7 +154,7 @@
 #include <sys/lx_brand.h>
 #include <sys/lx_types.h>
 #include <sys/lx_userhz.h>
-#include <sys/lx_proc.h>
+#include "lx_proc.h"
 #include <sys/param.h>
 #include <sys/termios.h>
 #include <sys/sunddi.h>
