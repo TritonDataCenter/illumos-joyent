@@ -1824,20 +1824,23 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	if ((err = uiomove(buf, olen, UIO_WRITE, uiop)) != 0)
 		return (err);
 
-	if ((p = lxpr_lock(lxpnp, NO_ZOMB)) == NULL)
-		return (ENXIO);
-
 	if (ddi_strtoul(buf, &endptr, 0, (ulong_t *)&filter) != 0 ||
 	    *endptr != '\0') {
 		return (EINVAL);
 	}
 
+	if ((p = lxpr_lock(lxpnp, NO_ZOMB)) == NULL)
+		return (ENXIO);
+
 	ASSERT(MUTEX_HELD(&p->p_lock));
+
 	if ((pd = ptolxproc(p)) == NULL) {
 		lxpr_unlock(p);
 		return (EINVAL);
 	}
+
 	pd->l_coredump_filter = filter & 0x1FF;
+
 	lxpr_unlock(p);
 
 	return (err);
