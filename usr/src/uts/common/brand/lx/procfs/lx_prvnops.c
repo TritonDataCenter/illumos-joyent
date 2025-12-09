@@ -1737,7 +1737,7 @@ lxpr_write_pid_tid_comm(lxpr_node_t *lxpnp, struct uio *uio, struct cred *cr,
  *      *uiobuf struct holding output data from read request.
  */
 static void
-lxpr_read_pid_coredump_filter(lxpr_node_t * lxpnp, lxpr_uiobuf_t *uiobuf)
+lxpr_read_pid_coredump_filter(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 {
 	uint32_t filter = LXPR_COREDUMP_FILTER_DEFAULT;
 	lx_proc_data_t *pd;
