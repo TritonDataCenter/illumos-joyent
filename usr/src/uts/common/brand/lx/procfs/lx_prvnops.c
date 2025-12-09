@@ -1823,7 +1823,7 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	if ((err = uiomove(buf, olen, UIO_WRITE, uiop)) != 0)
 		return (err);
 
-	if (ddi_strtoul(buf, NULL, 0, (ulong_t *)&filter) != 0) {
+	if (ddi_strtoul(buf, NULL, 0, &filter) != 0) {
 		return (EINVAL);
 	}
 
