@@ -1803,7 +1803,6 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	lx_proc_data_t *pd;
 	uint32_t filter;
 	char buf[32];
-	char *endptr;
 	int err = 0;
 	size_t olen;
 	proc_t *p;
