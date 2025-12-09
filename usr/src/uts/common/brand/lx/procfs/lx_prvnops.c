@@ -1835,7 +1835,7 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 		lxpr_unlock(p);
 		return (EINVAL);
 	}
-	pd->l_coredump_filter = filter & 0x1FF;
+	pd->l_coredump_filter = (uint32_t)(filter & 0x1FFul);
 	lxpr_unlock(p);
 
 	return (err);
