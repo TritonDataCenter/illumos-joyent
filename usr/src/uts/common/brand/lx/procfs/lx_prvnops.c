@@ -1831,14 +1831,11 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 		return (ENXIO);
 
 	ASSERT(MUTEX_HELD(&p->p_lock));
-
 	if ((pd = ptolxproc(p)) == NULL) {
 		lxpr_unlock(p);
 		return (EINVAL);
 	}
-
 	pd->l_coredump_filter = filter & 0x1FF;
-
 	lxpr_unlock(p);
 
 	return (err);
