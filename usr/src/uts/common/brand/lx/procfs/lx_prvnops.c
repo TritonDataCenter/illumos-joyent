@@ -1801,7 +1801,7 @@ lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
 	caller_context_t *ct)
 {
 	lx_proc_data_t *pd;
-	uint32_t filter;
+	ulong_t filter;
 	char buf[32];
 	int err = 0;
 	size_t olen;
