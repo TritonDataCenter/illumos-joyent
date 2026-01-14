@@ -30,7 +30,6 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD$*/
 
 #ifndef _I40E_DEVIDS_H_
 #define _I40E_DEVIDS_H_
@@ -58,9 +57,11 @@
 #define I40E_DEV_ID_10G_B		0x104F
 #define I40E_DEV_ID_10G_SFP		0x104E
 #define I40E_DEV_ID_5G_BASE_T_BC	0x101F
+#define I40E_DEV_ID_1G_BASE_T_BC	0x0DD2
 #define I40E_IS_X710TL_DEVICE(d) \
 	(((d) == I40E_DEV_ID_10G_BASE_T_BC) || \
-	((d) == I40E_DEV_ID_5G_BASE_T_BC))
+	((d) == I40E_DEV_ID_5G_BASE_T_BC) || \
+	((d) == I40E_DEV_ID_1G_BASE_T_BC))
 #define I40E_DEV_ID_VF			0x154C
 #define I40E_DEV_ID_VF_HV		0x1571
 #define I40E_DEV_ID_ADAPTIVE_VF		0x1889
