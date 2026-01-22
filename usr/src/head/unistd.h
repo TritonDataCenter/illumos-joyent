@@ -399,7 +399,8 @@ extern char *getusershell(void);
 /*
  * The following ioctl prototype is duplicated in <stropts.h>. The
  * duplication is necessitated by XPG4.2 which requires the prototype
- * be defined in <stropts.h>.
+ * be defined in <stropts.h>.  ioctl() is also duplicated in <sys/ioctl.h>
+ * for broader portability aid.
  */
 #if !defined(__XOPEN_OR_POSIX) || defined(__EXTENSIONS__)
 extern int ioctl(int, int, ...);
@@ -560,7 +561,6 @@ extern int unlink(const char *);
 extern char *getwd(char *);
 extern int usleep(useconds_t);
 extern pid_t vfork(void) __RETURNS_TWICE;
-#pragma unknown_control_flow(vfork)
 #endif
 #if !defined(__XOPEN_OR_POSIX) || defined(__EXTENSIONS__)
 extern void vhangup(void);

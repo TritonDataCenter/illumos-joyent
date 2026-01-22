@@ -14,7 +14,7 @@
 # Copyright 2014 Garrett D'Amore <garrett@damore.org>
 # Copyright 2019 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
-# Copyright 2024 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 #
 
 .PARALLEL: $(SUBDIRS)
@@ -23,6 +23,7 @@ SUBDIRS = \
 	bhyve-tests \
 	crypto-tests \
 	elf-tests \
+	i2c-tests \
 	libc-tests \
 	libmlrpc-tests \
 	libproc-tests \
@@ -34,6 +35,7 @@ SUBDIRS = \
 	smbclient-tests \
 	smbsrv-tests \
 	test-runner \
+	tz-tests \
 	util-tests \
 	zfs-tests
 

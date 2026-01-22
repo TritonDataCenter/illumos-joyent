@@ -51,6 +51,9 @@ fm/io/%.check:	fm/io/%.h
 fs/%.check:	fs/%.h
 	$(DOT_H_CHECK)
 
+gpio/%.check:	gpio/%.h
+	$(DOT_H_CHECK)
+
 ib/%.check:		ib/%.h
 	$(DOT_H_CHECK)
 
@@ -195,6 +198,8 @@ ROOTDIRS=			\
 	$(ROOTDIR)/fm/fs	\
 	$(ROOTDIR)/fm/io	\
 	$(ROOTDIR)/fs		\
+	$(ROOTDIR)/gpio		\
+	$(ROOTDIR)/i2c		\
 	$(ROOTDIR)/ib		\
 	$(ROOTDIR)/ib/adapters/tavor	\
 	$(ROOTDIR)/ib/adapters/hermon	\
@@ -254,6 +259,8 @@ ROOTCRYPTOHDRS= $(CRYPTOHDRS:%=$(ROOTDIR)/crypto/%)
 
 ROOTDCAMHDRS= $(DCAMHDRS:%=$(ROOTDIR)/dcam/%)
 
+ROOTI2CHDRS= $(I2CHDRS:%=$(ROOTDIR)/i2c/%)
+
 ROOTIBHDRS= $(IBHDRS:%=$(ROOTDIR)/ib/%)
 ROOTIBDHDRS= $(IBDHDRS:%=$(ROOTDIR)/ib/clients/ibd/%)
 ROOTIBTLHDRS= $(IBTLHDRS:%=$(ROOTDIR)/ib/ibtl/%)
@@ -282,6 +289,7 @@ ROOTFMIOHDRS= $(FMIOHDRS:%=$(ROOTDIR)/fm/io/%)
 ROOTFMFSHDRS= $(FMFSHDRS:%=$(ROOTDIR)/fm/fs/%)
 
 ROOTFSHDRS= $(FSHDRS:%=$(ROOTDIR)/fs/%)
+ROOTGPIOHDRS= $(GPIOHDRS:%=$(ROOTDIR)/gpio/%)
 
 ROOTNVMEHDRS= $(NVMEHDRS:%=$(ROOTDIR)/nvme/%)
 
@@ -324,7 +332,6 @@ ROOT1394HDRS= $(I1394HDRS:%=$(ROOTDIR)/1394/%)
 ROOTRSMHDRS= $(RSMHDRS:%=$(ROOTDIR)/rsm/%)
 
 ROOTDKTPHDRS= $(DKTPHDRS:%=$(ROOTDIR)/dktp/%)
-ROOTPCHDRS= $(PCHDRS:%=$(ROOTDIR)/%)
 ROOTHOTPLUGHDRS= $(HOTPLUGHDRS:%=$(ROOTDIR)/hotplug/%)
 ROOTHOTPLUGPCIHDRS= $(HOTPLUGPCIHDRS:%=$(ROOTDIR)/hotplug/pci/%)
 
@@ -335,7 +342,7 @@ sparc_ROOTHDRS=	\
 		$(ROOTUSBAUDHDRS) $(ROOTUSBHIDHDRS) $(ROOTUSBMSHDRS) \
 		$(ROOTUSBPRNHDRS) $(ROOTUGENHDRS) $(ROOTUSBVIDHDRS)
 
-i386_ROOTHDRS=	$(ROOTPCHDRS) \
+i386_ROOTHDRS=	\
 		$(ROOTHOTPLUGHDRS) \
 		$(ROOTHOTPLUGPCIHDRS)
 
@@ -471,4 +478,3 @@ $(ROOTDIR)/tsol/%:	tsol/%
 
 $(ROOTDIRS):
 	$(INS.dir)
-

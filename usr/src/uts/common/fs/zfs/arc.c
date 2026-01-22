@@ -28,6 +28,7 @@
  * Copyright (c) 2020, George Amanakis. All rights reserved.
  * Copyright (c) 2020, The FreeBSD Foundation [1]
  * Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
+ * Copyright 2025 Edgecast Cloud LLC.
  *
  * [1] Portions of this software were developed by Allan Jude
  *     under sponsorship from the FreeBSD Foundation.
@@ -280,6 +281,7 @@
 #include <sys/zio_compress.h>
 #include <sys/zio_checksum.h>
 #include <sys/zfs_context.h>
+#include <sys/zfs_ioctl.h>
 #include <sys/arc.h>
 #include <sys/refcount.h>
 #include <sys/vdev.h>
@@ -313,9 +315,8 @@ int arc_procfd;
 #endif
 
 /*
- * This thread's job is to keep enough free memory in the system, by
- * calling arc_kmem_reap_now() plus arc_shrink(), which improves
- * arc_available_memory().
+ * This thread's job is to keep enough free memory in the system, by calling
+ * arc_reap_cb(), which improves arc_available_memory().
  */
 static zthr_t		*arc_reap_zthr;
 
@@ -406,6 +407,14 @@ int zfs_arc_grow_retry = 0;
 int zfs_arc_shrink_shift = 0;
 int zfs_arc_p_min_shift = 0;
 int zfs_arc_average_blocksize = 8 * 1024; /* 8KB */
+
+/*
+ * Defaults for this system, set up once in arc_init(), assumes no
+ * dynamic reconfiguration (DR) of memory for now.
+ */
+static uint64_t zfs_default_arc_max;
+static uint64_t zfs_default_arc_min;
+static uint64_t zfs_init_allmem;
 
 /*
  * ARC dirty data constraints for arc_tempreserve_space() throttle
@@ -1106,7 +1115,7 @@ buf_dest(void *vbuf, void *unused)
 static void
 hdr_recl(void *unused)
 {
-	dprintf("hdr_recl called\n");
+	dprintf_zfs("hdr_recl called\n");
 	/*
 	 * umem calls the reclaim func when we destroy the buf cache,
 	 * which is after we do arc_fini().
@@ -1758,7 +1767,7 @@ arc_hdr_decrypt(arc_buf_hdr_t *hdr, spa_t *spa, const zbookmark_phys_t *zb)
 error:
 	arc_hdr_free_pabd(hdr, B_FALSE);
 	if (cabd != NULL)
-		arc_free_data_buf(hdr, cabd, arc_hdr_size(hdr), hdr);
+		arc_free_data_abd(hdr, cabd, arc_hdr_size(hdr), hdr);
 
 	return (ret);
 }
@@ -6873,7 +6882,7 @@ arc_tempreserve_space(spa_t *spa, uint64_t reserve, uint64_t txg)
 		    &arc_anon->arcs_esize[ARC_BUFC_METADATA]);
 		uint64_t data_esize =
 		    zfs_refcount_count(&arc_anon->arcs_esize[ARC_BUFC_DATA]);
-		dprintf("failing, arc_tempreserve=%lluK anon_meta=%lluK "
+		dprintf_zfs("failing, arc_tempreserve=%lluK anon_meta=%lluK "
 		    "anon_data=%lluK tempreserve=%lluK arc_c=%lluK\n",
 		    arc_tempreserve >> 10, meta_esize >> 10,
 		    data_esize >> 10, reserve >> 10, arc_c >> 10);
@@ -7108,6 +7117,193 @@ arc_max_bytes(void)
 	return (arc_c_max);
 }
 
+int
+arc_dynamic_resize(void *arg)
+{
+	/*
+	 * We just recycle the overly-large zfs_cmd_t for our own
+	 * nefarious purposes. The uint64_t pointers should do nicely.
+	 * "read" means we read from it, "write" means we write to it.
+	 *
+	 * zc_pad2 => cmd (0 == read arc sizes, non-0 == resize arc)
+	 * zc_name => uint64_t array of 6 elements:
+	 * [0] => new_min/arc_c_min (read/write)
+	 * [1] => new_max/arc_c_max (read/write)
+	 * [2] => system default min with no mods (write)
+	 * [3] => system default max with no mods (write)
+	 * [4] => zfs_init_allmem ("allmem" at arc_init() time) (write)
+	 * [5] => zfs_arc_min (write)
+	 * [6] => zfs_arc_max (write)
+	 */
+	CTASSERT(6 * sizeof (uint64_t) <= MAXPATHLEN);
+	zfs_cmd_t *zc = (zfs_cmd_t *)arg;
+	uint64_t *return_data = (uint64_t *)zc->zc_name;
+	int err = 0;
+	int cmd = zc->zc_pad2;
+	uint64_t new_min = return_data[0];
+	uint64_t new_max = return_data[1];
+
+	if (cmd != 0) {
+		/* Reality check args that don't need locks first. */
+
+		/*
+		 * Check for reset-to-default, which is min == 0 and
+		 * max == UINT64_MAX.
+		 *
+		 * Keep zeroes in place for no-change.
+		 */
+		if (new_min == 0) {
+			/*
+			 * Assume some special values for new_max.
+			 * the top 256 (UINT64_MAX - [0-255]) values can be
+			 * repurposed.
+			 */
+			switch (new_max) {
+			case UINT64_MAX:
+				/* Reset to the system's default tunings! */
+				new_min = zfs_default_arc_min;
+				new_max = zfs_default_arc_max;
+				break;
+			case (UINT64_MAX - 1UL):
+				/* Reset to /etc/system if possible. */
+				new_min = (zfs_arc_min != 0) ?
+				    zfs_arc_min : arc_c_min;
+				new_max = (zfs_arc_max != 0) ?
+				    zfs_arc_max : arc_c_max;
+				/*
+				 * If this results in bad settings, nothing
+				 * will get written and an error will return.
+				 *
+				 * NOTE: Other /etc/system tunables may need
+				 * to be reported AND addressed here.
+				 */
+				break;
+			default:
+				/*
+				 * Keep new_min at 0 to grab arc_c_* under the
+				 * lock.
+				 */
+				break;
+			}
+		} else {
+			/* Floor minimum ARC size at 64GiB, like arc_init(). */
+			if (new_min < 64 << 20)
+				return (EINVAL);
+		}
+
+		/* Last unlocked reality-check case. */
+		boolean_t force_arc_adjust;
+
+		if (new_max != 0 && new_min != 0) {
+			if (new_min > new_max)
+				return (ERANGE);
+			force_arc_adjust = B_TRUE;
+		} else if (new_max == 0 && new_min == 0) {
+			force_arc_adjust = B_FALSE;
+		} else {
+			force_arc_adjust = B_TRUE;
+		}
+
+#ifdef _KERNEL
+		uint64_t allmem = ptob(physmem - swapfs_minfree);
+#else
+		uint64_t allmem = (physmem * PAGESIZE) / 2;
+#endif
+		DTRACE_PROBE2(arc__dynamic__resize__allmem__check,
+		    uint64_t, allmem, uint64_t, zfs_init_allmem);
+
+		/* Use a light touch for now. */
+		if (mutex_tryenter(&arc_adjust_lock) == 0)
+			return (EAGAIN);
+
+		/*
+		 * At this point we have arc_adjust_lock, and won't let it go
+		 * until we reach bottom after filling in all "write" fields.
+		 * We also can count on no non-mdb scribbling of arc_c_*.
+		 */
+
+		/*
+		 * If either new_{min,max} is zero, set it to the current
+		 * arc_c_{min,max} value.
+		 */
+		if (new_min == 0)
+			new_min = arc_c_min;
+
+		if (new_max == 0)
+			new_max = arc_c_max;
+
+		if (new_min > new_max) {
+			err = ERANGE;
+		} else if (new_max >= allmem) {
+			err = ENOMEM;
+		} else {
+			ASSERT0(err);
+
+			arc_c_max = new_max;
+			arc_c_min = new_min;
+
+			/* Don't grow arc_c immediately, but do shrink it. */
+			arc_c = MIN(arc_c, arc_c_max);
+
+			/*
+			 * Readjust parameters that are functions of arc_c_min
+			 * or arc_c_max. Some of these parameters may self-
+			 * adjust but let's be careful for now.
+			 */
+			arc_p = (arc_c >> 1);
+			/* See /etc/system comment below... */
+			arc_meta_limit = arc_c_max / 4;
+#ifdef _KERNEL
+			/*
+			 * Metadata is stored in the kernel's heap.  Don't let
+			 * us use more than half the heap for the ARC.
+			 */
+			arc_meta_limit = MIN(arc_meta_limit,
+			    vmem_size(heap_arena, VMEM_ALLOC | VMEM_FREE) / 2);
+#endif
+			/*
+			 * If we restore ALL /etc/system performance analysis
+			 * tunables, the following adjustments will need to be
+			 * /etc/system checked and maybe changed as well. This
+			 * includes some not-derived items in arc_init(), e.g.
+			 * arc_meta_min and arc_grow_retry (and more).
+			 */
+			arc_meta_min = arc_c_min / 2;
+
+			/*
+			 * NOTE: We also ignore kmem_debugging() halving in
+			 * this path. root@gz/admin should know what they're
+			 * doing if they're using this.
+			 */
+
+			/* Make sure arc_adjust is triggered if need be. */
+			arc_adjust_needed =
+			    (arc_adjust_needed || force_arc_adjust);
+			/* arc_get_data_impl() does this with the lock held! */
+			if (force_arc_adjust)
+				zthr_wakeup(arc_adjust_zthr);
+		}
+	} /* Else don't bother locking, just report back */
+
+	/*
+	 * Fill in all pertinent fields, even if written anew above!
+	 * "read" (cmd == 0) can be unreliable-ish due to concurrency.
+	 * "write" (cmd != 0) is under arc_adjust_lock protection.
+	 */
+	return_data[0] = arc_c_min;
+	return_data[1] = arc_c_max;
+	return_data[2] = zfs_default_arc_min;
+	return_data[3] = zfs_default_arc_max;
+	return_data[4] = zfs_init_allmem;
+	return_data[5] = zfs_arc_min;
+	return_data[6] = zfs_arc_max;
+
+	if (cmd != 0)
+		mutex_exit(&arc_adjust_lock);
+
+	return (err);
+}
+
 void
 arc_init(void)
 {
@@ -7119,6 +7315,9 @@ arc_init(void)
 #else
 	uint64_t allmem = (physmem * PAGESIZE) / 2;
 #endif
+	/* Writing reality checks for arc_dynamic_resize() to cache (sic). */
+	zfs_init_allmem = allmem;
+
 	mutex_init(&arc_adjust_lock, NULL, MUTEX_DEFAULT, NULL);
 	cv_init(&arc_adjust_waiters_cv, NULL, CV_DEFAULT, NULL);
 
@@ -7133,6 +7332,7 @@ arc_init(void)
 	 * growth of the value at 1GB.
 	 */
 	arc_c_min = MIN(arc_c_min, 1 << 30);
+	zfs_default_arc_min = arc_c_min;
 
 	/* set max to 3/4 of all memory, or all but 1GB, whichever is more */
 	if (allmem >= 1 << 30)
@@ -7140,6 +7340,7 @@ arc_init(void)
 	else
 		arc_c_max = arc_c_min;
 	arc_c_max = MAX(allmem * 3 / 4, arc_c_max);
+	zfs_default_arc_max = arc_c_max;
 
 	/*
 	 * In userland, there's only the memory pressure that we artificially
@@ -7153,7 +7354,12 @@ arc_init(void)
 
 	/*
 	 * Allow the tunables to override our calculations if they are
-	 * reasonable (ie. over 64MB)
+	 * reasonable (ie. over 64MB).
+	 *
+	 * With the existence of arc_dynamic_resize(), these tunables can
+	 * again be overridden. These guardrails are less strict with the
+	 * (undocumented) ioctl, but callers (like zfscache(8) will keep these
+	 * in mind.
 	 */
 	if (zfs_arc_max > 64 << 20 && zfs_arc_max < allmem) {
 		arc_c_max = zfs_arc_max;

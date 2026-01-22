@@ -46,8 +46,6 @@
  *    undocumented identifiers listed above.
  */
 
-#pragma ident	"%Z%%M%	%I%	%E% SMI"
-
 #include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>

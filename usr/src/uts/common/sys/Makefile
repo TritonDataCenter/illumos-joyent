@@ -46,13 +46,17 @@ FILEMODE=644
 
 i386_HDRS=			\
 	asy.h			\
+	avintr.h		\
 	fd_debug.h		\
 	fdc.h			\
 	fdmedia.h		\
 	firmload.h		\
 	gfx_private.h		\
 	mouse.h			\
-	nvme.h
+	nvme.h			\
+	pcic_reg.h		\
+	pcic_var.h
+
 
 sparc_HDRS=			\
 	mouse.h			\
@@ -200,7 +204,6 @@ CHKHDRS=			\
 	dls.h			\
 	dls_mgmt.h		\
 	dls_impl.h		\
-	dma_i8237A.h		\
 	dnlc.h			\
 	door.h			\
 	door_data.h		\
@@ -209,10 +212,6 @@ CHKHDRS=			\
 	dtrace_impl.h		\
 	dumpadm.h		\
 	dumphdr.h		\
-	ecppsys.h		\
-	ecppio.h		\
-	ecppreg.h		\
-	ecppvar.h		\
 	edonr.h			\
 	efi_partition.h		\
 	elf.h			\
@@ -735,6 +734,12 @@ CRYPTOHDRS=			\
 DCAMHDRS=			\
 	dcam1394_io.h
 
+I2CHDRS=		\
+	controller.h	\
+	i2c.h		\
+	ioctl.h		\
+	mux.h
+
 IBHDRS=			\
 	ib_types.h	\
 	ib_pkt_hdrs.h
@@ -893,6 +898,16 @@ FSHDRS=				\
 	zfs.h			\
 	zut.h
 
+GPIOHDRS=			\
+	dpio.h			\
+	gpio_sim.h		\
+	kgpio_attr.h		\
+	kgpio_provider.h	\
+	kgpio.h			\
+	ltc4306.h		\
+	pca953x.h		\
+	zen_gpio.h
+
 NVMEHDRS=		\
 	discovery.h		\
 	kioxia.h		\
@@ -904,6 +919,7 @@ NVMEHDRS=		\
 	micron_9550.h		\
 	ocp.h			\
 	phison.h		\
+	samsung.h		\
 	solidigm.h		\
 	solidigm_p5xxx.h	\
 	solidigm_ps10x0.h	\
@@ -1123,17 +1139,6 @@ DKTPHDRS=		\
 	tgcom.h		\
 	tgdk.h
 
-# "pc" header files used on i386
-PCHDRS=			\
-	avintr.h	\
-	dma_engine.h	\
-	i8272A.h	\
-	pcic_reg.h	\
-	pcic_var.h	\
-	pic.h		\
-	pit.h		\
-	rtc.h
-
 NXGEHDRS=			\
 	nxge.h			\
 	nxge_common.h		\
@@ -1178,6 +1183,7 @@ CHECKHDRS=						\
 	$(FCHDRS:%.h=fibre-channel/%.check)		\
 	$(FCIMPLHDRS:%.h=fibre-channel/impl/%.check)	\
 	$(FCULPHDRS:%.h=fibre-channel/ulp/%.check)	\
+	$(I2CHDRS:%.h=i2c/%.check)			\
 	$(IBHDRS:%.h=ib/%.check)			\
 	$(IBDHDRS:%.h=ib/clients/ibd/%.check)		\
 	$(IBTLHDRS:%.h=ib/ibtl/%.check)			\
@@ -1201,6 +1207,7 @@ CHECKHDRS=						\
 	$(FMFSHDRS:%.h=fm/fs/%.check)			\
 	$(FMIOHDRS:%.h=fm/io/%.check)			\
 	$(FSHDRS:%.h=fs/%.check)			\
+	$(GPIOHDRS:%.h=gpio/%.check)			\
 	$(NVMEHDRS:%.h=nvme/%.check)			\
 	$(SCSIHDRS:%.h=scsi/%.check)			\
 	$(SCSIADHDRS:%.h=scsi/adapters/%.check)		\
@@ -1254,6 +1261,8 @@ CHECKHDRS=						\
 	$(ROOTFMIOHDRS)		\
 	$(ROOTFMFSHDRS)		\
 	$(ROOTFSHDRS)		\
+	$(ROOTGPIOHDRS)		\
+	$(ROOTI2CHDRS)		\
 	$(ROOTIBDHDRS)		\
 	$(ROOTIBHDRS)		\
 	$(ROOTIBTLHDRS)		\
@@ -1285,8 +1294,6 @@ CHECKHDRS=						\
 	$(ROOTSYSEVENTHDRS)     \
 	$(ROOTCONTRACTHDRS)     \
 	$(ROOTUSBHDRS)		\
-	$(ROOTUWBHDRS)		\
-	$(ROOTUWBAHDRS)		\
 	$(ROOTUSBAUDHDRS)	\
 	$(ROOTUSBHUBDHDRS)	\
 	$(ROOTUSBHIDHDRS)	\
@@ -1327,6 +1334,8 @@ install_h:			\
 	$(ROOTFMFSHDRS)		\
 	$(ROOTFMIOHDRS)		\
 	$(ROOTFSHDRS)		\
+	$(ROOTGPIOHDRS)		\
+	$(ROOTI2CHDRS)		\
 	$(ROOTIBDHDRS)		\
 	$(ROOTIBHDRS)		\
 	$(ROOTIBTLHDRS)		\
@@ -1357,8 +1366,6 @@ install_h:			\
 	$(ROOTSDCARDHDRS)	\
 	$(ROOTSYSEVENTHDRS)     \
 	$(ROOTCONTRACTHDRS)     \
-	$(ROOTUWBHDRS)		\
-	$(ROOTUWBAHDRS)		\
 	$(ROOTUSBHDRS)		\
 	$(ROOTUSBCCIDHDRS)	\
 	$(ROOTUSBAUDHDRS)	\

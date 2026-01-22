@@ -25,7 +25,7 @@
  * Copyright (c) 2014 Integros [integros.com]
  * Copyright 2020 Joyent, Inc.
  * Copyright 2020 Tintri by DDN, Inc. All rights reserved.
- * Copyright 2015-2023 RackTop Systems, Inc.
+ * Copyright 2015-2024 RackTop Systems, Inc.
  */
 
 /* Portions Copyright 2007 Jeremy Teo */
@@ -215,9 +215,15 @@ zfs_open(vnode_t **vpp, int flag, cred_t *cr, caller_context_t *ct)
 		}
 	}
 
-	/* Keep a count of the synchronous opens in the znode */
-	if (flag & (FSYNC | FDSYNC))
-		atomic_inc_32(&zp->z_sync_cnt);
+	/*
+	 * Keep a count of the synchronous opens in the znode. On first
+	 * synchronous open we must convert all previous async transactions
+	 * into sync to keep correct ordering.
+	 */
+	if (flag & (FSYNC | FDSYNC)) {
+		if (atomic_inc_32_nv(&zp->z_sync_cnt) == 1)
+			zil_async_to_sync(zfsvfs->z_log, zp->z_id);
+	}
 
 	ZFS_EXIT(zfsvfs);
 	return (0);
@@ -849,7 +855,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	int		count = 0;
 	sa_bulk_attr_t	bulk[4];
 	uint64_t	mtime[2], ctime[2];
-	boolean_t	did_clear_setid_bits = B_FALSE;
+	boolean_t	did_clear_setid_bits = B_FALSE, commit;
 
 	/*
 	 * Fasttrack empty write
@@ -967,6 +973,9 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	write_eof = (woff + n > zp->z_size);
 
 	end_size = MAX(zp->z_size, woff + n);
+
+	commit = ((ioflag & (FSYNC | FDSYNC)) != 0 ||
+	    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS);
 
 	/*
 	 * Write the file in reasonable size chunks.  Each chunk is written
@@ -1154,7 +1163,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		 * zfs_write_clear_setid_bits_if_necessary must precede
 		 * any of the TX_WRITE records logged here.
 		 */
-		zfs_log_write(zilog, tx, TX_WRITE, zp, woff, tx_bytes, ioflag);
+		zfs_log_write(zilog, tx, TX_WRITE, zp, woff, tx_bytes, commit);
 		dmu_tx_commit(tx);
 
 		if (prev_error != 0 || error != 0)
@@ -1174,8 +1183,7 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 		return (error);
 	}
 
-	if (ioflag & (FSYNC | FDSYNC) ||
-	    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
+	if (commit)
 		zil_commit(zilog, zp->z_id);
 
 	ZFS_EXIT(zfsvfs);
@@ -2647,8 +2655,6 @@ update:
 	return (error);
 }
 
-ulong_t zfs_fsync_sync_cnt = 4;
-
 static int
 zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 {
@@ -2664,8 +2670,6 @@ zfs_fsync(vnode_t *vp, int syncflag, cred_t *cr, caller_context_t *ct)
 	if (vn_has_cached_data(vp) && !(syncflag & FNODSYNC) &&
 	    (vp->v_type == VREG) && !(IS_SWAPVP(vp)))
 		(void) VOP_PUTPAGE(vp, (offset_t)0, (size_t)0, B_ASYNC, cr, ct);
-
-	(void) tsd_set(zfs_fsyncer_key, (void *)zfs_fsync_sync_cnt);
 
 	if (zfsvfs->z_os->os_sync != ZFS_SYNC_DISABLED) {
 		ZFS_ENTER(zfsvfs);
@@ -2711,7 +2715,17 @@ zfs_getattr(vnode_t *vp, vattr_t *vap, int flags, cred_t *cr,
 	ZFS_ENTER(zfsvfs);
 	ZFS_VERIFY_ZP(zp);
 
-	zfs_fuid_map_ids(zp, cr, &vap->va_uid, &vap->va_gid);
+	/*
+	 * When files have FUIDs (SIDs) for UID or GID, it can be
+	 * quite expensive to get the UID and GID values.
+	 * Avoid that when we can.
+	 */
+	if ((vap->va_mask & (AT_UID | AT_GID)) != 0) {
+		zfs_fuid_map_ids(zp, cr, &vap->va_uid, &vap->va_gid);
+	} else {
+		vap->va_uid = (uid_t)-1;
+		vap->va_gid = (gid_t)-1;
+	}
 
 	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_MTIME(zfsvfs), NULL, &mtime, 16);
 	SA_ADD_BULK_ATTR(bulk, count, SA_ZPL_CTIME(zfsvfs), NULL, &ctime, 16);
@@ -2725,11 +2739,22 @@ zfs_getattr(vnode_t *vp, vattr_t *vap, int flags, cred_t *cr,
 	 * If ACL is trivial don't bother looking for ACE_READ_ATTRIBUTES.
 	 * Also, if we are the owner don't bother, since owner should
 	 * always be allowed to read basic attributes of file.
+	 *
+	 * Also skip when flags & ATTR_NOACLCHECK, which is safe when
+	 * we only need ACE_READ_ATTRIBUTES or ACE_READ_ACL because
+	 * none of the other checks (dataset checks etc) done in
+	 * zfs_access_common apply to those permissions.
+	 *
+	 * Check "is owner" using zfs_fuid_is_cruser which optimizes
+	 * the case where both the object and owner have known SIDs.
+	 *
+	 * These optimizations are to avoid a potentially expensive
+	 * idmap up-call for these very frequent access checks.
 	 */
-	if (!(zp->z_pflags & ZFS_ACL_TRIVIAL) &&
-	    (vap->va_uid != crgetuid(cr))) {
-		if (error = zfs_zaccess(zp, ACE_READ_ATTRIBUTES, 0,
-		    skipaclchk, cr)) {
+	if (!(zp->z_pflags & ZFS_ACL_TRIVIAL) && !skipaclchk &&
+	    !zfs_fuid_is_cruser(zfsvfs, zp->z_uid, cr)) {
+		if ((error = zfs_zaccess(zp, ACE_READ_ATTRIBUTES, 0,
+		    B_FALSE, cr)) != 0) {
 			ZFS_EXIT(zfsvfs);
 			return (error);
 		}
@@ -3202,8 +3227,10 @@ top:
 	    XVA_ISSET_REQ(xvap, XAT_SPARSE) ||
 	    XVA_ISSET_REQ(xvap, XAT_CREATETIME) ||
 	    XVA_ISSET_REQ(xvap, XAT_SYSTEM)))) {
-		need_policy = zfs_zaccess(zp, ACE_WRITE_ATTRIBUTES, 0,
+		err = zfs_zaccess(zp, ACE_WRITE_ATTRIBUTES, 0,
 		    skipaclchk, cr);
+		if (err != 0)
+			need_policy = TRUE;
 	}
 
 	if (mask & (AT_UID|AT_GID)) {
@@ -3255,8 +3282,6 @@ top:
 	}
 
 	mutex_enter(&zp->z_lock);
-	oldva.va_mode = zp->z_mode;
-	zfs_fuid_map_ids(zp, cr, &oldva.va_uid, &oldva.va_gid);
 	if (mask & AT_XVATTR) {
 		/*
 		 * Update xvattr mask to include only those attributes
@@ -3348,6 +3373,11 @@ top:
 		    XVA_ISSET_REQ(xvap, XAT_OPAQUE))) {
 			need_policy = TRUE;
 		}
+	}
+
+	if (need_policy || (mask & AT_MODE) != 0) {
+		oldva.va_mode = zp->z_mode;
+		zfs_fuid_map_ids(zp, cr, &oldva.va_uid, &oldva.va_gid);
 	}
 
 	mutex_exit(&zp->z_lock);
@@ -4713,7 +4743,8 @@ zfs_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp,
 		    B_TRUE);
 		err = sa_bulk_update(zp->z_sa_hdl, bulk, count, tx);
 		ASSERT0(err);
-		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, off, len, 0);
+		zfs_log_write(zfsvfs->z_log, tx, TX_WRITE, zp, off, len,
+		    B_FALSE);
 	}
 	dmu_tx_commit(tx);
 

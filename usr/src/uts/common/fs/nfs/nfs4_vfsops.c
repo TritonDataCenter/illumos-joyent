@@ -1653,7 +1653,6 @@ resolve_referral(mntinfo4_t *mi, servinfo4_t *svp, cred_t *cr, int nth,
 	mutex_exit(&mi->mi_lock);
 
 	ret = 0;
-bad:
 	/* Free up XDR memory allocated in nfs4_process_referral() */
 	xdr_free(xdr_nfs_fsl_info, (char *)&nfsfsloc);
 	xdr_free(xdr_COMPOUND4res_clnt, (caddr_t)&callres);
@@ -1835,8 +1834,6 @@ recov_retry:
 			    needrecov);
 		return;
 	}
-
-is_link_err:
 
 	/* for non-recovery errors */
 	if (res.status && res.status != NFS4ERR_SYMLINK &&

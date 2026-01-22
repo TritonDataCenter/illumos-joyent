@@ -111,6 +111,7 @@ LOCFLAGS +=	-D_SYS_STREAM_H -D_REENTRANT -DSVR4 -DSUNW_OPTIONS \
 CPPFLAGS +=	$(LOCFLAGS)
 
 CERRWARN +=	-_gcc=-Wno-implicit-function-declaration
+CERRWARN +=	-_gcc=-Wno-unknown-pragmas
 
 # not linted
 SMATCH=off

@@ -21,13 +21,16 @@ pkg:/library/security/openssl
 pkg:/library/security/openssl-10
 pkg:/library/security/openssl-11
 pkg:/library/security/openssl-3
+pkg:/library/security/openssl-3/32
 pkg:/library/security/openssl-30
 pkg:/library/security/trousers
+pkg:/library/security/trousers/32
 pkg:/library/zlib
 pkg:/package/pkg
 pkg:/release/name
 pkg:/runtime/java
 pkg:/runtime/java/openjdk11
+pkg:/runtime/java/openjdk17
 pkg:/runtime/java/openjdk8
 pkg:/runtime/java/runtime64
 pkg:/runtime/perl
@@ -45,6 +48,7 @@ pkg:/system/library/gcc-10-runtime
 pkg:/system/library/gcc-7-runtime
 pkg:/system/library/gcc-runtime
 pkg:/system/library/libdbus
+pkg:/system/library/libdbus/32
 pkg:/system/library/libdbus-glib
 pkg:/system/library/mozilla-nss
 pkg:/system/management/snmp/net-snmp

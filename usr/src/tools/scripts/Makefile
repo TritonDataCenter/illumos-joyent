@@ -36,6 +36,7 @@ SCRIPTS= \
 SHFILES= \
 	build_cscope \
 	checkpaths \
+	check-gitignore \
 	cstyle \
 	elfcmp \
 	flg.flp \
@@ -67,6 +68,7 @@ PYFILES= \
 	git-pbchk \
 	hdrchk \
 	mapfilechk \
+	utf8check \
 	validate_pkg \
 	wscheck \
 	wsdiff

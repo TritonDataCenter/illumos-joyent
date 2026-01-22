@@ -26,6 +26,7 @@
  * Copyright 2020 Joyent, Inc.
  * Copyright 2025 Oxide Computer Company
  * Copyright 2024 MNX Cloud, Inc.
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 /*
  * Copyright (c) 2010, Intel Corporation.
@@ -1534,6 +1535,7 @@
 #include <sys/sunndi.h>
 #include <sys/cpuvar.h>
 #include <sys/processor.h>
+#include <sys/stdbool.h>
 #include <sys/sysmacros.h>
 #include <sys/pg.h>
 #include <sys/fp.h>
@@ -1829,6 +1831,8 @@ struct xsave_info {
 	size_t		zmmlo_offset;	/* AVX512: offset for zmm 256 save */
 	size_t		zmmhi_size;	/* AVX512: size of zmm hi reg save */
 	size_t		zmmhi_offset;	/* AVX512: offset for zmm hi reg save */
+	size_t		pkru_size;	/* PKRU size */
+	size_t		pkru_offset;	/* PKRU offset */
 };
 
 
@@ -3249,6 +3253,58 @@ cpuid_enable_auto_ibrs(void)
 }
 
 /*
+ *  AMD Zen 5 processors have a bug where the 16- and 32-bit forms of the
+ *  RDSEED instruction can frequently return 0 despite indicating success
+ *  (CF=1) - See AMD-SB-7055 / CVE-2025-62626.
+ */
+static void
+cpuid_evaluate_amd_rdseed(cpu_t *cpu, uchar_t *featureset)
+{
+	struct cpuid_info *cpi = cpu->cpu_m.mcpu_cpi;
+	struct cpuid_regs *ecp = &cpi->cpi_std[7];
+	uint32_t rev = cpu->cpu_m.mcpu_ucode_info->cui_rev;
+	uint64_t val;
+
+	ASSERT3U(cpi->cpi_vendor, ==, X86_VENDOR_AMD);
+	ASSERT(ecp->cp_ebx & CPUID_INTC_EBX_7_0_RDSEED);
+
+	/* This erratum only applies to the Zen5 uarch */
+	if (uarchrev_uarch(cpi->cpi_uarchrev) != X86_UARCH_AMD_ZEN5)
+		return;
+
+	/*
+	 * AMD-SB-7055 specifies microcode versions that mitigate this issue on
+	 * BRH-C1 and BRHD-B0. If we're on one of those chips and the microcode
+	 * version is new enough we can leave RDSEED enabled.
+	 */
+	if (chiprev_matches(cpi->cpi_chiprev, X86_CHIPREV_AMD_TURIN_C1) &&
+	    rev >= 0x0b00215a) {
+		return;
+	}
+	if (chiprev_matches(cpi->cpi_chiprev, X86_CHIPREV_AMD_DENSE_TURIN_B0) &&
+	    rev >= 0x0b101054) {
+		return;
+	}
+
+	/*
+	 * Go ahead and disable RDSEED on this boot.
+	 * In addition to removing it from the feature set and cached value, we
+	 * also need to remove it from the features returned by CPUID7 so that
+	 * userland programs performing their own feature detection will
+	 * determine it is not available.
+	 */
+	if (cpu->cpu_id == 0)
+		cmn_err(CE_WARN, "Masking unreliable RDSEED on this hardware");
+
+	remove_x86_feature(featureset, X86FSET_RDSEED);
+	ecp->cp_ebx &= ~CPUID_INTC_EBX_7_0_RDSEED;
+
+	val = rdmsr(MSR_AMD_CPUID7_FEATURES);
+	val &= ~MSR_AMD_CPUID7_FEATURES_RDSEED;
+	wrmsr(MSR_AMD_CPUID7_FEATURES, val);
+}
+
+/*
  * Determine how we should mitigate TAA or if we need to. Regardless of TAA, if
  * we can disable TSX, we do so.
  *
@@ -4258,7 +4314,7 @@ cpuid_pass_basic(cpu_t *cpu, void *arg)
 		/*
 		 * If XSAVE has been disabled, just ignore all of the
 		 * extended-save-area dependent flags here. By removing most of
-		 * the leaf 7, sub-leaf 0 flags, that will ensure tha we don't
+		 * the leaf 7, sub-leaf 0 flags, that will ensure that we don't
 		 * end up looking at additional xsave dependent leaves right
 		 * now.
 		 */
@@ -4288,8 +4344,11 @@ cpuid_pass_basic(cpu_t *cpu, void *arg)
 		    disable_smap == 0)
 			add_x86_feature(featureset, X86FSET_SMAP);
 
-		if (ecp->cp_ebx & CPUID_INTC_EBX_7_0_RDSEED)
+		if (ecp->cp_ebx & CPUID_INTC_EBX_7_0_RDSEED) {
 			add_x86_feature(featureset, X86FSET_RDSEED);
+			if (cpi->cpi_vendor == X86_VENDOR_AMD)
+				cpuid_evaluate_amd_rdseed(cpu, featureset);
+		}
 
 		if (ecp->cp_ebx & CPUID_INTC_EBX_7_0_ADX)
 			add_x86_feature(featureset, X86FSET_ADX);
@@ -5104,6 +5163,17 @@ cpuid_pass_extended(cpu_t *cpu, void *_arg __unused)
 
 			cpi->cpi_xsave.zmmhi_size = cp->cp_eax;
 			cpi->cpi_xsave.zmmhi_offset = cp->cp_ebx;
+		}
+
+		if (cpi->cpi_xsave.xsav_hw_features_low & XFEATURE_PKRU) {
+			cp->cp_eax = 0xD;
+			cp->cp_ecx = 9;
+			cp->cp_edx = cp->cp_ebx = 0;
+
+			(void) __cpuid_insn(cp);
+
+			cpi->cpi_xsave.pkru_size = cp->cp_eax;
+			cpi->cpi_xsave.pkru_offset = cp->cp_ebx;
 		}
 
 		if (is_x86_feature(x86_featureset, X86FSET_XSAVE)) {
@@ -6405,13 +6475,6 @@ cpuid_get_addrsize(cpu_t *cpu, uint_t *pabits, uint_t *vabits)
 		*vabits = cpi->cpi_vabits;
 }
 
-size_t
-cpuid_get_xsave_size(void)
-{
-	return (MAX(cpuid_info0.cpi_xsave.xsav_max_size,
-	    sizeof (struct xsave_state)));
-}
-
 /*
  * Export information about known offsets to the kernel. We only care about
  * things we have actually enabled support for in %xcr0.
@@ -6453,6 +6516,37 @@ cpuid_get_xsave_info(uint64_t bit, size_t *sizep, size_t *offp)
 	default:
 		panic("asked for unsupported xsave feature: 0x%lx", bit);
 	}
+}
+
+/*
+ * Use our supported-features indicators (xsave_bv_all) to return the XSAVE
+ * size of our supported-features that need saving. Some CPUs' maximum save
+ * size (stored in cpuid_info0.cpi_xsave.xsav_max_size) includes
+ * unsupported-by-us features (e.g. Intel AMX) which we MAY be able to safely
+ * dismiss if the supported XSAVE data's offset + length are before the
+ * unsupported feature.
+ */
+size_t
+cpuid_get_xsave_size(void)
+{
+	size_t furthest_out = sizeof (struct xsave_state);
+	uint_t shift = 0;
+
+	VERIFY(xsave_bv_all != 0);
+
+	for (uint64_t current = xsave_bv_all; current != 0;
+	    current >>= 1, shift++) {
+		uint64_t testbit = 1UL << shift;
+		size_t size, offset;
+
+		if ((testbit & xsave_bv_all) == 0)
+			continue;
+
+		cpuid_get_xsave_info(testbit, &size, &offset);
+		furthest_out = MAX(furthest_out, offset + size);
+	}
+
+	return (furthest_out);
 }
 
 /*

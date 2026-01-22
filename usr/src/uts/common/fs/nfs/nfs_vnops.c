@@ -3932,7 +3932,6 @@ again:
 		}
 	}
 
-out:
 	if (pl == NULL)
 		return (error);
 

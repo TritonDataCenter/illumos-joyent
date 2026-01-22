@@ -1612,7 +1612,7 @@ dump_queried_stats(dladm_handle_t dh, datalink_id_t linkid, void *arg)
 			dladm_link_stat_query_all_free(stat_chain);
 		}
 	}
-done:
+
 	return (DLADM_WALK_CONTINUE);
 }
 

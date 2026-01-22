@@ -21,6 +21,8 @@
 
 /*
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2025 Oxide Computer Company
+ * Copyright 2025 MNX Cloud, Inc.
  */
 
 /*
@@ -29,7 +31,7 @@
  */
 
 /*	Copyright (c) 1988 AT&T	*/
-/*	  All Rights Reserved  	*/
+/*	  All Rights Reserved	*/
 
 /*
  * A part of this file comes from public domain source, so
@@ -112,6 +114,7 @@
 #include <deflt.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <stdbool.h>
 
 /* JAN_01_1902 cast to (int) - negative number of seconds from 1970 */
 #define	JAN_01_1902		(int)0x8017E880
@@ -162,7 +165,7 @@
 #else /* little endian */
 
 #define	GET_BYTE(x) \
-	    ((x) & 0xff)
+	    ((uchar_t)(x) & 0xff)
 
 #define	SWAP_BYTES(x) ((\
 	    GET_BYTE(x) << 8) |\
@@ -208,7 +211,7 @@ extern	mutex_t		_time_lock;
 
 extern const int	__lyday_to_month[];
 extern const int	__yday_to_month[];
-extern const int	__mon_lengths[2][MONS_PER_YEAR];
+extern const int	__mon_lengths[2][MONSPERYEAR];
 extern const int	__year_lengths[2];
 
 const char	_tz_gmt[4] = "GMT";	/* "GMT"  */
@@ -323,7 +326,7 @@ static uint32_t		zoneinfo_seqno_init = 1;
 static uint32_t		*zoneinfo_seqadr = &zoneinfo_seqno_init;
 #define	RELOAD_INFO()	(zoneinfo_seqno != *zoneinfo_seqadr)
 
-#define	_2AM		(2 * SECS_PER_HOUR)
+#define	_2AM		(2 * SECSPERHOUR)
 #define	FIRSTWEEK	1
 #define	LASTWEEK	5
 
@@ -1047,7 +1050,7 @@ out:
  *	the assumption is:   If t exceeds 32-bit boundries and local zone
  *	is zoneinfo type, is_in_dst is set to to 0 for negative values
  *	of t, and set to the same DST state as the highest ordered
- * 	transition in cache for positive values of t.
+ *	transition in cache for positive values of t.
  */
 static void
 set_zone_default_context(void)
@@ -1064,11 +1067,17 @@ set_zone_default_context(void)
 	set_tzname(newtzname);
 }
 
+static bool
+state_is_posix(const state_t *state)
+{
+	return (state->zonerules == POSIX || state->zonerules == POSIX_USA);
+}
+
 static void
 set_zone_context(time_t t)
 {
 	prev_t		*prevp;
-	int    		lo, hi, tidx, lidx;
+	int		lo, hi, tidx, lidx;
 	ttinfo_t	*ttisp, *std, *alt;
 	const char	*newtzname[2];
 
@@ -1146,11 +1155,12 @@ set_zone_context(time_t t)
 	 */
 	ttisp = &lclzonep->ttis[lclzonep->types[tidx]];
 	prevp = &lclzonep->prev[tidx];
+	bool posix = state_is_posix(lclzonep);
 
 	if ((is_in_dst = ttisp->tt_isdst) == 0) { /* std. time */
 		timezone = -ttisp->tt_gmtoff;
 		newtzname[0] = &lclzonep->chars[ttisp->tt_abbrind];
-		if ((alt = prevp->alt) != NULL) {
+		if (!posix && (alt = prevp->alt) != NULL) {
 			altzone = -alt->tt_gmtoff;
 			newtzname[1] = &lclzonep->chars[alt->tt_abbrind];
 		} else {
@@ -1160,7 +1170,7 @@ set_zone_context(time_t t)
 	} else { /* alt. time */
 		altzone = -ttisp->tt_gmtoff;
 		newtzname[1] = &lclzonep->chars[ttisp->tt_abbrind];
-		if ((std = prevp->std) != NULL) {
+		if (!posix && (std = prevp->std) != NULL) {
 			timezone = -std->tt_gmtoff;
 			newtzname[0] = &lclzonep->chars[std->tt_abbrind];
 		} else {
@@ -1276,7 +1286,7 @@ posix_check_dst(long long t, state_t *sp)
 	if (sp->zonerules == POSIX)	 {	/* POSIX rules */
 		pdaylight.rules[0] = &sp->start_rule;
 		pdaylight.rules[1] = &sp->end_rule;
-	} else { 			/* POSIX_USA: USA */
+	} else {			/* POSIX_USA: USA */
 		i = 0;
 		while (year < __usa_rules[i].s_year && i < MAX_RULE_TABLE) {
 			i++;
@@ -1322,8 +1332,8 @@ posix_daylight(long long *janfirst, int year, posix_daylight_t *pdaylightp)
 	long long	value;
 
 	static const int	__secs_year_lengths[2] = {
-		DAYS_PER_NYEAR * SECSPERDAY,
-		DAYS_PER_LYEAR * SECSPERDAY
+		DAYSPERNYEAR * SECSPERDAY,
+		DAYSPERLYEAR * SECSPERDAY
 	};
 
 	leapyear = isleap(year);
@@ -1494,7 +1504,7 @@ load_zoneinfo(const char *name, state_t *sp)
 		return (-1);
 	}
 
-	cp += (sizeof (tzhp->tzh_magic)) + (sizeof (tzhp->tzh_reserved));
+	cp += offsetof(struct tzhead, tzh_ttisutcnt);
 
 /* LINTED: alignment */
 	ttisstdcnt = CVTZCODE(cp);
@@ -2473,9 +2483,11 @@ getsystemTZ()
 			break;
 	}
 	if (tzn == NULL) {
+		size_t tzl = strlen(tz) + 1;
+
 		/* This is new timezone name */
-		tzn = lmalloc(sizeof (tznmlist_t *) + strlen(tz) + 1);
-		(void) strcpy(tzn->name, tz);
+		tzn = lmalloc(sizeof (tznmlist_t *) + tzl);
+		(void) memcpy(tzn->name, tz, tzl);
 		tzn->link = systemTZrec;
 		systemTZrec = tzn;
 	}
@@ -2506,6 +2518,7 @@ set_one_tzname(const char *name, int idx)
 	int	hashid, i;
 	char	*s;
 	tznmlist_t *tzn;
+	size_t tznl;
 
 	if (name == _tz_gmt || name == _tz_spaces) {
 		tzname[idx] = (char *)name;
@@ -2527,11 +2540,12 @@ set_one_tzname(const char *name, int idx)
 	/*
 	 * allocate new entry. This entry is never freed, so use lmalloc
 	 */
-	tzn = lmalloc(sizeof (tznmlist_t *) + strlen(name) + 1);
+	tznl = strlen(name) + 1;
+	tzn = lmalloc(sizeof (tznmlist_t *) + tznl);
 	if (tzn == NULL)
 		return (1);
 
-	(void) strcpy(tzn->name, name);
+	(void) memcpy(tzn->name, name, tznl);
 
 	/* link it */
 	tzn->link = tznmhash[hashid];

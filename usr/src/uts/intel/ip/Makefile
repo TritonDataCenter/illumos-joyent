@@ -58,7 +58,6 @@ INSTALL_TARGET	= $(BINARY) $(ROOTMODULE) $(ROOTLINK) $(ROOT_CONFFILE)
 CFLAGS		+= $(CINLINEFLAGS)
 
 CERRWARN	+= -_gcc=-Wno-parentheses
-CERRWARN	+= -_gcc=-Wno-unused-label
 CERRWARN	+= -_gcc=-Wno-unused-function
 CERRWARN	+= -_gcc=-Wno-unused-variable
 CERRWARN	+= -_gcc=-Wno-switch
@@ -71,8 +70,8 @@ SMOFF += index_overflow
 # need work still
 $(OBJS_DIR)/igmp.o := SMOFF += shift_to_zero
 $(OBJS_DIR)/tnet.o := SMOFF += shift_to_zero
+$(OBJS_DIR)/radix.o := SMOFF += signed_integer_overflow_check
 SMOFF += signed,all_func_returns
-SMOFF += signed_integer_overflow_check
 
 #
 # To get the BPF header files included by ipnet.h

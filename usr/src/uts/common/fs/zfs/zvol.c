@@ -1063,7 +1063,7 @@ ssize_t zvol_immediate_write_sz = 32768;
 
 static void
 zvol_log_write(zvol_state_t *zv, dmu_tx_t *tx, offset_t off, ssize_t resid,
-    boolean_t sync)
+    boolean_t commit)
 {
 	uint32_t blocksize = zv->zv_volblocksize;
 	zilog_t *zilog = zv->zv_zilog;
@@ -1072,15 +1072,16 @@ zvol_log_write(zvol_state_t *zv, dmu_tx_t *tx, offset_t off, ssize_t resid,
 	if (zil_replaying(zilog, tx))
 		return;
 
-	if (zilog->zl_logbias == ZFS_LOGBIAS_THROUGHPUT)
+	if (zilog->zl_logbias == ZFS_LOGBIAS_THROUGHPUT) {
 		write_state = WR_INDIRECT;
-	else if (!spa_has_slogs(zilog->zl_spa) &&
-	    resid >= blocksize && blocksize > zvol_immediate_write_sz)
+	} else if (!spa_has_slogs(zilog->zl_spa) &&
+	    resid >= blocksize && blocksize > zvol_immediate_write_sz) {
 		write_state = WR_INDIRECT;
-	else if (sync)
+	} else if (commit) {
 		write_state = WR_COPIED;
-	else
+	} else {
 		write_state = WR_NEED_COPY;
+	}
 
 	while (resid) {
 		itx_t *itx;
@@ -1112,7 +1113,6 @@ zvol_log_write(zvol_state_t *zv, dmu_tx_t *tx, offset_t off, ssize_t resid,
 		BP_ZERO(&lr->lr_blkptr);
 
 		itx->itx_private = zv;
-		itx->itx_sync = sync;
 
 		zil_itx_assign(zilog, itx, tx);
 
@@ -1188,7 +1188,7 @@ zvol_strategy(buf_t *bp)
 	int error = 0;
 	boolean_t doread = !!(bp->b_flags & B_READ);
 	boolean_t is_dumpified;
-	boolean_t sync;
+	boolean_t commit;
 
 	if (getminor(bp->b_edev) == 0) {
 		error = SET_ERROR(EINVAL);
@@ -1231,9 +1231,9 @@ zvol_strategy(buf_t *bp)
 	}
 
 	is_dumpified = zv->zv_flags & ZVOL_DUMPIFIED;
-	sync = ((!(bp->b_flags & B_ASYNC) &&
+	commit = ((!(bp->b_flags & B_ASYNC) &&
 	    !(zv->zv_flags & ZVOL_WCE)) ||
-	    (zv->zv_objset->os_sync == ZFS_SYNC_ALWAYS)) &&
+	    zv->zv_objset->os_sync == ZFS_SYNC_ALWAYS) &&
 	    !doread && !is_dumpified;
 
 	smt_begin_unsafe();
@@ -1262,7 +1262,7 @@ zvol_strategy(buf_t *bp)
 				dmu_tx_abort(tx);
 			} else {
 				dmu_write(os, ZVOL_OBJ, off, size, addr, tx);
-				zvol_log_write(zv, tx, off, size, sync);
+				zvol_log_write(zv, tx, off, size, commit);
 				dmu_tx_commit(tx);
 			}
 		}
@@ -1281,7 +1281,7 @@ zvol_strategy(buf_t *bp)
 	if ((bp->b_resid = resid) == bp->b_bcount)
 		bioerror(bp, off > volsize ? EINVAL : error);
 
-	if (sync)
+	if (commit)
 		zil_commit(zv->zv_zilog, ZVOL_OBJ);
 	biodone(bp);
 
@@ -1442,7 +1442,7 @@ zvol_write(dev_t dev, uio_t *uio, cred_t *cr)
 	zvol_state_t *zv;
 	uint64_t volsize;
 	int error = 0;
-	boolean_t sync;
+	boolean_t commit;
 	zone_t *zonep = curzone;
 	uint64_t tot_bytes;
 	hrtime_t start, lat;
@@ -1477,8 +1477,8 @@ zvol_write(dev_t dev, uio_t *uio, cred_t *cr)
 	start = gethrtime();
 	tot_bytes = 0;
 
-	sync = !(zv->zv_flags & ZVOL_WCE) ||
-	    (zv->zv_objset->os_sync == ZFS_SYNC_ALWAYS);
+	commit = !(zv->zv_flags & ZVOL_WCE) ||
+	    zv->zv_objset->os_sync == ZFS_SYNC_ALWAYS;
 
 	locked_range_t *lr = rangelock_enter(&zv->zv_rangelock,
 	    uio->uio_loffset, uio->uio_resid, RL_WRITER);
@@ -1499,7 +1499,7 @@ zvol_write(dev_t dev, uio_t *uio, cred_t *cr)
 		}
 		error = dmu_write_uio_dnode(zv->zv_dn, uio, bytes, tx);
 		if (error == 0)
-			zvol_log_write(zv, tx, off, bytes, sync);
+			zvol_log_write(zv, tx, off, bytes, commit);
 		dmu_tx_commit(tx);
 
 		if (error)
@@ -1507,7 +1507,7 @@ zvol_write(dev_t dev, uio_t *uio, cred_t *cr)
 	}
 	rangelock_exit(lr);
 
-	if (sync)
+	if (commit)
 		zil_commit(zv->zv_zilog, ZVOL_OBJ);
 
 	DTRACE_PROBE4(zvol__uio__done, dev_t, dev, uio_t *, uio, int, 1, int,
@@ -1666,11 +1666,11 @@ zvol_get_volume_wce(void *minor_hdl)
  */
 void
 zvol_log_write_minor(void *minor_hdl, dmu_tx_t *tx, offset_t off, ssize_t resid,
-    boolean_t sync)
+    boolean_t commit)
 {
 	zvol_state_t *zv = minor_hdl;
 
-	zvol_log_write(zv, tx, off, resid, sync);
+	zvol_log_write(zv, tx, off, resid, commit);
 }
 /*
  * END entry points to allow external callers access to the volume.
@@ -1680,8 +1680,7 @@ zvol_log_write_minor(void *minor_hdl, dmu_tx_t *tx, offset_t off, ssize_t resid,
  * Log a DKIOCFREE/free-long-range to the ZIL with TX_TRUNCATE.
  */
 static void
-zvol_log_truncate(zvol_state_t *zv, dmu_tx_t *tx, uint64_t off, uint64_t len,
-    boolean_t sync)
+zvol_log_truncate(zvol_state_t *zv, dmu_tx_t *tx, uint64_t off, uint64_t len)
 {
 	itx_t *itx;
 	lr_truncate_t *lr;
@@ -1696,7 +1695,6 @@ zvol_log_truncate(zvol_state_t *zv, dmu_tx_t *tx, uint64_t off, uint64_t len,
 	lr->lr_offset = off;
 	lr->lr_length = len;
 
-	itx->itx_sync = sync;
 	zil_itx_assign(zilog, itx, tx);
 }
 
@@ -1911,8 +1909,7 @@ zvol_ioctl(dev_t dev, int cmd, intptr_t arg, int flag, cred_t *cr, int *rvalp)
 			if (error != 0) {
 				dmu_tx_abort(tx);
 			} else {
-				zvol_log_truncate(zv, tx, start, length,
-				    B_TRUE);
+				zvol_log_truncate(zv, tx, start, length);
 				dmu_tx_commit(tx);
 				error = dmu_free_long_range(zv->zv_objset,
 				    ZVOL_OBJ, start, length);

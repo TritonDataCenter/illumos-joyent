@@ -22,7 +22,7 @@
 /*
  * Copyright 2015 OmniTI Computer Consulting, Inc.  All rights reserved.
  * Copyright 2019 Joyent, Inc.
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
@@ -530,6 +530,7 @@ smbios_info_chassis(smbios_hdl_t *shp, id_t id, smbios_chassis_t *chp)
 	const smb_struct_t *stp = smb_lookup_id(shp, id);
 	off_t skuoff;
 	smb_chassis_t ch;
+	smb_chassis_bonus_t b;
 
 	if (stp == NULL) {
 		return (-1); /* errno is set for us */
@@ -552,8 +553,8 @@ smbios_info_chassis(smbios_hdl_t *shp, id_t id, smbios_chassis_t *chp)
 	bzero(chp, sizeof (smb_base_chassis_t));
 
 	/*
-	 * See the comments for the smb_chassis_pre35_t in sys/smbios_impl.h for
-	 * an explanation as to why this is here. The use of smb_strptr with
+	 * See the comments for the smb_chassis_pre35_t in <sys/smbios_impl.h>
+	 * for an explanation as to why this is here. The use of smb_strptr with
 	 * index 0 below ensures that we initialize this to an empty string.
 	 */
 	if (smb_libgteq(shp, SMB_VERSION_35)) {
@@ -563,6 +564,14 @@ smbios_info_chassis(smbios_hdl_t *shp, id_t id, smbios_chassis_t *chp)
 		bzero(p35->smbc_sku, sizeof (p35->smbc_sku));
 	}
 
+	/*
+	 * SMBIOS 3.9 added the rack type and height. Make sure to initialize
+	 * this if the library is new enough.
+	 */
+	if (smb_libgteq(shp, SMB_VERSION_39)) {
+		chp->smbc_rtype = 0;
+		chp->smbc_rheight = 0;
+	}
 	chp->smbc_oemdata = ch.smbch_oemdata;
 	chp->smbc_lock = (ch.smbch_type & SMB_CHT_LOCK) != 0;
 	chp->smbc_type = ch.smbch_type & ~SMB_CHT_LOCK;
@@ -582,26 +591,35 @@ smbios_info_chassis(smbios_hdl_t *shp, id_t id, smbios_chassis_t *chp)
 	 * if there isn't space for the SKU byte. This is very common of
 	 * hypervisors.
 	 */
-	skuoff = sizeof (ch) + ch.smbch_cn * ch.smbch_cm;
-	if (!smb_gteq(shp, SMB_VERSION_27) ||
-	    stp->smbst_hdr->smbh_len < skuoff + 1) {
+	if (!smb_gteq(shp, SMB_VERSION_27)) {
 		return (0);
 	}
 
-	if (smb_libgteq(shp, SMB_VERSION_27)) {
-		uint8_t strno;
+	skuoff = sizeof (ch) + ch.smbch_cn * ch.smbch_cm;
+	smb_info_bcopy_offset(stp->smbst_hdr, &b, sizeof (b), skuoff);
+
+	/*
+	 * In the library versions between 2.7 and 3.4, we opted to embed the
+	 * SKU in the chassis structure itself, rather than include a pointer.
+	 * See the comments around the smb_chassis_pre35_t in
+	 * <sys/smbios_impl.h>.
+	 */
+	if (smb_libgteq(shp, SMB_VERSION_27) &&
+	    !smb_libgteq(shp, SMB_VERSION_34)) {
+		smb_chassis_pre35_t *p35 = (smb_chassis_pre35_t *)chp;
 		const char *str;
 
-		smb_info_bcopy_offset(stp->smbst_hdr, &strno, sizeof (strno),
-		    skuoff);
-		str = smb_strptr(stp, strno);
-		if (smb_libgteq(shp, SMB_VERSION_35)) {
-			chp->smbc_sku = str;
-		} else {
-			smb_chassis_pre35_t *p35 = (smb_chassis_pre35_t *)chp;
-			(void) strlcpy(p35->smbc_sku, str,
-			    sizeof (p35->smbc_sku));
-		}
+		str = smb_strptr(stp, b.smbcb_sku);
+		(void) strlcpy(p35->smbc_sku, str, sizeof (p35->smbc_sku));
+	}
+
+	if (smb_libgteq(shp, SMB_VERSION_35)) {
+		chp->smbc_sku = smb_strptr(stp, b.smbcb_sku);
+	}
+
+	if (smb_libgteq(shp, SMB_VERSION_39)) {
+		chp->smbc_rtype = b.smbcb_rtype;
+		chp->smbc_rheight = b.smbcb_rheight;
 	}
 
 	return (0);
@@ -2087,7 +2105,7 @@ smbios_info_fwinfo(smbios_hdl_t *shp, id_t id, smbios_fwinfo_t *fwinfo)
 	}
 
 	/*
-	 * The verion and manufacturer are part of smbios_info_common().
+	 * The version and manufacturer are part of smbios_info_common().
 	 */
 	bzero(fwinfo, sizeof (*fwinfo));
 	smb_info_bcopy(stp->smbst_hdr, &fw, sizeof (fw));
@@ -2281,5 +2299,93 @@ smbios_info_addinfo_ent(smbios_hdl_t *shp, id_t id, uint_t entno,
 	}
 
 	*entp = entry;
+	return (0);
+}
+
+int
+smbios_info_tpm(smbios_hdl_t *shp, id_t id, smbios_tpm_t *tpm)
+{
+	const smb_struct_t *stp = smb_lookup_id(shp, id);
+	smb_tpm_t t;
+
+	if (stp == NULL) {
+		return (-1); /* errno is set for us */
+	}
+
+	if (stp->smbst_hdr->smbh_type != SMB_TYPE_TPM) {
+		return (smb_set_errno(shp, ESMB_TYPE));
+	}
+
+	if (stp->smbst_hdr->smbh_len < sizeof (t)) {
+		return (smb_set_errno(shp, ESMB_SHORT));
+	}
+
+	bzero(tpm, sizeof (*tpm));
+	smb_info_bcopy(stp->smbst_hdr, &t, sizeof (t));
+	bcopy(t.smbtpm_vid, tpm->smbtpm_vid, sizeof (t.smbtpm_vid));
+	tpm->smbtpm_major = t.smbtpm_major;
+	tpm->smbtpm_minor = t.smbtpm_minor;
+	tpm->smbtpm_fwv1 = t.smbtpm_fwv1;
+	tpm->smbtpm_fwv2 = t.smbtpm_fwv2;
+	tpm->smbtpm_desc = smb_strptr(stp, t.smbtpm_desc);
+	tpm->smbtpm_chars = t.smbtpm_chars;
+	tpm->smbtpm_oem = t.smbtpm_oem;
+
+	return (0);
+}
+
+int
+smbios_info_mgmtdev(smbios_hdl_t *shp, id_t id, smbios_mgmtdev_t *mgmt)
+{
+	const smb_struct_t *stp = smb_lookup_id(shp, id);
+	smb_mgmtdev_t md;
+
+	if (stp == NULL) {
+		return (-1); /* errno is set for us */
+	}
+
+	if (stp->smbst_hdr->smbh_type != SMB_TYPE_MGMTDEV) {
+		return (smb_set_errno(shp, ESMB_TYPE));
+	}
+
+	if (stp->smbst_hdr->smbh_len < sizeof (md)) {
+		return (smb_set_errno(shp, ESMB_SHORT));
+	}
+
+	bzero(mgmt, sizeof (*mgmt));
+	smb_info_bcopy(stp->smbst_hdr, &md, sizeof (md));
+	mgmt->smbmd_desc = smb_strptr(stp, md.smbmgd_desc);
+	mgmt->smbmd_dtype = md.smbmgd_dtype;
+	mgmt->smbmd_atype = md.smbmgd_atype;
+	mgmt->smbmd_addr = md.smbmgd_addr;
+
+	return (0);
+}
+
+int
+smbios_info_mgmtcomp(smbios_hdl_t *shp, id_t id, smbios_mgmtcomp_t *mgmt)
+{
+	const smb_struct_t *stp = smb_lookup_id(shp, id);
+	smb_mgmtcomp_t mc;
+
+	if (stp == NULL) {
+		return (-1); /* errno is set for us */
+	}
+
+	if (stp->smbst_hdr->smbh_type != SMB_TYPE_MGMTDEVCP) {
+		return (smb_set_errno(shp, ESMB_TYPE));
+	}
+
+	if (stp->smbst_hdr->smbh_len < sizeof (mc)) {
+		return (smb_set_errno(shp, ESMB_SHORT));
+	}
+
+	bzero(mgmt, sizeof (*mgmt));
+	smb_info_bcopy(stp->smbst_hdr, &mc, sizeof (mc));
+	mgmt->smbmc_desc = smb_strptr(stp, mc.smbmgc_desc);
+	mgmt->smbmc_mgmtdev = mc.smbmgc_mgmtdev;
+	mgmt->smbmc_comp = mc.smbmgc_comp;
+	mgmt->smbmc_thresh = mc.smbmgc_thresh;
+
 	return (0);
 }

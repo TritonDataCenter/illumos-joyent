@@ -29,6 +29,7 @@
 
 /*
  * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 RackTop Systems, Inc.
  */
 
 #include <sys/debug.h>
@@ -63,7 +64,6 @@ static dmar_table_t *dmar_table;	/* converted form of DMAR table */
 /*
  * global variables exported outside this file
  */
-boolean_t dmar_print = B_FALSE;
 kmutex_t ioapic_drhd_lock;
 list_t ioapic_drhd_list;
 
@@ -489,13 +489,23 @@ dmar_parse(dmar_table_t **tblpp, char *raw)
 		case DMAR_RHSA:
 			unmstr = "RHSA";
 			break;
+		case DMAR_ANDD:
+			unmstr = "ANDD";
+			break;
+		case DMAR_SATC:
+			unmstr = "SATC";
+			break;
+		case DMAR_SIDP:
+			unmstr = "SIDP";
+			break;
 		default:
-			unmstr = "unknown unity type";
+			unmstr = "unknown unit type";
 			break;
 		}
 		if (unmstr) {
 			ddi_err(DER_NOTE, NULL, "DMAR ACPI table: "
-			    "skipping unsupported unit type %s", unmstr);
+			    "skipping unsupported unit type %u: %s",
+			    get_uint16(uhead), unmstr);
 		}
 		uhead += get_uint16(&uhead[2]);
 	}
@@ -616,7 +626,7 @@ dmar_table_print(dmar_table_t *tbl)
 {
 	int i;
 
-	if (dmar_print == B_FALSE) {
+	if (immu_dmar_print == B_FALSE) {
 		return;
 	}
 

@@ -33,6 +33,7 @@
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2021 Joyent, Inc.
 # Copyright 2023 MNX Cloud, Inc.
+# Copyright 2026 Edgecast Cloud LLC.
 #
 
 #
@@ -183,6 +184,7 @@ CTFDIFF=	$(ONBLD_TOOLS)/bin/$(MACH)/ctfdiff
 CTFMERGE=	$(ONBLD_TOOLS)/bin/$(MACH)/ctfmerge
 CTFSTABS=	$(ONBLD_TOOLS)/bin/$(MACH)/ctfstabs
 CTFSTRIP=	$(ONBLD_TOOLS)/bin/$(MACH)/ctfstrip
+MANLINK=	$(ONBLD_TOOLS)/bin/$(MACH)/manlink
 NDRGEN=		$(ONBLD_TOOLS)/bin/$(MACH)/ndrgen
 GENOFFSETS=	$(ONBLD_TOOLS)/bin/genoffsets
 XREF=		$(ONBLD_TOOLS)/bin/xref
@@ -440,7 +442,6 @@ CERRWARN = -errtags=yes -errwarn=%all
 
 CERRWARN += -_gcc=-Wno-missing-braces
 CERRWARN += -_gcc=-Wno-sign-compare
-CERRWARN += -_gcc=-Wno-unknown-pragmas
 CERRWARN += -_gcc=-Wno-unused-parameter
 CERRWARN += -_gcc=-Wno-missing-field-initializers
 
@@ -458,7 +459,6 @@ CCERRWARN = -errtags=yes -errwarn=%all
 
 CCERRWARN += -_gcc=-Wno-missing-braces
 CCERRWARN += -_gcc=-Wno-sign-compare
-CCERRWARN += -_gcc=-Wno-unknown-pragmas
 CCERRWARN += -_gcc=-Wno-unused-parameter
 CCERRWARN += -_gcc=-Wno-missing-field-initializers
 
@@ -959,7 +959,7 @@ UTS_LABEL=	$(RELEASE)
 #
 BOOTBANNER1=	SmartOS Version ^v ^w-bit
 # XXX SmartOS: BANNER_YEAR in environment set in smartos-live's build_illumos.
-BOOTBANNER2=	Copyright 2022-$(BANNER_YEAR) MNX Cloud, Inc.
+BOOTBANNER2=	Copyright 2025-$(BANNER_YEAR) Edgecast Cloud LLC.
 BOOTBANNER3=
 BOOTBANNER4=
 BOOTBANNER5=

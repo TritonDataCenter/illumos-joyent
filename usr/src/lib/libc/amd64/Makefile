@@ -28,6 +28,7 @@
 # Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2025 Oxide Computer Company
 # Copyright 2025 Hans Rosenfeld
+# Copyright 2025 MNX Cloud, Inc.
 #
 
 LIBCBASE=	.
@@ -293,6 +294,8 @@ COMSYSOBJS=			\
 SYSOBJS=			\
 	__clock_gettime.o	\
 	__clock_gettime_sys.o	\
+	__gethrtime.o		\
+	__gethrtime_sys.o	\
 	__getcontext.o		\
 	__uadmin.o		\
 	_lwp_mutex_unlock.o	\
@@ -1042,7 +1045,6 @@ CERRWARN += -_gcc=-Wno-parentheses
 CERRWARN += -_gcc=-Wno-switch
 CERRWARN += $(CNOWARN_UNINIT)
 CERRWARN += -_gcc=-Wno-unused-value
-CERRWARN += -_gcc=-Wno-unused-label
 CERRWARN += -_gcc=-Wno-unused-variable
 CERRWARN += -_gcc=-Wno-type-limits
 CERRWARN += -_gcc=-Wno-char-subscripts
@@ -1159,7 +1161,13 @@ $(PORTI18N_COND:%=pics/%) := \
 pics/arc4random.o :=	CPPFLAGS += -I$(SRC)/common/crypto/chacha
 
 pics/__clock_gettime.o := CPPFLAGS += $(COMMPAGE_CPPFLAGS)
+pics/__gethrtime.o := CPPFLAGS += $(COMMPAGE_CPPFLAGS)
 pics/gettimeofday.o := CPPFLAGS += $(COMMPAGE_CPPFLAGS)
+
+# because of char_to_decimal.h
+pics/file_decim.o := SMOFF += indenting
+pics/func_decim.o := SMOFF += indenting
+pics/string_decim.o := SMOFF += indenting
 
 #
 # Disable the stack protector due to issues with bootstrapping rtld. See

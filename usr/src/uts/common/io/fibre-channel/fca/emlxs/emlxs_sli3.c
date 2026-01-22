@@ -4400,9 +4400,6 @@ emlxs_get_attention(emlxs_hba_t *hba, int32_t msgid)
 	uint32_t mask = hba->sli.sli3.hc_copy;
 
 #ifdef MSI_SUPPORT
-
-read_ha_register:
-
 	/* Check for default MSI interrupt */
 	if (msgid == 0) {
 		/* Read host attention register to determine interrupt source */
@@ -4630,7 +4627,7 @@ emlxs_handle_ff_error(emlxs_hba_t *hba)
 		    ((volatile uint8_t *)hba->sli.sli3.slim_addr + 0xb0));
 
 		EMLXS_MSGF(EMLXS_CONTEXT, &emlxs_hardware_error_msg,
-		    "Maximum adapter temperature exceeded (%d °C).", status1);
+		    "Maximum adapter temperature exceeded (%d Â°C).", status1);
 
 		hba->temperature = status1;
 		hba->flag |= FC_OVERTEMP_EVENT;
@@ -5502,12 +5499,8 @@ emlxs_sli3_hba_kill(emlxs_hba_t *hba)
 		goto mode_B;
 	}
 
-mode_A:
-
 	EMLXS_MSGF(EMLXS_CONTEXT, &emlxs_init_debug_msg,
 	    "Attempting SLIM2 Interlock...");
-
-interlock_A:
 
 	value = 0x55555555;
 	*word0 = 0;

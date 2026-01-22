@@ -2363,7 +2363,6 @@ icmp_opt_set(conn_t *connp, uint_t optset_context, int level, int name,
 	err = icmp_do_opt_set(coa, level, name, inlen, invalp,
 	    cr, checkonly);
 	if (err != 0) {
-errout:
 		if (!coa->coa_ancillary)
 			ixa_refrele(coa->coa_ixa);
 		*outlenp = 0;

@@ -22,35 +22,21 @@
 # Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
+# Copyright 2025 Hans Rosenfeld
 
 PROG = mpstat
 OBJS = mpstat.o
 SRCS =$(OBJS:%.o=%.c) $(COMMON_SRCS)
 
+CLEANFILES = $(OBJS) $(COMMON_OBJS:%.o=%.c)
+
 include $(SRC)/cmd/Makefile.cmd
 include $(SRC)/cmd/stat/Makefile.stat
 
 LDLIBS += -ldevinfo -lkstat -lavl
-CFLAGS += $(CCVERBOSE) -I${STATCOMMONDIR}
+CFLAGS += $(CCVERBOSE)
 CERRWARN += -_gcc=-Wno-switch
 CERRWARN += -_gcc=-Wno-parentheses
 FILEMODE= 0555
 
-.KEEP_STATE:
-
-all: $(PROG)
-
-install: all $(ROOTPROG)
-
-$(PROG): $(OBJS) $(COMMON_OBJS)
-	$(LINK.c) -o $(PROG) $(OBJS) $(COMMON_OBJS) $(LDLIBS)
-	$(POST_PROCESS)
-
-%.o : $(STATCOMMONDIR)/%.c
-	$(COMPILE.c) -o $@ $<
-	$(POST_PROCESS_O)
-
-clean:
-	-$(RM) $(OBJS) $(COMMON_OBJS)
-
-include $(SRC)/cmd/Makefile.targ
+include $(SRC)/cmd/stat/Makefile.stat.targ

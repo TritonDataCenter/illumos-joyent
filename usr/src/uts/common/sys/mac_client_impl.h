@@ -22,6 +22,7 @@
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright (c) 2012, Joyent, Inc.  All rights reserved.
+ * Copyright 2025 Oxide Computer Company
  */
 /*
  * Copyright 2018 Joyent, Inc.
@@ -83,6 +84,8 @@ typedef struct mac_promisc_impl_s {			/* Protected by */
 	boolean_t			mpi_no_phys;	/* WO */
 	boolean_t			mpi_strip_vlan_tag;	/* WO */
 	boolean_t			mpi_no_copy;	/* WO */
+	boolean_t			mpi_rx_only;	/* WO */
+	boolean_t			mpi_tx_only;	/* WO */
 	boolean_t			mpi_do_fixups;	/* WO */
 } mac_promisc_impl_t;
 
@@ -120,8 +123,7 @@ struct mac_client_impl_s {			/* Protected by */
 	uint32_t		mci_state_flags;	/* WO */
 	mac_rx_t		mci_rx_fn;		/* Rx Quiescence */
 	void			*mci_rx_arg;		/* Rx Quiescence */
-	mac_direct_rx_t		mci_direct_rx_fn;	/* SL */
-	void			*mci_direct_rx_arg;	/* SL */
+	mac_direct_rxs_t	mci_direct_rx;		/* SL */
 	mac_rx_t		mci_rx_p_fn;		/* Rx Quiescence */
 	void			*mci_rx_p_arg;		/* Rx Quiescence */
 	void			*mci_p_unicast_list;

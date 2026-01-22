@@ -12,7 +12,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  */
 
@@ -37,6 +37,7 @@
 #include <sys/vmm_kernel.h>
 #include <sys/vmm_reservoir.h>
 #include <sys/vmm_gpt.h>
+#include "vmm_util.h"
 
 
 /*
@@ -223,12 +224,32 @@ static void vmc_space_invalidate(vm_client_t *, uintptr_t, size_t, uint64_t);
 static void vmc_space_unmap(vm_client_t *, uintptr_t, size_t, vm_object_t *);
 static vm_client_t *vmc_space_orphan(vm_client_t *, vmspace_t *);
 
+bool
+vmm_vm_init(void)
+{
+	if (vmm_is_intel()) {
+		extern struct vmm_pte_impl ept_pte_impl;
+		return (vmm_gpt_init(&ept_pte_impl));
+	} else if (vmm_is_svm()) {
+		extern struct vmm_pte_impl rvi_pte_impl;
+		return (vmm_gpt_init(&rvi_pte_impl));
+	} else {
+		/* Caller should have already rejected other vendors */
+		panic("Unexpected hypervisor hardware vendor");
+	}
+}
+
+void
+vmm_vm_fini(void)
+{
+	vmm_gpt_fini();
+}
 
 /*
  * Create a new vmspace with a maximum address of `end`.
  */
 vmspace_t *
-vmspace_alloc(size_t end, vmm_pte_ops_t *pte_ops, bool track_dirty)
+vmspace_alloc(size_t end)
 {
 	vmspace_t *vms;
 	const uintptr_t size = end + 1;
@@ -247,9 +268,9 @@ vmspace_alloc(size_t end, vmm_pte_ops_t *pte_ops, bool track_dirty)
 	list_create(&vms->vms_clients, sizeof (vm_client_t),
 	    offsetof(vm_client_t, vmc_node));
 
-	vms->vms_gpt = vmm_gpt_alloc(pte_ops);
+	vms->vms_gpt = vmm_gpt_alloc();
 	vms->vms_pt_gen = 1;
-	vms->vms_track_dirty = track_dirty;
+	vms->vms_track_dirty = false;
 
 	return (vms);
 }
@@ -309,7 +330,7 @@ vmspace_resident_count(vmspace_t *vms)
  * operations from changing the page tables during the walk.
  */
 void
-vmspace_bits_operate(vmspace_t *vms, uint64_t gpa, size_t len,
+vmspace_bits_operate(vmspace_t *vms, const uint64_t gpa, size_t len,
     vmspace_bit_oper_t oper, uint8_t *bitmap)
 {
 	const bool bit_input = (oper & VBO_FLAG_BITMAP_IN) != 0;
@@ -324,7 +345,12 @@ vmspace_bits_operate(vmspace_t *vms, uint64_t gpa, size_t len,
 	 */
 	ASSERT(bitmap != NULL || (!bit_input && !bit_output));
 
-	for (size_t offset = 0; offset < len; offset += PAGESIZE) {
+	vmm_gpt_iter_t iter;
+	vmm_gpt_iter_entry_t entry;
+	vmm_gpt_iter_init(&iter, gpt, gpa, len);
+
+	while (vmm_gpt_iter_next(&iter, &entry)) {
+		const size_t offset = (entry.vgie_gpa - gpa);
 		const uint64_t pfn_offset = offset >> PAGESHIFT;
 		const size_t bit_offset = pfn_offset / 8;
 		const uint8_t bit_mask = 1 << (pfn_offset % 8);
@@ -334,8 +360,8 @@ vmspace_bits_operate(vmspace_t *vms, uint64_t gpa, size_t len,
 		}
 
 		bool value = false;
-		uint64_t *entry = vmm_gpt_lookup(gpt, gpa + offset);
-		if (entry == NULL) {
+		uint64_t *ptep = entry.vgie_ptep;
+		if (ptep == NULL) {
 			if (bit_output) {
 				bitmap[bit_offset] &= ~bit_mask;
 			}
@@ -344,7 +370,7 @@ vmspace_bits_operate(vmspace_t *vms, uint64_t gpa, size_t len,
 
 		switch (oper_only) {
 		case VBO_GET_DIRTY:
-			value = vmm_gpt_query(gpt, entry, VGQ_DIRTY);
+			value = vmm_gpte_query_dirty(ptep);
 			break;
 		case VBO_SET_DIRTY: {
 			uint_t prot = 0;
@@ -359,9 +385,9 @@ vmspace_bits_operate(vmspace_t *vms, uint64_t gpa, size_t len,
 			 * Only if the page is marked both Present and Writable
 			 * will we permit the dirty bit to be set.
 			 */
-			if (!vmm_gpt_is_mapped(gpt, entry, &pfn, &prot)) {
-				int err = vmspace_ensure_mapped(vms, gpa,
-				    PROT_WRITE, &pfn, entry);
+			if (!vmm_gpte_is_mapped(ptep, &pfn, &prot)) {
+				int err = vmspace_ensure_mapped(vms,
+				    entry.vgie_gpa, PROT_WRITE, &pfn, ptep);
 				if (err == 0) {
 					present_writable = true;
 				}
@@ -370,7 +396,7 @@ vmspace_bits_operate(vmspace_t *vms, uint64_t gpa, size_t len,
 			}
 
 			if (present_writable) {
-				value = !vmm_gpt_reset_dirty(gpt, entry, true);
+				value = !vmm_gpte_reset_dirty(ptep, true);
 			}
 			break;
 		}
@@ -383,7 +409,7 @@ vmspace_bits_operate(vmspace_t *vms, uint64_t gpa, size_t len,
 			 * Any PTEs with the dirty bit set will have already
 			 * been properly populated.
 			 */
-			value = vmm_gpt_reset_dirty(gpt, entry, false);
+			value = vmm_gpte_reset_dirty(ptep, false);
 			break;
 		default:
 			panic("unrecognized operator: %d", oper_only);
@@ -906,18 +932,18 @@ vmspace_lookup_map(vmspace_t *vms, uintptr_t gpa, int req_prot, pfn_t *pfnp,
 	ASSERT0(gpa & PAGEOFFSET);
 	ASSERT((req_prot & (PROT_READ | PROT_WRITE | PROT_EXEC)) != PROT_NONE);
 
-	vmm_gpt_walk(gpt, gpa, entries, MAX_GPT_LEVEL);
+	(void) vmm_gpt_walk(gpt, gpa, entries, LEVEL1);
 	leaf = entries[LEVEL1];
 	if (leaf == NULL) {
 		/*
 		 * Since we populated the intermediate tables for any regions
 		 * mapped in the GPT, an empty leaf entry indicates there is no
-		 * mapping, populated or not, at this GPT.
+		 * mapping, populated or not, at this GPA.
 		 */
 		return (FC_NOMAP);
 	}
 
-	if (vmm_gpt_is_mapped(gpt, leaf, &pfn, &prot)) {
+	if (vmm_gpte_is_mapped(leaf, &pfn, &prot)) {
 		if ((req_prot & prot) != req_prot) {
 			return (FC_PROT);
 		}
@@ -947,6 +973,9 @@ vmspace_lookup_map(vmspace_t *vms, uintptr_t gpa, int req_prot, pfn_t *pfnp,
 int
 vmspace_populate(vmspace_t *vms, uintptr_t addr, uintptr_t len)
 {
+	ASSERT0(addr & PAGEOFFSET);
+	ASSERT0(len & PAGEOFFSET);
+
 	vmspace_mapping_t *vmsm;
 	mutex_enter(&vms->vms_lock);
 
@@ -959,13 +988,18 @@ vmspace_populate(vmspace_t *vms, uintptr_t addr, uintptr_t len)
 	vm_object_t *vmo = vmsm->vmsm_object;
 	const int prot = vmsm->vmsm_prot;
 	const uint8_t attr = vmo->vmo_attr;
+	vmm_gpt_t *gpt = vms->vms_gpt;
 	size_t populated = 0;
-	const size_t end = addr + len;
-	for (uintptr_t gpa = addr & PAGEMASK; gpa < end; gpa += PAGESIZE) {
-		const pfn_t pfn = vm_object_pfn(vmo, VMSM_OFFSET(vmsm, gpa));
+
+	vmm_gpt_iter_t iter;
+	vmm_gpt_iter_entry_t entry;
+	vmm_gpt_iter_init(&iter, gpt, addr, len);
+	while (vmm_gpt_iter_next(&iter, &entry)) {
+		const pfn_t pfn =
+		    vm_object_pfn(vmo, VMSM_OFFSET(vmsm, entry.vgie_gpa));
 		VERIFY(pfn != PFN_INVALID);
 
-		if (vmm_gpt_map(vms->vms_gpt, gpa, pfn, prot, attr)) {
+		if (vmm_gpt_map_at(gpt, entry.vgie_ptep, pfn, prot, attr)) {
 			populated++;
 		}
 	}
@@ -1528,8 +1562,7 @@ vmp_release_inner(vm_page_t *vmp, vm_client_t *vmc)
 		if ((vmp->vmp_prot & PROT_WRITE) != 0 &&
 		    (vmp->vmp_flags & VPF_DEFER_DIRTY) == 0 &&
 		    vmc->vmc_track_dirty) {
-			vmm_gpt_t *gpt = vmc->vmc_space->vms_gpt;
-			(void) vmm_gpt_reset_dirty(gpt, vmp->vmp_ptep, true);
+			(void) vmm_gpte_reset_dirty(vmp->vmp_ptep, true);
 		}
 	}
 	kmem_free(vmp, sizeof (*vmp));

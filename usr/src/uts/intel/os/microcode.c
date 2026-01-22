@@ -37,6 +37,7 @@
 #include <sys/kobj.h>
 #include <sys/kobj_impl.h>
 #include <sys/ontrap.h>
+#include <sys/stdbool.h>
 #include <sys/systeminfo.h>
 #include <sys/systm.h>
 #include <sys/ucode.h>
@@ -64,6 +65,8 @@ static const char ucode_failure_fmt[] =
 	"cpu%d: failed to update microcode from version 0x%x to 0x%x";
 static const char ucode_success_fmt[] =
 	"?cpu%d: microcode has been updated from version 0x%x to 0x%x\n";
+static const char ucode_fallback_fmt[] =
+	"?cpu%d: using older fallback microcode; update the system firmware";
 
 static const char ucode_path_fmt[] = "/platform/%s/ucode";
 
@@ -224,7 +227,7 @@ ucode_write(xc_arg_t arg1, xc_arg_t unused2, xc_arg_t unused3)
  */
 
 ucode_errno_t
-ucode_validate(uint8_t *ucodep, int size)
+ucode_validate(uint8_t *ucodep, size_t size)
 {
 	if (ucode == NULL)
 		return (EM_NOTSUP);
@@ -232,9 +235,9 @@ ucode_validate(uint8_t *ucodep, int size)
 }
 
 ucode_errno_t
-ucode_update(uint8_t *ucodep, int size)
+ucode_update(uint8_t *ucodep, size_t size)
 {
-	int		found = 0;
+	bool		found = false;
 	ucode_update_t	cached = { 0 };
 	ucode_update_t	*cachedp = NULL;
 	ucode_errno_t	rc = EM_OK;
@@ -287,7 +290,7 @@ ucode_update(uint8_t *ucodep, int size)
 		    == EM_OK) {
 			bcopy(uusp, &cached, sizeof (cached));
 			cachedp = &cached;
-			found = 1;
+			found = true;
 		}
 
 		/* Nothing to do */
@@ -444,7 +447,9 @@ ucode_apply(cpu_t *cp)
 	/*
 	 * Apply pending update.
 	 */
+	uinfop->cui_boot_rev = uinfop->cui_rev;
 	ucode->us_load(uinfop);
+	ucode->us_read_rev(uinfop);
 }
 
 /*
@@ -473,9 +478,8 @@ ucode_finish(cpu_t *cp)
 	if (uinfop->cui_pending_ucode == NULL)
 		return;
 
-	old_rev = uinfop->cui_rev;
+	old_rev = uinfop->cui_boot_rev;
 	new_rev = uinfop->cui_pending_rev;
-	ucode->us_read_rev(uinfop);
 
 	if (uinfop->cui_rev != new_rev) {
 		ASSERT3U(uinfop->cui_rev, ==, old_rev);
@@ -555,16 +559,38 @@ ucode_check_boot(void)
 	ucode->us_read_rev(uinfop);
 	if (ucode->us_locate(cp, uinfop) == EM_OK) {
 		uint32_t old_rev, new_rev;
+		bool fallback = false;
 
-		old_rev = uinfop->cui_rev;
+		old_rev = uinfop->cui_boot_rev = uinfop->cui_rev;
+
+retry:
 		new_rev = uinfop->cui_pending_rev;
 		ucode->us_load(uinfop);
 		ucode->us_read_rev(uinfop);
 
 		if (uinfop->cui_rev != new_rev) {
 			ASSERT3U(uinfop->cui_rev, ==, old_rev);
+
 			cmn_err(CE_WARN, ucode_failure_fmt, cp->cpu_id,
 			    old_rev, new_rev);
+
+			/*
+			 * If the updater supports attempting a fallback
+			 * microcode version, try that.
+			 */
+			if (!fallback && ucode->us_locate_fallback != NULL) {
+				ucode->us_file_reset();
+				uinfop->cui_pending_ucode = NULL;
+				uinfop->cui_pending_size = 0;
+				uinfop->cui_pending_rev = 0;
+				if (ucode->us_locate_fallback(cp, uinfop) ==
+				    EM_OK) {
+					cmn_err(CE_WARN, ucode_fallback_fmt,
+					    cp->cpu_id);
+					fallback = true;
+					goto retry;
+				}
+			}
 		} else {
 			cmn_err(CE_CONT, ucode_success_fmt, cp->cpu_id,
 			    old_rev, new_rev);

@@ -12,7 +12,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include <sys/types.h>
@@ -26,6 +26,7 @@
 #include <vm/hat_i86.h>
 
 #include <sys/vmm_gpt.h>
+#include <sys/vmm_gpt_impl.h>
 
 /*
  * VMM Generic Page Tables
@@ -97,7 +98,7 @@ struct vmm_gpt_node {
 	vmm_gpt_node_t	*vgn_children;
 	vmm_gpt_node_t	*vgn_sib_next;
 	vmm_gpt_node_t	*vgn_sib_prev;
-	uint64_t	*vgn_entries;
+	vmm_gpt_entry_t	*vgn_entries;
 	uint64_t	vgn_gpa;
 };
 
@@ -116,8 +117,213 @@ struct vmm_gpt_node {
  */
 struct vmm_gpt {
 	vmm_gpt_node_t	*vgpt_root;
-	vmm_pte_ops_t	*vgpt_pte_ops;
 };
+
+void
+vmm_gpt_impl_panic(void)
+{
+	/*
+	 * Bail out if caller a makes it to indirect stub before complete
+	 * hot-patching has occured.
+	 */
+	panic("Indirect function not hot-patched");
+}
+
+/*
+ * Function indirection stubs
+ *
+ * These are made valid (no longer jumping to vmm_gpt_impl_panic()) by
+ * vmm_gpt_init(), and are only to be called after that has run successfully
+ * during module initialization.
+ */
+uint64_t vmm_gpti_map_table(uint64_t);
+uint64_t vmm_gpti_map_page(uint64_t, uint_t, uint8_t);
+bool vmm_gpti_parse(uint64_t, pfn_t *, uint_t *);
+
+const struct vmm_pte_impl vmm_pte_uninit_impl = {
+	.vpi_map_table		= (void *)vmm_gpt_impl_panic,
+	.vpi_map_page		= (void *)vmm_gpt_impl_panic,
+	.vpi_pte_parse		= (void *)vmm_gpt_impl_panic,
+	.vpi_bit_accessed	= 0,
+	.vpi_bit_dirty		= 0,
+
+	.vpi_get_pmtp		= (void *)vmm_gpt_impl_panic,
+	.vpi_hw_ad_supported	= (void *)vmm_gpt_impl_panic,
+};
+
+static const struct vmm_pte_impl *vmm_pte_impl = &vmm_pte_uninit_impl;
+
+#define	JMP_NEAR_OPCODE	0xe9
+
+struct jmp_instr {
+	uint8_t opcode;
+	int32_t off;
+} __packed;
+
+
+/*
+ * Given a pointer to an immediate-near-`jmp` instruction, calculate the address
+ * of its target.
+ */
+static uintptr_t
+jmp_off_to_addr(const struct jmp_instr *instp)
+{
+	const uintptr_t next_rip = (uintptr_t)&instp[1];
+	const uintptr_t off = (uintptr_t)(intptr_t)instp->off;
+
+	return (next_rip + off);
+}
+
+/*
+ * Given a pointer to a immediate-near-`jmp` instruction, calculate the
+ * immediate value for a given target address, if possible.
+ *
+ * Returns false if the target address is not within range of the `jmp`.
+ * Stores the offset value in `resp` on success.
+ */
+static bool
+jmp_addr_to_off(const struct jmp_instr *instp, void *target, int32_t *resp)
+{
+	const uintptr_t next_rip = (uintptr_t)&instp[1];
+	const intptr_t off = (uintptr_t)target - next_rip;
+
+	/* jump is not "near" */
+	if (off < INT32_MIN || off > INT32_MAX) {
+		return (false);
+	}
+
+	if (resp != NULL) {
+		*resp = (int32_t)off;
+	}
+	return (true);
+}
+
+/*
+ * Try to get the symbol name for a given kernel-virtual address.
+ *
+ * Returns a valid string pointer regardless of success or failure.
+ */
+static inline const char *
+addr_to_sym(void *addr)
+{
+	ulong_t ignored_offset;
+	const char *name = modgetsymname((uintptr_t)addr, &ignored_offset);
+
+	return (name != NULL ? name : "<null>");
+}
+
+/*
+ * Hot-patch frequently called PTE implementation functions.
+ *
+ * Since indirect function calls are relatively expensive in a post-Spectre
+ * world, we choose to call into the backend via stubs which are hot-patched
+ * during module initialization with the proper implementation.  During module
+ * unload, it is called again to re-patch the stubs back to their uninitialized
+ * state of pointing to vmm_gpt_impl_panic().
+ */
+static bool
+vmm_gpt_patch_indirection(const struct vmm_pte_impl *old_impl,
+    const struct vmm_pte_impl *new_impl)
+{
+	struct indirection_patch {
+		void (*patch_site)();
+		void (*old_implf)();
+		void (*new_implf)();
+	};
+	const struct indirection_patch patches[] = {
+		{
+			.patch_site	= (void *)vmm_gpti_map_table,
+			.old_implf	= (void *)old_impl->vpi_map_table,
+			.new_implf	= (void *)new_impl->vpi_map_table,
+		},
+		{
+			.patch_site	= (void *)vmm_gpti_map_page,
+			.old_implf	= (void *)old_impl->vpi_map_page,
+			.new_implf	= (void *)new_impl->vpi_map_page,
+		},
+		{
+			.patch_site	= (void *)vmm_gpti_parse,
+			.old_implf	= (void *)old_impl->vpi_pte_parse,
+			.new_implf	= (void *)new_impl->vpi_pte_parse,
+		},
+	};
+
+	/* Check the patches for validity first */
+	for (uint_t i = 0; i < ARRAY_SIZE(patches); i++) {
+		const struct indirection_patch *patch = &patches[i];
+		const struct jmp_instr *instp = (void *)patch->patch_site;
+
+		/* Expecting a near `jmp */
+		if (instp->opcode != JMP_NEAR_OPCODE) {
+			cmn_err(CE_WARN, "vmm: non-JMP instruction found when "
+			    "attempting to hotpatch %s",
+			    addr_to_sym(patch->patch_site));
+			return (false);
+		}
+		/* ... targeted at the expected function */
+		const uintptr_t old_target = jmp_off_to_addr(instp);
+		if (old_target != (uintptr_t)patch->old_implf) {
+			cmn_err(CE_WARN, "vmm: JMP instr @ %s has unexpected "
+			    "target %s != %s",
+			    addr_to_sym(patch->patch_site),
+			    addr_to_sym((void *)old_target),
+			    addr_to_sym(patch->old_implf));
+			return (false);
+		}
+		/*
+		 * ... and which is close enough in the address space to the new
+		 * intended target to be within range of the near `jmp`.
+		 */
+		if (!jmp_addr_to_off(instp, patch->new_implf, NULL)) {
+			cmn_err(CE_WARN, "vmm: near-JMP to new target %s is "
+			    "too far for site %s",
+			    addr_to_sym(patch->new_implf),
+			    addr_to_sym(patch->patch_site));
+			return (false);
+		}
+	}
+
+	for (uint_t i = 0; i < ARRAY_SIZE(patches); i++) {
+		const struct indirection_patch *patch = &patches[i];
+		struct jmp_instr *instp = (void *)patch->patch_site;
+
+		int32_t new_off;
+		VERIFY(jmp_addr_to_off(instp, patch->new_implf, &new_off));
+		/*
+		 * We do not meet the demand from hot_patch_kernel_text() that
+		 * the to-be-patched data be aligned with the patch size.  On
+		 * x86_64, with the caveat that no other CPU(s) will be
+		 * concurrently executing the patched instructions, we can break
+		 * the rules without fear of disaster.
+		 */
+		hot_patch_kernel_text((caddr_t)&instp->off, new_off, 4);
+	}
+	return (true);
+}
+
+bool
+vmm_gpt_init(const struct vmm_pte_impl *target_impl)
+{
+	VERIFY3P(vmm_pte_impl, ==, &vmm_pte_uninit_impl);
+
+	if (vmm_gpt_patch_indirection(vmm_pte_impl, target_impl)) {
+		vmm_pte_impl = target_impl;
+		return (true);
+	}
+	return (false);
+}
+
+void
+vmm_gpt_fini(void)
+{
+	/*
+	 * Restore the indirection stubs back to their original (panicking)
+	 * implementations.  All potential callers should be excluded since this
+	 * is only done during module unload.
+	 */
+	VERIFY(vmm_gpt_patch_indirection(vmm_pte_impl, &vmm_pte_uninit_impl));
+	vmm_pte_impl = &vmm_pte_uninit_impl;
+}
 
 /*
  * Allocates a vmm_gpt_node_t structure with corresponding page of memory to
@@ -135,7 +341,7 @@ vmm_gpt_node_alloc(void)
 	 * guaranteed to be page-aligned.
 	 */
 	page = kmem_zalloc(PAGESIZE, KM_SLEEP);
-	node->vgn_entries = (uint64_t *)page;
+	node->vgn_entries = (vmm_gpt_entry_t *)page;
 	node->vgn_host_pfn = hat_getpfnum(kas.a_hat, page);
 
 	return (node);
@@ -145,13 +351,9 @@ vmm_gpt_node_alloc(void)
  * Allocates and initializes a vmm_gpt_t.
  */
 vmm_gpt_t *
-vmm_gpt_alloc(vmm_pte_ops_t *pte_ops)
+vmm_gpt_alloc(void)
 {
-	vmm_gpt_t *gpt;
-
-	VERIFY(pte_ops != NULL);
-	gpt = kmem_zalloc(sizeof (*gpt), KM_SLEEP);
-	gpt->vgpt_pte_ops = pte_ops;
+	vmm_gpt_t *gpt = kmem_zalloc(sizeof (vmm_gpt_t), KM_SLEEP);
 	gpt->vgpt_root = vmm_gpt_node_alloc();
 
 	return (gpt);
@@ -200,7 +402,7 @@ vmm_gpt_lvl_index(vmm_gpt_node_level_t level, uint64_t gpa)
 {
 	ASSERT(level < MAX_GPT_LEVEL);
 
-	const uint16_t mask = (1U << 9) - 1;
+	const uint16_t mask = MAX_NODE_IDX;
 	switch (level) {
 	case LEVEL4: return ((gpa >> 39) & mask);
 	case LEVEL3: return ((gpa >> 30) & mask);
@@ -241,6 +443,14 @@ vmm_gpt_lvl_len(vmm_gpt_node_level_t level)
 	default:
 		panic("impossible level value");
 	};
+}
+
+/* Get the index of a PTE pointer based on its offset in that table */
+static inline uint16_t
+vmm_gpt_ptep_index(const vmm_gpt_entry_t *ptep)
+{
+	const uintptr_t offset = (uintptr_t)ptep & 0xffful;
+	return (offset / sizeof (uint64_t));
 }
 
 /*
@@ -305,11 +515,8 @@ vmm_gpt_node_next(vmm_gpt_node_t *node, bool only_seq)
 
 	/* Try our next sibling */
 	vmm_gpt_node_t *next = node->vgn_sib_next;
-	if (next != NULL) {
-		if (next->vgn_gpa == gpa_match || !only_seq) {
-			return (next);
-		}
-	} else {
+
+	if (next == NULL) {
 		/*
 		 * If the next-sibling pointer is NULL on the node, it can mean
 		 * one of two things:
@@ -322,17 +529,21 @@ vmm_gpt_node_next(vmm_gpt_node_t *node, bool only_seq)
 		 *    boundary of the node.
 		 *
 		 * Either way, the proper course of action is to check the first
-		 * child of our parent's next sibling.
+		 * child of our parent's next sibling (if the parent is not the
+		 * root of the GPT itself).
 		 */
-		vmm_gpt_node_t *pibling = node->vgn_parent->vgn_sib_next;
-		if (pibling != NULL) {
-			next = pibling->vgn_children;
-			if (next != NULL) {
-				if (next->vgn_gpa == gpa_match || !only_seq) {
-					return (next);
-				}
+		if (node->vgn_parent != NULL && node->vgn_level > LEVEL3) {
+			vmm_gpt_node_t *psibling =
+			    vmm_gpt_node_next(node->vgn_parent, true);
+			if (psibling != NULL) {
+				next = psibling->vgn_children;
 			}
 		}
+	}
+
+	if (next != NULL &&
+	    (next->vgn_gpa == gpa_match || !only_seq)) {
+		return (next);
 	}
 
 	return (NULL);
@@ -404,8 +615,7 @@ vmm_gpt_node_add(vmm_gpt_t *gpt, vmm_gpt_node_t *parent,
 	}
 
 	/* Configure PTE for child table */
-	parent->vgn_entries[idx] =
-	    gpt->vgpt_pte_ops->vpeo_map_table(child->vgn_host_pfn);
+	parent->vgn_entries[idx] = vmm_gpti_map_table(child->vgn_host_pfn);
 	parent->vgn_ref_cnt++;
 }
 
@@ -448,43 +658,160 @@ vmm_gpt_node_remove(vmm_gpt_node_t *child)
  * Walks the GPT for the given GPA, accumulating entries to the given depth.  If
  * the walk terminates before the depth is reached, the remaining entries are
  * written with NULLs.
+ *
+ * Returns the GPA corresponding to the deepest populated (non-NULL) entry
+ * encountered during the walk.
  */
-void
-vmm_gpt_walk(vmm_gpt_t *gpt, uint64_t gpa, uint64_t **entries,
+uint64_t
+vmm_gpt_walk(vmm_gpt_t *gpt, uint64_t gpa, vmm_gpt_entry_t **entries,
     vmm_gpt_node_level_t depth)
 {
-	uint64_t *current_entries, entry;
-	pfn_t pfn;
-
 	ASSERT(gpt != NULL);
-	current_entries = gpt->vgpt_root->vgn_entries;
-	for (uint_t i = 0; i < depth; i++) {
+	ASSERT3U(depth, <, MAX_GPT_LEVEL);
+
+	vmm_gpt_entry_t *current_entries = gpt->vgpt_root->vgn_entries;
+	uint64_t mask = 0;
+	for (uint_t lvl = LEVEL4; lvl <= depth; lvl++) {
 		if (current_entries == NULL) {
-			entries[i] = NULL;
+			entries[lvl] = NULL;
 			continue;
 		}
-		entries[i] = &current_entries[vmm_gpt_lvl_index(i, gpa)];
-		entry = *entries[i];
-		if (!gpt->vgpt_pte_ops->vpeo_pte_is_present(entry)) {
+		entries[lvl] = &current_entries[vmm_gpt_lvl_index(lvl, gpa)];
+		mask = vmm_gpt_lvl_mask(lvl);
+		const vmm_gpt_entry_t pte = *entries[lvl];
+
+		pfn_t pfn;
+		if (!vmm_gpti_parse(pte, &pfn, NULL)) {
 			current_entries = NULL;
 			continue;
 		}
-		pfn = gpt->vgpt_pte_ops->vpeo_pte_pfn(entry);
-		current_entries = (uint64_t *)hat_kpm_pfn2va(pfn);
+		current_entries = (vmm_gpt_entry_t *)hat_kpm_pfn2va(pfn);
 	}
+	return (gpa & mask);
 }
 
 /*
- * Looks up an entry given GPA.
+ * Given a `gpa`, and the corresponding `entries` array as queried by a call to
+ * `vmm_gpt_walk()`, attempt to advance to the next PTE at the `depth` provided
+ * by the caller.
+ *
+ * As there may not be PTEs present at the requested `depth`, the amount that
+ * the GPA is advanced may be larger than what is expected for that provided
+ * depth.
+ *
+ * Returns the GPA correspending to the PTE to which `entries` was advanced to.
  */
-uint64_t *
-vmm_gpt_lookup(vmm_gpt_t *gpt, uint64_t gpa)
+static uint64_t
+vmm_gpt_walk_advance(vmm_gpt_t *gpt, uint64_t gpa, vmm_gpt_entry_t **entries,
+    vmm_gpt_node_level_t depth)
 {
-	uint64_t *entries[MAX_GPT_LEVEL];
+	ASSERT(gpt != NULL);
+	ASSERT3U(depth, <, MAX_GPT_LEVEL);
+	ASSERT0(gpa & ~vmm_gpt_lvl_mask(depth));
 
-	vmm_gpt_walk(gpt, gpa, entries, MAX_GPT_LEVEL);
+	/*
+	 * Advanced to the next entry in the deepest level of PTE possible,
+	 * ascending to higher levels if we reach the end of a table at any
+	 * given point.
+	 */
+	int lvl;
+	for (lvl = depth; lvl >= LEVEL4; lvl--) {
+		vmm_gpt_entry_t *ptep = entries[lvl];
 
-	return (entries[LEVEL1]);
+		if (ptep == NULL) {
+			continue;
+		}
+
+		uint16_t index = vmm_gpt_ptep_index(ptep);
+		ASSERT3U(vmm_gpt_lvl_index(lvl, gpa), ==, index);
+		if (index == MAX_NODE_IDX) {
+			continue;
+		}
+
+		gpa = (gpa & vmm_gpt_lvl_mask(lvl)) + vmm_gpt_lvl_len(lvl);
+		entries[lvl] = ptep + 1;
+		break;
+	}
+
+	if (lvl < LEVEL4) {
+		/* Advanced off the end of the tables */
+		return (UINT64_MAX);
+	}
+
+	/*
+	 * Attempt to walk back down to the target level if any ascension was
+	 * necessary during the above advancement.
+	 */
+	vmm_gpt_entry_t pte = *entries[lvl];
+	lvl++;
+	for (; lvl < MAX_GPT_LEVEL; lvl++) {
+		pfn_t pfn;
+
+		if (lvl > depth || !vmm_gpti_parse(pte, &pfn, NULL)) {
+			entries[lvl] = NULL;
+			continue;
+		}
+
+		vmm_gpt_entry_t *next_table =
+		    (vmm_gpt_entry_t *)hat_kpm_pfn2va(pfn);
+		const uint16_t index = vmm_gpt_lvl_index(lvl, gpa);
+		pte = next_table[index];
+		entries[lvl] = &next_table[index];
+	}
+
+	return (gpa);
+}
+
+/*
+ * Initialize iteration over GPT leaf entries between [addr, addr + len).  The
+ * specified interval must be page-aligned and not overflow the end of the
+ * address space.
+ *
+ * Subsequent calls to vmm_gpt_iter_next() will emit the encountered entries.
+ */
+void
+vmm_gpt_iter_init(vmm_gpt_iter_t *iter, vmm_gpt_t *gpt, uint64_t addr,
+    uint64_t len)
+{
+	ASSERT0(addr & PAGEOFFSET);
+	ASSERT0(len & PAGEOFFSET);
+	ASSERT3U((addr + len), >=, addr);
+
+	iter->vgi_gpt = gpt;
+	iter->vgi_addr = addr;
+	iter->vgi_end = addr + len;
+	iter->vgi_current = vmm_gpt_walk(gpt, addr, iter->vgi_entries, LEVEL1);
+}
+
+/*
+ * Fetch the next entry (if any) from an iterator initialized from a preceding
+ * call to vmm_gpt_iter_init().  Returns true when the next GPT leaf entry
+ * inside the iterator range has been populated in `entry`.  Returns `false`
+ * when there are no such entries available or remaining in the range.
+ */
+bool
+vmm_gpt_iter_next(vmm_gpt_iter_t *iter, vmm_gpt_iter_entry_t *entry)
+{
+	if (iter->vgi_current >= iter->vgi_end) {
+		return (false);
+	}
+
+	while (iter->vgi_current < iter->vgi_end) {
+		bool found = false;
+		if (iter->vgi_entries[LEVEL1] != NULL) {
+			entry->vgie_gpa = iter->vgi_current;
+			entry->vgie_ptep = iter->vgi_entries[LEVEL1];
+			found = true;
+		}
+
+		iter->vgi_current = vmm_gpt_walk_advance(iter->vgi_gpt,
+		    iter->vgi_current, iter->vgi_entries, LEVEL1);
+
+		if (found) {
+			return (true);
+		}
+	}
+	return (false);
 }
 
 /*
@@ -621,40 +948,29 @@ vmm_gpt_populate_region(vmm_gpt_t *gpt, uint64_t addr, uint64_t len)
 
 /*
  * Format a PTE and install it in the provided PTE-pointer.
+ *
+ * The caller must ensure that a conflicting PFN is not mapped at the requested
+ * location.  Racing operations to map the same PFN at one location are
+ * acceptable and properly handled.
  */
 bool
-vmm_gpt_map_at(vmm_gpt_t *gpt, uint64_t *ptep, pfn_t pfn, uint_t prot,
+vmm_gpt_map_at(vmm_gpt_t *gpt, vmm_gpt_entry_t *ptep, pfn_t pfn, uint_t prot,
     uint8_t attr)
 {
-	uint64_t entry, old_entry;
+	const vmm_gpt_entry_t pte = vmm_gpti_map_page(pfn, prot, attr);
+	const vmm_gpt_entry_t old_pte = atomic_cas_64(ptep, 0, pte);
+	if (old_pte != 0) {
+#ifdef DEBUG
+		pfn_t new_pfn, old_pfn;
 
-	entry = gpt->vgpt_pte_ops->vpeo_map_page(pfn, prot, attr);
-	old_entry = atomic_cas_64(ptep, 0, entry);
-	if (old_entry != 0) {
-		ASSERT3U(gpt->vgpt_pte_ops->vpeo_pte_pfn(entry), ==,
-		    gpt->vgpt_pte_ops->vpeo_pte_pfn(old_entry));
+		ASSERT(vmm_gpti_parse(pte, &new_pfn, NULL));
+		ASSERT(vmm_gpti_parse(old_pte, &old_pfn, NULL));
+		ASSERT3U(old_pfn, ==, new_pfn);
+#endif /* DEBUG */
 		return (false);
 	}
 
 	return (true);
-}
-
-/*
- * Inserts an entry for a given GPA into the table.  The caller must
- * ensure that a conflicting PFN is not mapped at the requested location.
- * Racing operations to map the same PFN at one location is acceptable and
- * properly handled.
- */
-bool
-vmm_gpt_map(vmm_gpt_t *gpt, uint64_t gpa, pfn_t pfn, uint_t prot, uint8_t attr)
-{
-	uint64_t *entries[MAX_GPT_LEVEL];
-
-	ASSERT(gpt != NULL);
-	vmm_gpt_walk(gpt, gpa, entries, MAX_GPT_LEVEL);
-	ASSERT(entries[LEVEL1] != NULL);
-
-	return (vmm_gpt_map_at(gpt, entries[LEVEL1], pfn, prot, attr));
 }
 
 /*
@@ -732,16 +1048,16 @@ vmm_gpt_vacate_region(vmm_gpt_t *gpt, uint64_t addr, uint64_t len)
 bool
 vmm_gpt_unmap(vmm_gpt_t *gpt, uint64_t gpa)
 {
-	uint64_t *entries[MAX_GPT_LEVEL], entry;
+	vmm_gpt_entry_t *entries[MAX_GPT_LEVEL], pte;
 
 	ASSERT(gpt != NULL);
-	vmm_gpt_walk(gpt, gpa, entries, MAX_GPT_LEVEL);
+	(void) vmm_gpt_walk(gpt, gpa, entries, LEVEL1);
 	if (entries[LEVEL1] == NULL)
 		return (false);
 
-	entry = *entries[LEVEL1];
+	pte = *entries[LEVEL1];
 	*entries[LEVEL1] = 0;
-	return (gpt->vgpt_pte_ops->vpeo_pte_is_present(entry));
+	return (vmm_gpti_parse(pte, NULL, NULL));
 }
 
 /*
@@ -754,10 +1070,19 @@ vmm_gpt_unmap_region(vmm_gpt_t *gpt, uint64_t addr, uint64_t len)
 	ASSERT0(addr & PAGEOFFSET);
 	ASSERT0(len & PAGEOFFSET);
 
-	const uint64_t end = addr + len;
+	vmm_gpt_iter_t state;
+	vmm_gpt_iter_entry_t entry;
 	size_t num_unmapped = 0;
-	for (uint64_t gpa = addr; gpa < end; gpa += PAGESIZE) {
-		if (vmm_gpt_unmap(gpt, gpa) != 0) {
+
+	vmm_gpt_iter_init(&state, gpt, addr, len);
+	while (vmm_gpt_iter_next(&state, &entry)) {
+		if (entry.vgie_ptep == NULL) {
+			continue;
+		}
+
+		const vmm_gpt_entry_t pte = *entry.vgie_ptep;
+		*entry.vgie_ptep = 0;
+		if (vmm_gpti_parse(pte, NULL, NULL)) {
 			num_unmapped++;
 		}
 	}
@@ -771,57 +1096,80 @@ vmm_gpt_unmap_region(vmm_gpt_t *gpt, uint64_t addr, uint64_t len)
  * bits of the entry.  Otherwise, it will be ignored.
  */
 bool
-vmm_gpt_is_mapped(vmm_gpt_t *gpt, uint64_t *ptep, pfn_t *pfnp, uint_t *protp)
+vmm_gpte_is_mapped(const vmm_gpt_entry_t *ptep, pfn_t *pfnp, uint_t *protp)
 {
-	uint64_t entry;
+	ASSERT(ptep != NULL);
 
-	ASSERT(pfnp != NULL);
-	ASSERT(protp != NULL);
+	return (vmm_gpti_parse(*ptep, pfnp, protp));
+}
 
-	if (ptep == NULL) {
-		return (false);
-	}
-	entry = *ptep;
-	if (!gpt->vgpt_pte_ops->vpeo_pte_is_present(entry)) {
-		return (false);
-	}
-	*pfnp = gpt->vgpt_pte_ops->vpeo_pte_pfn(entry);
-	*protp = gpt->vgpt_pte_ops->vpeo_pte_prot(entry);
-	return (true);
+
+static uint_t
+vmm_gpt_reset_bits(volatile uint64_t *ptep, uint64_t mask, uint64_t bits)
+{
+	uint64_t pte, newpte, oldpte = 0;
+
+	/*
+	 * We use volatile and atomic ops here because we may be
+	 * racing against hardware modifying these bits.
+	 */
+	VERIFY3P(ptep, !=, NULL);
+	oldpte = *ptep;
+	do {
+		pte = oldpte;
+		newpte = (pte & ~mask) | bits;
+		oldpte = atomic_cas_64(ptep, pte, newpte);
+	} while (oldpte != pte);
+
+	return (oldpte & mask);
 }
 
 /*
- * Resets the accessed bit on the page table entry pointed to be `entry`.
+ * Resets the accessed bit on the page table entry pointed to be `ptep`.
  * If `on` is true, the bit will be set, otherwise it will be cleared.
  * The old value of the bit is returned.
- */
-uint_t
-vmm_gpt_reset_accessed(vmm_gpt_t *gpt, uint64_t *entry, bool on)
-{
-	ASSERT(entry != NULL);
-	return (gpt->vgpt_pte_ops->vpeo_reset_accessed(entry, on));
-}
-
-/*
- * Resets the dirty bit on the page table entry pointed to be `entry`.
- * If `on` is true, the bit will be set, otherwise it will be cleared.
- * The old value of the bit is returned.
- */
-uint_t
-vmm_gpt_reset_dirty(vmm_gpt_t *gpt, uint64_t *entry, bool on)
-{
-	ASSERT(entry != NULL);
-	return (gpt->vgpt_pte_ops->vpeo_reset_dirty(entry, on));
-}
-
-/*
- * Query state from PTE pointed to by `entry`.
  */
 bool
-vmm_gpt_query(vmm_gpt_t *gpt, uint64_t *entry, vmm_gpt_query_t query)
+vmm_gpte_reset_accessed(vmm_gpt_entry_t *ptep, bool on)
 {
-	ASSERT(entry != NULL);
-	return (gpt->vgpt_pte_ops->vpeo_query(entry, query));
+	ASSERT(ptep != NULL);
+
+	const uint64_t accessed_bit = vmm_pte_impl->vpi_bit_accessed;
+	const uint64_t dirty_bit = vmm_pte_impl->vpi_bit_dirty;
+
+	const uint64_t old_state = vmm_gpt_reset_bits(ptep,
+	    accessed_bit | dirty_bit, on ? accessed_bit : 0);
+	return (old_state != 0);
+}
+
+/*
+ * Resets the dirty bit on the page table entry pointed to be `ptep`.
+ * If `on` is true, the bit will be set, otherwise it will be cleared.
+ * The old value of the bit is returned.
+ */
+bool
+vmm_gpte_reset_dirty(vmm_gpt_entry_t *ptep, bool on)
+{
+	ASSERT(ptep != NULL);
+	const uint64_t dirty_bit = vmm_pte_impl->vpi_bit_dirty;
+
+	const uint64_t old_state =
+	    vmm_gpt_reset_bits(ptep, dirty_bit, on ? dirty_bit : 0);
+	return (old_state != 0);
+}
+
+bool
+vmm_gpte_query_accessed(const vmm_gpt_entry_t *ptep)
+{
+	ASSERT(ptep != NULL);
+	return ((*ptep & vmm_pte_impl->vpi_bit_accessed) != 0);
+}
+
+bool
+vmm_gpte_query_dirty(const vmm_gpt_entry_t *ptep)
+{
+	ASSERT(ptep != NULL);
+	return ((*ptep & vmm_pte_impl->vpi_bit_dirty) != 0);
 }
 
 /*
@@ -831,7 +1179,7 @@ uint64_t
 vmm_gpt_get_pmtp(vmm_gpt_t *gpt, bool track_dirty)
 {
 	const pfn_t root_pfn = gpt->vgpt_root->vgn_host_pfn;
-	return (gpt->vgpt_pte_ops->vpeo_get_pmtp(root_pfn, track_dirty));
+	return (vmm_pte_impl->vpi_get_pmtp(root_pfn, track_dirty));
 }
 
 /*
@@ -840,5 +1188,5 @@ vmm_gpt_get_pmtp(vmm_gpt_t *gpt, bool track_dirty)
 bool
 vmm_gpt_can_track_dirty(vmm_gpt_t *gpt)
 {
-	return (gpt->vgpt_pte_ops->vpeo_hw_ad_supported());
+	return (vmm_pte_impl->vpi_hw_ad_supported());
 }

@@ -52,7 +52,6 @@ INSTALL_TARGET	= $(BINARY) $(ROOTMODULE)
 #
 CFLAGS		+= $(CCVERBOSE)
 
-CERRWARN	+= -_gcc=-Wno-unused-label
 CERRWARN	+= $(CNOWARN_UNINIT)
 CERRWARN	+= -_gcc=-Wno-type-limits
 CERRWARN	+= -_gcc=-Wno-switch
@@ -60,10 +59,6 @@ CERRWARN	+= -_gcc=-Wno-unused-variable
 
 # needs work
 SMOFF += all_func_returns
-$(OBJS_DIR)/mac_sched.o := SMOFF += assign_vs_compare
-# suppress false-positive for an unsigned overflow
-$(OBJS_DIR)/mac_provider.o := SMOFF += signed_integer_overflow_check
-$(OBJS_DIR)/mac_util.o := SMOFF += signed
 
 #
 #	Default build targets.

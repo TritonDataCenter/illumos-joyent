@@ -13,7 +13,7 @@
  * Copyright 2016 Nexenta Systems, Inc.
  * Copyright 2020 Joyent, Inc.
  * Copyright 2019 Western Digital Corporation
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Oxide Computer Company
  * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
  */
 
@@ -32,7 +32,7 @@
 #endif
 
 /*
- * Declarations used for communication between nvmeadm(8) and nvme(4D)
+ * Declarations used for communication between nvme(4D) and libnvme.
  */
 
 #ifdef __cplusplus
@@ -49,15 +49,19 @@ extern "C" {
 #define	NVME_IOC_GET_LOGPAGE		(NVME_IOC | 2)
 #define	NVME_IOC_GET_FEATURE		(NVME_IOC | 3)
 #define	NVME_IOC_FORMAT			(NVME_IOC | 4)
-#define	NVME_IOC_DETACH			(NVME_IOC | 5)
-#define	NVME_IOC_ATTACH			(NVME_IOC | 6)
+#define	NVME_IOC_BD_DETACH		(NVME_IOC | 5)
+#define	NVME_IOC_BD_ATTACH		(NVME_IOC | 6)
 #define	NVME_IOC_FIRMWARE_DOWNLOAD	(NVME_IOC | 7)
 #define	NVME_IOC_FIRMWARE_COMMIT	(NVME_IOC | 8)
 #define	NVME_IOC_PASSTHRU		(NVME_IOC | 9)
 #define	NVME_IOC_NS_INFO		(NVME_IOC | 10)
 #define	NVME_IOC_LOCK			(NVME_IOC | 11)
 #define	NVME_IOC_UNLOCK			(NVME_IOC | 12)
-#define	NVME_IOC_MAX			NVME_IOC_NS_INFO
+#define	NVME_IOC_CTRL_ATTACH		(NVME_IOC | 13)
+#define	NVME_IOC_CTRL_DETACH		(NVME_IOC | 14)
+#define	NVME_IOC_NS_CREATE		(NVME_IOC | 15)
+#define	NVME_IOC_NS_DELETE		(NVME_IOC | 16)
+#define	NVME_IOC_MAX			NVME_IOC_NS_DELETE
 
 #define	IS_NVME_IOC(x)			((x) > NVME_IOC && (x) <= NVME_IOC_MAX)
 #define	NVME_IOC_CMD(x)			((x) & 0xff)
@@ -457,13 +461,59 @@ typedef enum {
 	 * Indicates that the blkdev address somehow would have overflowed our
 	 * internal buffer.
 	 */
-	NVME_IOCTL_E_BD_ADDR_OVER
+	NVME_IOCTL_E_BD_ADDR_OVER,
+	/*
+	 * Indicates that Namespace Management commands are not supported by the
+	 * controller at all.
+	 */
+	NVME_IOCTL_E_CTRL_NS_MGMT_UNSUP,
+	/*
+	 * Indicates that the request could not proceed because the namespace is
+	 * currently attached to a controller.
+	 */
+	NVME_IOCTL_E_NS_CTRL_ATTACHED,
+	NVME_IOCTL_E_NS_CTRL_NOT_ATTACHED,
+	/*
+	 * This indicates that the namespace ID is valid; however, there is no
+	 * namespace actually allocated for this ID. For example, when trying to
+	 * attach or detach a controller to an unallocated namespace.
+	 *
+	 * When a namespace ID is invalid, the kernel will generally instead
+	 * return NVME_IOCTL_E_NS_RANGE.
+	 */
+	NVME_IOCTL_E_NS_NO_NS,
+	/*
+	 * Namespace Create fields with bad values
+	 */
+	NVME_IOCTL_E_NS_CREATE_NSZE_RANGE,
+	NVME_IOCTL_E_NS_CREATE_NCAP_RANGE,
+	NVME_IOCTL_E_NS_CREATE_CSI_RANGE,
+	NVME_IOCTL_E_NS_CREATE_FLBAS_RANGE,
+	NVME_IOCTL_E_NS_CREATE_NMIC_RANGE,
+	/*
+	 * Namespace Create fields with unsupported versions. Currently this can
+	 * only apply to the CSI. Note, there aren't unusable errors yet;
+	 * however, that'll change when we support other CSI types.
+	 */
+	NVME_IOCTL_E_NS_CREATE_CSI_UNSUP,
+	/*
+	 * We may have a valid CSI, but not support it at our end. This error
+	 * indicates that. Similarly, the device may not support thin
+	 * provisioning.
+	 */
+	NVME_IOCTL_E_DRV_CSI_UNSUP,
+	NVME_IOCTL_E_CTRL_THIN_PROV_UNSUP
 } nvme_ioctl_errno_t;
 
 /*
  * This structure is embedded as the first item of every ioctl. It is also used
- * directly for the attach (NVME_IOC_ATTACH) and detach (NVME_IOC_DETACH)
- * ioctls.
+ * directly for the following ioctls:
+ *
+ *  - blkdev attach (NVME_IOC_ATTACH)
+ *  - blkdev detach (NVME_IOC_DETACH)
+ *  - controller attach (NVME_IOC_CTRL_ATTACH)
+ *  - controller detach (NVME_IOC_CTRL_DETACH)
+ *  - namespace delete (NVME_IOC_NS_DELETE)
  */
 typedef struct {
 	/*
@@ -530,7 +580,7 @@ typedef struct {
 
 /*
  * Get a specific log page (NVME_IOC_GET_LOGPAGE). By default, unused fields
- * should be left at zero.  the input data length is specified by nigl_len, in
+ * should be left at zero. The input data length is specified by nigl_len, in
  * bytes. The NVMe specification does not provide a way for a controller to
  * write less bytes than requested for a log page. It is undefined behavior if a
  * log page read requests more data than is supported. If this is successful,
@@ -674,6 +724,58 @@ typedef struct {
 	nvme_ioctl_common_t niu_common;
 	nvme_lock_ent_t niu_ent;
 } nvme_ioctl_unlock_t;
+
+/*
+ * Namespace Management related structures and constants. Note, namespace
+ * controller attach, controller detach, and namespace delete all use the common
+ * ioctl structure at this time.
+ */
+#define	NVME_NS_ATTACH_CTRL_ATTACH	0
+#define	NVME_NS_ATTACH_CTRL_DETACH	1
+
+/*
+ * Constants related to fields here. These represent the specifications maximum
+ * size, even though there are additional constraints placed on it by the driver
+ * (e.g. we only allow creating a namespace with the NVM CSI).
+ */
+#define	NVME_NS_MGMT_MAX_CSI	0xff
+#define	NVME_NS_MGMT_MAX_FLBAS	0xf
+#define	NVME_NS_MGMT_NMIC_MASK	0x1
+
+/*
+ * Logical values for namespace multipath I/O and sharing capabilities (NMIC).
+ */
+typedef enum {
+	/*
+	 * Indicates that no NVMe namespace sharing is permitted between
+	 * controllers.
+	 */
+	NVME_NS_NMIC_T_NONE	= 0,
+	/*
+	 * Indicates that namespace sharing is allowed between controllers. This
+	 * is equivalent to the SHRNS bit being set.
+	 */
+	NVME_NS_NMIC_T_SHARED,
+	/*
+	 * Indicates that this is a dispersed namespace. A dispersed namespace
+	 * implies a shared namespace and indicates that DISNS and SHRNS are
+	 * both set.
+	 */
+	NVME_NS_NMIC_T_DISPERSED
+} nvme_ns_nmic_t;
+
+/*
+ * Namespace create structure (NVME_IOC_NS_CREATE).
+ */
+typedef struct {
+	nvme_ioctl_common_t nnc_common;
+	uint64_t nnc_nsze;
+	uint64_t nnc_ncap;
+	uint32_t nnc_csi;
+	uint32_t nnc_flbas;
+	uint32_t nnc_nmic;
+	uint32_t nnc_nsid;
+} nvme_ioctl_ns_create_t;
 
 /*
  * 32-bit ioctl structures. These must be packed to be 4 bytes to get the proper
@@ -857,12 +959,20 @@ typedef struct {
 		uint32_t oaes_rsvd0:8;
 		uint32_t oaes_nsan:1;	/* Namespace Attribute Notices (1.2) */
 		uint32_t oaes_fwact:1;	/* Firmware Activation Notices (1.2) */
-		uint32_t oaes_rsvd1:1;
+		uint32_t oaes_rsvd10:1;
 		uint32_t oaes_ansacn:1;	/* Asymmetric NS Access Change (1.4) */
 		uint32_t oaes_plat:1;	/* Predictable Lat Event Agg. (1.4) */
 		uint32_t oaes_lbasi:1;	/* LBA Status Information (1.4) */
 		uint32_t oaes_egeal:1;	/* Endurance Group Event Agg. (1.4) */
-		uint32_t oaes_rsvd2:17;
+		uint32_t oaes_nnss:1;	/* Normal NVM Subsys Shutdown (2.0) */
+		uint32_t oaes_tthr:1;	/* Temp. Tresh. Hysteresis Rec (2.1) */
+		uint32_t oaes_rgcns:1;	/* Reach Group Change Notice (2.1) */
+		uint32_t oaes_rsvd18:1;
+		uint32_t oaes_ansan:1;	/* Allocated Namespace Attr. (2.1) */
+		uint32_t oaes_rsvd20:7;
+		uint32_t oaes_zdcn:1;	/* Zone Descriptor Change (2.0) */
+		uint32_t oaes_rsvd28:3;
+		uint32_t oaes_dlpcn:1;	/* Disc Log Page Change (2.0) */
 	} id_oaes;
 	struct {
 		uint32_t ctrat_hid:1;	/* 128-bit Host Identifier (1.2)  */
@@ -875,16 +985,43 @@ typedef struct {
 		uint32_t ctrat_nsg:1;	/* Namespace Granularity (1.4) */
 		uint32_t ctrat_sqass:1;	/* SQ Associations (1.4) */
 		uint32_t ctrat_uuid:1;	/* UUID List (1.4) */
-		uint32_t ctrat_rsvd:22;
+		uint32_t ctrat_mds:1;	/* Multi-Domain Subsys (2.0) */
+		uint32_t ctrat_fcm:1;	/* Fixed Cap Management (2.0) */
+		uint32_t ctrat_vcm:1;	/* Variable Cap Management (2.0) */
+		uint32_t ctrat_deg:1;	/* Delete Endurance Group (2.0) */
+		uint32_t ctrat_dnvms:1;	/* Delete NVM Set (2.0) */
+		uint32_t ctrat_elbas:1;	/* Ext. LBA Formats (2.0) */
+		uint32_t ctrat_mem:1;	/* MDTS and Size exclude Meta (2.1) */
+		uint32_t ctrat_hmbr:1;	/* HMB Restrictions (2.1) */
+		uint32_t ctrat_rhii:1;	/* Reservations and Host ID (2.1) */
+		uint32_t ctrat_fdps:1;	/* Flexible Data Placement (2.1) */
+		uint32_t ctrat_rsvd20:12;
 	} id_ctratt;
 	uint16_t id_rrls;		/* Read Recovery Levels (1.4) */
-	uint8_t id_rsvd_cc[111-102];
+	struct {
+		uint8_t bpcap_rpmbbpwps:2;	/* RPMB Prot Write (2.1) */
+		uint8_t bpcap_sfbpwps:1;	/* Set Feat RPMB (2.1) */
+		uint8_t bpcap_rsvd3:5;
+	} id_bpcap;
+	uint8_t id_rsvd_103;
+	uint32_t id_nssl;		/* NVM Subsystem Shutdown Lat. (2.1) */
+	uint8_t id_rsvd_108[2];
+	struct {
+		uint8_t plsi_plsepf:1;	/* PLS Emergency Power Fail (2.1) */
+		uint8_t plsi_plsfq:1;	/* PLS Force Quiesce (2.1) */
+		uint8_t plsi_rvsd:6;
+	} id_plsi;
 	uint8_t id_cntrltype;		/* Controller Type (1.4) */
 	uint8_t id_frguid[16];		/* FRU GUID (1.3) */
 	uint16_t id_crdt1;		/* Command Retry Delay Time 1 (1.4) */
 	uint16_t id_crdt2;		/* Command Retry Delay Time 2 (1.4) */
 	uint16_t id_crdt3;		/* Command Retry Delay Time 3 (1.4) */
-	uint8_t id_rsvd2_cc[240 - 134];
+	struct {
+		uint8_t crcap_rrsup:1;	/* Reachability Reporting (2.1) */
+		uint8_t crcap_rgidc:1;	/* Group ID Changeable (2.1) */
+		uint8_t crcap_rsvd2:6;
+	} id_crcap;
+	uint8_t id_rsvd2_cc[240 - 135];
 	uint8_t id_rsvd_nvmemi[253 - 240];
 	/* NVMe-MI region */
 	struct {			/* NVMe Subsystem Report */
@@ -914,7 +1051,9 @@ typedef struct {
 		uint16_t oa_virtmgmt:1;	/* Virtualization Management (1.3) */
 		uint16_t oa_doorbell:1;	/* Doorbell Buffer Config (1.3) */
 		uint16_t oa_lbastat:1;	/* LBA Status (1.4) */
-		uint16_t oa_rsvd:6;
+		uint16_t oa_clfs:1;	/* Command and Feat Lockdown (2.0) */
+		uint16_t oa_hmlms:1;	/* Host Managed Live Migration (2.0) */
+		uint16_t oa_rsvd12:4;
 	} id_oacs;
 	uint8_t	id_acl;			/* Abort Command Limit */
 	uint8_t id_aerl;		/* Asynchronous Event Request Limit */
@@ -922,7 +1061,8 @@ typedef struct {
 		uint8_t fw_readonly:1;	/* Slot 1 is Read-Only */
 		uint8_t	fw_nslot:3;	/* number of firmware slots */
 		uint8_t fw_norst:1;	/* Activate w/o reset (1.2) */
-		uint8_t fw_rsvd:3;
+		uint8_t fw_smud:1;	/* Support Multiple Update Det. (2.0) */
+		uint8_t fw_rsvd6:2;
 	} id_frmw;
 	struct {			/* Log Page Attributes */
 		uint8_t lp_smart:1;	/* SMART/Health information per NS */
@@ -930,7 +1070,9 @@ typedef struct {
 		uint8_t lp_extsup:1;	/* Extended Get Log Page (1.2) */
 		uint8_t lp_telemetry:1;	/* Telemetry Log Pages (1.3) */
 		uint8_t lp_persist:1;	/* Persistent Log Page (1.4) */
-		uint8_t lp_rsvd:3;
+		uint8_t lp_mlps:1;	/* Misc. Log Page (2.0) */
+		uint8_t lp_da4s:1;	/* Data Area 4 Support (2.0) */
+		uint8_t lp_rsvd7:1;
 	} id_lpa;
 	uint8_t id_elpe;		/* Error Log Page Entries */
 	uint8_t	id_npss;		/* Number of Power States */
@@ -960,7 +1102,8 @@ typedef struct {
 	uint16_t ap_edstt;		/* Ext. Device Self-test time (1.3) */
 	struct {			/* Device Self-test Options */
 		uint8_t dsto_sub:1;	/* Subsystem level self-test (1.3) */
-		uint8_t dsto_rsvd:7;
+		uint8_t dsto_hirs:1;	/* Host-Initiated Refresh (2.1) */
+		uint8_t dsto_rsvd:6;
 	} ap_dsto;
 	uint8_t ap_fwug;		/* Firmware Update Granularity (1.3) */
 	uint16_t ap_kas;		/* Keep Alive Support (1.2) */
@@ -974,7 +1117,8 @@ typedef struct {
 		uint32_t san_ces:1;	/* Crypto Erase Support (1.3) */
 		uint32_t san_bes:1;	/* Block Erase Support (1.3) */
 		uint32_t san_ows:1;	/* Overwite Support (1.3) */
-		uint32_t san_rsvd:26;
+		uint32_t san_vers:1;	/* Verification Support (2.1) */
+		uint32_t san_rsvd:25;
 		uint32_t san_ndi:1;	/* No-deallocate Inhibited (1.4) */
 		uint32_t san_nodmmas:2;	/* No-Deallocate Modifies Media (1.4) */
 	} ap_sanitize;
@@ -996,7 +1140,23 @@ typedef struct {
 	uint32_t ap_anagrpmax;		/* ANA Group ID Max (1.4) */
 	uint32_t ap_nanagrpid;		/* Number of ANA Group IDs (1.4) */
 	uint32_t ap_pels;		/* Persistent Event Log Size (1.4) */
-	uint8_t id_rsvd_ac[512 - 356];
+	uint16_t ap_did;		/* Domain ID (2.0) */
+	struct {
+		uint8_t kpioc_kpios:1;	/* Key Per I/O Sup (2.1) */
+		uint8_t kpioc_kpisc:1;	/* Key Per I/O Scope (2.1) */
+		uint8_t kpioc_rsvd:6;
+	} ap_kpioc;
+	uint8_t ap_rsvd359;
+	uint16_t ap_mptfawr;		/* Max FW Act Time w/o Reset (2.1) */
+	uint8_t ap_rsvd362[368-362];
+	nvme_uint128_t ap_megcap;	/* Max Endurance Group Cap (2.1) */
+	struct {
+		uint8_t tmpthha_tmpthmh:3;	/* Temp Tresh Max Hyst (2.1) */
+		uint8_t tmpthha_rsvd3:5;
+	} ap_tmpthha;
+	uint8_t ap_rsvd385;
+	uint16_t ap_cqt;		/* Command Quiesce Time (2.1) */
+	uint8_t ap_rsvd_ac[512 - 388];
 
 	/* NVM Command Set Attributes */
 	nvme_idctl_qes_t id_sqes;	/* Submission Queue Entry Size */
@@ -1007,12 +1167,17 @@ typedef struct {
 		uint16_t on_compare:1;	/* Compare */
 		uint16_t on_wr_unc:1;	/* Write Uncorrectable */
 		uint16_t on_dset_mgmt:1; /* Dataset Management */
-		uint16_t on_wr_zero:1;	/* Write Zeros (1.1) */
+		uint16_t on_wr_zero:1;	/* Write Zeroes (1.1) */
 		uint16_t on_save:1;	/* Save/Select in Get/Set Feat (1.1) */
 		uint16_t on_reserve:1;	/* Reservations (1.1) */
 		uint16_t on_ts:1;	/* Timestamp (1.3) */
 		uint16_t on_verify:1;	/* Verify (1.4) */
-		uint16_t on_rsvd:8;
+		uint16_t on_nvmcpys:1;	/* Copy (2.0) */
+		uint16_t on_nvmcsa:1;	/* NVM Copy Single Atomicity (2.1) */
+		uint16_t on_nvmafc:1;	/* NVM All Fast Copy (2.1) */
+		uint16_t on_maxwzd:1;	/* Max Write Zeroes w/ Dealloc (2.1) */
+		uint16_t on_nszs:1;	/* Namespace zeros (2.1) */
+		uint16_t on_rsvd13:3;
 	} id_oncs;
 	struct {			/* Fused Operation Support */
 		uint16_t f_cmp_wr:1;	/* Compare and Write */
@@ -1042,21 +1207,50 @@ typedef struct {
 		uint8_t nwpc_rsvd:5;
 	} id_nwpc;
 	uint16_t id_acwu;		/* Atomic Compare & Write Unit (1.1) */
-	uint16_t id_rsvd_nc_3;
+	struct {
+		uint16_t cdfs_cdf0s:1;	/* Copy Desc Format 0 (2.0) */
+		uint16_t cdfs_cdf1s:1;	/* Copy Desc Format 1 (2.0) */
+		uint16_t cdfs_cdf2s:1;	/* Copy Desc Format 2 (2.1) */
+		uint16_t cdfs_cdf3s:1;	/* Copy Desc Format 3 (2.1) */
+		uint16_t cdfs_cdf4s:1;	/* Copy Desc Format 4 (2.1) */
+		uint16_t cdfs_rsvd5:11;
+	} id_cdfs;
 	struct {			/* SGL Support (1.1) */
 		uint16_t sgl_sup:2;	/* SGL Supported in NVM cmds (1.3) */
 		uint16_t sgl_keyed:1;	/* Keyed SGL Support (1.2) */
-		uint16_t sgl_rsvd1:13;
+		uint16_t sgl_rsvd3:5;
+		uint16_t sgl_sdt:8;	/* SGL Desc Threshold (2.0) */
 		uint16_t sgl_bucket:1;	/* SGL Bit Bucket supported (1.1) */
 		uint16_t sgl_balign:1;	/* SGL Byte Aligned (1.2) */
 		uint16_t sgl_sglgtd:1;	/* SGL Length Longer than Data (1.2) */
 		uint16_t sgl_mptr:1;	/* SGL MPTR w/ SGL (1.2) */
 		uint16_t sgl_offset:1;	/* SGL Address is offset (1.2) */
 		uint16_t sgl_tport:1;	/* Transport SGL Data Block (1.4) */
-		uint16_t sgl_rsvd2:10;
+		uint16_t sgl_rsvd22:10;
 	} id_sgls;
-	uint32_t id_mnan;		/* Maximum Number of Allowed NSes */
-	uint8_t id_rsvd_nc_4[768 - 544];
+	uint32_t id_mnan;		/* Maximum Num of Allowed NSes (1.4) */
+	nvme_uint128_t id_maxdna;	/* Maximum Domain NS Attach (2.0) */
+	uint32_t id_maxcna;		/* Maximum I/O Ctrl NS Attach (2.0) */
+	uint32_t id_oaqd;		/* Optimal Agg. Queue Depth (2.1) */
+	uint8_t id_rhiri;		/* Host-Init Refresh Ival (2.1) */
+	uint8_t id_hirt;		/* Host-Init refresh time (2.1) */
+	uint16_t id_cmmrtd;		/* Ctrl. Max Mem Track Desc (2.1) */
+	uint16_t id_nmmrtd;		/* NVM Max Mem Track Desc (2.1) */
+	uint8_t id_minmrtg;		/* Min Mem Range Track Gran (2.1) */
+	uint8_t id_maxmrtg;		/* Max Mem Range Track Gran (2.1) */
+	struct {
+		uint8_t trattr_thmcs:1;	/* Track Host Memory Changes (2.1) */
+		uint8_t trattr_tudcs:1;	/* Track User Data Changes (2.1) */
+		uint8_t trattr_mrtll:1;	/* Memory Range Tracking Lim (2.1) */
+		uint8_t trattr_rsvd3:5;
+	} id_trattr;
+	uint8_t id_rsvd577;
+	uint16_t id_mcudmq;		/* Max Ctrl User Mig Queues (2.1) */
+	uint16_t id_mnsudmq;		/* Max NVM Sys Mig Queues (2.1) */
+	uint16_t id_mcmr;		/* Max CDQ Memory Ranges (2.1) */
+	uint16_t id_nmcmr;		/* NVM Sub Max CDQ Mem Ranges (2.1) */
+	uint16_t id_mcdqpc;		/* Max Ctrl Data Queue PRP (2.1) */
+	uint8_t id_rsvd_nc_4[768 - 588];
 
 	/* I/O Command Set Attributes */
 	uint8_t id_subnqn[1024 - 768];	/* Subsystem Qualified Name (1.2.1+) */
@@ -1124,14 +1318,16 @@ typedef struct {
 		uint8_t f_nsabp:1;	/* Namespace atomics (1.2) */
 		uint8_t f_dae:1;	/* Deallocated errors supported (1.2) */
 		uint8_t f_uidreuse:1;	/* GUID reuse impossible (1.3) */
-		uint8_t f_optperf:1;	/* Namespace I/O opt (1.4) */
-		uint8_t f_rsvd:3;
+		uint8_t f_optperf:2;	/* Namespace I/O opt (1.4, N1.1) */
+		uint8_t f_mam:1;	/* Multiple Atomicity (N1.1) */
+		uint8_t f_optrperf:1;	/* Optional Read Perf (N1.1) */
 	} id_nsfeat;
 	uint8_t id_nlbaf;		/* Number of LBA formats */
 	struct {			/* Formatted LBA size */
 		uint8_t lba_format:4;	/* LBA format */
 		uint8_t lba_extlba:1;	/* extended LBA (includes metadata) */
-		uint8_t lba_rsvd:3;
+		uint8_t lba_fidxu:2;	/* Format Index Upper (N1.0) */
+		uint8_t lba_rsvd:1;
 	} id_flbas;
 	struct {			/* Metadata Capabilities */
 		uint8_t mc_extlba:1;	/* extended LBA transfers */
@@ -1153,7 +1349,8 @@ typedef struct {
 	} id_dps;
 	struct {			/* NS Multi-Path/Sharing Cap (1.1) */
 		uint8_t nm_shared:1;	/* NS is shared (1.1) */
-		uint8_t nm_rsvd:7;
+		uint8_t nm_disperse:1;	/* NS is dispersed (2.1) */
+		uint8_t nm_rsvd:6;
 	} id_nmic;
 	struct {			/* Reservation Capabilities (1.1) */
 		uint8_t rc_persist:1;	/* Persist Through Power Loss (1.1) */
@@ -1169,21 +1366,37 @@ typedef struct {
 		uint8_t fpi_remp:7;	/* Percent NVM Format Remaining (1.2) */
 		uint8_t fpi_sup:1;	/* Supported (1.2) */
 	} id_fpi;
-	uint8_t id_dfleat;		/* Deallocate Log. Block (1.3) */
+	struct {
+		uint8_t dlfeat_drb:3;	/* Deallocation Read Behavior (1.3) */
+		uint8_t dlfeat_wzds:1;	/* Write Zeroes Deallocation (1.3) */
+		uint8_t dlfeat_gds:1;	/* Guard Deallocation Status (1.3) */
+		uint8_t dlfeat_rsvd5:3;
+	} id_dlfeat;
 	uint16_t id_nawun;		/* Atomic Write Unit Normal (1.2) */
 	uint16_t id_nawupf;		/* Atomic Write Unit Power Fail (1.2) */
 	uint16_t id_nacwu;		/* Atomic Compare & Write Unit (1.2) */
 	uint16_t id_nabsn;		/* Atomic Boundary Size Normal (1.2) */
 	uint16_t id_nbao;		/* Atomic Boundary Offset (1.2) */
 	uint16_t id_nabspf;		/* Atomic Boundary Size Fail (1.2) */
-	uint16_t id_noiob;		/* Optimal I/O Bondary (1.3) */
+	uint16_t id_noiob;		/* Optimal I/O Boundary (1.3) */
 	nvme_uint128_t id_nvmcap;	/* NVM Capacity */
 	uint16_t id_npwg;		/* NS Pref. Write Gran. (1.4) */
 	uint16_t id_npwa;		/* NS Pref. Write Align. (1.4) */
 	uint16_t id_npdg;		/* NS Pref. Deallocate Gran. (1.4) */
 	uint16_t id_npda;		/* NS Pref. Deallocate Align. (1.4) */
 	uint16_t id_nows;		/* NS. Optimal Write Size (1.4) */
-	uint8_t id_rsvd1[92 - 74];
+	uint16_t id_mssrl;		/* Max Single Source Range (N1.0) */
+	uint32_t id_mcl;		/* Max Copy Length (N1.0) */
+	uint8_t id_msrc;		/* Max Source Range (N1.0) */
+	struct {
+		uint8_t kpios_kpioens:1;	/* Key Per I/O En (N1.1) */
+		uint8_t kpios_kpiosns:1;	/* Key Per I/O Sup (N1.1) */
+		uint8_t kpios_rsvd2:6;
+	} id_kpios;
+	uint8_t id_nulbaf;		/* Unique Attr. LBA Formats (N1.1) */
+	uint8_t id_rsvd83;
+	uint32_t id_kpiodaag;		/* Key Per I/O Access Gran (N1.1) */
+	uint8_t id_rsvd1[92 - 88];
 	uint32_t id_anagrpid;		/* ANA Group Identifier (1.4) */
 	uint8_t id_rsvd2[99 - 96];
 	struct {
@@ -1195,7 +1408,10 @@ typedef struct {
 	uint8_t id_nguid[16];		/* Namespace GUID (1.2) */
 	uint8_t id_eui64[8];		/* IEEE Extended Unique Id (1.1) */
 	nvme_idns_lbaf_t id_lbaf[NVME_MAX_LBAF];	/* LBA Formats */
-
+	/*
+	 * This region contains additional LBAF and should be updated as part of
+	 * enabling support for additional LBA formats in the stack.
+	 */
 	uint8_t id_rsvd3[384 - 192];
 
 	uint8_t id_vs[4096 - 384];	/* Vendor Specific */
@@ -1546,6 +1762,31 @@ CTASSERT(offsetof(nvme_pev_log_t, pel_gnum) == 372);
 #endif
 
 /*
+ * NVMe Telemetry Header
+ */
+typedef struct {
+	uint8_t ntl_lid;
+	uint8_t ntl_rsvd1[4];
+	uint8_t ntl_ieee[3];
+	uint16_t ntl_thda1lb;
+	uint16_t ntl_thda2lb;
+	uint16_t ntl_thda3lb;
+	uint8_t ntl_rsvd14[2];
+	uint32_t ntl_thda4lb;
+	uint8_t ntl_rsvd20[380 - 20];
+	uint8_t ntl_ths;
+	uint8_t ntl_thdgn;
+	uint8_t ntl_tcda;
+	uint8_t ntl_tcdgn;
+	uint8_t ntl_rid[512 - 384];
+	uint8_t ntl_data[];
+} nvme_telemetry_log_t;
+
+CTASSERT(sizeof (nvme_telemetry_log_t) == 512);
+
+#define	NVME_TELMCTRL_LSP_CTHID	1
+
+/*
  * NVMe Format NVM
  */
 #define	NVME_FRMT_SES_NONE	0
@@ -1571,19 +1812,42 @@ typedef union {
 /*
  * NVMe Get / Set Features
  */
-#define	NVME_FEAT_ARBITRATION	0x1	/* Command Arbitration */
-#define	NVME_FEAT_POWER_MGMT	0x2	/* Power Management */
-#define	NVME_FEAT_LBA_RANGE	0x3	/* LBA Range Type */
-#define	NVME_FEAT_TEMPERATURE	0x4	/* Temperature Threshold */
-#define	NVME_FEAT_ERROR		0x5	/* Error Recovery */
-#define	NVME_FEAT_WRITE_CACHE	0x6	/* Volatile Write Cache */
-#define	NVME_FEAT_NQUEUES	0x7	/* Number of Queues */
-#define	NVME_FEAT_INTR_COAL	0x8	/* Interrupt Coalescing */
-#define	NVME_FEAT_INTR_VECT	0x9	/* Interrupt Vector Configuration */
-#define	NVME_FEAT_WRITE_ATOM	0xa	/* Write Atomicity */
-#define	NVME_FEAT_ASYNC_EVENT	0xb	/* Asynchronous Event Configuration */
-#define	NVME_FEAT_AUTO_PST	0xc	/* Autonomous Power State Transition */
+#define	NVME_FEAT_ARBITRATION	0x01	/* Command Arbitration */
+#define	NVME_FEAT_POWER_MGMT	0x02	/* Power Management */
+#define	NVME_FEAT_LBA_RANGE	0x03	/* LBA Range Type */
+#define	NVME_FEAT_TEMPERATURE	0x04	/* Temperature Threshold */
+#define	NVME_FEAT_ERROR		0x05	/* Error Recovery */
+#define	NVME_FEAT_WRITE_CACHE	0x06	/* Volatile Write Cache */
+#define	NVME_FEAT_NQUEUES	0x07	/* Number of Queues */
+#define	NVME_FEAT_INTR_COAL	0x08	/* Interrupt Coalescing */
+#define	NVME_FEAT_INTR_VECT	0x09	/* Interrupt Vector Configuration */
+#define	NVME_FEAT_WRITE_ATOM	0x0a	/* Write Atomicity */
+#define	NVME_FEAT_ASYNC_EVENT	0x0b	/* Asynchronous Event Configuration */
+#define	NVME_FEAT_AUTO_PST	0x0c	/* Autonomous Power State Transition */
 					/* (1.1) */
+#define	NVME_FEAT_HMB		0x0d	/* Host Memory Buffer (1.2) */
+#define	NVME_FEAT_TIMESTAMP	0x0e	/* Timestamp (1.3) */
+#define	NVME_FEAT_KEEP_ALIVE	0x0f	/* Keep Alive Timer (1.2) */
+#define	NVME_FEAT_HCTM		0x10	/* Host Controlled Thermal Mgmt (1.3) */
+#define	NVME_FEAT_NOPSC		0x11	/* Non-op Power State Cfg. (1.3) */
+#define	NVME_FEAT_READ_REC	0x12	/* Read Recovery Level Cfg (1.4) */
+#define	NVME_FEAT_PLM_CFG	0x13	/* Predictable Lat. Mode Cfg. (1.4) */
+#define	NVME_FEAT_PLM_WIN	0x14	/* ^ Window (1.4) */
+#define	NVME_FEAT_LBA_STS_ATTR	0x15	/* LBA Status Info Attr (1.4) */
+#define	NVME_FEAT_HOST_BEHAVE	0x16	/* Host Behavior (1.4) */
+#define	NVME_FEAT_SAN_CFG	0x17	/* Sanitize Config (1.4) */
+#define	NVME_FEAT_EGRP_EVENT	0x18	/* Endurance Group Event Config (1.4) */
+#define	NVME_FEAT_IO_CMD_SET	0x19	/* I/O Command Set Profile (2.0) */
+#define	NVME_FEAT_IO_CMD_SET	0x19	/* I/O Command Set Profile (2.0) */
+#define	NVME_FEAT_SPINUP	0x1a	/* Spinup Control (2.0) */
+#define	NVME_FEAT_PLS		0x1b	/* Power Loss Signaling (2.1) */
+#define	NVME_FEAT_FDP		0x1d	/* Flexible Device Placement (2.1) */
+#define	NVME_FEAT_FDP_EVENTS	0x1e	/* ^ Events (2.1) */
+#define	NVME_FEAT_NS_LABEL	0x1f	/* Namespace Admin Label (2.1) */
+#define	NVME_FEAT_CTRL_DQ	0x21	/* Controller Data Queue (2.1) */
+#define	NVME_FEAT_ENH_CTRL_META	0x7d	/* Enhanced Controller Metadata (2.0) */
+#define	NVME_FEAT_CTRL_META	0x7e	/* Controller Metadata (2.0) */
+#define	NVME_FEAT_NS_META	0x7f	/* Namespace Metadata (2.0) */
 
 #define	NVME_FEAT_PROGRESS	0x80	/* Software Progress Marker */
 
@@ -1625,7 +1889,8 @@ typedef union {
 typedef union {
 	struct {
 		uint32_t pm_ps:5;	/* Power State */
-		uint32_t pm_rsvd:27;
+		uint32_t pm_wh:3;	/* Workload Hint (1.2) */
+		uint32_t pm_rsvd:24;
 	} b;
 	uint32_t r;
 } nvme_power_mgmt_t;
@@ -1661,7 +1926,8 @@ typedef union {
 		uint16_t tt_tmpth;	/* Temperature Threshold */
 		uint16_t tt_tmpsel:4;	/* Temperature Select */
 		uint16_t tt_thsel:2;	/* Temperature Type */
-		uint16_t tt_resv:10;
+		uint16_t tt_tmpthh:3;	/* Threshold Hysteresis (2.1) */
+		uint16_t tt_resv:7;
 	} b;
 	uint32_t r;
 } nvme_temp_threshold_t;
@@ -1675,7 +1941,8 @@ typedef union {
 typedef union {
 	struct {
 		uint16_t er_tler;	/* Time-Limited Error Recovery */
-		uint16_t er_rsvd;
+		uint16_t er_dulbe:1;	/* Deallocated or Unwritten (1.2) */
+		uint16_t er_rsvd:15;
 	} b;
 	uint32_t r;
 } nvme_error_recovery_t;
@@ -1730,21 +1997,32 @@ typedef union {
 /* Asynchronous Event Configuration Feature */
 typedef union {
 	struct {
-		uint8_t aec_avail:1;	/* Available space too low */
-		uint8_t aec_temp:1;	/* Temperature too high */
-		uint8_t aec_reliab:1;	/* Degraded reliability */
-		uint8_t aec_readonly:1;	/* Media is read-only */
-		uint8_t aec_volatile:1;	/* Volatile memory backup failed */
-		uint8_t aec_rsvd1:3;
-		uint8_t aec_nsan:1;	/* Namespace attribute notices (1.2) */
-		uint8_t aec_fwact:1;	/* Firmware activation notices (1.2) */
-		uint8_t aec_telln:1;	/* Telemetry log notices (1.3) */
-		uint8_t aec_ansacn:1;	/* Asymm. NS access change (1.4) */
-		uint8_t aec_plat:1;	/* Predictable latency ev. agg. (1.4) */
-		uint8_t aec_lbasi:1;	/* LBA status information (1.4) */
-		uint8_t aec_egeal:1;	/* Endurance group ev. agg. (1.4) */
-		uint8_t aec_rsvd2:1;
-		uint8_t aec_rsvd3[2];
+		uint32_t aec_avail:1;	/* Available space too low */
+		uint32_t aec_temp:1;	/* Temperature too high */
+		uint32_t aec_reliab:1;	/* Degraded reliability */
+		uint32_t aec_readonly:1;	/* Media is read-only */
+		uint32_t aec_volatile:1;	/* Volatile mem backup failed */
+		uint32_t aec_pmrro:1;	/* Persist Memory Read Only (X.X) */
+		uint32_t aec_rsvd1:2;
+		uint32_t aec_nsan:1;	/* Namespace attribute notices (1.2) */
+		uint32_t aec_fwact:1;	/* Firmware activation notices (1.2) */
+		uint32_t aec_telln:1;	/* Telemetry log notices (1.3) */
+		uint32_t aec_ansacn:1;	/* Asymm. NS access change (1.4) */
+		uint32_t aec_plat:1;	/* Predictable latency ev. agg. (1.4) */
+		uint32_t aec_lbasi:1;	/* LBA status information (1.4) */
+		uint32_t aec_egeal:1;	/* Endurance group ev. agg. (1.4) */
+		uint32_t aec_nnsshdn:1;	/* Normal NVM Subsys Shutdown (2.0) */
+		uint32_t aec_tthry:1;	/* Temp Thres Hysteresis (2.1) */
+		uint32_t aec_rassn:1;	/* Reachability Association (2.1) */
+		uint32_t aec_rgpr0:1;	/* Reachability Group (2.1) */
+		uint32_t aec_ansan:1;	/* Allocated Namespace Attr. (2.1) */
+		uint32_t aec_rsvd20:7;
+		uint32_t aec_zdcn:1;	/* Zone Descriptor Changed (2.0) */
+		/* Fabrics Specific */
+		uint32_t aec_pmdrlpcn:1;	/* Pull Model Change (2.1) */
+		uint32_t aec_adlpcn:1;	/* AVE Discovery Change (2.1) */
+		uint32_t aec_hdlpcn:1;	/* Host Discovery Change (2.1) */
+		uint32_t aec_dlpcn:1;	/* Discovery Change (2.0) */
 	} b;
 	uint32_t r;
 } nvme_async_event_conf_t;
@@ -1766,6 +2044,18 @@ typedef struct {
 } nvme_auto_power_state_t;
 
 #define	NVME_AUTO_PST_BUFSIZE	256
+
+/* Host Behavior */
+typedef struct {
+	uint8_t nhb_acre;	/* Advanced Command Retry (1.4) */
+	uint8_t nhb_etdas;	/* Telemetry Area 4 (2.0) */
+	uint8_t nhb_lbafee;	/* Extended LBA Formats (2.0) */
+	uint8_t nhb_hdisns;	/* Dispersed Namespaces (2.1) */
+	uint16_t nhb_cdfe;	/* Copy Descriptor (2.1) */
+	uint8_t nhb_rsvd[512 - 6];
+} nvme_host_behavior_t;
+
+CTASSERT(sizeof (nvme_host_behavior_t) == 512);
 
 /* Software Progress Marker Feature */
 typedef union {
@@ -1996,31 +2286,65 @@ typedef struct {
 } nvme_ioctl_ctrl_info_t;
 
 /*
- * NVME namespace state flags.
+ * NVME namespace states.
  *
  * The values are defined entirely by the driver. Some states correspond to
  * namespace states described by the NVMe specification r1.3 section 6.1, others
  * are specific to the implementation of this driver. These are present in the
- * nvme_ns_kinfo_t that is used with the NVME_IOC_NS_INFO ioctl.
+ * nvme_ns_kinfo_t that is used with the NVME_IOC_NS_INFO ioctl. Devices that
+ * support Namespace Management have the ability to transition through these
+ * states directly. Devices without it may be able to have namespaces in these
+ * states depending on the version.
  *
  * The states are as follows:
- * - ALLOCATED: the namespace exists in the controller as per the NVMe spec
- * - ACTIVE: the namespace exists and is attached to this controller as per the
- *   NVMe spec. Any namespace that is ACTIVE is also ALLOCATED. This must not be
- *   confused with the ATTACHED state.
- * - ATTACHED: the driver has attached a blkdev(4D) instance to this namespace.
- *   This state can be changed by userspace with the ioctls NVME_IOC_ATTACH and
- *   NVME_IOC_DETACH. A namespace can only be ATTACHED when it is not IGNORED.
- * - IGNORED: the driver ignores this namespace, it never attaches a blkdev(4D).
- *   Namespaces are IGNORED when they are not ACTIVE, or if they are ACTIVE but
- *   have certain properties that the driver cannot handle.
+ * - UNALLOCATED: The namespace ID exists, but has no corresponding NVM
+ *   allocation as per the NVMe spec. It leaves this state with an NVMe
+ *   Namespace Management NS create command: NVME_IOC_NS_CREATE.
+ *
+ * - ALLOCATED: The namespace exists in the controller as per the NVMe spec. It
+ *   becomes ACTIVE (or IGNORED) by performing a controller attach comand:
+ *   NVME_IOC_CTRL_ATTACH. It becomes unallocated by performing an NVMe
+ *   Namespace Management NS delete command: NVME_IOC_NS_DELETE.
+ *
+ * - ACTIVE: The namespace exists and is attached to this controller as per the
+ *   NVMe spec. From the hardware's perspective the namespace is usable.
+ *
+ *   Not all namespaces are supported by the kernel. For example, a namespace
+ *   may use features that the NVMe device driver does not support such as
+ *   end-to-end data protection features or a different command set.
+ *
+ *   When a namespace enters the active state, we will immediately evaluate
+ *   whether or not we can support a block device (via blkdev(4D)) on this
+ *   namespace. If we can, then we will immediately advance to the NOT_IGNORED
+ *   state. Otherwise, to transition to the NOT_IGNORED state, the namespace
+ *   must be formatted with the FORMAT NVM command with supported settings. The
+ *   namespace can transition back to the ALLOCATED state by performing a
+ *   NVME_IOC_CTRL_DETACH ioctl.
+ *
+ * - NOT_IGNORED: The namespace is active from the controller perspective and is
+ *   formatted with settings that would support blkdev(4D) being attached;
+ *   however, there is no blkdev(4D) instance currently attached. A device
+ *   transitions from the NOT_IGNORED to the ATTACHED state by actively
+ *   attaching a blkdev(4D) instance to the namespace through the
+ *   NVME_IOC_BD_ATTACH ioctl. A namespace can transition back to the ACTIVE
+ *   state by issuing a FORMAT NVM command with unsupported settings. It can
+ *   also go to the ALLOCATED state by performing the NVME_IOC_CTRL_DETACH
+ *   ioctl.
+ *
+ * - ATTACHED: the driver has attached a blkdev(4D) instance to this namespace
+ *   and it is usable as a block device. Certain operations such as a FORMAT NVM
+ *   or similar are rejected during this state. The device can go back to ACTIVE
+ *   with the NVME_IOC_BD_DETACH ioctl.
  */
 typedef enum {
-	NVME_NS_STATE_ALLOCATED	=	1 << 0,
-	NVME_NS_STATE_ACTIVE	=	1 << 1,
-	NVME_NS_STATE_ATTACHED	=	1 << 2,
-	NVME_NS_STATE_IGNORED	=	1 << 3
+	NVME_NS_STATE_UNALLOCATED = 0,
+	NVME_NS_STATE_ALLOCATED,
+	NVME_NS_STATE_ACTIVE,
+	NVME_NS_STATE_NOT_IGNORED,
+	NVME_NS_STATE_ATTACHED
 } nvme_ns_state_t;
+
+#define	NVME_NS_NSTATES	5
 
 /*
  * This is the maximum length of the NVMe namespace's blkdev address. This is

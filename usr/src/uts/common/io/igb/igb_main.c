@@ -635,9 +635,9 @@ igb_attach(dev_info_t *devinfo, ddi_attach_cmd_t cmd)
 	 * default.
 	 */
 	if (igb->hw.mac.type == e1000_i350)
-		(void) e1000_set_eee_i350(&igb->hw, B_FALSE, B_FALSE);
+		(void) e1000_set_eee_i350(&igb->hw, false, false);
 	else if (igb->hw.mac.type == e1000_i354)
-		(void) e1000_set_eee_i354(&igb->hw, B_FALSE, B_FALSE);
+		(void) e1000_set_eee_i354(&igb->hw, false, false);
 
 	return (DDI_SUCCESS);
 
@@ -1049,7 +1049,7 @@ igb_init_driver_settings(igb_t *igb)
 	/*
 	 * Initialize chipset specific hardware function pointers
 	 */
-	if (e1000_setup_init_funcs(hw, B_TRUE) != E1000_SUCCESS) {
+	if (e1000_setup_init_funcs(hw, true) != E1000_SUCCESS) {
 		return (IGB_FAILURE);
 	}
 
@@ -1458,7 +1458,7 @@ igb_init_adapter(igb_t *igb)
 	}
 
 	hw->fc.pause_time = E1000_FC_PAUSE_TIME;
-	hw->fc.send_xon = B_TRUE;
+	hw->fc.send_xon = true;
 
 	(void) e1000_validate_mdi_setting(hw);
 
@@ -1474,14 +1474,14 @@ igb_init_adapter(igb_t *igb)
 	/*
 	 * Don't wait for auto-negotiation to complete
 	 */
-	hw->phy.autoneg_wait_to_complete = B_FALSE;
+	hw->phy.autoneg_wait_to_complete = false;
 
 	/*
 	 * Copper options
 	 */
 	if (hw->phy.media_type == e1000_media_type_copper) {
 		hw->phy.mdix = 0;	/* AUTO_ALL_MODES */
-		hw->phy.disable_polarity_correction = B_FALSE;
+		hw->phy.disable_polarity_correction = false;
 		hw->phy.ms_type = e1000_ms_hw_default; /* E1000_MASTER_SLAVE */
 	}
 
@@ -1914,9 +1914,9 @@ igb_start(igb_t *igb, boolean_t alloc_buffer)
 		goto start_failure;
 
 	if (igb->hw.mac.type == e1000_i350)
-		(void) e1000_set_eee_i350(&igb->hw, B_FALSE, B_FALSE);
+		(void) e1000_set_eee_i350(&igb->hw, false, false);
 	else if (igb->hw.mac.type == e1000_i354)
-		(void) e1000_set_eee_i354(&igb->hw, B_FALSE, B_FALSE);
+		(void) e1000_set_eee_i354(&igb->hw, false, false);
 
 	for (i = igb->num_tx_rings - 1; i >= 0; i--)
 		mutex_exit(&igb->tx_rings[i].tx_lock);
@@ -3135,7 +3135,7 @@ igb_setup_link(igb_t *igb, boolean_t setup_hw)
 	invalid = B_FALSE;
 
 	if (igb->param_adv_autoneg_cap == 1) {
-		mac->autoneg = B_TRUE;
+		mac->autoneg = true;
 		phy->autoneg_advertised = 0;
 
 		/*
@@ -3159,7 +3159,7 @@ igb_setup_link(igb_t *igb, boolean_t setup_hw)
 		if (phy->autoneg_advertised == 0)
 			invalid = B_TRUE;
 	} else {
-		mac->autoneg = B_FALSE;
+		mac->autoneg = false;
 
 		/*
 		 * 1000fdx and 1000hdx are not supported for forced link
@@ -3179,7 +3179,7 @@ igb_setup_link(igb_t *igb, boolean_t setup_hw)
 	if (invalid) {
 		igb_log(igb, IGB_LOG_INFO, "Invalid link settings. Setup "
 		    "link to autonegotiation with full link capabilities.");
-		mac->autoneg = B_TRUE;
+		mac->autoneg = true;
 		phy->autoneg_advertised = ADVERTISE_1000_FULL |
 		    ADVERTISE_100_FULL | ADVERTISE_100_HALF |
 		    ADVERTISE_10_FULL | ADVERTISE_10_HALF;
@@ -3485,8 +3485,6 @@ igb_find_mac_address(igb_t *igb)
 
 	return (B_TRUE);
 }
-
-#pragma inline(igb_arm_watchdog_timer)
 
 static void
 igb_arm_watchdog_timer(igb_t *igb)
@@ -3882,9 +3880,9 @@ igb_set_loopback_mode(igb_t *igb, uint32_t mode)
 
 	if (mode == IGB_LB_NONE) {
 		/* Reset the chip */
-		hw->phy.autoneg_wait_to_complete = B_TRUE;
+		hw->phy.autoneg_wait_to_complete = true;
 		(void) igb_reset(igb);
-		hw->phy.autoneg_wait_to_complete = B_FALSE;
+		hw->phy.autoneg_wait_to_complete = false;
 		return (B_TRUE);
 	}
 
@@ -3934,9 +3932,9 @@ igb_set_loopback_mode(igb_t *igb, uint32_t mode)
 			igb->loopback_mode = IGB_LB_NONE;
 
 			/* Reset the chip */
-			hw->phy.autoneg_wait_to_complete = B_TRUE;
+			hw->phy.autoneg_wait_to_complete = true;
 			(void) igb_reset(igb);
-			hw->phy.autoneg_wait_to_complete = B_FALSE;
+			hw->phy.autoneg_wait_to_complete = false;
 
 			igb_log(igb, IGB_LOG_INFO, "Set external loopback "
 			    "failed, reset to loopback none.");
@@ -4050,7 +4048,6 @@ igb_set_internal_serdes_loopback(igb_t *igb)
 	E1000_WRITE_REG(hw, E1000_CONNSW, connsw);
 }
 
-#pragma inline(igb_intr_rx_work)
 /*
  * igb_intr_rx_work - rx processing of ISR
  */
@@ -4068,7 +4065,6 @@ igb_intr_rx_work(igb_rx_ring_t *rx_ring)
 		    rx_ring->ring_gen_num);
 }
 
-#pragma inline(igb_intr_tx_work)
 /*
  * igb_intr_tx_work - tx processing of ISR
  */
@@ -4089,7 +4085,6 @@ igb_intr_tx_work(igb_tx_ring_t *tx_ring)
 	}
 }
 
-#pragma inline(igb_intr_link_work)
 /*
  * igb_intr_link_work - link-status-change processing of ISR
  */
@@ -4106,7 +4101,7 @@ igb_intr_link_work(igb_t *igb)
 	 * Because we got a link-status-change interrupt, force
 	 * e1000_check_for_link() to look at phy
 	 */
-	igb->hw.mac.get_link_status = B_TRUE;
+	igb->hw.mac.get_link_status = true;
 
 	/* igb_link_check takes care of link status change */
 	link_changed = igb_link_check(igb);
@@ -4189,7 +4184,7 @@ igb_intr_legacy(void *arg1, void *arg2)
 			 * Because we got a link-status-change interrupt, force
 			 * e1000_check_for_link() to look at phy
 			 */
-			igb->hw.mac.get_link_status = B_TRUE;
+			igb->hw.mac.get_link_status = true;
 
 			/* igb_link_check takes care of link status change */
 			link_changed = igb_link_check(igb);

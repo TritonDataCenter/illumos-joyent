@@ -1398,8 +1398,17 @@ dbuf_read(dmu_buf_impl_t *db, zio_t *zio, uint32_t flags)
 
 		DB_DNODE_EXIT(db);
 
-		if (!err && need_wait)
-			err = zio_wait(zio);
+		/*
+		 * If we created a zio_root we must execute it to avoid
+		 * leaking it, even if it isn't attached to any work due
+		 * to an error in dbuf_read_impl().
+		 */
+		if (need_wait) {
+			if (err == 0)
+				err = zio_wait(zio);
+			else
+				(void) zio_wait(zio);
+		}
 	} else {
 		/*
 		 * Another reader came in while the dbuf was in flight
@@ -2410,9 +2419,6 @@ dbuf_destroy(dmu_buf_impl_t *db)
 	ASSERT3U(db->db_caching_status, ==, DB_NO_CACHE);
 	ASSERT(!multilist_link_active(&db->db_cache_link));
 
-	kmem_cache_free(dbuf_kmem_cache, db);
-	arc_space_return(sizeof (dmu_buf_impl_t), ARC_SPACE_OTHER);
-
 	/*
 	 * If this dbuf is referenced from an indirect dbuf,
 	 * decrement the ref count on the indirect dbuf.
@@ -2421,6 +2427,9 @@ dbuf_destroy(dmu_buf_impl_t *db)
 		mutex_enter(&parent->db_mtx);
 		dbuf_rele_and_unlock(parent, db, B_TRUE);
 	}
+
+	kmem_cache_free(dbuf_kmem_cache, db);
+	arc_space_return(sizeof (dmu_buf_impl_t), ARC_SPACE_OTHER);
 }
 
 /*
@@ -2951,7 +2960,6 @@ dbuf_hold_impl(dnode_t *dn, uint8_t level, uint64_t blkid,
 	ASSERT3U(dn->dn_nlevels, >, level);
 
 	*dbp = NULL;
-top:
 	/* dbuf_find() returns with db_mtx held */
 	db = dbuf_find(dn->dn_objset, dn->dn_object, level, blkid);
 

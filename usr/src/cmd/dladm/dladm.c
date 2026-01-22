@@ -3191,7 +3191,7 @@ print_xaggr_cb(ofmt_arg_t *ofarg, char *buf, uint_t bufsize)
 		}
 		break;
 	}
-err:
+
 	*(l->laggr_status) = DLADM_STATUS_OK;
 	return (B_TRUE);
 }
@@ -3518,7 +3518,6 @@ print_aggr(show_grp_state_t *state, datalink_id_t linkid)
 	else
 		status = print_aggr_info(state, link, &ginfo);
 
-done:
 	free(ginfo.lg_ports);
 	return (status);
 }

@@ -21,6 +21,8 @@
 /*
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2025 Oxide Computer Company
  */
 
 #include "rge.h"
@@ -49,9 +51,6 @@ static uint32_t rge_rx_watchdog_count	= 1 << 3;
  * Operating register get/set access routines
  */
 
-static uint32_t rge_reg_get32(rge_t *rgep, uintptr_t regno);
-#pragma	inline(rge_reg_get32)
-
 static uint32_t
 rge_reg_get32(rge_t *rgep, uintptr_t regno)
 {
@@ -61,9 +60,6 @@ rge_reg_get32(rge_t *rgep, uintptr_t regno)
 	return (ddi_get32(rgep->io_handle, REG32(rgep, regno)));
 }
 
-static void rge_reg_put32(rge_t *rgep, uintptr_t regno, uint32_t data);
-#pragma	inline(rge_reg_put32)
-
 static void
 rge_reg_put32(rge_t *rgep, uintptr_t regno, uint32_t data)
 {
@@ -72,9 +68,6 @@ rge_reg_put32(rge_t *rgep, uintptr_t regno, uint32_t data)
 
 	ddi_put32(rgep->io_handle, REG32(rgep, regno), data);
 }
-
-static void rge_reg_set32(rge_t *rgep, uintptr_t regno, uint32_t bits);
-#pragma	inline(rge_reg_set32)
 
 static void
 rge_reg_set32(rge_t *rgep, uintptr_t regno, uint32_t bits)
@@ -89,9 +82,6 @@ rge_reg_set32(rge_t *rgep, uintptr_t regno, uint32_t bits)
 	rge_reg_put32(rgep, regno, regval);
 }
 
-static void rge_reg_clr32(rge_t *rgep, uintptr_t regno, uint32_t bits);
-#pragma	inline(rge_reg_clr32)
-
 static void
 rge_reg_clr32(rge_t *rgep, uintptr_t regno, uint32_t bits)
 {
@@ -105,9 +95,6 @@ rge_reg_clr32(rge_t *rgep, uintptr_t regno, uint32_t bits)
 	rge_reg_put32(rgep, regno, regval);
 }
 
-static uint16_t rge_reg_get16(rge_t *rgep, uintptr_t regno);
-#pragma	inline(rge_reg_get16)
-
 static uint16_t
 rge_reg_get16(rge_t *rgep, uintptr_t regno)
 {
@@ -116,9 +103,6 @@ rge_reg_get16(rge_t *rgep, uintptr_t regno)
 
 	return (ddi_get16(rgep->io_handle, REG16(rgep, regno)));
 }
-
-static void rge_reg_put16(rge_t *rgep, uintptr_t regno, uint16_t data);
-#pragma	inline(rge_reg_put16)
 
 static void
 rge_reg_put16(rge_t *rgep, uintptr_t regno, uint16_t data)
@@ -129,9 +113,6 @@ rge_reg_put16(rge_t *rgep, uintptr_t regno, uint16_t data)
 	ddi_put16(rgep->io_handle, REG16(rgep, regno), data);
 }
 
-static uint8_t rge_reg_get8(rge_t *rgep, uintptr_t regno);
-#pragma	inline(rge_reg_get8)
-
 static uint8_t
 rge_reg_get8(rge_t *rgep, uintptr_t regno)
 {
@@ -141,9 +122,6 @@ rge_reg_get8(rge_t *rgep, uintptr_t regno)
 	return (ddi_get8(rgep->io_handle, REG8(rgep, regno)));
 }
 
-static void rge_reg_put8(rge_t *rgep, uintptr_t regno, uint8_t data);
-#pragma	inline(rge_reg_put8)
-
 static void
 rge_reg_put8(rge_t *rgep, uintptr_t regno, uint8_t data)
 {
@@ -152,9 +130,6 @@ rge_reg_put8(rge_t *rgep, uintptr_t regno, uint8_t data)
 
 	ddi_put8(rgep->io_handle, REG8(rgep, regno), data);
 }
-
-static void rge_reg_set8(rge_t *rgep, uintptr_t regno, uint8_t bits);
-#pragma	inline(rge_reg_set8)
 
 static void
 rge_reg_set8(rge_t *rgep, uintptr_t regno, uint8_t bits)
@@ -169,9 +144,6 @@ rge_reg_set8(rge_t *rgep, uintptr_t regno, uint8_t bits)
 	rge_reg_put8(rgep, regno, regval);
 }
 
-static void rge_reg_clr8(rge_t *rgep, uintptr_t regno, uint8_t bits);
-#pragma	inline(rge_reg_clr8)
-
 static void
 rge_reg_clr8(rge_t *rgep, uintptr_t regno, uint8_t bits)
 {
@@ -184,9 +156,6 @@ rge_reg_clr8(rge_t *rgep, uintptr_t regno, uint8_t bits)
 	regval &= ~bits;
 	rge_reg_put8(rgep, regno, regval);
 }
-
-uint16_t rge_mii_get16(rge_t *rgep, uintptr_t mii);
-#pragma	no_inline(rge_mii_get16)
 
 uint16_t
 rge_mii_get16(rge_t *rgep, uintptr_t mii)
@@ -212,9 +181,6 @@ rge_mii_get16(rge_t *rgep, uintptr_t mii)
 	return ((uint16_t)~0u);
 }
 
-void rge_mii_put16(rge_t *rgep, uintptr_t mii, uint16_t data);
-#pragma	no_inline(rge_mii_put16)
-
 void
 rge_mii_put16(rge_t *rgep, uintptr_t mii, uint16_t data)
 {
@@ -239,9 +205,6 @@ rge_mii_put16(rge_t *rgep, uintptr_t mii, uint16_t data)
 	RGE_REPORT((rgep, "rge_mii_put16(0x%lx, 0x%x) fail",
 	    mii, data));
 }
-
-void rge_ephy_put16(rge_t *rgep, uintptr_t emii, uint16_t data);
-#pragma	no_inline(rge_ephy_put16)
 
 void
 rge_ephy_put16(rge_t *rgep, uintptr_t emii, uint16_t data)
@@ -272,9 +235,6 @@ rge_ephy_put16(rge_t *rgep, uintptr_t emii, uint16_t data)
  * Atomically shift a 32-bit word left, returning
  * the value it had *before* the shift was applied
  */
-static uint32_t rge_atomic_shl32(uint32_t *sp, uint_t count);
-#pragma	inline(rge_mii_put16)
-
 static uint32_t
 rge_atomic_shl32(uint32_t *sp, uint_t count)
 {
@@ -578,9 +538,6 @@ rge_phy_update(rge_t *rgep)
 	RGE_DEBUG(("rge_phy_update: gigctrl <- 0x%x", gigctrl));
 }
 
-void rge_phy_init(rge_t *rgep);
-#pragma	no_inline(rge_phy_init)
-
 void
 rge_phy_init(rge_t *rgep)
 {
@@ -688,9 +645,6 @@ rge_phy_init(rge_t *rgep)
 	}
 }
 
-void rge_chip_ident(rge_t *rgep);
-#pragma	no_inline(rge_chip_ident)
-
 void
 rge_chip_ident(rge_t *rgep)
 {
@@ -791,9 +745,6 @@ rge_chip_ident(rge_t *rgep)
  * + Enable Memory Space accesses.
  * + Enable Bus Mastering according.
  */
-void rge_chip_cfg_init(rge_t *rgep, chip_id_t *cidp);
-#pragma	no_inline(rge_chip_cfg_init)
-
 void
 rge_chip_cfg_init(rge_t *rgep, chip_id_t *cidp)
 {
@@ -829,9 +780,6 @@ rge_chip_cfg_init(rge_t *rgep, chip_id_t *cidp)
 	RGE_DEBUG(("rge_chip_cfg_init: clsize %d latency %d command 0x%x",
 	    cidp->clsize, cidp->latency, cidp->command));
 }
-
-int rge_chip_reset(rge_t *rgep);
-#pragma	no_inline(rge_chip_reset)
 
 int
 rge_chip_reset(rge_t *rgep)
@@ -875,9 +823,6 @@ rge_chip_reset(rge_t *rgep)
 	RGE_REPORT((rgep, "rge_chip_reset fail."));
 	return (-1);
 }
-
-void rge_chip_init(rge_t *rgep);
-#pragma	no_inline(rge_chip_init)
 
 void
 rge_chip_init(rge_t *rgep)
@@ -942,16 +887,6 @@ rge_chip_init(rge_t *rgep)
 	if (chip->enable_mac_first)
 		rge_reg_set8(rgep, RT_COMMAND_REG,
 		    RT_COMMAND_RX_ENABLE | RT_COMMAND_TX_ENABLE);
-
-	/*
-	 * Set dump tally counter register
-	 */
-	val32 = rgep->dma_area_stats.cookie.dmac_laddress >> 32;
-	rge_reg_put32(rgep, DUMP_COUNTER_REG_1, val32);
-	val32 = rge_reg_get32(rgep, DUMP_COUNTER_REG_0);
-	val32 &= DUMP_COUNTER_REG_RESV;
-	val32 |= rgep->dma_area_stats.cookie.dmac_laddress;
-	rge_reg_put32(rgep, DUMP_COUNTER_REG_0, val32);
 
 	/*
 	 * Change to config register write enable mode
@@ -1048,9 +983,6 @@ rge_chip_init(rge_t *rgep)
  * rge_chip_start() -- start the chip transmitting and/or receiving,
  * including enabling interrupts
  */
-void rge_chip_start(rge_t *rgep);
-#pragma	no_inline(rge_chip_start)
-
 void
 rge_chip_start(rge_t *rgep)
 {
@@ -1090,9 +1022,6 @@ rge_chip_start(rge_t *rgep)
  * must not block; also, no tracing or logging takes place
  * when invoked by rge_quiesce().
  */
-void rge_chip_stop(rge_t *rgep, boolean_t fault);
-#pragma	no_inline(rge_chip_stop)
-
 void
 rge_chip_stop(rge_t *rgep, boolean_t fault)
 {
@@ -1124,9 +1053,6 @@ rge_chip_stop(rge_t *rgep, boolean_t fault)
 /*
  * rge_get_mac_addr() -- get the MAC address on NIC
  */
-static void rge_get_mac_addr(rge_t *rgep);
-#pragma	inline(rge_get_mac_addr)
-
 static void
 rge_get_mac_addr(rge_t *rgep)
 {
@@ -1153,9 +1079,6 @@ rge_get_mac_addr(rge_t *rgep)
 	val32 = val32 >> 8;
 	macaddr[5] = val32 & 0xff;
 }
-
-static void rge_set_mac_addr(rge_t *rgep);
-#pragma	inline(rge_set_mac_addr)
 
 static void
 rge_set_mac_addr(rge_t *rgep)
@@ -1203,9 +1126,6 @@ rge_set_mac_addr(rge_t *rgep)
 	rge_reg_clr8(rgep, RT_93c46_COMMOND_REG, RT_93c46_MODE_CONFIG);
 }
 
-static void rge_set_multi_addr(rge_t *rgep);
-#pragma	inline(rge_set_multi_addr)
-
 static void
 rge_set_multi_addr(rge_t *rgep)
 {
@@ -1235,9 +1155,6 @@ rge_set_multi_addr(rge_t *rgep)
 	}
 }
 
-static void rge_set_promisc(rge_t *rgep);
-#pragma	inline(rge_set_promisc)
-
 static void
 rge_set_promisc(rge_t *rgep)
 {
@@ -1252,9 +1169,6 @@ rge_set_promisc(rge_t *rgep)
  * the multicast hash table, the required level of promiscuity, and
  * the current loopback mode ...
  */
-void rge_chip_sync(rge_t *rgep, enum rge_sync_op todo);
-#pragma	no_inline(rge_chip_sync)
-
 void
 rge_chip_sync(rge_t *rgep, enum rge_sync_op todo)
 {
@@ -1280,9 +1194,6 @@ rge_chip_sync(rge_t *rgep, enum rge_sync_op todo)
 	}
 }
 
-void rge_chip_blank(void *arg, time_t ticks, uint_t count, int flag);
-#pragma	no_inline(rge_chip_blank)
-
 /* ARGSUSED */
 void
 rge_chip_blank(void *arg, time_t ticks, uint_t count, int flag)
@@ -1290,43 +1201,57 @@ rge_chip_blank(void *arg, time_t ticks, uint_t count, int flag)
 	_NOTE(ARGUNUSED(arg, ticks, count));
 }
 
-void rge_tx_trigger(rge_t *rgep);
-#pragma	no_inline(rge_tx_trigger)
-
 void
 rge_tx_trigger(rge_t *rgep)
 {
 	rge_reg_put8(rgep, TX_RINGS_POLL_REG, NORMAL_TX_RING_POLL);
 }
 
-void rge_hw_stats_dump(rge_t *rgep);
-#pragma	no_inline(rge_tx_trigger)
-
 void
 rge_hw_stats_dump(rge_t *rgep)
 {
-	int i = 0;
 	uint32_t regval = 0;
 
 	if (rgep->rge_mac_state == RGE_MAC_STOPPED)
 		return;
 
-	regval = rge_reg_get32(rgep, DUMP_COUNTER_REG_0);
-	while (regval & DUMP_START) {
-		drv_usecwait(100);
-		if (++i > STATS_DUMP_LOOP) {
-			RGE_DEBUG(("rge h/w statistics dump fail!"));
-			rgep->rge_chip_state = RGE_CHIP_ERROR;
-			return;
-		}
-		regval = rge_reg_get32(rgep, DUMP_COUNTER_REG_0);
-	}
-	DMA_SYNC(rgep->dma_area_stats, DDI_DMA_SYNC_FORKERNEL);
+	/*
+	 * Set the stats counter dump address.  First, set the high part of the
+	 * address and read it back to ensure it's flushed out.
+	 */
+	rge_reg_put32(rgep, DUMP_COUNTER_REG_1,
+	    rgep->dma_area_stats.cookie.dmac_laddress >> 32);
+	(void) rge_reg_get32(rgep, DUMP_COUNTER_REG_1);
 
 	/*
-	 * Start H/W statistics dump for RTL8169 chip
+	 * Then set the low part of the address, preserving the reserved bits:
 	 */
-	rge_reg_set32(rgep, DUMP_COUNTER_REG_0, DUMP_START);
+	regval = rge_reg_get32(rgep, DUMP_COUNTER_REG_0);
+	regval &= DUMP_COUNTER_REG_RESV;
+	regval |= rgep->dma_area_stats.cookie.dmac_laddress;
+	rge_reg_put32(rgep, DUMP_COUNTER_REG_0, regval);
+
+	/*
+	 * Set the command bit to start dumping statistics:
+	 */
+	regval = rge_reg_get32(rgep, DUMP_COUNTER_REG_0);
+	rge_reg_put32(rgep, DUMP_COUNTER_REG_0, regval | DUMP_START);
+
+	for (uint_t i = 0; i < STATS_DUMP_LOOP; i++) {
+		drv_usecwait(100);
+
+		/*
+		 * Check to see if the dump has completed:
+		 */
+		regval = rge_reg_get32(rgep, DUMP_COUNTER_REG_0);
+		if ((regval & DUMP_START) == 0) {
+			DMA_SYNC(rgep->dma_area_stats, DDI_DMA_SYNC_FORKERNEL);
+			return;
+		}
+	}
+
+	RGE_DEBUG(("rge h/w statistics dump fail!"));
+	rgep->rge_chip_state = RGE_CHIP_ERROR;
 }
 
 /*
@@ -1335,9 +1260,6 @@ rge_hw_stats_dump(rge_t *rgep)
 
 #undef	RGE_DBG
 #define	RGE_DBG		RGE_DBG_INT	/* debug flag for this code	*/
-
-static void rge_wake_factotum(rge_t *rgep);
-#pragma	inline(rge_wake_factotum)
 
 static void
 rge_wake_factotum(rge_t *rgep)
@@ -1351,9 +1273,6 @@ rge_wake_factotum(rge_t *rgep)
 /*
  *	rge_intr() -- handle chip interrupts
  */
-uint_t rge_intr(caddr_t arg1, caddr_t arg2);
-#pragma	no_inline(rge_intr)
-
 uint_t
 rge_intr(caddr_t arg1, caddr_t arg2)
 {
@@ -1548,9 +1467,6 @@ rge_intr(caddr_t arg1, caddr_t arg2)
 #undef	RGE_DBG
 #define	RGE_DBG		RGE_DBG_FACT	/* debug flag for this code	*/
 
-static boolean_t rge_factotum_link_check(rge_t *rgep);
-#pragma	no_inline(rge_factotum_link_check)
-
 static boolean_t
 rge_factotum_link_check(rge_t *rgep)
 {
@@ -1587,9 +1503,6 @@ rge_factotum_link_check(rge_t *rgep)
 /*
  * Factotum routine to check for Tx stall, using the 'watchdog' counter
  */
-static boolean_t rge_factotum_stall_check(rge_t *rgep);
-#pragma	no_inline(rge_factotum_stall_check)
-
 static boolean_t
 rge_factotum_stall_check(rge_t *rgep)
 {
@@ -1638,9 +1551,6 @@ rge_factotum_stall_check(rge_t *rgep)
  *	reset & restart the chip after an error
  *	check the link status whenever necessary
  */
-uint_t rge_chip_factotum(caddr_t arg1, caddr_t arg2);
-#pragma	no_inline(rge_chip_factotum)
-
 uint_t
 rge_chip_factotum(caddr_t arg1, caddr_t arg2)
 {
@@ -1710,9 +1620,6 @@ rge_chip_factotum(caddr_t arg1, caddr_t arg2)
  * factotum, and prods the chip to update the status block (which
  * will cause a hardware interrupt when complete).
  */
-void rge_chip_cyclic(void *arg);
-#pragma	no_inline(rge_chip_cyclic)
-
 void
 rge_chip_cyclic(void *arg)
 {
@@ -1748,9 +1655,6 @@ rge_chip_cyclic(void *arg)
 
 #if	RGE_DEBUGGING || RGE_DO_PPIO
 
-static void rge_chip_peek_cfg(rge_t *rgep, rge_peekpoke_t *ppd);
-#pragma	no_inline(rge_chip_peek_cfg)
-
 static void
 rge_chip_peek_cfg(rge_t *rgep, rge_peekpoke_t *ppd)
 {
@@ -1783,9 +1687,6 @@ rge_chip_peek_cfg(rge_t *rgep, rge_peekpoke_t *ppd)
 	ppd->pp_acc_data = regval;
 }
 
-static void rge_chip_poke_cfg(rge_t *rgep, rge_peekpoke_t *ppd);
-#pragma	no_inline(rge_chip_poke_cfg)
-
 static void
 rge_chip_poke_cfg(rge_t *rgep, rge_peekpoke_t *ppd)
 {
@@ -1816,9 +1717,6 @@ rge_chip_poke_cfg(rge_t *rgep, rge_peekpoke_t *ppd)
 		break;
 	}
 }
-
-static void rge_chip_peek_reg(rge_t *rgep, rge_peekpoke_t *ppd);
-#pragma	no_inline(rge_chip_peek_reg)
 
 static void
 rge_chip_peek_reg(rge_t *rgep, rge_peekpoke_t *ppd)
@@ -1852,9 +1750,6 @@ rge_chip_peek_reg(rge_t *rgep, rge_peekpoke_t *ppd)
 	ppd->pp_acc_data = regval;
 }
 
-static void rge_chip_poke_reg(rge_t *rgep, rge_peekpoke_t *ppd);
-#pragma	no_inline(rge_chip_peek_reg)
-
 static void
 rge_chip_poke_reg(rge_t *rgep, rge_peekpoke_t *ppd)
 {
@@ -1886,9 +1781,6 @@ rge_chip_poke_reg(rge_t *rgep, rge_peekpoke_t *ppd)
 	}
 }
 
-static void rge_chip_peek_mii(rge_t *rgep, rge_peekpoke_t *ppd);
-#pragma	no_inline(rge_chip_peek_mii)
-
 static void
 rge_chip_peek_mii(rge_t *rgep, rge_peekpoke_t *ppd)
 {
@@ -1898,9 +1790,6 @@ rge_chip_peek_mii(rge_t *rgep, rge_peekpoke_t *ppd)
 	ppd->pp_acc_data = rge_mii_get16(rgep, ppd->pp_acc_offset/2);
 }
 
-static void rge_chip_poke_mii(rge_t *rgep, rge_peekpoke_t *ppd);
-#pragma	no_inline(rge_chip_poke_mii)
-
 static void
 rge_chip_poke_mii(rge_t *rgep, rge_peekpoke_t *ppd)
 {
@@ -1909,9 +1798,6 @@ rge_chip_poke_mii(rge_t *rgep, rge_peekpoke_t *ppd)
 
 	rge_mii_put16(rgep, ppd->pp_acc_offset/2, ppd->pp_acc_data);
 }
-
-static void rge_chip_peek_mem(rge_t *rgep, rge_peekpoke_t *ppd);
-#pragma	no_inline(rge_chip_peek_mem)
 
 static void
 rge_chip_peek_mem(rge_t *rgep, rge_peekpoke_t *ppd)
@@ -1948,9 +1834,6 @@ rge_chip_peek_mem(rge_t *rgep, rge_peekpoke_t *ppd)
 	ppd->pp_acc_data = regval;
 }
 
-static void rge_chip_poke_mem(rge_t *rgep, rge_peekpoke_t *ppd);
-#pragma	no_inline(rge_chip_poke_mem)
-
 static void
 rge_chip_poke_mem(rge_t *rgep, rge_peekpoke_t *ppd)
 {
@@ -1984,10 +1867,6 @@ rge_chip_poke_mem(rge_t *rgep, rge_peekpoke_t *ppd)
 		break;
 	}
 }
-
-static enum ioc_reply rge_pp_ioctl(rge_t *rgep, int cmd, mblk_t *mp,
-					struct iocblk *iocp);
-#pragma	no_inline(rge_pp_ioctl)
 
 static enum ioc_reply
 rge_pp_ioctl(rge_t *rgep, int cmd, mblk_t *mp, struct iocblk *iocp)
@@ -2133,10 +2012,6 @@ rge_pp_ioctl(rge_t *rgep, int cmd, mblk_t *mp, struct iocblk *iocp)
 	return (peek ? IOC_REPLY : IOC_ACK);
 }
 
-static enum ioc_reply rge_diag_ioctl(rge_t *rgep, int cmd, mblk_t *mp,
-					struct iocblk *iocp);
-#pragma	no_inline(rge_diag_ioctl)
-
 static enum ioc_reply
 rge_diag_ioctl(rge_t *rgep, int cmd, mblk_t *mp, struct iocblk *iocp)
 {
@@ -2175,10 +2050,6 @@ rge_diag_ioctl(rge_t *rgep, int cmd, mblk_t *mp, struct iocblk *iocp)
 
 #endif	/* RGE_DEBUGGING || RGE_DO_PPIO */
 
-static enum ioc_reply rge_mii_ioctl(rge_t *rgep, int cmd, mblk_t *mp,
-				    struct iocblk *iocp);
-#pragma	no_inline(rge_mii_ioctl)
-
 static enum ioc_reply
 rge_mii_ioctl(rge_t *rgep, int cmd, mblk_t *mp, struct iocblk *iocp)
 {
@@ -2216,10 +2087,6 @@ rge_mii_ioctl(rge_t *rgep, int cmd, mblk_t *mp, struct iocblk *iocp)
 
 	/* NOTREACHED */
 }
-
-enum ioc_reply rge_chip_ioctl(rge_t *rgep, queue_t *wq, mblk_t *mp,
-				struct iocblk *iocp);
-#pragma	no_inline(rge_chip_ioctl)
 
 enum ioc_reply
 rge_chip_ioctl(rge_t *rgep, queue_t *wq, mblk_t *mp, struct iocblk *iocp)

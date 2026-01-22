@@ -31,6 +31,7 @@
 # Copyright 2019 Peter Tribble
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2024 MNX Cloud, Inc.
+# Copyright 2025 Edgecast Cloud LLC.
 #
 
 include ../Makefile.master
@@ -193,6 +194,7 @@ COMMON_SUBDIRS=		\
 	getopt		\
 	gettext		\
 	gettxt		\
+	gpioadm		\
 	grep		\
 	groups		\
 	growfs		\
@@ -204,6 +206,7 @@ COMMON_SUBDIRS=		\
 	hostname	\
 	hotplug		\
 	hotplugd	\
+	i2cadm		\
 	ibd_upgrade	\
 	iconv		\
 	id		\
@@ -468,6 +471,7 @@ COMMON_SUBDIRS=		\
 	zdb		\
 	zdump		\
 	zfs		\
+	zfscache	\
 	zhack		\
 	zhyve		\
 	zic		\

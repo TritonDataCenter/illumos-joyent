@@ -39,6 +39,7 @@
  * Copyright (c) 2017, Datto, Inc. All rights reserved.
  * Copyright 2021 The University of Queensland
  * Copyright 2024 Oxide Computer Company
+ * Copyright 2025 Edgecast Cloud LLC.
  */
 
 /*
@@ -230,7 +231,6 @@ extern void zfs_fini(void);
 ldi_ident_t zfs_li = NULL;
 dev_info_t *zfs_dip;
 
-uint_t zfs_fsyncer_key;
 extern uint_t rrw_tsd_key;
 static uint_t zfs_allow_log_key;
 
@@ -5321,6 +5321,12 @@ zfs_ioc_send_progress(zfs_cmd_t *zc)
 }
 
 static int
+zfs_ioc_arc(zfs_cmd_t *zc)
+{
+	return (arc_dynamic_resize(zc));
+}
+
+static int
 zfs_ioc_inject_fault(zfs_cmd_t *zc)
 {
 	int id, error;
@@ -6927,6 +6933,8 @@ zfs_ioctl_init(void)
 	    zfs_ioc_clear_fault, zfs_secpolicy_inject);
 	zfs_ioctl_register_pool_meta(ZFS_IOC_INJECT_LIST_NEXT,
 	    zfs_ioc_inject_list_next, zfs_secpolicy_inject);
+	zfs_ioctl_register_pool_meta(ZFS_IOC_ARC,
+	    zfs_ioc_arc, zfs_secpolicy_inject);
 
 	/*
 	 * pool destroy, and export don't log the history as part of
@@ -7562,7 +7570,6 @@ _init(void)
 		return (error);
 	}
 
-	tsd_create(&zfs_fsyncer_key, NULL);
 	tsd_create(&rrw_tsd_key, rrw_tsd_destroy);
 	tsd_create(&zfs_allow_log_key, zfs_allow_log_destroy);
 
@@ -7594,7 +7601,6 @@ _fini(void)
 	if (zfs_nfsshare_inited || zfs_smbshare_inited)
 		(void) ddi_modclose(sharefs_mod);
 
-	tsd_destroy(&zfs_fsyncer_key);
 	ldi_ident_release(zfs_li);
 	zfs_li = NULL;
 	mutex_destroy(&zfs_share_lock);

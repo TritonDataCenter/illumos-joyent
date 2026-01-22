@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -58,14 +58,16 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/bitext.h>
+#include <sys/ccompile.h>
 
 #include "pcieadm.h"
 
 /*
  * A few required forwards
  */
-struct pcieadm_cfgspace_walk;
-struct pcieadm_regdef;
+typedef struct pcieadm_cfgspace_walk pcieadm_cfgspace_walk_t;
+typedef struct pcieadm_cfgspace_print pcieadm_cfgspace_print_t;
+typedef struct pcieadm_regdef pcieadm_regdef_t;
 
 typedef enum pcieadm_cfgspace_op {
 	PCIEADM_CFGSPACE_OP_PRINT,
@@ -80,7 +82,11 @@ typedef enum piceadm_cfgspace_flag {
 typedef enum pcieadm_cfgspace_otype {
 	PCIEADM_CFGSPACE_OT_SHORT,
 	PCIEADM_CFGSPACE_OT_HUMAN,
-	PCIEADM_CFGSPACE_OT_VALUE
+	PCIEADM_CFGSPACE_OT_VALUE,
+	PCIEADM_CFGSPACE_OT_BYTEOFF,
+	PCIEADM_CFGSPACE_OT_BITOFF,
+	PCIEADM_CFGSPACE_OT_BYTELEN,
+	PCIEADM_CFGSPACE_OT_BITLEN
 } pcieadm_cfgsapce_otype_t;
 
 typedef struct pcieadm_cfgspace_ofmt {
@@ -89,6 +95,10 @@ typedef struct pcieadm_cfgspace_ofmt {
 	const char *pco_human;
 	uint64_t pco_value;
 	const char *pco_strval;
+	uint32_t pco_off;
+	uint32_t pco_bitoff;
+	uint32_t pco_len;
+	uint32_t pco_bitlen;
 } pcieadm_cfgspace_ofmt_t;
 
 typedef enum pcieadm_regdef_val {
@@ -103,7 +113,7 @@ typedef struct pcieadm_regdef_addend {
 	int64_t pra_addend;
 } pcieadm_regdef_addend_t;
 
-typedef struct pcieadm_regdef {
+struct pcieadm_regdef {
 	uint8_t prd_lowbit;
 	uint8_t prd_hibit;
 	const char *prd_short;
@@ -116,10 +126,11 @@ typedef struct pcieadm_regdef {
 		 */
 		const char *prdv_strval[128];
 		pcieadm_regdef_addend_t prdv_hex;
-		void (*prdv_func)(struct pcieadm_cfgspace_walk *,
-		    const struct pcieadm_regdef *, uint64_t);
+		void (*prdv_func)(pcieadm_cfgspace_walk_t *,
+		    const pcieadm_cfgspace_print_t *, const pcieadm_regdef_t *,
+		    uint64_t);
 	} prd_val;
-} pcieadm_regdef_t;
+};
 
 typedef struct pcieadm_unitdef {
 	const char *pcd_unit;
@@ -152,7 +163,7 @@ typedef union pcieadm_cfgspace_data {
 	uint32_t pcb_u32[PCIE_CONF_HDR_SIZE / 4];
 } pcieadm_cfgspace_data_t;
 
-typedef struct pcieadm_cfgspace_walk {
+struct pcieadm_cfgspace_walk {
 	pcieadm_t *pcw_pcieadm;
 	pcieadm_cfgspace_op_t pcw_op;
 	uint32_t pcw_valid;
@@ -168,7 +179,7 @@ typedef struct pcieadm_cfgspace_walk {
 	pcieadm_cfgspace_flags_t pcw_flags;
 	ofmt_handle_t pcw_ofmt;
 	pcieadm_strfilt_t *pcw_filt;
-} pcieadm_cfgspace_walk_t;
+};
 
 void
 pcieadm_strfilt_pop(pcieadm_cfgspace_walk_t *walkp)
@@ -303,6 +314,26 @@ pcieadm_cfgspace_ofmt_cb(ofmt_arg_t *ofarg, char *buf, uint_t buflen)
 			}
 		}
 		break;
+	case PCIEADM_CFGSPACE_OT_BYTEOFF:
+		if (snprintf(buf, buflen, "%u", pco->pco_off) >= buflen) {
+			return (B_FALSE);
+		}
+		break;
+	case PCIEADM_CFGSPACE_OT_BITOFF:
+		if (snprintf(buf, buflen, "%u", pco->pco_bitoff) >= buflen) {
+			return (B_FALSE);
+		}
+		break;
+	case PCIEADM_CFGSPACE_OT_BYTELEN:
+		if (snprintf(buf, buflen, "%u", pco->pco_len) >= buflen) {
+			return (B_FALSE);
+		}
+		break;
+	case PCIEADM_CFGSPACE_OT_BITLEN:
+		if (snprintf(buf, buflen, "%u", pco->pco_bitlen) >= buflen) {
+			return (B_FALSE);
+		}
+		break;
 	default:
 		abort();
 	}
@@ -315,12 +346,17 @@ static const ofmt_field_t pcieadm_cfgspace_ofmt[] = {
 	{ "SHORT", 30, PCIEADM_CFGSPACE_OT_SHORT, pcieadm_cfgspace_ofmt_cb },
 	{ "HUMAN", 30, PCIEADM_CFGSPACE_OT_HUMAN, pcieadm_cfgspace_ofmt_cb },
 	{ "VALUE", 20, PCIEADM_CFGSPACE_OT_VALUE, pcieadm_cfgspace_ofmt_cb },
+	{ "OFFSET", 8, PCIEADM_CFGSPACE_OT_BYTEOFF, pcieadm_cfgspace_ofmt_cb },
+	{ "BITOFF", 8, PCIEADM_CFGSPACE_OT_BITOFF, pcieadm_cfgspace_ofmt_cb },
+	{ "LENGTH", 8, PCIEADM_CFGSPACE_OT_BYTELEN, pcieadm_cfgspace_ofmt_cb },
+	{ "BITLEN", 8, PCIEADM_CFGSPACE_OT_BITLEN, pcieadm_cfgspace_ofmt_cb },
 	{ NULL, 0, 0, NULL }
 };
 
 static void
 pcieadm_cfgspace_print_parse(pcieadm_cfgspace_walk_t *walkp,
-    const char *sname, const char *human, uint64_t value)
+    const char *sname, const char *human, uint64_t value, uint32_t len,
+    uint32_t bitlen, uint32_t off, uint32_t bitoff)
 {
 	pcieadm_cfgspace_ofmt_t pco;
 
@@ -330,10 +366,13 @@ pcieadm_cfgspace_print_parse(pcieadm_cfgspace_walk_t *walkp,
 	pco.pco_human = human;
 	pco.pco_value = value;
 	pco.pco_strval = NULL;
+	pco.pco_off = walkp->pcw_capoff + off;
+	pco.pco_bitoff = bitoff;
+	pco.pco_len = len;
+	pco.pco_bitlen = bitlen;
 	ofmt_print(walkp->pcw_ofmt, &pco);
 }
 
-typedef struct pcieadm_cfgspace_print pcieadm_cfgspace_print_t;
 typedef void (*pcieadm_cfgspace_print_f)(pcieadm_cfgspace_walk_t *,
     const pcieadm_cfgspace_print_t *, const void *);
 
@@ -346,17 +385,26 @@ struct pcieadm_cfgspace_print {
 	const void *pcp_arg;
 };
 
-static void
-pcieadm_field_printf(pcieadm_cfgspace_walk_t *walkp, const char *shortf,
-    const char *humanf, uint64_t val, const char *fmt, ...)
+static uint32_t
+pcieadm_cfgspace_getcap32(pcieadm_cfgspace_walk_t *walkp, uint32_t off)
 {
-	va_list ap;
+	off += walkp->pcw_capoff;
+	VERIFY3U(off, <, PCIE_CONF_HDR_SIZE);
+	VERIFY0(off % 4);
+	return (walkp->pcw_data->pcb_u32[off / 4]);
+}
 
+static void
+pcieadm_field_vprintf(pcieadm_cfgspace_walk_t *walkp, const char *shortf,
+    const char *humanf, uint64_t val, uint32_t len, uint32_t bitlen,
+    uint32_t off, uint32_t bitoff, const char *fmt, va_list ap)
+{
 	if (!pcieadm_cfgspace_filter(walkp, shortf))
 		return;
 
 	if (walkp->pcw_ofmt != NULL) {
-		pcieadm_cfgspace_print_parse(walkp, shortf, humanf, val);
+		pcieadm_cfgspace_print_parse(walkp, shortf, humanf, val, len,
+		    bitlen, off, bitoff);
 		return;
 	}
 
@@ -371,13 +419,39 @@ pcieadm_field_printf(pcieadm_cfgspace_walk_t *walkp, const char *shortf,
 		(void) printf("|--> %s: ", humanf);
 	}
 
-	va_start(ap, fmt);
 	(void) vprintf(fmt, ap);
-	va_end(ap);
-
 }
 
-static void
+static void __PRINTFLIKE(5)
+pcieadm_regdef_printf(pcieadm_cfgspace_walk_t *walkp,
+    const pcieadm_cfgspace_print_t *print, const pcieadm_regdef_t *regdef,
+    uint64_t val, const char *fmt, ...)
+{
+	va_list ap;
+	uint32_t off = print->pcp_off + (regdef->prd_lowbit / NBBY);
+	uint32_t bitoff = regdef->prd_lowbit % NBBY;
+	uint32_t len = regdef->prd_hibit - regdef->prd_lowbit + 1;
+
+	va_start(ap, fmt);
+	pcieadm_field_vprintf(walkp, regdef->prd_short, regdef->prd_human, val,
+	    len / NBBY, len % NBBY, off, bitoff, fmt, ap);
+	va_end(ap);
+}
+
+static void __PRINTFLIKE(9)
+pcieadm_field_printf(pcieadm_cfgspace_walk_t *walkp, const char *shortf,
+    const char *humanf, uint64_t val, uint32_t len, uint32_t bitlen,
+    uint32_t off, uint32_t bitoff, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	pcieadm_field_vprintf(walkp, shortf, humanf, val, len, bitlen, off,
+	    bitoff, fmt, ap);
+	va_end(ap);
+}
+
+static void __PRINTFLIKE(4)
 pcieadm_cfgspace_printf(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, uint64_t val, const char *fmt, ...)
 {
@@ -388,7 +462,8 @@ pcieadm_cfgspace_printf(pcieadm_cfgspace_walk_t *walkp,
 
 	if (walkp->pcw_ofmt != NULL) {
 		pcieadm_cfgspace_print_parse(walkp, print->pcp_short,
-		    print->pcp_human, val);
+		    print->pcp_human, val, print->pcp_len, 0, print->pcp_off,
+		    0);
 		return;
 	}
 
@@ -423,6 +498,10 @@ pcieadm_cfgspace_puts(pcieadm_cfgspace_walk_t *walkp,
 		pco.pco_short = print->pcp_short;
 		pco.pco_human = print->pcp_human;
 		pco.pco_strval = str;
+		pco.pco_off = walkp->pcw_capoff + print->pcp_off;
+		pco.pco_bitoff = 0;
+		pco.pco_len = print->pcp_len;
+		pco.pco_bitlen = 0;
 		ofmt_print(walkp->pcw_ofmt, &pco);
 		return;
 	}
@@ -510,9 +589,9 @@ pcieadm_cfgspace_print_regdef(pcieadm_cfgspace_walk_t *walkp,
 				strval = "reserved";
 			}
 
-			pcieadm_field_printf(walkp, regdef->prd_short,
-			    regdef->prd_human, regval, "%s (0x%" PRIx64 ")\n",
-			    strval, regval << regdef->prd_lowbit);
+			pcieadm_regdef_printf(walkp, print, regdef, regval,
+			    "%s (0x%" PRIx64 ")\n", strval, regval <<
+			    regdef->prd_lowbit);
 			break;
 		case PRDV_HEX:
 			actval = regval;
@@ -521,14 +600,12 @@ pcieadm_cfgspace_print_regdef(pcieadm_cfgspace_walk_t *walkp,
 			}
 			actval += regdef->prd_val.prdv_hex.pra_addend;
 
-			pcieadm_field_printf(walkp, regdef->prd_short,
-			    regdef->prd_human, regval, "0x% " PRIx64 "\n",
-			    actval);
+			pcieadm_regdef_printf(walkp, print, regdef, regval,
+			    "0x%" PRIx64 "\n", actval);
 			break;
 		case PRDV_BITFIELD:
-			pcieadm_field_printf(walkp, regdef->prd_short,
-			    regdef->prd_human, regval, "0x%" PRIx64 "\n",
-			    regval << regdef->prd_lowbit);
+			pcieadm_regdef_printf(walkp, print, regdef, regval,
+			    "0x%" PRIx64 "\n", regval << regdef->prd_lowbit);
 
 			if (walkp->pcw_ofmt == NULL) {
 				pcieadm_indent();
@@ -543,7 +620,7 @@ pcieadm_cfgspace_print_regdef(pcieadm_cfgspace_walk_t *walkp,
 			}
 			break;
 		case PRDV_CUSTOM:
-			regdef->prd_val.prdv_func(walkp, regdef, regval);
+			regdef->prd_val.prdv_func(walkp, print, regdef, regval);
 			break;
 		}
 	}
@@ -567,7 +644,8 @@ pcieadm_cfgspace_print_strmap(pcieadm_cfgspace_walk_t *walkp,
 		}
 	}
 
-	pcieadm_cfgspace_printf(walkp, print, val, "0x%x -- %s\n", val, str);
+	pcieadm_cfgspace_printf(walkp, print, val, "0x%" PRIx64 " -- %s\n",
+	    val, str);
 }
 
 static void
@@ -673,6 +751,7 @@ pcieadm_cfgspace_print_bars(pcieadm_cfgspace_walk_t *walkp,
 
 	for (uint_t i = 0; i < print->pcp_len / 4; i++) {
 		uint_t type;
+		uint32_t off = print->pcp_off + i * 4;
 		(void) snprintf(barname, sizeof (barname), "%s%u",
 		    print->pcp_short, i);
 
@@ -693,17 +772,18 @@ pcieadm_cfgspace_print_bars(pcieadm_cfgspace_walk_t *walkp,
 		pcieadm_strfilt_push(walkp, barname);
 		pcieadm_indent();
 
-		pcieadm_field_printf(walkp, "space", "Space", type,
-		    "%s (0x%x)\n", typestrs[type], type);
+		pcieadm_field_printf(walkp, "space", "Space", type, 0, 1, off,
+		    0, "%s (0x%x)\n", typestrs[type], type);
 
 		if (type == PCI_BASE_SPACE_IO) {
 			uint32_t addr = barp[i] & PCI_BASE_IO_ADDR_M;
 
 			pcieadm_field_printf(walkp, "addr", "Address", addr,
-			    "0x%" PRIx32 "\n", addr);
+			    3, 30, off, 2, "0x%" PRIx32 "\n", addr);
 		} else {
 			uint8_t type, pre;
 			uint64_t addr;
+			uint32_t blen = 3;
 			const char *locstr;
 
 			type = barp[i] & PCI_BASE_TYPE_M;
@@ -712,11 +792,12 @@ pcieadm_cfgspace_print_bars(pcieadm_cfgspace_walk_t *walkp,
 
 			if (type == PCI_BASE_TYPE_ALL) {
 				addr += (uint64_t)barp[i+1] << 32;
+				blen += 4;
 				i++;
 			}
 
 			pcieadm_field_printf(walkp, "addr", "Address", addr,
-			    "0x%" PRIx64 "\n", addr);
+			    blen, 28, off, 4, "0x%" PRIx64 "\n", addr);
 
 			switch (type) {
 			case PCI_BASE_TYPE_MEM:
@@ -735,10 +816,11 @@ pcieadm_cfgspace_print_bars(pcieadm_cfgspace_walk_t *walkp,
 			}
 
 			pcieadm_field_printf(walkp, "type", "Memory Type",
-			    type >> 1, "%s (0x%x)\n", locstr, type >> 1);
+			    type >> 1, 0, 2, off, 1, "%s (0x%x)\n", locstr,
+			    type >> 1);
 			pcieadm_field_printf(walkp, "prefetch", "Prefetchable",
-			    pre != 0, "%s (0x%x)\n", pre != 0 ? "yes" : "no",
-			    pre != 0);
+			    pre != 0, 0, 1, off, 3, "%s (0x%x)\n", pre != 0 ?
+			    "yes" : "no", pre != 0);
 		}
 
 		pcieadm_deindent();
@@ -815,6 +897,16 @@ pcieadm_cfgspace_print_dpa_paa(pcieadm_cfgspace_walk_t *walkp,
 	}
 }
 
+static void
+pcieadm_cfgspace_print_table(pcieadm_cfgspace_walk_t *walkp,
+    const pcieadm_cfgspace_print_t *print)
+{
+	for (; print->pcp_short != NULL; print++) {
+		VERIFY3P(print->pcp_print, !=, NULL);
+		print->pcp_print(walkp, print, print->pcp_arg);
+	}
+}
+
 /*
  * Config Space Header Table Definitions
  */
@@ -878,7 +970,7 @@ static const pcieadm_regdef_t pcieadm_regdef_status[] = {
  */
 static const pcieadm_regdef_t pcieadm_regdef_class[] = {
 	{ 16, 23, "class", "Class Code", PRDV_HEX },
-	{ 7, 15, "sclass", "Sub-Class Code", PRDV_HEX },
+	{ 8, 15, "sclass", "Sub-Class Code", PRDV_HEX },
 	{ 0, 7, "pi", "Programming Interface", PRDV_HEX },
 	{ -1, -1, NULL }
 };
@@ -1016,7 +1108,7 @@ static const pcieadm_regdef_t pcieadm_regdef_exprom[] = {
 	{ -1, -1, NULL }
 };
 
-static pcieadm_strmap_t pcieadm_strmap_ipin[] = {
+static const pcieadm_strmap_t pcieadm_strmap_ipin[] = {
 	{ "none", 0 },
 	{ "INTA", PCI_INTA },
 	{ "INTB", PCI_INTB },
@@ -2576,15 +2668,117 @@ static const pcieadm_cfgspace_print_t pcieadm_cap_mcast[] = {
 /*
  * Various vendor extensions
  */
+
+/*
+ * Red Hat Virtio capabilities.
+ */
+
+#define	VIRTIO_PCI_CAP_COMMON_CFG	0x1	/* Common config */
+#define	VIRTIO_PCI_CAP_NOTIFY_CFG	0x2	/* Notifications */
+#define	VIRTIO_PCI_CAP_ISR_CFG		0x3	/* ISR Status */
+#define	VIRTIO_PCI_CAP_DEVICE_CFG	0x4	/* Device-specific config */
+#define	VIRTIO_PCI_CAP_PCI_CFG		0x5	/* PCI config access */
+
+static const pcieadm_strmap_t pcieadm_strmap_vs_virtio_type[] = {
+	{ "Virtio Common Configuration", VIRTIO_PCI_CAP_COMMON_CFG },
+	{ "Virtio Notifications", VIRTIO_PCI_CAP_NOTIFY_CFG },
+	{ "Virtio ISR Status", VIRTIO_PCI_CAP_ISR_CFG },
+	{ "Virtio Device-specific Configuration", VIRTIO_PCI_CAP_DEVICE_CFG },
+	{ "Virtio PCI Configuration Access", VIRTIO_PCI_CAP_PCI_CFG },
+	{ NULL }
+};
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs_virtio_common[] = {
+	{ 0x3, 1, "type", "Type",
+	    pcieadm_cfgspace_print_strmap, pcieadm_strmap_vs_virtio_type },
+	{ 0x4, 1, "bar", "BAR", pcieadm_cfgspace_print_hex },
+	{ 0x8, 2, "offset", "Offset", pcieadm_cfgspace_print_hex },
+	{ 0xc, 2, "len", "Length", pcieadm_cfgspace_print_hex },
+	{ -1, -1, NULL }
+};
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs_virtio_notify[] = {
+	{ 0x10, 2, "mult", "Multiplier", pcieadm_cfgspace_print_hex },
+	{ -1, -1, NULL }
+};
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs_virtio_pci[] = {
+	{ 0x10, 4, "data", "Data", pcieadm_cfgspace_print_hex },
+	{ -1, -1, NULL }
+};
+
+static boolean_t
+pcieadm_cfgspace_print_vs_virtio(pcieadm_cfgspace_walk_t *walkp,
+    const pcieadm_cfgspace_print_t *print, const void *arg)
+{
+	uint8_t caplen, type;
+
+	caplen = walkp->pcw_data->pcb_u8[walkp->pcw_capoff + 2];
+	if (caplen < 0x10)
+		return (B_FALSE);
+
+	type = walkp->pcw_data->pcb_u8[walkp->pcw_capoff + 3];
+
+	if (type > VIRTIO_PCI_CAP_PCI_CFG)
+		return (B_FALSE);
+
+	pcieadm_cfgspace_print_table(walkp, pcieadm_cap_vs_virtio_common);
+
+	switch (type) {
+	case VIRTIO_PCI_CAP_NOTIFY_CFG:
+		pcieadm_cfgspace_print_table(walkp,
+		    pcieadm_cap_vs_virtio_notify);
+		break;
+	case VIRTIO_PCI_CAP_PCI_CFG:
+		pcieadm_cfgspace_print_table(walkp,
+		    pcieadm_cap_vs_virtio_pci);
+		break;
+	default:
+		break;
+	}
+
+	return (B_TRUE);
+}
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs_unknown[] = {
+	{ 0x2, 1, "length", "Length", pcieadm_cfgspace_print_hex },
+	{ -1, -1, NULL }
+};
+
+static void
+pcieadm_cfgspace_print_vs(pcieadm_cfgspace_walk_t *walkp,
+    const pcieadm_cfgspace_print_t *print, const void *arg)
+{
+	uint16_t vid = walkp->pcw_data->pcb_u8[PCI_CONF_VENID] +
+	    (walkp->pcw_data->pcb_u8[PCI_CONF_VENID + 1] << 8);
+	uint16_t did = walkp->pcw_data->pcb_u8[PCI_CONF_DEVID] +
+	    (walkp->pcw_data->pcb_u8[PCI_CONF_DEVID + 1] << 8);
+
+	/*
+	 * Red Hat virtio
+	 */
+	if (vid == 0x1af4 && did >= 0x1000 && did <= 0x107f) {
+		if (pcieadm_cfgspace_print_vs_virtio(walkp, print, arg))
+			return;
+	}
+
+	/*
+	 * For any unknown vendor-specific capability there is not a lot we can
+	 * print since all of the data after the first three bytes is
+	 * vendor-specific.
+	 */
+	pcieadm_cfgspace_print_table(walkp, pcieadm_cap_vs_unknown);
+}
+
+static const pcieadm_cfgspace_print_t pcieadm_cap_vs[] = {
+	{ 0x0, 1, "vs", "Vendor Specific", pcieadm_cfgspace_print_vs },
+	{ -1, -1, NULL }
+};
+
 static const pcieadm_regdef_t pcieadm_regdef_vsec[] = {
 	{ 0, 15, "id", "ID", PRDV_HEX },
 	{ 16, 19, "rev", "Revision", PRDV_HEX },
 	{ 20, 31, "len", "Length", PRDV_HEX },
-	{ -1, -1, NULL }
-};
-
-static const pcieadm_cfgspace_print_t pcieadm_cap_vs[] = {
-	{ 0x2, 2, "length", "Length", pcieadm_cfgspace_print_hex },
 	{ -1, -1, NULL }
 };
 
@@ -2855,7 +3049,7 @@ pcieadm_cfgspace_print_tphst(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
 	uint_t nents;
-	uint32_t tphcap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t tphcap = pcieadm_cfgspace_getcap32(walkp, 4);
 
 	if (bitx32(tphcap, 10, 9) != 1) {
 		return;
@@ -3367,7 +3561,7 @@ static void
 pcieadm_cfgspace_print_dpc_rppio(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 
 	if (bitx32(cap, 5, 5) == 0) {
 		return;
@@ -3380,7 +3574,7 @@ static void
 pcieadm_cfgspace_print_dpc_piohead(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	uint32_t nwords = bitx32(cap, 11, 8);
 
 	if (bitx32(cap, 5, 5) == 0 || nwords < 4) {
@@ -3394,7 +3588,7 @@ static void
 pcieadm_cfgspace_print_dpc_impspec(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	uint32_t nwords = bitx32(cap, 11, 8);
 
 	if (bitx32(cap, 5, 5) == 0 || nwords < 5) {
@@ -3408,7 +3602,7 @@ static void
 pcieadm_cfgspace_print_dpc_tlplog(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	int32_t nwords = (int32_t)bitx32(cap, 11, 8);
 
 	if (nwords == 0 || bitx32(cap, 5, 5) == 0) {
@@ -3554,7 +3748,7 @@ static void
 pcieadm_cfgspace_print_vc_rsrc(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t cap = walkp->pcw_data->pcb_u32[(walkp->pcw_capoff + 4) / 4];
+	uint32_t cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	uint32_t nents = bitx32(cap, 2, 0) + 1;
 
 	for (uint32_t i = 0; i < nents; i++) {
@@ -4650,7 +4844,7 @@ static void
 pcieadm_cfgspace_print_ap_sen(pcieadm_cfgspace_walk_t *walkp,
     const pcieadm_cfgspace_print_t *print, const void *arg)
 {
-	uint32_t ap_cap = walkp->pcw_data->pcb_u32[walkp->pcw_capoff + 4];
+	uint32_t ap_cap = pcieadm_cfgspace_getcap32(walkp, 4);
 	pcieadm_cfgspace_print_t p;
 
 	if (bitx32(ap_cap, 8, 8) == 0)
@@ -4719,14 +4913,15 @@ static const pcieadm_cfgspace_print_t pcieadm_cap_rcecea_v2[] = {
  */
 static void
 pcieadm_regdef_print_rtr(pcieadm_cfgspace_walk_t *walkp,
-    const pcieadm_regdef_t *regdef, uint64_t reg)
+    const pcieadm_cfgspace_print_t *print, const pcieadm_regdef_t *regdef,
+    uint64_t reg)
 {
 	uint64_t scale = bitx64(reg, 11, 9);
 	uint64_t time = bitx64(reg, 8, 0);
 
 	time *= 1ULL << (scale * 5);
-	pcieadm_field_printf(walkp, regdef->prd_short, regdef->prd_human,
-	    reg, "%" PRIu64 " ns\n", time);
+	pcieadm_regdef_printf(walkp, print, regdef, reg, "%" PRIu64 " ns\n",
+	    time);
 }
 
 static const pcieadm_regdef_t pcieadm_regdef_rtr1[] = {
@@ -4898,7 +5093,11 @@ static const pcieadm_pci_cap_t pcieadm_pcie_caps[] = {
 	    "Flit Performance Measurement" },
 	{ PCIE_EXT_CAP_ID_FLIT_ERR, "flterr", "Flit Error Injection" },
 	{ PCIE_EXT_CAP_ID_SVC, "svc", "Streamlined Virtual Channel" },
-	{ PCIE_EXT_CAP_ID_MMIO_RBL, "mrbl", "MMIO Register Block Locator" }
+	{ PCIE_EXT_CAP_ID_MMIO_RBL, "mrbl", "MMIO Register Block Locator" },
+	{ PCIE_EXT_CAP_ID_NOP_FLIT, "nop", "NOP Flit" },
+	{ PCIE_EXT_CAP_ID_SIOV, "siov", "Scalable I/O Virtualization" },
+	{ PCIE_EXT_CAP_ID_PL128GT, "pl128g", "Physical Layer 128.0 GT/s" },
+	{ PCIE_EXT_CAP_ID_CAP_DATA, "cdata", "Captured Data" }
 };
 
 static const pcieadm_pci_cap_t *
@@ -4991,15 +5190,8 @@ pcieadm_cfgspace_print_cap(pcieadm_cfgspace_walk_t *walkp, uint_t capid,
 	}
 
 	if (vers_info != NULL) {
-		const pcieadm_cfgspace_print_t *print;
-
 		pcieadm_indent();
-		for (print = vers_info->ppr_print;
-		    print->pcp_short != NULL; print++) {
-			VERIFY3P(print->pcp_print, !=, NULL);
-			print->pcp_print(walkp, print,
-			    print->pcp_arg);
-		}
+		pcieadm_cfgspace_print_table(walkp, vers_info->ppr_print);
 		pcieadm_deindent();
 	} else {
 		if (subcap != NULL) {
@@ -5108,8 +5300,6 @@ pcieadm_cfgspace(pcieadm_t *pcip, pcieadm_cfgspace_op_t op,
 	if (op == PCIEADM_CFGSPACE_OP_WRITE) {
 		pcieadm_cfgspace_write(fd, &data.pcb_u8[0], PCI_CAP_PTR_OFF);
 	} else if (op == PCIEADM_CFGSPACE_OP_PRINT) {
-		const pcieadm_cfgspace_print_t *print;
-
 		if (walk.pcw_ofmt == NULL &&
 		    pcieadm_cfgspace_filter(&walk, headshort)) {
 			if ((flags & PCIEADM_CFGSPACE_F_SHORT) != 0) {
@@ -5123,9 +5313,7 @@ pcieadm_cfgspace(pcieadm_t *pcip, pcieadm_cfgspace_op_t op,
 
 		pcieadm_strfilt_push(&walk, headshort);
 		pcieadm_indent();
-		for (print = header; print->pcp_short != NULL; print++) {
-			print->pcp_print(&walk, print, print->pcp_arg);
-		}
+		pcieadm_cfgspace_print_table(&walk, header);
 		pcieadm_deindent();
 		pcieadm_strfilt_pop(&walk);
 	}
@@ -5314,14 +5502,19 @@ pcieadm_show_cfgspace_help(const char *fmt, ...)
 	    "The following fields are supported:\n"
 	    "\thuman\t\ta human-readable description of the specific output\n"
 	    "\tshort\t\tthe short name of the value used for filters\n"
-	    "\tvalue\t\tthe value of a the given capability, register, etc.\n");
+	    "\tvalue\t\tthe value of a the given capability, register, etc.\n"
+	    "\tlength\t\tthe length of the field in bytes\n"
+	    "\tbitlen\t\tthe number of additional bits long the field is\n"
+	    "\toffset\t\tthe offset in bytes to the start of the field\n"
+	    "\tbitoff\t\tthe additional number of bits to the start of the "
+	    "field\n");
 }
 
 int
 pcieadm_show_cfgspace(pcieadm_t *pcip, int argc, char *argv[])
 {
 	int c, ret;
-	pcieadm_cfgspace_f readf;
+	const pcieadm_ops_t *ops;
 	void *readarg;
 	boolean_t list = B_FALSE, parse = B_FALSE;
 	const char *device = NULL, *file = NULL, *fields = NULL;
@@ -5455,17 +5648,17 @@ pcieadm_show_cfgspace(pcieadm_t *pcip, int argc, char *argv[])
 
 	if (device != NULL) {
 		pcieadm_find_dip(pcip, device);
-		pcieadm_init_cfgspace_kernel(pcip, &readf, &readarg);
+		pcieadm_init_ops_kernel(pcip, &ops, &readarg);
 	} else {
 		pcip->pia_devstr = file;
-		pcieadm_init_cfgspace_file(pcip, file, &readf, &readarg);
+		pcieadm_init_ops_file(pcip, file, &ops, &readarg);
 	}
-	pcieadm_cfgspace(pcip, PCIEADM_CFGSPACE_OP_PRINT, readf, -1, readarg,
-	    nfilts, filts, flags, ofmt);
+	pcieadm_cfgspace(pcip, PCIEADM_CFGSPACE_OP_PRINT, ops->pop_cfg, -1,
+	    readarg, nfilts, filts, flags, ofmt);
 	if (device != NULL) {
-		pcieadm_fini_cfgspace_kernel(readarg);
+		pcieadm_fini_ops_kernel(readarg);
 	} else {
-		pcieadm_fini_cfgspace_file(readarg);
+		pcieadm_fini_ops_file(readarg);
 	}
 
 	ofmt_close(ofmt);
@@ -5493,7 +5686,7 @@ pcieadm_save_cfgspace_cb(di_node_t devi, void *arg)
 {
 	int fd, nregs, *regs;
 	pcieadm_save_cfgspace_t *psc = arg;
-	pcieadm_cfgspace_f readf;
+	const pcieadm_ops_t *ops;
 	void *readarg;
 	char fname[128];
 
@@ -5535,10 +5728,10 @@ pcieadm_save_cfgspace_cb(di_node_t devi, void *arg)
 		return (DI_WALK_CONTINUE);
 	}
 
-	pcieadm_init_cfgspace_kernel(psc->psc_pci, &readf, &readarg);
-	pcieadm_cfgspace(psc->psc_pci, PCIEADM_CFGSPACE_OP_WRITE, readf, fd,
-	    readarg, 0, NULL, 0, NULL);
-	pcieadm_fini_cfgspace_kernel(readarg);
+	pcieadm_init_ops_kernel(psc->psc_pci, &ops, &readarg);
+	pcieadm_cfgspace(psc->psc_pci, PCIEADM_CFGSPACE_OP_WRITE, ops->pop_cfg,
+	    fd, readarg, 0, NULL, 0, NULL);
+	pcieadm_fini_ops_kernel(readarg);
 
 	if (close(fd) != 0) {
 		warn("failed to close output fd for %s", fname);
@@ -5586,7 +5779,6 @@ int
 pcieadm_save_cfgspace(pcieadm_t *pcip, int argc, char *argv[])
 {
 	int c;
-	pcieadm_cfgspace_f readf;
 	void *readarg;
 	const char *device = NULL;
 	boolean_t do_all = B_FALSE;
@@ -5633,6 +5825,7 @@ pcieadm_save_cfgspace(pcieadm_t *pcip, int argc, char *argv[])
 
 	if (!do_all) {
 		int fd;
+		const pcieadm_ops_t *ops;
 
 		pcieadm_find_dip(pcip, device);
 
@@ -5652,10 +5845,10 @@ pcieadm_save_cfgspace(pcieadm_t *pcip, int argc, char *argv[])
 			err(EXIT_FAILURE, "failed to reduce privileges");
 		}
 
-		pcieadm_init_cfgspace_kernel(pcip, &readf, &readarg);
-		pcieadm_cfgspace(pcip, PCIEADM_CFGSPACE_OP_WRITE, readf, fd,
-		    readarg, 0, NULL, 0, NULL);
-		pcieadm_fini_cfgspace_kernel(readarg);
+		pcieadm_init_ops_kernel(pcip, &ops, &readarg);
+		pcieadm_cfgspace(pcip, PCIEADM_CFGSPACE_OP_WRITE, ops->pop_cfg,
+		    fd, readarg, 0, NULL, 0, NULL);
+		pcieadm_fini_ops_kernel(readarg);
 
 		if (close(fd) != 0) {
 			err(EXIT_FAILURE, "failed to close output file "

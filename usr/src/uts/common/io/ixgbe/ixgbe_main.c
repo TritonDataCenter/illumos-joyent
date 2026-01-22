@@ -1484,7 +1484,7 @@ ixgbe_init(ixgbe_t *ixgbe)
 	hw->fc.high_water[0] = DEFAULT_FCRTH;
 	hw->fc.low_water[0] = DEFAULT_FCRTL;
 	hw->fc.pause_time = DEFAULT_FCPAUSE;
-	hw->fc.send_xon = B_TRUE;
+	hw->fc.send_xon = true;
 
 	/*
 	 * Initialize flow control
@@ -1646,7 +1646,7 @@ ixgbe_chip_stop(ixgbe_t *ixgbe)
 	/*
 	 * Stop interupt generation and disable Tx unit
 	 */
-	hw->adapter_stopped = B_FALSE;
+	hw->adapter_stopped = false;
 	(void) ixgbe_stop_adapter(hw);
 
 	/*
@@ -1664,13 +1664,13 @@ ixgbe_chip_stop(ixgbe_t *ixgbe)
 	 * the PHY while doing so. Else, just power down the PHY.
 	 */
 	if (hw->phy.ops.enter_lplu != NULL) {
-		hw->phy.reset_disable = B_TRUE;
+		hw->phy.reset_disable = true;
 		rv = hw->phy.ops.enter_lplu(hw);
 		if (rv != IXGBE_SUCCESS)
 			ixgbe_error(ixgbe, "Error while entering LPLU: %d", rv);
-		hw->phy.reset_disable = B_FALSE;
+		hw->phy.reset_disable = false;
 	} else {
-		(void) ixgbe_set_phy_power(hw, B_FALSE);
+		(void) ixgbe_set_phy_power(hw, false);
 	}
 
 	/*
@@ -3649,7 +3649,7 @@ ixgbe_init_params(ixgbe_t *ixgbe)
 {
 	struct ixgbe_hw *hw = &ixgbe->hw;
 	ixgbe_link_speed speeds_supported = 0;
-	boolean_t negotiate;
+	bool negotiate;
 
 	/*
 	 * Get a list of speeds the adapter supports. If the hw struct hasn't
@@ -3838,12 +3838,12 @@ ixgbe_driver_link_check(ixgbe_t *ixgbe)
 {
 	struct ixgbe_hw *hw = &ixgbe->hw;
 	ixgbe_link_speed speed = IXGBE_LINK_SPEED_UNKNOWN;
-	boolean_t link_up = B_FALSE;
+	bool link_up = false;
 	boolean_t link_changed = B_FALSE;
 
 	ASSERT(mutex_owned(&ixgbe->gen_lock));
 
-	(void) ixgbe_check_link(hw, &speed, &link_up, B_FALSE);
+	(void) ixgbe_check_link(hw, &speed, &link_up, false);
 	if (link_up) {
 		ixgbe->link_check_complete = B_TRUE;
 
@@ -3924,7 +3924,7 @@ ixgbe_sfp_check(void *arg)
 
 		/* if link up, do multispeed fiber setup */
 		(void) ixgbe_setup_link(hw, IXGBE_LINK_SPEED_82599_AUTONEG,
-		    B_TRUE);
+		    true);
 		ixgbe_driver_link_check(ixgbe);
 		ixgbe_get_hw_state(ixgbe);
 	} else if (eicr & IXGBE_EICR_GPI_SDP2_BY_MAC(hw)) {
@@ -3936,7 +3936,7 @@ ixgbe_sfp_check(void *arg)
 
 		/* do multispeed fiber setup */
 		(void) ixgbe_setup_link(hw, IXGBE_LINK_SPEED_82599_AUTONEG,
-		    B_TRUE);
+		    true);
 		ixgbe_driver_link_check(ixgbe);
 		ixgbe_get_hw_state(ixgbe);
 	}
@@ -3964,12 +3964,12 @@ ixgbe_overtemp_check(void *arg)
 	struct ixgbe_hw *hw = &ixgbe->hw;
 	uint32_t eicr = ixgbe->eicr;
 	ixgbe_link_speed speed;
-	boolean_t link_up;
+	bool link_up;
 
 	mutex_enter(&ixgbe->gen_lock);
 
 	/* make sure we know current state of link */
-	(void) ixgbe_check_link(hw, &speed, &link_up, B_FALSE);
+	(void) ixgbe_check_link(hw, &speed, &link_up, false);
 
 	/* check over-temp condition */
 	if (((eicr & IXGBE_EICR_GPI_SDP0_BY_MAC(hw)) && (!link_up)) ||
@@ -4251,7 +4251,6 @@ ixgbe_find_mac_address(ixgbe_t *ixgbe)
 	return (B_TRUE);
 }
 
-#pragma inline(ixgbe_arm_watchdog_timer)
 static void
 ixgbe_arm_watchdog_timer(ixgbe_t *ixgbe)
 {
@@ -4640,7 +4639,7 @@ ixgbe_set_internal_mac_loopback(ixgbe_t *ixgbe)
 		IXGBE_WRITE_REG(&ixgbe->hw, IXGBE_AUTOC, reg);
 
 		(void) ixgbe_setup_link(&ixgbe->hw, IXGBE_LINK_SPEED_10GB_FULL,
-		    B_FALSE);
+		    false);
 		break;
 
 	default:
@@ -4648,7 +4647,6 @@ ixgbe_set_internal_mac_loopback(ixgbe_t *ixgbe)
 	}
 }
 
-#pragma inline(ixgbe_intr_rx_work)
 /*
  * ixgbe_intr_rx_work - RX processing of ISR.
  */
@@ -4667,7 +4665,6 @@ ixgbe_intr_rx_work(ixgbe_rx_ring_t *rx_ring)
 		    rx_ring->ring_gen_num);
 }
 
-#pragma inline(ixgbe_intr_tx_work)
 /*
  * ixgbe_intr_tx_work - TX processing of ISR.
  */
@@ -4693,7 +4690,6 @@ ixgbe_intr_tx_work(ixgbe_tx_ring_t *tx_ring)
 	}
 }
 
-#pragma inline(ixgbe_intr_other_work)
 /*
  * ixgbe_intr_other_work - Process interrupt types other than tx/rx
  */
@@ -5396,7 +5392,6 @@ ixgbe_add_intr_handlers(ixgbe_t *ixgbe)
 	return (IXGBE_SUCCESS);
 }
 
-#pragma inline(ixgbe_map_rxring_to_vector)
 /*
  * ixgbe_map_rxring_to_vector - Map given rx ring to given interrupt vector.
  */
@@ -5420,7 +5415,6 @@ ixgbe_map_rxring_to_vector(ixgbe_t *ixgbe, int r_idx, int v_idx)
 	ixgbe->rx_rings[r_idx].vect_bit = 1 << v_idx;
 }
 
-#pragma inline(ixgbe_map_txring_to_vector)
 /*
  * ixgbe_map_txring_to_vector - Map given tx ring to given interrupt vector.
  */
@@ -5936,7 +5930,7 @@ ixgbe_get_hw_state(ixgbe_t *ixgbe)
 {
 	struct ixgbe_hw *hw = &ixgbe->hw;
 	ixgbe_link_speed speed = 0;
-	boolean_t link_up = B_FALSE;
+	bool link_up = false;
 	uint32_t pcs1g_anlp = 0;
 
 	ASSERT(mutex_owned(&ixgbe->gen_lock));
@@ -5944,7 +5938,7 @@ ixgbe_get_hw_state(ixgbe_t *ixgbe)
 	ixgbe->param_lp_100fdx_cap  = 0;
 
 	/* check for link, don't wait */
-	(void) ixgbe_check_link(hw, &speed, &link_up, B_FALSE);
+	(void) ixgbe_check_link(hw, &speed, &link_up, false);
 	ixgbe->phys_supported = ixgbe_get_supported_physical_layer(hw);
 
 	/*
@@ -6510,7 +6504,7 @@ ixgbe_addvlan(mac_group_driver_t gdriver, uint16_t vid)
 	 * This logic is meant to reserve VLVF slots for use by
 	 * reserved groups: guaranteeing their use of HW filtering.
 	 */
-	ret = ixgbe_set_vfta(hw, vid, rx_group->index, B_TRUE, is_def_grp);
+	ret = ixgbe_set_vfta(hw, vid, rx_group->index, true, is_def_grp);
 
 	if (ret == IXGBE_SUCCESS) {
 		vlp = kmem_zalloc(sizeof (ixgbe_vlan_t), KM_SLEEP);
@@ -6590,7 +6584,7 @@ ixgbe_remvlan(mac_group_driver_t gdriver, uint16_t vid)
 	 * vlvf_bypass.
 	 */
 	if (vlp->ixvl_refs == 1) {
-		ret = ixgbe_set_vfta(hw, vid, rx_group->index, B_FALSE,
+		ret = ixgbe_set_vfta(hw, vid, rx_group->index, false,
 		    is_def_grp);
 	} else {
 		/*
@@ -6635,8 +6629,8 @@ ixgbe_remvlan(mac_group_driver_t gdriver, uint16_t vid)
 		vlp = ixgbe_find_vlan(defgrp, vid);
 		if (vlp != NULL) {
 			/* This shouldn't fail, but if it does return EIO. */
-			ret = ixgbe_set_vfta(hw, vid, rx_group->index, B_TRUE,
-			    B_TRUE);
+			ret = ixgbe_set_vfta(hw, vid, rx_group->index, true,
+			    true);
 			if (ret != IXGBE_SUCCESS) {
 				mutex_exit(&ixgbe->gen_lock);
 				return (EIO);

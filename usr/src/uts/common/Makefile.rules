@@ -789,6 +789,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/dmfe/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/eedev/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/efe/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
@@ -802,6 +806,10 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/ena/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/fcoe/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/gpio/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -822,6 +830,60 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/pciex/hotplug/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/hotplug/pcihp/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+I2CBASE = $(UTSBASE)/common/io/i2c
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/ctrl/i2csim/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/ctrl/ismt/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/ctrl/pchsmbus/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/eeprom/at24c/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/eeprom/ee100x/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/eeprom/spd511x/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/gpio/pca953x/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/sensor/lm7x/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/sensor/tmp43x/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/sensor/ts511x/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/mux/ltc430x/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/mux/pca954x/%.c
+	$(COMPILE.c) -o $@ $<
+	$(CTFCONVERT_O)
+
+$(OBJS_DIR)/%.o:		$(I2CBASE)/nexus/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 
@@ -1041,10 +1103,6 @@ $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/overlay/%.c
 	$(CTFCONVERT_O)
 
 $(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/overlay/plugins/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
-
-$(OBJS_DIR)/%.o:		$(UTSBASE)/common/io/pci-ide/%.c
 	$(COMPILE.c) -o $@ $<
 	$(CTFCONVERT_O)
 

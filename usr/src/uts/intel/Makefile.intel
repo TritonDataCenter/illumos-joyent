@@ -26,7 +26,7 @@
 # Copyright 2022 Garrett D'Amore <garrett@damore.org>
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2019 Peter Tribble.
-# Copyright 2024 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 # Copyright 2023 Racktop Systems, Inc.
 #
 
@@ -234,6 +234,7 @@ DRV_KMODS	+= dlpistub
 DRV_KMODS	+= dnet
 DRV_KMODS	+= dump
 DRV_KMODS	+= ecpp
+DRV_KMODS	+= eedev
 DRV_KMODS	+= emlxs
 DRV_KMODS	+= eventfd
 DRV_KMODS	+= fd
@@ -774,6 +775,11 @@ DRV_KMODS	+= vmm_vtd
 DRV_KMODS	+= vmm_drv_test
 
 #
+#	GPIO Related Modules
+#
+DRV_KMODS	+= kgpio gpio_sim
+
+#
 #	The kernel test driver.
 #
 DRV_KMODS	+= ktest
@@ -784,3 +790,17 @@ DRV_KMODS	+= ktest
 MISC_KMODS	+= mac_ktest
 MISC_KMODS	+= ktest_ktest
 MISC_KMODS	+= stream_ktest
+
+#
+#	I2C Devices and Framework
+#
+DRV_KMODS	+= i2cnex i2csim
+DRV_KMODS	+= pca954x ltc430x
+DRV_KMODS	+= ee100x spd511x at24c
+DRV_KMODS	+= lm7x tmp43x ts511x
+DRV_KMODS	+= pca953x
+
+#
+#	I2C Controllers
+#
+DRV_KMODS	+= ismt pchsmbus

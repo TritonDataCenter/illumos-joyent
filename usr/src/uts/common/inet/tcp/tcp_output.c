@@ -1734,8 +1734,6 @@ tcp_shutdown_output(void *arg, mblk_t *mp, void *arg2, ip_recv_attr_t *dummy)
 	}
 }
 
-#pragma inline(tcp_send_data)
-
 void
 tcp_send_data(tcp_t *tcp, mblk_t *mp)
 {
@@ -3455,7 +3453,8 @@ tcp_sack_rexmit(tcp_t *tcp, uint_t *flags)
 			} else {
 				usable_swnd = usable_swnd / mss;
 				tcp->tcp_cwnd = tcp->tcp_snxt - tcp->tcp_suna +
-				    MAX(usable_swnd * mss, mss);
+				    MAX((uint32_t)usable_swnd * (uint32_t)mss,
+				    (uint32_t)mss);
 				*flags |= TH_XMIT_NEEDED;
 				return;
 			}

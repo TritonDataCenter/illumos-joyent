@@ -23,6 +23,7 @@
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2018, Joyent, Inc.
+ * Copyright 2023-2025 RackTop Systems, Inc.
  */
 
 
@@ -4321,6 +4322,73 @@ dprov_free_context(crypto_ctx_t *ctx)
 }
 
 /*
+ * Helper for SHA* _HMAC_GEN_MECH_INFO_TYPE
+ * The mech. param is just a length, 32-bit or 64-bit.
+ * Note: umech was already copied in.  Just need to
+ * copyin the parameter pointed to by umech.
+ */
+static int
+copyin_sha_hmac_mech(crypto_mechanism_t *umech, crypto_mechanism_t *kmech,
+    int *out_error, int mode)
+{
+	STRUCT_DECL(crypto_mechanism, mech);
+	size_t uparam_len, kparam_len;
+	caddr_t pp;
+	char *kparam;
+	ulong_t lparam;
+	int rv;
+	int error = 0;
+
+	STRUCT_INIT(mech, mode);
+	bcopy(umech, STRUCT_BUF(mech), STRUCT_SIZE(mech));
+	pp = STRUCT_FGETP(mech, cm_param);
+	uparam_len = STRUCT_FGET(mech, cm_param_len);
+
+	if (pp == NULL) {
+		rv = CRYPTO_MECHANISM_PARAM_INVALID;
+		goto out;
+	}
+
+	if ((mode & DATAMODEL_MASK) == DATAMODEL_ILP32) {
+		size32_t iparam;
+		if (uparam_len != sizeof (iparam)) {
+			rv = CRYPTO_MECHANISM_PARAM_INVALID;
+			goto out;
+		}
+		if (copyin((char *)pp, &iparam, sizeof (iparam)) != 0) {
+			error = EFAULT;
+			rv = CRYPTO_FAILED;
+			goto out;
+		}
+		lparam = iparam;
+	} else {
+		if (uparam_len != sizeof (lparam)) {
+			rv = CRYPTO_MECHANISM_PARAM_INVALID;
+			goto out;
+		}
+		if (copyin((char *)pp, &lparam, sizeof (lparam)) != 0) {
+			error = EFAULT;
+			rv = CRYPTO_FAILED;
+			goto out;
+		}
+	}
+
+	kparam_len = sizeof (lparam);
+	if ((kparam = kmem_alloc(kparam_len, KM_NOSLEEP)) == NULL) {
+		rv = CRYPTO_HOST_MEMORY;
+		goto out;
+	}
+	bcopy(&lparam, kparam, kparam_len);
+
+	kmech->cm_param = kparam;
+	kmech->cm_param_len = kparam_len;
+	rv = CRYPTO_SUCCESS;
+out:
+	*out_error = error;
+	return (rv);
+}
+
+/*
  * Resource control checks don't need to be done. Why? Because this routine
  * knows the size of the structure, and it can't be overridden by a user.
  * This is different from the crypto module, which has no knowledge of
@@ -4757,6 +4825,13 @@ dprov_copyin_mechanism(crypto_provider_handle_t provider,
 	kmech->cm_param_len = 0;
 
 	switch (kmech->cm_type) {
+	case SHA1_HMAC_GEN_MECH_INFO_TYPE:
+	case SHA256_HMAC_GEN_MECH_INFO_TYPE:
+	case SHA384_HMAC_GEN_MECH_INFO_TYPE:
+	case SHA512_HMAC_GEN_MECH_INFO_TYPE:
+		rv = copyin_sha_hmac_mech(umech, kmech, &error, mode);
+		goto out;
+
 	case DES_CBC_MECH_INFO_TYPE:
 	case DES3_CBC_MECH_INFO_TYPE:
 		expected_param_len = DES_BLOCK_LEN;
@@ -6776,7 +6851,7 @@ dprov_random_task(dprov_req_t *taskq_req)
 
 	switch (taskq_req->dr_type) {
 
-	DPROV_REQ_RANDOM_SEED:
+	case DPROV_REQ_RANDOM_SEED:
 		/*
 		 * Since we don't really generate random numbers
 		 * nothing to do.

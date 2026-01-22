@@ -11,9 +11,10 @@
 
 #
 # Copyright 2019 Joyent, Inc.
+# Copyright 2023-2025 RackTop Systems, Inc.
 #
 
-ALGS	= hmac_sha1
+ALGS	= hmac_sha1 hmac_sha1_gen hmac_sha2 hmac_sha2_gen
 
 all	:=	TARGET = all
 install	:=	TARGET = install

@@ -181,7 +181,7 @@ struct mem_seg {
 struct mem_map {
 	vm_paddr_t	gpa;
 	size_t		len;
-	vm_ooffset_t	segoff;
+	uintptr_t	segoff;
 	int		segid;
 	int		prot;
 	int		flags;
@@ -245,7 +245,6 @@ nullop_panic(void)
 /* Do not allow use of an un-set `ops` to do anything but panic */
 static struct vmm_ops vmm_ops_null = {
 	.init		= (vmm_init_func_t)nullop_panic,
-	.cleanup	= (vmm_cleanup_func_t)nullop_panic,
 	.resume		= (vmm_resume_func_t)nullop_panic,
 	.vminit		= (vmi_init_func_t)nullop_panic,
 	.vmrun		= (vmi_run_func_t)nullop_panic,
@@ -269,10 +268,8 @@ static struct vmm_ops vmm_ops_null = {
 };
 
 static struct vmm_ops *ops = &vmm_ops_null;
-static vmm_pte_ops_t *pte_ops = NULL;
 
 #define	VMM_INIT()			((*ops->init)())
-#define	VMM_CLEANUP()			((*ops->cleanup)())
 #define	VMM_RESUME()			((*ops->resume)())
 
 #define	VMINIT(vm)		((*ops->vminit)(vm))
@@ -470,44 +467,46 @@ vmm_init(void)
 
 	if (vmm_is_intel()) {
 		ops = &vmm_ops_intel;
-		pte_ops = &ept_pte_ops;
 	} else if (vmm_is_svm()) {
 		ops = &vmm_ops_amd;
-		pte_ops = &rvi_pte_ops;
 	} else {
 		return (ENXIO);
 	}
 
-	return (VMM_INIT());
+	if (!vmm_vm_init()) {
+		return (ENXIO);
+	}
+	const int err = VMM_INIT();
+	if (err != 0) {
+		vmm_vm_fini();
+		ops = &vmm_ops_null;
+		return (err);
+	}
+
+	return (0);
 }
 
 int
 vmm_mod_load()
 {
-	int	error;
-
 	VERIFY(vmm_initialized == 0);
 
-	error = vmm_init();
-	if (error == 0)
+	const int err = vmm_init();
+	if (err == 0) {
 		vmm_initialized = 1;
+	}
 
-	return (error);
+	return (err);
 }
 
-int
+void
 vmm_mod_unload()
 {
-	int	error;
-
 	VERIFY(vmm_initialized == 1);
 
-	error = VMM_CLEANUP();
-	if (error)
-		return (error);
-	vmm_initialized = 0;
+	vmm_vm_fini();
 
-	return (0);
+	vmm_initialized = 0;
 }
 
 /*
@@ -605,13 +604,17 @@ vm_create(uint64_t flags, struct vm **retvm)
 	if (!vmm_initialized)
 		return (ENXIO);
 
-	bool track_dirty = (flags & VCF_TRACK_DIRTY) != 0;
-	if (track_dirty && !pte_ops->vpeo_hw_ad_supported())
-		return (ENOTSUP);
-
-	vmspace = vmspace_alloc(VM_MAXUSER_ADDRESS, pte_ops, track_dirty);
-	if (vmspace == NULL)
+	vmspace = vmspace_alloc(VM_MAXUSER_ADDRESS);
+	if (vmspace == NULL) {
 		return (ENOMEM);
+	}
+
+	if ((flags & VCF_TRACK_DIRTY) != 0) {
+		if (vmspace_set_tracking(vmspace, true) != 0) {
+			vmspace_destroy(vmspace);
+			return (ENOTSUP);
+		}
+	}
 
 	vm = kmem_zalloc(sizeof (struct vm), KM_SLEEP);
 
@@ -861,7 +864,7 @@ vm_alloc_memseg(struct vm *vm, int ident, size_t len, bool sysmem)
 	if (ident < 0 || ident >= VM_MAX_MEMSEGS)
 		return (EINVAL);
 
-	if (len == 0 || (len & PAGE_MASK))
+	if (len == 0 || (len & PAGEOFFSET))
 		return (EINVAL);
 
 	seg = &vm->mem_segs[ident];
@@ -917,14 +920,9 @@ vm_free_memseg(struct vm *vm, int ident)
 }
 
 int
-vm_mmap_memseg(struct vm *vm, vm_paddr_t gpa, int segid, vm_ooffset_t first,
+vm_mmap_memseg(struct vm *vm, vm_paddr_t gpa, int segid, uintptr_t off,
     size_t len, int prot, int flags)
 {
-	struct mem_seg *seg;
-	struct mem_map *m, *map;
-	vm_ooffset_t last;
-	int i, error;
-
 	if (prot == 0 || (prot & ~(PROT_ALL)) != 0)
 		return (EINVAL);
 
@@ -933,31 +931,28 @@ vm_mmap_memseg(struct vm *vm, vm_paddr_t gpa, int segid, vm_ooffset_t first,
 
 	if (segid < 0 || segid >= VM_MAX_MEMSEGS)
 		return (EINVAL);
-
-	seg = &vm->mem_segs[segid];
+	const struct mem_seg *seg = &vm->mem_segs[segid];
 	if (seg->object == NULL)
 		return (EINVAL);
 
-	last = first + len;
-	if (first < 0 || first >= last || last > seg->len)
+	const uintptr_t end = off + len;
+	if (((gpa | off | end) & PAGEOFFSET) != 0)
+		return (EINVAL);
+	if (end < off || end > seg->len)
 		return (EINVAL);
 
-	if ((gpa | first | last) & PAGE_MASK)
-		return (EINVAL);
-
-	map = NULL;
-	for (i = 0; i < VM_MAX_MEMMAPS; i++) {
-		m = &vm->mem_maps[i];
+	struct mem_map *map = NULL;
+	for (int i = 0; i < VM_MAX_MEMMAPS; i++) {
+		struct mem_map *m = &vm->mem_maps[i];
 		if (m->len == 0) {
 			map = m;
 			break;
 		}
 	}
-
 	if (map == NULL)
 		return (ENOSPC);
 
-	error = vmspace_map(vm->vmspace, seg->object, first, gpa, len, prot);
+	int error = vmspace_map(vm->vmspace, seg->object, off, gpa, len, prot);
 	if (error != 0)
 		return (EFAULT);
 
@@ -973,7 +968,7 @@ vm_mmap_memseg(struct vm *vm, vm_paddr_t gpa, int segid, vm_ooffset_t first,
 
 	map->gpa = gpa;
 	map->len = len;
-	map->segoff = first;
+	map->segoff = off;
 	map->segid = segid;
 	map->prot = prot;
 	map->flags = flags;
@@ -1000,7 +995,7 @@ vm_munmap_memseg(struct vm *vm, vm_paddr_t gpa, size_t len)
 
 int
 vm_mmap_getnext(struct vm *vm, vm_paddr_t *gpa, int *segid,
-    vm_ooffset_t *segoff, size_t *len, int *prot, int *flags)
+    uintptr_t *segoff, size_t *len, int *prot, int *flags)
 {
 	struct mem_map *mm, *mmnext;
 	int i;

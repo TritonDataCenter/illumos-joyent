@@ -1,7 +1,3 @@
-md 85
-devinfo 88
-asy 106
-did 239
 dump 0
 fssnap 1
 kstat 2
@@ -54,6 +50,7 @@ random 49
 sad 50
 scsi_vhci 51
 kvm 52
+vioblk 53
 simnet 54
 sgen 55
 softmac 56
@@ -85,8 +82,10 @@ power 81
 ramdisk 82
 sd 83
 smbios 84
+md 85
 tzmon 86
 ucode 87
+devinfo 88
 vgatext 89
 zfs 90
 pool 91
@@ -104,6 +103,7 @@ adpu320 102
 afe 103
 amd64_gart 104
 agpgart 105
+asy 106
 agptarget 107
 ahci 108
 amd8111s 109
@@ -185,6 +185,7 @@ sdp 184
 igb 185
 e1000g 186
 ipf 187
+ipd 188
 iscsi 189
 iser 190
 ixgb 191
@@ -220,6 +221,7 @@ sppptun 220
 fd 221
 fdc 222
 ecpp 223
+kgpio 224
 cmdk 225
 pci-ide 226
 ata 227
@@ -231,8 +233,10 @@ rpcib 232
 rtls 233
 rum 234
 scsa1394 235
+at24c 236
 sdhost 237
 ses 238
+did 239
 sfe 240
 si3124 241
 nsmb 242
@@ -261,13 +265,13 @@ ibp 264
 blkdev 265
 smbsrv 266
 aac 267
-vioblk 53
+ee100x 268
 iscsit 269
 vmxnet 270
-ipd 188
 tap 271
 tun 272
 ipmi 273
+i2cnex 274
 t4nex 275
 cxgbe 276
 virtio 277
@@ -278,6 +282,7 @@ upf 281
 urf 282
 vnd 283
 lx_ptm 284
+ismt 285
 lx_systrace 286
 nfp 287
 inotify 288
@@ -318,3 +323,12 @@ zen_umc 322
 lmrc 323
 smartpqi 324
 igc 325
+lm7x 326
+ltc430x 327
+pca953x 328
+pca954x 329
+pchsmbus 330
+spd511x 331
+tmp43x 332
+ts511x 333
+eedev 334

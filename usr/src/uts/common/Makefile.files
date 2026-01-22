@@ -28,21 +28,19 @@
 # Copyright 2021 Joyent, Inc.
 # Copyright 2016 OmniTI Computer Consulting, Inc.  All rights reserved.
 # Copyright 2016 Hans Rosenfeld <rosenfeld@grumpf.hope-2000.org>
-# Copyright 2024 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 # Copyright 2023 RackTop Systems, Inc.
 #
 
 #
 # This Makefile defines all file modules for the directory uts/common
 # and its children. These are the source files which may be considered
-# common to all SunOS systems.
+# common to all illumos systems.
 
+# Common objects used by only a subset of illumos systems
 i386_CORE_OBJS += \
 		atomic.o	\
-		avintr.o	\
-		pic.o
-
-sparc_CORE_OBJS +=
+		avintr.o
 
 COMMON_CORE_OBJS +=			\
 		beep.o			\
@@ -980,8 +978,6 @@ KB8042_OBJS +=	\
 		kb8042_keytables.o
 
 MOUSE8042_OBJS += mouse8042.o
-
-FDC_OBJS +=	fdc.o
 
 ASY_OBJS +=	asy.o
 
@@ -1979,7 +1975,8 @@ SKD_OBJS = skd.o
 #
 NVME_OBJS += nvme.o nvme_validate.o nvme_lock.o nvme_stat.o
 NVME_OBJS += nvme_feature.o nvme_field.o nvme_firmware.o nvme_format.o \
-		nvme_identify.o nvme_log.o nvme_version.o nvme_vuc.o
+		nvme_identify.o nvme_log.o nvme_nsmgmt.o nvme_version.o \
+		nvme_vuc.o
 
 PVSCSI_OBJS = pvscsi.o
 
@@ -2012,7 +2009,7 @@ CH_COM_OBJS =	ch_mac.o ch_subr.o cspi.o espi.o ixf1010.o mc3.o mc4.o mc5.o \
 #
 CXGBE_COM_OBJS =	t4_hw.o common.o
 CXGBE_NEX_OBJS =	t4_nexus.o t4_sge.o t4_mac.o t4_ioctl.o t4_debug.o \
-			t4_l2t.o cudbg_lib.o cudbg_wtp.o fastlz.o \
+			cudbg_lib.o cudbg_wtp.o fastlz.o \
 			fastlz_api.o cudbg_common.o cudbg_flash_utils.o \
 			cudbg.o
 
@@ -2374,6 +2371,12 @@ MLXCX_OBJS +=	mlxcx.o mlxcx_dma.o mlxcx_cmd.o mlxcx_intr.o mlxcx_gld.o \
 ENA_OBJS +=	ena.o ena_admin.o ena_dma.o ena_aenq.o ena_gld.o ena_hw.o \
 		ena_intr.o ena_stats.o ena_tx.o ena_rx.o ena_watchdog.o
 
+#
+# GPIO Framwork and related drivers
+#
+KGPIO_OBJS +=		kgpio.o
+GPIO_SIM_OBJS +=	gpio_sim.o
+
 IGC_CORE_OBJS += igc_api.o igc_base.o igc_i225.o igc_mac.o igc_nvm.o igc_phy.o
 IGC_OBJS += $(IGC_CORE_OBJS) igc.o igc_osdep.o igc_gld.o igc_ring.o igc_stat.o
 
@@ -2388,3 +2391,28 @@ KTEST_OBJS += ktest.o
 MAC_KTEST_OBJS += mac_ktest.o
 KTEST_KTEST_OBJS += ktest_selftest.o
 STREAM_KTEST_OBJS += stream_ktest.o
+
+#
+# EEPROM framework driver
+#
+EEDEV_OBJS += eedev.o
+
+
+#
+# I2C controllers, muxes, drivers, and nexus
+#
+I2CNEX_OBJS +=	i2cnex.o i2cnex_addr.o i2cnex_client.o i2cnex_ctrl.o \
+		i2cnex_device.o i2cnex_user.o i2cnex_mux.o i2cnex_txn.o \
+		i2cnex_props.o i2cnex_util.o
+I2CSIM_OBJS += i2csim.o
+ISMT_OBJS += ismt.o
+PCHSMBUS_OBJS += pchsmbus.o
+LTC430X_OBJS += ltc430x.o
+PCA953X_OBJS += pca953x.o
+PCA954X_OBJS += pca954x.o
+EE100X_OBJS += ee100x.o
+SPD511X_OBJS += spd511x.o
+TS511X_OBJS += ts511x.o
+LM7X_OBJS += lm7x.o
+TMP43X_OBJS += tmp43x.o
+AT24C_OBJS += at24c.o
