@@ -2099,7 +2099,14 @@ f platform/i86pc/ucode/AuthenticAMD/A7C0-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/AA01-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/AA02-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/B021-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B081-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/B110-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B240-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B440-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B441-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B600-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B680-00 0444 root sys
+f platform/i86pc/ucode/AuthenticAMD/B700-00 0444 root sys
 f platform/i86pc/ucode/AuthenticAMD/equivalence-table 0444 root sys
 d platform/i86pc/ucode/AuthenticAMD/fallback 0755 root sys
 f platform/i86pc/ucode/AuthenticAMD/fallback/8012-00 0444 root sys
