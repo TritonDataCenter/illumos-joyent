@@ -66,6 +66,8 @@ struct viona_desb;
 typedef struct viona_desb viona_desb_t;
 struct viona_net;
 typedef struct viona_neti viona_neti_t;
+struct viona_soft_state;
+typedef struct viona_soft_state viona_soft_state_t;
 
 typedef struct viona_transfer_stats {
 	/* Packets transferred successfully */
@@ -129,6 +131,24 @@ typedef struct viona_vring_tx {
 	uint_t		vrt_header_pad;
 } viona_vring_tx_t;
 
+typedef enum viona_vring_part_type {
+	VIONA_RING_PART_DESC = 1,
+	VIONA_RING_PART_AVAIL,
+	VIONA_RING_PART_USED
+} viona_ring_part_type_t;
+
+typedef struct viona_vring_part {
+	viona_ring_part_type_t	vrp_type;
+	uint64_t		vrp_pa;
+	uint64_t		vrp_base;
+	uint_t			vrp_off;
+	uint_t			vrp_npages;
+
+	/* Reference to guest pages holding virtqueue part */
+	void			**vrp_map_pages;
+	vmm_page_t		*vrp_map_hold;
+} viona_vring_part_t;
+
 typedef struct viona_vring {
 	viona_link_t	*vr_link;
 
@@ -136,6 +156,7 @@ typedef struct viona_vring {
 	kcondvar_t	vr_cv;
 	uint16_t	vr_state;
 	uint16_t	vr_state_flags;
+	uint16_t	vr_index;
 	uint_t		vr_xfer_outstanding;
 	kthread_t	*vr_worker_thread;
 	vmm_lease_t	*vr_lease;
@@ -150,7 +171,12 @@ typedef struct viona_vring {
 	/* Internal ring-related state */
 	kmutex_t	vr_a_mutex;	/* sync consumers of 'avail' */
 	kmutex_t	vr_u_mutex;	/* sync consumers of 'used' */
-	uint64_t	vr_pa;
+
+	/* The components of a split virtqueue ring */
+	viona_vring_part_t	vr_desc;
+	viona_vring_part_t	vr_avail;
+	viona_vring_part_t	vr_used;
+
 	uint16_t	vr_size;
 	uint16_t	vr_mask;	/* cached from vr_size */
 	uint16_t	vr_cur_aidx;	/* trails behind 'avail_idx' */
@@ -206,19 +232,27 @@ typedef struct viona_link_params {
 } viona_link_params_t;
 
 struct viona_link {
+	viona_soft_state_t	*l_ss;
+
 	vmm_hold_t		*l_vm_hold;
 	boolean_t		l_destroyed;
+	boolean_t		l_modern;
 
-	viona_vring_t		l_vrings[VIONA_VQ_MAX];
+	viona_vring_t		*l_vrings;
+	uint16_t		l_npairs;	/* Number of ring pairs */
+	uint16_t		l_usepairs;	/* Number of pairs to use */
 
-	uint32_t		l_features;
-	uint32_t		l_features_hw;
+	uint64_t		l_features;
+	uint64_t		l_features_hw;
 	uint32_t		l_cap_csum;
 	viona_link_params_t	l_params;
 	uint16_t		l_mtu;
 
 	uint16_t		l_notify_ioport;
 	void			*l_notify_cookie;
+#define	NOTIFY_MMADDR_UNSET	UINT64_MAX
+	uint64_t		l_notify_mmaddr;
+	void			*l_notify_mmcookie;
 
 	datalink_id_t		l_linkid;
 	mac_handle_t		l_mh;
@@ -296,13 +330,13 @@ typedef struct iov_bunch {
 	uint32_t	ib_remain;
 } iov_bunch_t;
 
-typedef struct viona_soft_state {
+struct viona_soft_state {
 	kmutex_t		ss_lock;
 	viona_link_t		*ss_link;
 	list_node_t		ss_node;
 	kstat_t			*ss_kstat;
 	minor_t			ss_minor;
-} viona_soft_state_t;
+};
 
 #pragma pack(1)
 struct virtio_desc {
@@ -360,6 +394,13 @@ struct virtio_net_hdr {
 #define	VIONA_PROBE_BAD_RING_ADDR(r, a)		\
 	VIONA_PROBE2(bad_ring_addr, viona_vring_t *, r, void *, (void *)(a))
 
+#define	VIONA_NRINGS(link) ((link)->l_npairs * 2)
+#define	VIONA_USABLE_RINGS(link) ((link)->l_usepairs * 2)
+/* Check if a ring index is within bounds */
+#define	VIONA_RING_VALID(link, idx) ((idx) < VIONA_NRINGS(link))
+#define	VIONA_RING_ISRX(ring) ((ring)->vr_index % 2 == 0)
+#define	VIONA_RING_ISTX(ring) ((ring)->vr_index % 2 != 0)
+
 /* Increment one of the named ring error stats */
 #define	VIONA_RING_STAT_INCR(r, name)	\
 	(((r)->vr_err_stats.rs_ ## name)++)
@@ -380,16 +421,15 @@ struct virtio_net_hdr {
 #define	VIRTIO_NET_HDR_GSO_NONE		0
 #define	VIRTIO_NET_HDR_GSO_TCPV4	1
 
-#define	VIRTIO_NET_F_CSUM		(1 << 0)
-#define	VIRTIO_NET_F_GUEST_CSUM		(1 << 1)
-#define	VIRTIO_NET_F_MAC		(1 << 5) /* host supplies MAC */
-#define	VIRTIO_NET_F_GUEST_TSO4		(1 << 7) /* guest can accept TSO */
-#define	VIRTIO_NET_F_HOST_TSO4		(1 << 11) /* host can accept TSO */
-#define	VIRTIO_NET_F_MRG_RXBUF		(1 << 15) /* host can merge RX bufs */
-#define	VIRTIO_NET_F_STATUS		(1 << 16) /* cfg status field present */
-#define	VIRTIO_F_RING_NOTIFY_ON_EMPTY	(1 << 24)
-#define	VIRTIO_F_RING_INDIRECT_DESC	(1 << 28)
-#define	VIRTIO_F_RING_EVENT_IDX		(1 << 29)
+#define	VIRTIO_NET_F_CSUM		(1ULL << 0)
+#define	VIRTIO_NET_F_GUEST_CSUM		(1ULL << 1)
+#define	VIRTIO_NET_F_GUEST_TSO4		(1ULL << 7) /* guest can accept TSO */
+#define	VIRTIO_NET_F_HOST_TSO4		(1ULL << 11) /* host can accept TSO */
+#define	VIRTIO_NET_F_MRG_RXBUF		(1ULL << 15) /* host can mrg RX bufs */
+#define	VIRTIO_F_RING_NOTIFY_ON_EMPTY	(1ULL << 24)
+#define	VIRTIO_F_RING_INDIRECT_DESC	(1ULL << 28)
+#define	VIRTIO_F_RING_EVENT_IDX		(1ULL << 29)
+#define	VIRTIO_F_VERSION_1		(1ULL << 32)
 
 /*
  * Place an upper bound on the size of packets viona is willing to handle,
@@ -414,7 +454,9 @@ struct virtio_net_hdr {
 #define	VIONA_DEFAULT_MTU		1500
 
 struct viona_ring_params {
-	uint64_t	vrp_pa;
+	uint64_t	vrp_pa_desc;
+	uint64_t	vrp_pa_avail;
+	uint64_t	vrp_pa_used;
 	uint16_t	vrp_size;
 	uint16_t	vrp_avail_idx;
 	uint16_t	vrp_used_idx;
@@ -426,6 +468,7 @@ int viona_ring_get_state(viona_link_t *, uint16_t, struct viona_ring_params *);
 int viona_ring_set_state(viona_link_t *, uint16_t,
     const struct viona_ring_params *);
 int viona_ring_reset(viona_vring_t *, boolean_t);
+int viona_ring_legacy_addr(struct viona_ring_params *);
 int viona_ring_init(viona_link_t *, uint16_t, const struct viona_ring_params *);
 boolean_t viona_ring_lease_renew(viona_vring_t *);
 bool vring_need_bail(const viona_vring_t *);

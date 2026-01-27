@@ -10,11 +10,11 @@
 #
 
 #
-# Copyright 2025 Oxide Computer Company
+# Copyright 2026 Oxide Computer Company
 #
 
 .PARALLEL: $(SUBDIRS)
 
-SUBDIRS = i2csimd runfiles tests
+SUBDIRS = cmd i2csimd runfiles tests
 
 include $(SRC)/test/Makefile.com

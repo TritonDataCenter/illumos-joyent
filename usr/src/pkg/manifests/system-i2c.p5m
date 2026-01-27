@@ -10,7 +10,7 @@
 #
 
 #
-# Copyright 2025 Oxide Computer Company
+# Copyright 2026 Oxide Computer Company
 #
 
 <include global_zone_only_component>
@@ -18,6 +18,7 @@ set name=pkg.fmri value=pkg:/system/i2c@$(PKGVERS)
 set name=pkg.summary value="I2C Framework and Utilities"
 set name=pkg.description value="I2C, I3C, SMBus Framework and Utilities"
 set name=info.classification value=org.opensolaris.category.2008:System/Hardware
+set name=variant.arch value=$(ARCH)
 dir  path=kernel/drv group=sys
 dir  path=kernel/drv/$(ARCH64) group=sys
 file path=kernel/drv/$(ARCH64)/at24c
@@ -176,8 +177,11 @@ driver name=pchsmbus \
     alias=pci8086,4b23 \
     alias=pci8086,4da3 \
     alias=pci8086,51a3 \
+    alias=pci8086,54a3 \
     alias=pci8086,5ad4 \
+    alias=pci8086,6e23 \
     alias=pci8086,7722 \
+    alias=pci8086,7a23 \
     alias=pci8086,7aa3 \
     alias=pci8086,7e22 \
     alias=pci8086,7f23 \
