@@ -2215,7 +2215,7 @@ Pbuild_file_symtab(struct ps_prochandle *P, file_info_t *fptr)
 				buf[bo] = '/';
 				bo++;
 			}
-			(void) snprintf(buf + bo, sizeof (buf) - bo, "%2x",
+			(void) snprintf(buf + bo, sizeof (buf) - bo, "%02x",
 			    *dp);
 		}
 
