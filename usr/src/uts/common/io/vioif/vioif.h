@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2021 Joyent, Inc.
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -36,6 +37,14 @@ extern "C" {
 #define	VIRTIO_NET_CONFIG_STATUS	0x06	/* 16 R   */
 #define	VIRTIO_NET_CONFIG_MAX_VQ_PAIRS	0x08	/* 16 R   */
 #define	VIRTIO_NET_CONFIG_MTU		0x0A	/* 16 R   */
+#define	VIRTIO_NET_CONFIG_SPEED		0x0C	/* 32 R   */
+#define	VIRTIO_NET_CONFIG_DUPLEX	0x10	/* 8  R   */
+
+#define	VIRTIO_NET_CONFIG_STATUS_LINK_UP	1
+#define	VIRTIO_NET_CONFIG_SPEED_UNKNOWN		UINT32_MAX
+#define	VIRTIO_NET_CONFIG_DUPLEX_HALF		0
+#define	VIRTIO_NET_CONFIG_DUPLEX_FULL		1
+#define	VIRTIO_NET_CONFIG_DUPLEX_UNKNOWN	0xff
 
 /*
  * VIRTIO NETWORK VIRTQUEUES
@@ -156,6 +165,14 @@ extern "C" {
 #define	VIRTIO_NET_F_CTRL_RX_EXTRA	(1ULL << 20)
 
 /*
+ * SPEED_DUPLEX:
+ *	The VIRTIO_NET_CONFIG_SPEED and VIRTIO_NET_CONFIG_DUPLEX registers are
+ *	available, which allows the driver to determine the link speed and
+ *	duplex of the device.
+ */
+#define	VIRTIO_NET_F_SPEED_DUPLEX	(1ULL << 63)
+
+/*
  * These features are supported by the driver and we will request them from the
  * device.  Note that we do not currently request GUEST_CSUM, as the driver
  * does not presently support receiving frames with any offload features from
@@ -169,13 +186,22 @@ extern "C" {
 					VIRTIO_NET_F_MAC |		\
 					VIRTIO_NET_F_MTU |		\
 					VIRTIO_NET_F_CTRL_VQ |		\
-					VIRTIO_NET_F_CTRL_RX)
+					VIRTIO_NET_F_CTRL_RX |		\
+					VIRTIO_NET_F_STATUS)
+
+/* The following features are only available with the modern interface. */
+#define	VIRTIO_NET_WANTED_FEATURES_MODERN	\
+					(VIRTIO_NET_F_SPEED_DUPLEX)
 
 /*
  * VIRTIO NETWORK HEADER
  *
  * This structure appears at the start of each transmit or receive packet
- * buffer.
+ * buffer. When using the legacy interface, the `vnh_num_buffers` field only
+ * appears when VIRTIO_NET_F_MRG_RXBUF is negotiated, whereas it is always
+ * present with the modern interface. We use a common struct since it is always
+ * constructed in a buffer of at least this size, and then only put the
+ * requisite number of bytes (VIRTIO_NET_HDR_LEN()) into the descriptor.
  */
 struct virtio_net_hdr {
 	uint8_t				vnh_flags;
@@ -184,7 +210,11 @@ struct virtio_net_hdr {
 	uint16_t			vnh_gso_size;
 	uint16_t			vnh_csum_start;
 	uint16_t			vnh_csum_offset;
+	uint16_t			vnh_num_buffers;
 } __packed;
+#define	VIRTIO_NET_HDR_LEN(modern) \
+	((modern) ? sizeof (struct virtio_net_hdr) : \
+	offsetof(struct virtio_net_hdr, vnh_num_buffers))
 
 /*
  * VIRTIO NETWORK HEADER: FLAGS (vnh_flags)
@@ -425,6 +455,9 @@ struct vioif {
 	unsigned int			vif_has_ctrlq:1;
 	unsigned int			vif_has_ctrlq_rx:1;
 
+	uint32_t			vif_speed;	/* Mb/s */
+	uint16_t			vif_status;
+	uint8_t				vif_duplex;
 	uint_t				vif_mtu;
 	uint_t				vif_mtu_max;
 	uint8_t				vif_mac[ETHERADDRL];
@@ -438,6 +471,7 @@ struct vioif {
 	uint_t				vif_nrxbufs_onloan_max;
 	uint_t				vif_rxbufs_capacity;
 	vioif_rxbuf_t			*vif_rxbufs_mem;
+	size_t				vif_rxbuf_hdrlen;
 
 	/*
 	 * Transmit buffer free list and accounting:
