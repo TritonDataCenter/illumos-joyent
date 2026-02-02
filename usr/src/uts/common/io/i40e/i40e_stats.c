@@ -420,7 +420,7 @@ i40e_stat_pf_update(i40e_t *i40e, boolean_t init)
 	    &ipk->ipk_rx_unknown_protocol, &ips->ips_rx_unknown_protocol, init);
 
 	/* 64-bit */
-	i40e_stat_get_uint48(i40e, I40E_GL_RXERR1_L(port), &ipk->ipk_rx_err1,
+	i40e_stat_get_uint48(i40e, I40E_GL_RXERR1L(port), &ipk->ipk_rx_err1,
 	    &ips->ips_rx_err1, init);
 	i40e_stat_get_uint48(i40e, I40E_GL_RXERR2_L(port), &ipk->ipk_rx_err2,
 	    &ips->ips_rx_err2, init);
@@ -784,7 +784,7 @@ i40e_m_stat(void *arg, uint_t stat, uint64_t *val)
 		i40e_stat_get_uint32(i40e, I40E_GLPRT_RLEC(port),
 		    &ipk->ipk_rx_length_errors, &ips->ips_rx_length_errors,
 		    B_FALSE);
-		i40e_stat_get_uint48(i40e, I40E_GL_RXERR1_L(port),
+		i40e_stat_get_uint48(i40e, I40E_GL_RXERR1L(port),
 		    &ipk->ipk_rx_err1, &ips->ips_rx_err1, B_FALSE);
 		i40e_stat_get_uint48(i40e, I40E_GL_RXERR2_L(port),
 		    &ipk->ipk_rx_err2, &ips->ips_rx_err2, B_FALSE);
