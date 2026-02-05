@@ -16,6 +16,7 @@
  * Copyright 2020 Ryan Zezeski
  * Copyright 2020 RackTop Systems, Inc.
  * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -238,17 +239,18 @@ i40e_m_promisc(void *arg, boolean_t on)
 	 * this way we will get all unicast/multicast and VLAN
 	 * promisc behavior but will not get VF or VMDq traffic
 	 * replicated on the Main VSI.
+	 *
+	 * A recent LLM analysis suggests that we might wish to still maintain
+	 * keeping sharp track of multicast promisc counts even though the
+	 * Linux comment says "all unicast/multicast".
 	 */
 
 	ret = on ? i40e_aq_set_default_vsi(hw, I40E_DEF_VSI_SEID(i40e), NULL) :
 	    i40e_aq_clear_default_vsi(hw, I40E_DEF_VSI_SEID(i40e), NULL);
-	if (ret == I40E_SUCCESS)
-		i40e->i40e_promisc_on = on;
-	else
-		err = EIO;
 #else
 	ret = i40e_aq_set_vsi_unicast_promiscuous(hw, I40E_DEF_VSI_SEID(i40e),
 	    on ? true : false, NULL, false);
+#endif
 	if (ret != I40E_SUCCESS) {
 		i40e_error(i40e, "failed to %s unicast promiscuity on "
 		    "the default VSI: %d", on == B_TRUE ? "enable" : "disable",
@@ -290,7 +292,6 @@ i40e_m_promisc(void *arg, boolean_t on)
 	} else {
 		i40e->i40e_promisc_on = on;
 	}
-#endif
 
 done:
 	mutex_exit(&i40e->i40e_general_lock);
