@@ -22,7 +22,7 @@
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2018 Joyent, Inc.
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -597,28 +597,99 @@ mac_soft_ring_poll(mac_soft_ring_t *ringp, size_t bytes_to_pickup)
 }
 
 /*
- * mac_soft_ring_dls_bypass
- *
  * Enable direct client (IP) callback function from the softrings.
  * Callers need to make sure they don't need any DLS layer processing
  */
 void
-mac_soft_ring_dls_bypass(void *arg, mac_direct_rx_t rx_func, void *rx_arg1)
+mac_soft_ring_dls_bypass_enable(mac_soft_ring_t *softring,
+    mac_direct_rx_t rx_func, void *rx_arg1)
 {
-	mac_soft_ring_t		*softring = arg;
-	mac_soft_ring_set_t	*srs;
-
 	VERIFY3P(rx_func, !=, NULL);
-
 	mutex_enter(&softring->s_ring_lock);
 	softring->s_ring_rx_func = rx_func;
 	softring->s_ring_rx_arg1 = rx_arg1;
 	mutex_exit(&softring->s_ring_lock);
+}
 
-	srs = softring->s_ring_set;
-	mutex_enter(&srs->srs_lock);
-	srs->srs_type |= SRST_DLS_BYPASS;
-	mutex_exit(&srs->srs_lock);
+/* Disable DLS bypass. */
+void
+mac_soft_ring_dls_bypass_disable(mac_soft_ring_t *softring,
+    mac_client_impl_t *mcip)
+{
+	mutex_enter(&softring->s_ring_lock);
+	/*
+	 * Before modifying the ring state we first wait for any in-progress
+	 * processing to stop.
+	 */
+	while (softring->s_ring_state & S_RING_PROC) {
+		softring->s_ring_state |= S_RING_CLIENT_WAIT;
+		cv_wait(&softring->s_ring_client_cv,
+		    &softring->s_ring_lock);
+	}
+
+	softring->s_ring_state &= ~S_RING_CLIENT_WAIT;
+	softring->s_ring_rx_func = mac_rx_deliver;
+	softring->s_ring_rx_arg1 = mcip;
+	mutex_exit(&softring->s_ring_lock);
+}
+
+void
+mac_soft_ring_poll_enable(mac_soft_ring_t *sr, mac_direct_rx_t drx,
+    void *drx_arg, mac_resource_cb_t *rcb, uint32_t pri)
+{
+	mac_rx_fifo_t mrf;
+
+	/* Only TCP/IP clients are poll capable at the moment. */
+	VERIFY((sr->s_ring_type & (ST_RING_TCP | ST_RING_TCP6)) != 0);
+	/* The client resourse callback structure better be set. */
+	VERIFY3P(rcb->mrc_arg, !=, NULL);
+	/* Polling should be configured only once on a given softring. */
+	VERIFY3P(sr->s_ring_rx_arg2, ==, NULL);
+
+	/*
+	 * As polling elides DLS processing we must make sure that
+	 * softring processing (i.e. non-polling) also bypasses DLS
+	 * processing.
+	 */
+	mac_soft_ring_dls_bypass_enable(sr, drx, drx_arg);
+
+	bzero(&mrf, sizeof (mrf));
+	mrf.mrf_type = MAC_RX_FIFO;
+	mrf.mrf_receive = (mac_receive_t)mac_soft_ring_poll;
+	mrf.mrf_intr_enable =
+	    (mac_intr_enable_t)mac_soft_ring_intr_enable;
+	mrf.mrf_intr_disable =
+	    (mac_intr_disable_t)mac_soft_ring_intr_disable;
+	mrf.mrf_rx_arg = sr;
+	mrf.mrf_intr_handle = (mac_intr_handle_t)sr;
+	mrf.mrf_cpu_id = sr->s_ring_cpuid;
+	mrf.mrf_flow_priority = pri;
+
+	sr->s_ring_rx_arg2 = rcb->mrc_add(rcb->mrc_arg,
+	    (mac_resource_t *)&mrf);
+}
+
+void
+mac_soft_ring_poll_disable(mac_soft_ring_t *sr, mac_resource_cb_t *rcb,
+    mac_client_impl_t *mcip)
+{
+	/* Only TCP/IP clients are poll capable at the moment. */
+	VERIFY((sr->s_ring_type & (ST_RING_TCP | ST_RING_TCP6)) != 0);
+
+	/*
+	 * Remove the IP ring if there is one associated with this
+	 * softring. Note that IP rings are a limited resource; and
+	 * SRST_CLIENT_POLL_V4/V6 being set on the SRS is no guarantee
+	 * that all TCP softrings have an associated IP ring. This is by
+	 * design. See ip_squeue_add_ring().
+	 */
+	if (sr->s_ring_rx_arg2 != NULL) {
+		VERIFY3P(rcb->mrc_arg, !=, NULL);
+		rcb->mrc_remove(rcb->mrc_arg, sr->s_ring_rx_arg2);
+		sr->s_ring_rx_arg2 = NULL;
+	}
+
+	mac_soft_ring_dls_bypass_disable(sr, mcip);
 }
 
 /*
