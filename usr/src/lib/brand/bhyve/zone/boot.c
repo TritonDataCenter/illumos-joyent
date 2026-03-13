@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2020 Joyent, Inc.
- * Copyright 2025 Edgecast Cloud LLC.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -607,6 +607,19 @@ add_bhyve_extra_opts(int *argc, char **argv)
 	return (0);
 }
 
+static int
+add_virtio_opts(int *argc, char **argv)
+{
+	if (!get_zcfg_var("attr", "virtio1", NULL)) {
+		if (add_arg(argc, argv, "-o") != 0 ||
+		    add_arg(argc, argv, "virtio.modern=false") != 0) {
+			return (-1);
+		}
+	}
+
+	return (0);
+}
+
 #define	INVALID_CHAR	(char)(255)
 
 static char
@@ -865,6 +878,7 @@ main(int argc, char **argv)
 	    add_ram(&zhargc, (char **)&zhargv) != 0 ||
 	    add_devices(&zhargc, (char **)&zhargv) != 0 ||
 	    add_nets(&zhargc, (char **)&zhargv) != 0 ||
+	    add_virtio_opts(&zhargc, (char **)&zhargv) != 0 ||
 	    add_bhyve_extra_opts(&zhargc, (char **)&zhargv) != 0 ||
 	    add_fbuf(&zhargc, (char **)&zhargv) != 0 ||
 	    add_vmname(&zhargc, (char **)&zhargv) != 0) {
