@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 1990 Mentat Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -1454,6 +1455,7 @@ irb_inactive(irb_t *irb)
 	struct rt_entry *rt;
 	struct radix_node *rn;
 	ip_stack_t *ipst = irb->irb_ipst;
+	boolean_t rc = B_FALSE;
 
 	ASSERT(irb->irb_ipst != NULL);
 
@@ -1467,15 +1469,27 @@ irb_inactive(irb_t *irb)
 		rn = ipst->ips_ip_ftable->rnh_deladdr(rn->rn_key, rn->rn_mask,
 		    ipst->ips_ip_ftable);
 		DTRACE_PROBE1(irb__free, rt_t *,  rt);
-		ASSERT((void *)rn == (void *)rt);
-		Free(rt, rt_entry_cache);
-		/* irb_lock is freed */
-		RADIX_NODE_HEAD_UNLOCK(ipst->ips_ip_ftable);
-		return (B_TRUE);
+		rw_exit(&irb->irb_lock);
+		if ((void *)rn != (void *)rt) {
+			/*
+			 * Corner-case ==> deladdr() deletes either nothing
+			 * (rn == NULL) or something else (rn != NULL).
+			 * For now, just let it go and release the rwlock
+			 * from what we were passed (irb & rt).	Worst
+			 * case is it's a leak.
+			 */
+			DTRACE_PROBE1(irb__free__delother, struct radix_node *,
+			    rn);
+		} else {
+			/* Common-case ==> it's us, so now we can free. */
+			Free(rt, rt_entry_cache);
+			rc = B_TRUE;
+		}
+	} else {
+		rw_exit(&irb->irb_lock);
 	}
-	rw_exit(&irb->irb_lock);
 	RADIX_NODE_HEAD_UNLOCK(ipst->ips_ip_ftable);
-	return (B_FALSE);
+	return (rc);
 }
 
 /*
