@@ -610,11 +610,43 @@ add_bhyve_extra_opts(int *argc, char **argv)
 static int
 add_virtio_opts(int *argc, char **argv)
 {
-	if (!get_zcfg_var("attr", "virtio1", NULL)) {
-		if (add_arg(argc, argv, "-o") != 0 ||
-		    add_arg(argc, argv, "virtio.modern=false") != 0) {
-			return (-1);
-		}
+	/*
+	 * We're mapping "virtio1" to BHYVE's virtio.modern and
+	 * "virtio09" to BHYVE's virtio.legacy.
+	 *
+	 * A quick table for the 2x3 possibilities. See the proptable.js
+	 * file in smartos-live to make sure this table matches up.
+	 *
+	 * zonecfg variable   BHYVE argument   default-if-not-present
+	 * ================   ==============   ======================
+	 * virtio09           virtio.legacy    true
+	 * virtio1            virtio.modern    false
+	 *
+	 * We will add their values *explicitly* to the bhvye command line
+	 * for maximum observability.
+	 */
+	boolean_t legacy, modern;
+	/* sizeof ("virtio.legacy=false") + 1 == 20 */
+	char argstring[20];
+
+	/*
+	 * Legacy defaults to true, so we must make sure the val == NULL case
+	 * turns into true.
+	 */
+	legacy = get_zcfg_var("attr", "virtio09", NULL) == NULL ||
+	    is_env_true("attr", "virtio09", NULL);
+
+	/* Modern is much easier. */
+	modern = is_env_true("attr", "virtio1", NULL);
+
+	/* Turn into bhyve arguments. */
+	if (add_arg(argc, argv, "-o") != 0 ||
+	    snprintf(argstring, 20, "virtio.legacy=%s",	legacy ?
+	    "true" : "false") >= 20 || add_arg(argc, argv, argstring) != 0 ||
+	    add_arg(argc, argv, "-o") != 0 ||
+	    snprintf(argstring, 20, "virtio.modern=%s",	modern ?
+	    "true" : "false") >= 20 || add_arg(argc, argv, argstring) != 0) {
+		return (-1);
 	}
 
 	return (0);
