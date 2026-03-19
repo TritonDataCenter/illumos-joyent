@@ -626,8 +626,8 @@ add_virtio_opts(int *argc, char **argv)
 	 * for maximum observability.
 	 */
 	boolean_t legacy, modern;
-	/* sizeof ("virtio.legacy=false") + 1 == 20 */
-	char argstring[20];
+	char argstr[20];  /* sizeof ("virtio.legacy=false") + 1 == 20 */
+
 
 	/*
 	 * Legacy defaults to true, so we must make sure the val == NULL case
@@ -641,11 +641,13 @@ add_virtio_opts(int *argc, char **argv)
 
 	/* Turn into bhyve arguments. */
 	if (add_arg(argc, argv, "-o") != 0 ||
-	    snprintf(argstring, 20, "virtio.legacy=%s",	legacy ?
-	    "true" : "false") >= 20 || add_arg(argc, argv, argstring) != 0 ||
+	    snprintf(argstr, sizeof (argstr), "virtio.legacy=%s", legacy ?
+	    "true" : "false") >= sizeof (argstr) ||
+	    add_arg(argc, argv, argstr) != 0 ||
 	    add_arg(argc, argv, "-o") != 0 ||
-	    snprintf(argstring, 20, "virtio.modern=%s",	modern ?
-	    "true" : "false") >= 20 || add_arg(argc, argv, argstring) != 0) {
+	    snprintf(argstr, sizeof (argstr), "virtio.modern=%s", modern ?
+	    "true" : "false") >= sizeof (argstr) ||
+	    add_arg(argc, argv, argstring) != 0) {
 		return (-1);
 	}
 
