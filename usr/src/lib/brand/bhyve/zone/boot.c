@@ -611,45 +611,32 @@ static int
 add_virtio_opts(int *argc, char **argv)
 {
 	/*
-	 * We're mapping "virtio1" to BHYVE's virtio.modern and
-	 * "virtio09" to BHYVE's virtio.legacy.
+	 * We're mapping "virtio1" to BHYVE's virtio.modern, i.e. enabling
+	 * the transitional (0.9 and 1.0) devices in this bhyve instance.
 	 *
-	 * A quick table for the 2x3 possibilities. See the proptable.js
-	 * file in smartos-live to make sure this table matches up.
+	 * This dance is to insure old BHYVE VM objects with broken-driver
+	 * images do not fall over on a PI upgrade.
 	 *
-	 * zonecfg variable   BHYVE argument   default-if-not-present
-	 * ================   ==============   ======================
-	 * virtio09           virtio.legacy    true
-	 * virtio1            virtio.modern    false
+	 * Make sure the proptable.js file in smartos-live matches this
+	 * for a VM object "virtio1" property, including its absence. See
+	 * smartos-live for more.
 	 *
-	 * We will add their values *explicitly* to the bhvye command line
-	 * for maximum observability.
+	 * variable	BHYVE argument	variable-not-present	present
+	 * ========	==============  ====================	=======
+	 * virtio1	virtio.modern	false			use-value
+	 *
+	 * We will add the values of virtio.modern *explicitly* to the
+	 * command-line for observability.
+	 *
+	 * If we change variable-not-present to "true", the following
+	 * assignment will have to be rewritten.
 	 */
-	boolean_t legacy, modern;
-	char argstr[20];  /* sizeof ("virtio.legacy=false") + 1 == 20 */
-
-
-	/*
-	 * Legacy defaults to true, so we must make sure the val == NULL case
-	 * turns into true.
-	 */
-	legacy = get_zcfg_var("attr", "virtio09", NULL) == NULL ||
-	    is_env_true("attr", "virtio09", NULL);
-
-	/* Modern is much easier. */
-	modern = is_env_true("attr", "virtio1", NULL);
+	char *argstr = is_env_true("attr", "virtio1", NULL) ?
+	    "virtio.modern=true" : "virtio.modern=false";
 
 	/* Turn into bhyve arguments. */
-	if (add_arg(argc, argv, "-o") != 0 ||
-	    snprintf(argstr, sizeof (argstr), "virtio.legacy=%s", legacy ?
-	    "true" : "false") >= sizeof (argstr) ||
-	    add_arg(argc, argv, argstr) != 0 ||
-	    add_arg(argc, argv, "-o") != 0 ||
-	    snprintf(argstr, sizeof (argstr), "virtio.modern=%s", modern ?
-	    "true" : "false") >= sizeof (argstr) ||
-	    add_arg(argc, argv, argstring) != 0) {
+	if (add_arg(argc, argv, "-o") != 0 || add_arg(argc, argv, argstr) != 0)
 		return (-1);
-	}
 
 	return (0);
 }
