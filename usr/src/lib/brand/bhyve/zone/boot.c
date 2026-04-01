@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2020 Joyent, Inc.
- * Copyright 2025 Edgecast Cloud LLC.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -607,6 +607,40 @@ add_bhyve_extra_opts(int *argc, char **argv)
 	return (0);
 }
 
+static int
+add_virtio_opts(int *argc, char **argv)
+{
+	/*
+	 * We're mapping "virtio1" to BHYVE's virtio.modern, i.e. enabling
+	 * the transitional (0.9 and 1.0) devices in this bhyve instance.
+	 *
+	 * This dance is to insure old BHYVE VM objects with broken-driver
+	 * images do not fall over on a PI upgrade.
+	 *
+	 * Make sure the proptable.js file in smartos-live matches this
+	 * for a VM object "virtio1" property, including its absence. See
+	 * smartos-live for more.
+	 *
+	 * variable	BHYVE argument	variable-not-present	present
+	 * ========	==============  ====================	=======
+	 * virtio1	virtio.modern	false			use-value
+	 *
+	 * We will add the values of virtio.modern *explicitly* to the
+	 * command-line for observability.
+	 *
+	 * If we change variable-not-present to "true", the following
+	 * assignment will have to be rewritten.
+	 */
+	char *argstr = is_env_true("attr", "virtio1", NULL) ?
+	    "virtio.modern=true" : "virtio.modern=false";
+
+	/* Turn into bhyve arguments. */
+	if (add_arg(argc, argv, "-o") != 0 || add_arg(argc, argv, argstr) != 0)
+		return (-1);
+
+	return (0);
+}
+
 #define	INVALID_CHAR	(char)(255)
 
 static char
@@ -865,6 +899,7 @@ main(int argc, char **argv)
 	    add_ram(&zhargc, (char **)&zhargv) != 0 ||
 	    add_devices(&zhargc, (char **)&zhargv) != 0 ||
 	    add_nets(&zhargc, (char **)&zhargv) != 0 ||
+	    add_virtio_opts(&zhargc, (char **)&zhargv) != 0 ||
 	    add_bhyve_extra_opts(&zhargc, (char **)&zhargv) != 0 ||
 	    add_fbuf(&zhargc, (char **)&zhargv) != 0 ||
 	    add_vmname(&zhargc, (char **)&zhargv) != 0) {

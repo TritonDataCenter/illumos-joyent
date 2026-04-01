@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -26,7 +26,7 @@
  *
  * 1) We have a list of fields that exist which include minimum controller
  * versions and related functionality validation routines that operate off of
- * the nvme_t. While tihs list includes things like the CSI and LID, these are
+ * the nvme_t. While this list includes things like the CSI and LID, these are
  * things that may only be specified when we have a non-standard log page.
  *
  * 2) We then have a table of log pages that are supported which list which
@@ -294,6 +294,57 @@ nvme_lpd_telemetry_len(uint64_t *outp, const void *data, size_t len)
 	return (true);
 }
 
+static bool
+nvme_lpd_eom_len(uint64_t *outp, const void *data, size_t len)
+{
+	nvme_eom_hdr_t hdr;
+	uint64_t out;
+
+	if (len < sizeof (hdr)) {
+		return (false);
+	}
+
+	(void) memcpy(&hdr, data, sizeof (hdr));
+
+	/*
+	 * The valid size depends on the value in EOMIP. If the measurement is
+	 * not done then the only amount that is valid is the overall header
+	 * length. Currently the header length is required to be 64 bytes. If it
+	 * is not that, then we will generate an error as that means something
+	 * else is going on that means we shouldn't trust this.
+	 */
+	if (hdr.eom_hsize != sizeof (hdr)) {
+		return (false);
+	}
+
+	out = sizeof (hdr);
+	switch (hdr.eom_eomip) {
+	case NVME_EOM_NOT_STARTED:
+	case NVME_EOM_IN_PROGRESS:
+		break;
+	case NVME_EOM_DONE:
+		out += hdr.eom_ds * hdr.eom_nd;
+		break;
+	default:
+		/*
+		 * This indicates we have a progress code we don't know how to
+		 * handle. It's possible that it would make sense to just return
+		 * the header size, but for now we opt to be conservative and
+		 * simply fail.
+		 */
+		return (false);
+	}
+
+	*outp = out;
+	return (true);
+}
+
+/*
+ * Short names have evolved a bit over time. When they do we put the old name as
+ * an alias record here.
+ */
+static const char *nvme_supcmd_aliases[] = { "cmdeff" };
+
 /*
  * The short names here correspond to the well defined names in nvmeadm(8) and
  * libnvme(3LIB) that users expect to be able to use. Please do not change them
@@ -357,8 +408,10 @@ const nvme_log_page_info_t nvme_std_log_pages[] = { {
 	.nlpi_scope = NVME_LOG_SCOPE_CTRL,
 	.nlpi_len = sizeof (nvme_nschange_list_t)
 }, {
-	.nlpi_short = "cmdeff",
+	.nlpi_short = "supcmd",
 	.nlpi_human = "commands supported and effects",
+	.nlpi_aliases = nvme_supcmd_aliases,
+	.nlpi_naliases = ARRAY_SIZE(nvme_supcmd_aliases),
 	.nlpi_lid = NVME_LOGPAGE_CMDSUP,
 	.nlpi_csi = NVME_CSI_NVM,
 	.nlpi_vers = &nvme_vers_1v2,
@@ -393,6 +446,44 @@ const nvme_log_page_info_t nvme_std_log_pages[] = { {
 	.nlpi_scope = NVME_LOG_SCOPE_CTRL,
 	.nlpi_len = sizeof (nvme_telemetry_log_t),
 	.nlpi_var_func = nvme_lpd_telemetry_len
+}, {
+	.nlpi_short = "supfeat",
+	.nlpi_human = "Feature Identifiers Supported and Effects",
+	.nlpi_lid = NVME_LOGPAGE_SUPFEAT,
+	.nlpi_csi = NVME_CSI_NVM,
+	.nlpi_vers = &nvme_vers_2v0,
+	.nlpi_kind = NVME_LOG_ID_MANDATORY,
+	.nlpi_source = NVME_LOG_DISC_S_SPEC,
+	.nlpi_scope = NVME_LOG_SCOPE_CTRL,
+	.nlpi_len = sizeof (nvme_supfeat_log_t)
+}, {
+	.nlpi_short = "supmicmd",
+	.nlpi_human = "NVMe-MI Commands Supported and Effects",
+	.nlpi_lid = NVME_LOGPAGE_SUPMI,
+	.nlpi_csi = NVME_CSI_NVM,
+	.nlpi_vers = &nvme_vers_2v0,
+	.nlpi_kind = NVME_LOG_ID_MANDATORY,
+	.nlpi_source = NVME_LOG_DISC_S_SPEC,
+	.nlpi_scope = NVME_LOG_SCOPE_CTRL,
+	.nlpi_len = sizeof (nvme_supmicmd_log_t)
+}, {
+	.nlpi_short = "phyeye",
+	.nlpi_human = "Physical Interface Receiver Eye Opening Measurement Log",
+	.nlpi_lid = NVME_LOGPAGE_PHYEYE,
+	.nlpi_csi = NVME_CSI_NVM,
+	/*
+	 * This log page was introduced in the PCIe 1.1 supplement. There is no
+	 * good way to discover it. It has been implemented in NVMe 2.0 based
+	 * devices so we basically tag it as a 2.0 minimum version and then rely
+	 * on the 'suplog' log page to determine presence.
+	 */
+	.nlpi_vers = &nvme_vers_2v0,
+	.nlpi_kind = NVME_LOG_ID_OPTIONAL,
+	.nlpi_source = NVME_LOG_DISC_S_SPEC,
+	.nlpi_disc = NVME_LOG_DISC_F_NEED_LSP | NVME_LOG_DISC_F_NEED_LSI,
+	.nlpi_scope = NVME_LOG_SCOPE_CTRL,
+	.nlpi_len = sizeof (nvme_eom_hdr_t),
+	.nlpi_var_func = nvme_lpd_eom_len
 } };
 
 const size_t nvme_std_log_npages = ARRAY_SIZE(nvme_std_log_pages);
