@@ -467,6 +467,41 @@ snapshot_vmcx_vcpu(struct vmctx *ctx, int vcpuid,
 
 	/* 5. VMM_ARCH via VDC_VMM_ARCH. */
 	ret = snapshot_vmm_class(ctx, vcpuid, VDC_VMM_ARCH, 1, meta);
+	if (ret != 0)
+		goto done;
+
+	/*
+	 * 6. vCPU run state (VRS_RUN / VRS_HALT / VRS_INIT / VRS_SIPI_*).
+	 *
+	 * Without this, dest vCPUs start in their default post-init state
+	 * (BSP VRS_RUN-after-vm_set_run_state is skipped via
+	 * migrate.restored, APs VRS_HALT by default), losing the source's
+	 * running-state information.  In the file-based v1 path this
+	 * caused vm_run to wedge immediately: BSP had valid registers but
+	 * run_state said "not yet runnable," so no guest code executed.
+	 * Same per-vcpu_run_state field v1 bhyve_migrate.c saves.
+	 */
+	{
+		enum vcpu_run_state rstate;
+		uint8_t sipi_vector;
+
+		if (meta->op == VM_SNAPSHOT_SAVE) {
+			if (vm_get_run_state(vcpu, &rstate, &sipi_vector) != 0) {
+				rstate = VRS_HALT;
+				sipi_vector = 0;
+			}
+		}
+		SNAPSHOT_VAR_OR_LEAVE(rstate, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(sipi_vector, meta, ret, done);
+		if (meta->op == VM_SNAPSHOT_RESTORE) {
+			if (vm_set_run_state(vcpu, rstate, sipi_vector) != 0) {
+				(void) fprintf(stderr,
+				    "vmcx: vcpu%d set_run_state(%u,%u): %s\n",
+				    vcpuid, (unsigned)rstate,
+				    (unsigned)sipi_vector, strerror(errno));
+			}
+		}
+	}
 
 done:
 	if (vcpu != NULL)
@@ -503,6 +538,109 @@ done:
  * (the snapshot orchestrator) treat this exactly like the FreeBSD
  * function; the per-class fan-out and per-vCPU iteration is hidden here.
  */
+/*
+ * Cross-host VMM_TIME merge on RESTORE.
+ *
+ * Naively writing source's vdi_time_info_v1 to dest fails with EPERM
+ * from the kernel's vmfreqratio check (FR_SCALING_NOT_SUPPORTED) when
+ * the source's captured vt_guest_freq doesn't exactly match dest's
+ * host TSC frequency, and bleeds into VHPET's vh_time_base check
+ * (future hrtime) via an un-rebased boot_hrtime.
+ *
+ * v1 handled this by reading dest's live VMM_TIME, rebasing source's
+ * boot_hrtime to dest's hrtime reference, taking dest's wall-clock /
+ * hres fields, and (on freq mismatch) scaling guest_tsc + replacing
+ * guest_freq with dest's.  Algorithm is ported verbatim from
+ * bhyve_migrate.c@4f95ad6c98; see that file for the full rationale.
+ */
+static int
+snapshot_vmm_time_merge(struct vmctx *ctx, struct vm_snapshot_meta *meta)
+{
+	uint32_t src_len = 0;
+	struct vdi_time_info_v1 src;
+	struct vdi_time_info_v1 dst;
+	uint32_t dst_result_len = 0;
+	int ret = 0;
+
+	(void) memset(&src, 0, sizeof (src));
+	(void) memset(&dst, 0, sizeof (dst));
+
+	/*
+	 * Wire format: [uint32 src_len][src_len bytes of data].
+	 * Expect src_len >= sizeof(vdi_time_info_v1); extra bytes
+	 * (forward-compat trailer) are discarded.
+	 */
+	SNAPSHOT_VAR_OR_LEAVE(src_len, meta, ret, done);
+	if (src_len < sizeof (src)) {
+		(void) fprintf(stderr,
+		    "vmm_time: source blob too short (%u < %zu)\n",
+		    src_len, sizeof (src));
+		return (EINVAL);
+	}
+	SNAPSHOT_BUF_OR_LEAVE(&src, sizeof (src), meta, ret, done);
+	if (src_len > sizeof (src)) {
+		uint8_t discard[256];
+		uint32_t rem = src_len - (uint32_t)sizeof (src);
+		while (rem > 0) {
+			uint32_t chunk = rem > sizeof (discard) ?
+			    (uint32_t)sizeof (discard) : rem;
+			SNAPSHOT_BUF_OR_LEAVE(discard, chunk, meta, ret, done);
+			rem -= chunk;
+		}
+	}
+
+	/* Read dest's live time snapshot. */
+	if (vm_data_read(ctx, -1, VDC_VMM_TIME, 1, VDX_FLAG_WRITE_COPYOUT,
+	    &dst, sizeof (dst), &dst_result_len) != 0) {
+		return (errno);
+	}
+
+	int64_t guest_uptime = src.vt_hrtime - src.vt_boot_hrtime;
+	uint64_t src_wc_ns = src.vt_hres_sec * 1000000000ULL + src.vt_hres_ns;
+	uint64_t dst_wc_ns = dst.vt_hres_sec * 1000000000ULL + dst.vt_hres_ns;
+	int64_t migrate_delta_ns = 0;
+	if (dst_wc_ns > src_wc_ns) {
+		migrate_delta_ns = (int64_t)(dst_wc_ns - src_wc_ns);
+	}
+
+	src.vt_boot_hrtime = dst.vt_hrtime -
+	    (guest_uptime + migrate_delta_ns);
+	src.vt_hrtime = dst.vt_hrtime;
+	src.vt_hres_sec = dst.vt_hres_sec;
+	src.vt_hres_ns = dst.vt_hres_ns;
+
+	if (src.vt_guest_freq != dst.vt_guest_freq) {
+		if (src.vt_guest_freq != 0) {
+			/*
+			 * new_tsc = old_tsc * dst_freq / src_freq, split
+			 * into quotient + remainder to avoid 128-bit div.
+			 */
+			uint64_t q = src.vt_guest_tsc / src.vt_guest_freq;
+			uint64_t r = src.vt_guest_tsc % src.vt_guest_freq;
+			src.vt_guest_tsc = q * dst.vt_guest_freq +
+			    r * dst.vt_guest_freq / src.vt_guest_freq;
+		}
+		src.vt_guest_freq = dst.vt_guest_freq;
+	}
+
+	if (migrate_delta_ns > 0 && src.vt_guest_freq > 0) {
+		uint64_t ns = (uint64_t)migrate_delta_ns;
+		uint64_t q = ns / 1000000000ULL;
+		uint64_t r = ns % 1000000000ULL;
+		uint64_t tsc_delta = q * src.vt_guest_freq +
+		    r * src.vt_guest_freq / 1000000000ULL;
+		src.vt_guest_tsc += tsc_delta;
+	}
+
+	if (vm_data_write(ctx, -1, VDC_VMM_TIME, 1, &src,
+	    sizeof (src)) != 0) {
+		return (errno);
+	}
+
+done:
+	return (ret);
+}
+
 int
 vm_snapshot_req(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 {
@@ -521,6 +659,15 @@ vm_snapshot_req(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 		/* VDC_RTC is version 2 in the illumos VMM — v1 uses it too. */
 		return (snapshot_vmm_class(ctx, -1, VDC_RTC, 2, meta));
 	case STRUCT_VM:
+		/*
+		 * RESTORE takes the merge path (read dest live time, rebase
+		 * boot_hrtime, apply freq scaling) to avoid the cross-host
+		 * EPERM from vmfreqratio + the future-base_time rejection
+		 * in VHPET that cascades from an un-rebased boot_hrtime.
+		 */
+		if (meta->op == VM_SNAPSHOT_RESTORE) {
+			return (snapshot_vmm_time_merge(ctx, meta));
+		}
 		return (snapshot_vmm_class(ctx, -1, VDC_VMM_TIME, 1, meta));
 	case STRUCT_VLAPIC:
 		return (snapshot_class_per_vcpu(ctx, VDC_LAPIC, 1, meta));
