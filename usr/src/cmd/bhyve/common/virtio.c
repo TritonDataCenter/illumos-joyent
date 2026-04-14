@@ -69,6 +69,7 @@
 #include "pci_emul.h"
 #ifdef BHYVE_SNAPSHOT
 #include <sys/vmm_snapshot.h>
+#include "snapshot.h"
 #endif
 #include "virtio.h"
 
@@ -2165,16 +2166,6 @@ done:
 	return (ret);
 }
 
-/*
- * Save/restore virtio queue descriptor pointers.
- *
- * TODO (v2 phase 6): the FreeBSD implementation snapshots
- * vq->vq_desc / vq_avail / vq_used via SNAPSHOT_GUEST2HOST_ADDR_OR_LEAVE,
- * which requires vm_snapshot_guest2host_addr() in libvmmapi.  That helper
- * isn't ported yet on illumos (needs paddr_host2guest reverse mapping).
- * Until then we save only the integer queue fields; the guest-physical
- * pointers are reconstructed from vq_pfn on restore.
- */
 static int
 vi_pci_snapshot_queues(struct virtio_softc *vs, struct vm_snapshot_meta *meta)
 {
@@ -2182,9 +2173,13 @@ vi_pci_snapshot_queues(struct virtio_softc *vs, struct vm_snapshot_meta *meta)
 	int ret;
 	struct virtio_consts *vc;
 	struct vqueue_info *vq;
+	struct vmctx *ctx;
+	uint64_t addr_size;
 
+	ctx = vs->vs_pi->pi_vmctx;
 	vc = vs->vs_vc;
 
+	/* Save virtio queue info */
 	for (i = 0; i < vc->vc_nvq; i++) {
 		vq = &vs->vs_queues[i];
 
@@ -2198,9 +2193,26 @@ vi_pci_snapshot_queues(struct virtio_softc *vs, struct vm_snapshot_meta *meta)
 		SNAPSHOT_VAR_OR_LEAVE(vq->vq_msix_idx, meta, ret, done);
 
 		SNAPSHOT_VAR_OR_LEAVE(vq->vq_pfn, meta, ret, done);
+
+		if (!vq_ring_ready(vq))
+			continue;
+
+		addr_size = vq->vq_qsize * sizeof (struct vring_desc);
+		SNAPSHOT_GUEST2HOST_ADDR_OR_LEAVE(ctx, vq->vq_desc, addr_size,
+		    false, meta, ret, done);
+
+		addr_size = (2 + vq->vq_qsize + 1) * sizeof (uint16_t);
+		SNAPSHOT_GUEST2HOST_ADDR_OR_LEAVE(ctx, vq->vq_avail, addr_size,
+		    false, meta, ret, done);
+
+		addr_size = (2 + 2 * vq->vq_qsize + 1) * sizeof (uint16_t);
+		SNAPSHOT_GUEST2HOST_ADDR_OR_LEAVE(ctx, vq->vq_used, addr_size,
+		    false, meta, ret, done);
+
+		SNAPSHOT_BUF_OR_LEAVE(vq->vq_desc,
+		    vring_size_aligned(vq->vq_qsize), meta, ret, done);
 	}
 
-	ret = 0;
 done:
 	return (ret);
 }

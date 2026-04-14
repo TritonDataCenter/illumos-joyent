@@ -48,6 +48,7 @@
 #ifndef	_BHYVE_VIRTIO_H_
 #define	_BHYVE_VIRTIO_H_
 
+#include <sys/param.h>
 #include <pthread_np.h>
 #include <machine/atomic.h>
 #include <sys/ccompile.h>
@@ -411,6 +412,16 @@ static inline int
 vq_ring_ready(struct vqueue_info *vq)
 {
 	return (vq->vq_flags & VQ_ALLOC);
+}
+
+#ifndef	VRING_ALIGN
+#define	VRING_ALIGN	4096
+#endif
+
+static inline u_int
+vring_size_aligned(u_int qsz)
+{
+	return (roundup2(vring_size(qsz, VRING_ALIGN), VRING_ALIGN));
 }
 
 /*
