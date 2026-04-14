@@ -696,6 +696,43 @@ pci_vtblk_snapshot(void *vsc, struct vm_snapshot_meta *meta)
 done:
 	return (ret);
 }
+
+/*
+ * pe_hibernate: close the zvol fd so `zfs recv` on the destination side
+ * of a live migration can apply the final incremental without hitting
+ * "dataset is busy".  blockif_pause() must have already quiesced the
+ * worker threads — bhyve_control.c arranges that before calling us.
+ */
+static int
+pci_vtblk_hibernate(struct pci_devinst *pi)
+{
+	struct pci_vtblk_softc *sc = pi->pi_arg;
+
+	DPRINTF(("vtblk: hibernate — closing backing fd"));
+	blockif_hibernate(sc->bc);
+	return (0);
+}
+
+/*
+ * pe_wake: re-open the zvol after `zfs recv` completes.  Called from
+ * cmd_import_state immediately before the state blob is applied.
+ */
+static int
+pci_vtblk_wake(struct pci_devinst *pi)
+{
+	struct pci_vtblk_softc *sc = pi->pi_arg;
+	int err;
+
+	err = blockif_wake(sc->bc);
+	if (err != 0) {
+		(void) fprintf(stderr,
+		    "vtblk: wake failed to re-open backing file: %s\n",
+		    strerror(err));
+	} else {
+		DPRINTF(("vtblk: wake — backing fd re-opened"));
+	}
+	return (err);
+}
 #endif /* BHYVE_SNAPSHOT */
 
 static const struct pci_devemu pci_de_vblk = {
@@ -710,6 +747,8 @@ static const struct pci_devemu pci_de_vblk = {
 	.pe_snapshot =	vi_pci_snapshot,
 	.pe_pause =	vi_pci_pause,
 	.pe_resume =	vi_pci_resume,
+	.pe_hibernate =	pci_vtblk_hibernate,
+	.pe_wake =	pci_vtblk_wake,
 #endif
 };
 PCI_EMUL_SET(pci_de_vblk);

@@ -661,6 +661,54 @@ resume_all_devices(void)
 	return (last_err);
 }
 
+/*
+ * Hibernate every PCI device that registers the optional pe_hibernate
+ * callback — in practice virtio-blk and nvme, which hold open fds on
+ * zvols that the destination side of a live migration needs to
+ * release while `zfs recv` runs.  We pause first internally because
+ * blockif_hibernate() asserts bc_paused == 1 (needed so no worker is
+ * mid-syscall when we close its fd).
+ */
+int
+hibernate_all_devices(void)
+{
+	int last_err = 0;
+	struct pci_devinst *pdi = NULL;
+
+	/*
+	 * Guarantee the pause invariant blockif_hibernate needs, without
+	 * requiring every caller to remember the ordering.  pci_pause is
+	 * idempotent on an already-paused device.
+	 */
+	pdi = NULL;
+	while ((pdi = pci_next(pdi)) != NULL) {
+		int e = pci_pause(pdi);
+		if (e != 0)
+			last_err = e;
+	}
+
+	pdi = NULL;
+	while ((pdi = pci_next(pdi)) != NULL) {
+		int e = pci_hibernate(pdi);
+		if (e != 0)
+			last_err = e;
+	}
+	return (last_err);
+}
+
+static int
+wake_all_devices(void)
+{
+	int last_err = 0;
+	struct pci_devinst *pdi = NULL;
+	while ((pdi = pci_next(pdi)) != NULL) {
+		int e = pci_wake(pdi);
+		if (e != 0)
+			last_err = e;
+	}
+	return (last_err);
+}
+
 static void
 cmd_pause(int fd)
 {
@@ -772,6 +820,29 @@ cmd_import_state(int fd, const char *line)
 		    strerror(errno));
 	}
 	(void) pause_all_devices();
+
+	/*
+	 * Re-open any blockif fds that were hibernated while we waited
+	 * for `zfs recv` to finish on the destination zvol.  Devices
+	 * that never hibernated (normal non-migrate boot, or devices
+	 * without backing fds) will be a no-op.
+	 *
+	 * This MUST happen before parse_and_apply_stream: the stream
+	 * carries BARs/register state that subsequently gets restored,
+	 * and pci_restore_bars -> pci_restore_bar_conflict calls into
+	 * device callbacks that expect a working blockif.  We also want
+	 * the imported bc_size / bc_sectsz to reflect the post-recv zvol
+	 * rather than the pre-hibernate @mig-sync-N state.
+	 */
+	int wake_err = wake_all_devices();
+	if (wake_err != 0) {
+		(void) fprintf(stderr,
+		    "import-state: wake_all_devices: %s\n",
+		    strerror(wake_err));
+		send_error(fd, strerror(wake_err));
+		free(stream);
+		return;
+	}
 
 	int ret = parse_and_apply_stream(stream, blob_len);
 	free(stream);

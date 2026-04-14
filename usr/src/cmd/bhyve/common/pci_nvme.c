@@ -3433,11 +3433,52 @@ pci_nvme_legacy_config(nvlist_t *nvl, const char *opts)
 		return (blockif_legacy_config(nvl, opts));
 }
 
+#ifdef BHYVE_SNAPSHOT
+/*
+ * pe_hibernate / pe_wake: release and re-acquire the zvol backing the
+ * NVMe namespace during the destination-side quiesce window of a
+ * live migration.  See the block_if.c comment on blockif_hibernate()
+ * for why this is needed on illumos.  NVME_STOR_RAM devices are
+ * purely in-memory and have no fd to close; they're a no-op here.
+ */
+static int
+pci_nvme_hibernate(struct pci_devinst *pi)
+{
+	struct pci_nvme_softc *sc = pi->pi_arg;
+
+	if (sc->nvstore.type != NVME_STOR_BLOCKIF)
+		return (0);
+	blockif_hibernate(sc->nvstore.ctx);
+	return (0);
+}
+
+static int
+pci_nvme_wake(struct pci_devinst *pi)
+{
+	struct pci_nvme_softc *sc = pi->pi_arg;
+	int err;
+
+	if (sc->nvstore.type != NVME_STOR_BLOCKIF)
+		return (0);
+	err = blockif_wake(sc->nvstore.ctx);
+	if (err != 0) {
+		(void) fprintf(stderr,
+		    "nvme: wake failed to re-open backing file: %s\n",
+		    strerror(err));
+	}
+	return (err);
+}
+#endif /* BHYVE_SNAPSHOT */
+
 static const struct pci_devemu pci_de_nvme = {
 	.pe_emu =	"nvme",
 	.pe_init =	pci_nvme_init,
 	.pe_legacy_config = pci_nvme_legacy_config,
 	.pe_barwrite =	pci_nvme_write,
-	.pe_barread =	pci_nvme_read
+	.pe_barread =	pci_nvme_read,
+#ifdef BHYVE_SNAPSHOT
+	.pe_hibernate =	pci_nvme_hibernate,
+	.pe_wake =	pci_nvme_wake,
+#endif
 };
 PCI_EMUL_SET(pci_de_nvme);
