@@ -48,6 +48,11 @@ int	uart_rxfifo_putchar(struct uart_softc *sc, uint8_t ch, bool loopback);
 void	uart_rxfifo_reset(struct uart_softc *sc, int size);
 int	uart_rxfifo_size(struct uart_softc *sc);
 
+#ifdef BHYVE_SNAPSHOT
+int	uart_rxfifo_snapshot(struct uart_softc *sc,
+	    struct vm_snapshot_meta *meta);
+#endif
+
 struct uart_softc *uart_init(void);
 int	uart_tty_open(struct uart_softc *sc, const char *path,
 	    void (*drain)(int, enum ev_type, void *), void *arg);
