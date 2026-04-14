@@ -125,6 +125,8 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_snapshot_buf_err;
 		vm_snapshot_req;
 		vm_restore_time;
+		vm_pause_instance;
+		vm_resume_instance;
 		vm_data_read;
 		vm_data_write;
 		vm_get_snapshot_size;

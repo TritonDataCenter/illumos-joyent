@@ -365,6 +365,9 @@ struct vm_snapshot_meta;
 int	vm_snapshot_req(struct vmctx *ctx, struct vm_snapshot_meta *meta);
 int	vm_restore_time(struct vmctx *ctx);
 
+int	vm_pause_instance(struct vmctx *ctx);
+int	vm_resume_instance(struct vmctx *ctx);
+
 #ifdef	__FreeBSD__
 /*
  * FreeBSD specific APIs
