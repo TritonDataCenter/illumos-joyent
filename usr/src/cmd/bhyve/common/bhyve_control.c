@@ -664,13 +664,21 @@ resume_all_devices(void)
 static void
 cmd_pause(int fd)
 {
+	/*
+	 * Order matters: pause vCPUs FIRST, then devices.  If we pause
+	 * devices first (marking e.g. blockif bc_paused = 1), the guest's
+	 * still-running vCPUs can fire one more virtio queue-notify which
+	 * traps into bhyve, which in turn calls blockif_request() and
+	 * trips the assert(!bc->bc_paused) in block_if.c:949.  FreeBSD's
+	 * vm_checkpoint() enforces this order too (see snapshot.c:1270).
+	 */
+	if (vm_pause_instance(ctl_ctx) != 0) {
+		send_error(fd, strerror(errno));
+		return;
+	}
 	int e = pause_all_devices();
 	if (e != 0) {
 		send_error(fd, strerror(e));
-		return;
-	}
-	if (vm_pause_instance(ctl_ctx) != 0) {
-		send_error(fd, strerror(errno));
 		return;
 	}
 	send_ok(fd);
@@ -748,13 +756,22 @@ cmd_import_state(int fd, const char *line)
 		return;
 	}
 
-	/* Pause everything before writing state (no-op if already paused). */
-	(void) pause_all_devices();
+	/*
+	 * Pause everything before writing state (no-op if already paused).
+	 * vCPUs first so there's no window where devices are pause-flagged
+	 * while a guest notify path can still call into blockif_request()
+	 * and trip the bc_paused assert (see cmd_pause comment).  On the
+	 * dest in migrate-listen mode vCPU threads haven't started yet,
+	 * so vm_pause_instance is effectively a no-op here, but we issue
+	 * it for symmetry with cmd_pause and to cover the snapshot-restore
+	 * case where vCPUs are running.
+	 */
 	if (vm_pause_instance(ctl_ctx) != 0) {
 		(void) fprintf(stderr,
 		    "import-state: vm_pause_instance: %s\n",
 		    strerror(errno));
 	}
+	(void) pause_all_devices();
 
 	int ret = parse_and_apply_stream(stream, blob_len);
 	free(stream);
