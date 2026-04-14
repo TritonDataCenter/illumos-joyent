@@ -583,6 +583,33 @@ parse_and_apply_stream(uint8_t *stream, size_t len)
 		off += sh.blob_len;
 
 		if (ret != 0) {
+			/*
+			 * System-wide kernel device classes (VMM_TIME,
+			 * VIOAPIC, VATPIC, VATPIT, VHPET, VPMTMR, VRTC)
+			 * can all hit cross-host incompatibilities on
+			 * restore: VMM_TIME wants a platform-local TSC
+			 * rebase; VHPET has a length check against the
+			 * kernel's struct-version; others may have their
+			 * own quirks.  v1 handled each case individually
+			 * (see bhyve_migrate.c); v2's bridge hasn't ported
+			 * that yet.
+			 *
+			 * For now log and continue on kernel-class restore
+			 * errors — per-vCPU VMCX state (registers, FPU,
+			 * MSRs, VMM_ARCH) and PCI device state are what
+			 * actually resume the guest.  A missing HPET tick
+			 * source or pre-merged VMM_TIME costs guest clock
+			 * accuracy, not guest survival.
+			 */
+			if (sh.kind == CTL_SEC_KERN &&
+			    sh.kern_req != STRUCT_VMCX &&
+			    sh.kern_req != STRUCT_VLAPIC) {
+				(void) fprintf(stderr,
+				    "import-state: kernel section '%s' "
+				    "(req=%u) soft-failed (%s); continuing\n",
+				    name, sh.kern_req, strerror(ret));
+				continue;
+			}
 			(void) fprintf(stderr,
 			    "import-state: section %u (%s) failed: %s\n",
 			    i, name, strerror(ret));
@@ -723,7 +750,11 @@ cmd_import_state(int fd, const char *line)
 
 	/* Pause everything before writing state (no-op if already paused). */
 	(void) pause_all_devices();
-	(void) vm_pause_instance(ctl_ctx);
+	if (vm_pause_instance(ctl_ctx) != 0) {
+		(void) fprintf(stderr,
+		    "import-state: vm_pause_instance: %s\n",
+		    strerror(errno));
+	}
 
 	int ret = parse_and_apply_stream(stream, blob_len);
 	free(stream);
