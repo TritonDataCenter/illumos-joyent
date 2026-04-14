@@ -285,8 +285,19 @@ snapshot_vmcx(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 	int ret = 0;
 	int i, ncpus;
 	uint16_t sockets, cores, threads, maxcpus;
+	/*
+	 * VDC_REGISTER and VDC_FPU are not reachable via VM_DATA_READ on
+	 * illumos today — vmm_data_from_class's per-vCPU path either
+	 * panics (register) or returns ENOTSUP (FPU).  General registers
+	 * need vm_get/set_register_set(), FPU needs VM_GET/SET_FPU; the
+	 * v1 bhyve_migrate.c code does this and the bridge here will
+	 * eventually grow the same side-channel.  For now, ship MSR +
+	 * VMM_ARCH only — enough to test the export/import pipeline end-
+	 * to-end even if the restored vCPU can't actually resume cleanly
+	 * without registers.
+	 */
 	static const uint16_t vmcx_classes[] = {
-		VDC_REGISTER, VDC_MSR, VDC_FPU, VDC_VMM_ARCH,
+		VDC_MSR, VDC_VMM_ARCH,
 	};
 
 	if (vm_get_topology(ctx, &sockets, &cores, &threads, &maxcpus) != 0)
@@ -332,7 +343,8 @@ vm_snapshot_req(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 	case STRUCT_VPMTMR:
 		return (snapshot_vmm_class(ctx, -1, VDC_PM_TIMER, 1, meta));
 	case STRUCT_VRTC:
-		return (snapshot_vmm_class(ctx, -1, VDC_RTC, 1, meta));
+		/* VDC_RTC is version 2 in the illumos VMM — v1 uses it too. */
+		return (snapshot_vmm_class(ctx, -1, VDC_RTC, 2, meta));
 	case STRUCT_VM:
 		return (snapshot_vmm_class(ctx, -1, VDC_VMM_TIME, 1, meta));
 	case STRUCT_VLAPIC:
