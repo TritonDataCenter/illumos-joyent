@@ -805,6 +805,29 @@ main(int argc, char *argv[])
 			vcpu_info[vcpuid].vcpu = vm_vcpu_open(ctx, vcpuid);
 	}
 
+#ifndef	__FreeBSD__
+	/*
+	 * When the destination bhyve is going to wait for an imported
+	 * snapshot, pre-initialize every non-BSP vCPU now (before the
+	 * imported LAPIC blob arrives).  bhyve_init_vcpu() -> vm_set_x2apic_state()
+	 * unconditionally rewrites the vLAPIC id/LDR/DFR and toggles the
+	 * X2APIC bit in APICBASE (see vlapic_set_x2apic_state()); running it
+	 * after VDC_LAPIC restore wipes the AP's logical destination register
+	 * and starves the AP of timer/IPI delivery on the destination host.
+	 * The BSP is already initialised a few lines above for the same
+	 * reason.  bhyve_start_vcpu() below skips its per-vCPU init for APs
+	 * when migrate.restored is set so we don't double-init and clobber
+	 * the just-imported state a second time.
+	 */
+	if (get_config_bool_default("migrate.listen", false)) {
+		for (int vcpuid = 0; vcpuid < guest_ncpus; vcpuid++) {
+			if (vcpuid == BSP)
+				continue;
+			bhyve_init_vcpu(vcpu_info[vcpuid].vcpu);
+		}
+	}
+#endif
+
 	memflags = 0;
 	if (get_config_bool_default("memory.wired", false))
 		memflags |= VM_MEM_F_WIRED;
