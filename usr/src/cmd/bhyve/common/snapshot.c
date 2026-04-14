@@ -61,6 +61,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include <machine/vmm.h>
 #include <vmmapi.h>
 
 #include "bhyverun.h"
