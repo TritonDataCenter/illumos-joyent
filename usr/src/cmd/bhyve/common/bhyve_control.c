@@ -589,9 +589,12 @@ static void
 cmd_status(int fd)
 {
 	const char *name = vm_get_name(ctl_ctx);
+	size_t lowmem = vm_get_lowmem_size(ctl_ctx);
+	size_t highmem = vm_get_highmem_size(ctl_ctx);
 	send_json(fd,
-	    "{\"status\":\"ok\",\"name\":\"%s\",\"ncpus\":%d}",
-	    name != NULL ? name : "", ctl_ncpus);
+	    "{\"status\":\"ok\",\"name\":\"%s\",\"ncpus\":%d,"
+	    "\"lowmem\":%zu,\"highmem\":%zu}",
+	    name != NULL ? name : "", ctl_ncpus, lowmem, highmem);
 }
 
 static int
