@@ -92,6 +92,7 @@ CPPFLAGS =	-I../common \
 		-I$(SRC)/uts/common \
 		-I$(SRC)/uts/intel \
 		-DWITHOUT_CAPSICUM \
+		-DBHYVE_SNAPSHOT \
 		-DOPENSSL_API_COMPAT=10101
 
 SMOFF += all_func_returns

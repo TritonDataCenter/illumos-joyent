@@ -51,6 +51,7 @@
 struct vmctx;
 struct pci_devinst;
 struct memory_region;
+struct vm_snapshot_meta;
 
 struct pci_devemu {
 	const char      *pe_emu;	/* Name of device emulation */
@@ -80,6 +81,13 @@ struct pci_devemu {
 #ifndef __FreeBSD__
 	void	(*pe_lintrupdate)(struct pci_devinst *pi);
 #endif /* __FreeBSD__ */
+
+#ifdef BHYVE_SNAPSHOT
+	/* Save/restore device state */
+	int	(*pe_snapshot)(struct vm_snapshot_meta *meta);
+	int	(*pe_pause)(struct pci_devinst *pi);
+	int	(*pe_resume)(struct pci_devinst *pi);
+#endif
 };
 #define PCI_EMUL_SET(x)   DATA_SET(pci_devemu_set, x)
 
@@ -277,6 +285,13 @@ void	pci_walk_lintr(int bus, pci_lintr_cb cb, void *arg);
 void	pci_write_dsdt(void);
 uint64_t pci_ecfg_base(void);
 int	pci_bus_configured(int bus);
+
+#ifdef BHYVE_SNAPSHOT
+struct pci_devinst *pci_next(const struct pci_devinst *cursor);
+int	pci_snapshot(struct vm_snapshot_meta *meta);
+int	pci_pause(struct pci_devinst *pdi);
+int	pci_resume(struct pci_devinst *pdi);
+#endif
 
 static __inline void
 pci_set_cfgdata8(struct pci_devinst *pi, int offset, uint8_t val)

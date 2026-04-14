@@ -59,6 +59,9 @@
 
 #include <machine/vmm.h>
 #include <vmmapi.h>
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 
 #include "acpi.h"
 #include "bhyverun.h"
@@ -2444,6 +2447,141 @@ INOUT_PORT(pci_cfgdata, CONF1_DATA_PORT+0, IOPORT_F_INOUT, pci_emul_cfgdata);
 INOUT_PORT(pci_cfgdata, CONF1_DATA_PORT+1, IOPORT_F_INOUT, pci_emul_cfgdata);
 INOUT_PORT(pci_cfgdata, CONF1_DATA_PORT+2, IOPORT_F_INOUT, pci_emul_cfgdata);
 INOUT_PORT(pci_cfgdata, CONF1_DATA_PORT+3, IOPORT_F_INOUT, pci_emul_cfgdata);
+
+#ifdef BHYVE_SNAPSHOT
+/*
+ * Saves/restores PCI device emulated state.  Returns 0 on success.
+ */
+static int
+pci_snapshot_pci_dev(struct vm_snapshot_meta *meta)
+{
+	struct pci_devinst *pi;
+	int i;
+	int ret;
+
+	pi = meta->dev_data;
+
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msi.enabled, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msi.addr, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msi.msg_data, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msi.maxmsgnum, meta, ret, done);
+
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.enabled, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.table_bar, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.pba_bar, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.table_offset, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.table_count, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.pba_offset, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.pba_size, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.function_mask, meta, ret, done);
+
+	SNAPSHOT_BUF_OR_LEAVE(pi->pi_cfgdata, sizeof (pi->pi_cfgdata),
+	    meta, ret, done);
+
+	for (i = 0; i < (int)nitems(pi->pi_bar); i++) {
+		SNAPSHOT_VAR_OR_LEAVE(pi->pi_bar[i].type, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(pi->pi_bar[i].size, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(pi->pi_bar[i].addr, meta, ret, done);
+	}
+
+	/* Restore MSI-X table. */
+	for (i = 0; i < pi->pi_msix.table_count; i++) {
+		SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.table[i].addr,
+		    meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.table[i].msg_data,
+		    meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(pi->pi_msix.table[i].vector_control,
+		    meta, ret, done);
+	}
+
+done:
+	return (ret);
+}
+
+int
+pci_snapshot(struct vm_snapshot_meta *meta)
+{
+	struct pci_devemu *pde;
+	struct pci_devinst *pdi;
+	int ret;
+
+	assert(meta->dev_name != NULL);
+
+	pdi = meta->dev_data;
+	pde = pdi->pi_d;
+
+	if (pde->pe_snapshot == NULL)
+		return (ENOTSUP);
+
+	ret = pci_snapshot_pci_dev(meta);
+	if (ret == 0)
+		ret = (*pde->pe_snapshot)(meta);
+
+	return (ret);
+}
+
+int
+pci_pause(struct pci_devinst *pdi)
+{
+	struct pci_devemu *pde = pdi->pi_d;
+
+	if (pde->pe_pause == NULL) {
+		/* The pause/resume functionality is optional. */
+		return (0);
+	}
+
+	return ((*pde->pe_pause)(pdi));
+}
+
+int
+pci_resume(struct pci_devinst *pdi)
+{
+	struct pci_devemu *pde = pdi->pi_d;
+
+	if (pde->pe_resume == NULL) {
+		/* The pause/resume functionality is optional. */
+		return (0);
+	}
+
+	return ((*pde->pe_resume)(pdi));
+}
+
+struct pci_devinst *
+pci_next(const struct pci_devinst *cursor)
+{
+	unsigned bus = 0, slot = 0, func = 0;
+	struct businfo *bi;
+	struct slotinfo *si;
+	struct funcinfo *fi;
+
+	bus = cursor ? cursor->pi_bus : 0;
+	slot = cursor ? cursor->pi_slot : 0;
+	func = cursor ? (cursor->pi_func + 1) : 0;
+
+	for (; bus < MAXBUSES; bus++) {
+		if ((bi = pci_businfo[bus]) == NULL)
+			continue;
+
+		if (slot >= MAXSLOTS)
+			slot = 0;
+
+		for (; slot < MAXSLOTS; slot++) {
+			si = &bi->slotinfo[slot];
+			if (func >= MAXFUNCS)
+				func = 0;
+			for (; func < MAXFUNCS; func++) {
+				fi = &si->si_funcs[func];
+				if (fi->fi_devi == NULL)
+					continue;
+
+				return (fi->fi_devi);
+			}
+		}
+	}
+
+	return (NULL);
+}
+#endif /* BHYVE_SNAPSHOT */
 
 #define PCI_EMUL_TEST
 #ifdef PCI_EMUL_TEST
