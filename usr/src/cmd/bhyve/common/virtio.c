@@ -67,6 +67,9 @@
 #include "config.h"
 #include "debug.h"
 #include "pci_emul.h"
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 #include "virtio.h"
 
 /*
@@ -2100,3 +2103,143 @@ done:
 	if (vs->vs_mtx)
 		pthread_mutex_unlock(vs->vs_mtx);
 }
+
+#ifdef BHYVE_SNAPSHOT
+int
+vi_pci_pause(struct pci_devinst *pi)
+{
+	struct virtio_softc *vs;
+	struct virtio_consts *vc;
+
+	vs = pi->pi_arg;
+	vc = vs->vs_vc;
+
+	assert(vc->vc_pause != NULL);
+	(*vc->vc_pause)(DEV_SOFTC(vs));
+
+	return (0);
+}
+
+int
+vi_pci_resume(struct pci_devinst *pi)
+{
+	struct virtio_softc *vs;
+	struct virtio_consts *vc;
+
+	vs = pi->pi_arg;
+	vc = vs->vs_vc;
+
+	assert(vc->vc_resume != NULL);
+	(*vc->vc_resume)(DEV_SOFTC(vs));
+
+	return (0);
+}
+
+static int
+vi_pci_snapshot_softc(struct virtio_softc *vs, struct vm_snapshot_meta *meta)
+{
+	int ret;
+
+	SNAPSHOT_VAR_OR_LEAVE(vs->vs_flags, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(vs->vs_negotiated_caps, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(vs->vs_curq, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(vs->vs_status, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(vs->vs_isr, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(vs->vs_msix_cfg_idx, meta, ret, done);
+
+done:
+	return (ret);
+}
+
+static int
+vi_pci_snapshot_consts(struct virtio_consts *vc, struct vm_snapshot_meta *meta)
+{
+	int ret;
+
+	SNAPSHOT_VAR_CMP_OR_LEAVE(vc->vc_nvq, meta, ret, done);
+	SNAPSHOT_VAR_CMP_OR_LEAVE(vc->vc_cfgsize, meta, ret, done);
+	SNAPSHOT_VAR_CMP_OR_LEAVE(vc->vc_hv_caps_legacy, meta, ret, done);
+	SNAPSHOT_VAR_CMP_OR_LEAVE(vc->vc_hv_caps_modern, meta, ret, done);
+
+done:
+	return (ret);
+}
+
+/*
+ * Save/restore virtio queue descriptor pointers.
+ *
+ * TODO (v2 phase 6): the FreeBSD implementation snapshots
+ * vq->vq_desc / vq_avail / vq_used via SNAPSHOT_GUEST2HOST_ADDR_OR_LEAVE,
+ * which requires vm_snapshot_guest2host_addr() in libvmmapi.  That helper
+ * isn't ported yet on illumos (needs paddr_host2guest reverse mapping).
+ * Until then we save only the integer queue fields; the guest-physical
+ * pointers are reconstructed from vq_pfn on restore.
+ */
+static int
+vi_pci_snapshot_queues(struct virtio_softc *vs, struct vm_snapshot_meta *meta)
+{
+	int i;
+	int ret;
+	struct virtio_consts *vc;
+	struct vqueue_info *vq;
+
+	vc = vs->vs_vc;
+
+	for (i = 0; i < vc->vc_nvq; i++) {
+		vq = &vs->vs_queues[i];
+
+		SNAPSHOT_VAR_CMP_OR_LEAVE(vq->vq_qsize, meta, ret, done);
+		SNAPSHOT_VAR_CMP_OR_LEAVE(vq->vq_num, meta, ret, done);
+
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_flags, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_last_avail, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_next_used, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_save_used, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_msix_idx, meta, ret, done);
+
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_pfn, meta, ret, done);
+	}
+
+	ret = 0;
+done:
+	return (ret);
+}
+
+int
+vi_pci_snapshot(struct vm_snapshot_meta *meta)
+{
+	int ret;
+	struct pci_devinst *pi;
+	struct virtio_softc *vs;
+	struct virtio_consts *vc;
+
+	pi = meta->dev_data;
+	vs = pi->pi_arg;
+	vc = vs->vs_vc;
+
+	/* Save virtio softc */
+	ret = vi_pci_snapshot_softc(vs, meta);
+	if (ret != 0)
+		goto done;
+
+	/* Save virtio consts */
+	ret = vi_pci_snapshot_consts(vc, meta);
+	if (ret != 0)
+		goto done;
+
+	/* Save virtio queue info */
+	ret = vi_pci_snapshot_queues(vs, meta);
+	if (ret != 0)
+		goto done;
+
+	/* Save device softc, if needed */
+	if (vc->vc_snapshot != NULL) {
+		ret = (*vc->vc_snapshot)(DEV_SOFTC(vs), meta);
+		if (ret != 0)
+			goto done;
+	}
+
+done:
+	return (ret);
+}
+#endif /* BHYVE_SNAPSHOT */
