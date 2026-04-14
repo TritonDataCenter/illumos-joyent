@@ -27,6 +27,7 @@ COMMON_OBJS = \
 	acpi.o			\
 	acpi_device.o		\
 	basl.o			\
+	bhyve_control.o		\
 	bhyvegc.o		\
 	bhyverun.o		\
 	block_if.o		\
