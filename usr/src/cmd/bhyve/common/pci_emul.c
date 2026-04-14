@@ -2479,6 +2479,21 @@ pci_snapshot_pci_dev(struct vm_snapshot_meta *meta)
 	    meta, ret, done);
 
 	for (i = 0; i < (int)nitems(pi->pi_bar); i++) {
+		/*
+		 * On RESTORE, tear down the current VMM-side MMIO / IO
+		 * registration at the destination's startup BAR address
+		 * BEFORE the SNAPSHOT_VAR_OR_LEAVE calls overwrite
+		 * pi_bar[].addr with the source's value.  Re-registration
+		 * at the new address happens in pci_restore_bars() once
+		 * every device has been parsed and the cross-device
+		 * conflict check has run.
+		 */
+		if (meta->op == VM_SNAPSHOT_RESTORE &&
+		    pi->pi_bar[i].type != PCIBAR_NONE &&
+		    pi->pi_bar[i].type != PCIBAR_MEMHI64 &&
+		    pi->pi_bar[i].addr != 0) {
+			unregister_bar(pi, i);
+		}
 		SNAPSHOT_VAR_OR_LEAVE(pi->pi_bar[i].type, meta, ret, done);
 		SNAPSHOT_VAR_OR_LEAVE(pi->pi_bar[i].size, meta, ret, done);
 		SNAPSHOT_VAR_OR_LEAVE(pi->pi_bar[i].addr, meta, ret, done);
@@ -2544,6 +2559,235 @@ pci_resume(struct pci_devinst *pdi)
 	}
 
 	return ((*pde->pe_resume)(pdi));
+}
+
+/*
+ * Validate that a BAR restored from a migration blob is safe to hand
+ * to register_bar().  register_bar -> modify_bar_registration ->
+ * register_inout / register_mem asserts on out-of-range ranges via
+ * VERIFY_IOPORT and equivalents; those asserts SIGABRT the whole
+ * bhyve.  Turning a malformed migration payload into a denial-of-
+ * service is exactly the hardening gap we closed on v1 (C-2) —
+ * port that check here.
+ */
+static bool
+bar_restore_in_range(const struct pci_devinst *pi, int idx)
+{
+	uint64_t addr = pi->pi_bar[idx].addr;
+	uint64_t size = pi->pi_bar[idx].size;
+
+	if (size == 0)
+		return (false);
+	if (addr + size < addr)		/* u64 overflow */
+		return (false);
+
+	switch (pi->pi_bar[idx].type) {
+	case PCIBAR_IO:
+		/* VERIFY_IOPORT requires port + size <= 0x10000. */
+		return (addr <= 0xffff && addr + size <= 0x10000);
+	case PCIBAR_MEM32:
+		return (addr <= 0xffffffffu &&
+		    addr + size <= 0x100000000ULL);
+	case PCIBAR_MEM64:
+		/*
+		 * Any 64-bit address is legal as far as the register
+		 * interface is concerned; u64 overflow was rejected above.
+		 */
+		return (true);
+	case PCIBAR_ROM:
+	default:
+		return (true);
+	}
+}
+
+/*
+ * One record in the BAR-conflict sweep (see pci_restore_bar_conflict
+ * below).  Populated from each enabled, restored BAR on each device.
+ */
+struct bar_slot {
+	struct pci_devinst	*pi;
+	int			idx;
+	enum pcibar_type	type;
+	uint64_t		start;
+	uint64_t		end;	/* inclusive */
+};
+
+/*
+ * Cross-device BAR-conflict pre-flight for migration restore (C-3).
+ *
+ * register_mem_int() silently frees (drops) the incoming range if its
+ * base collides with an existing entry in the rb-tree — see the
+ * comment at mem.c:214-220 on why the general path swallows overlaps.
+ * But register_mem returns 0 in that case, modify_bar_registration
+ * thinks it succeeded, and pe_baraddr() is called telling the device
+ * "you're live at addr X" even though MMIO routing for X still points
+ * at whichever device got there first.  A crafted migration payload
+ * with two BARs at the same address produces a routing discrepancy
+ * (e.g. viona programs its notify hook at X but MMIO to X is handled
+ * by virtio-blk).
+ *
+ * Detect this BEFORE touching the rb-tree by walking the just-restored
+ * pi_bar[] arrays and rejecting any overlap within the same address
+ * space (IO vs MMIO).  MEM32 and MEM64 share the 64-bit MMIO space.
+ */
+static int
+pci_restore_bar_conflict(void)
+{
+	struct businfo *bi;
+	struct slotinfo *si;
+	struct funcinfo *fi;
+	struct pci_devinst *pi;
+	/*
+	 * Worst case: 256 buses × 32 slots × 8 funcs × 6 BARs = ~400K
+	 * entries × sizeof(bar_slot) = ~12 MB, past the thread's
+	 * default 64 KB stack.  Heap-allocate.
+	 */
+	const size_t cap = MAXBUSES * MAXSLOTS * MAXFUNCS *
+	    ((size_t)PCI_BARMAX + 1);
+	struct bar_slot *slots = calloc(cap, sizeof (*slots));
+	if (slots == NULL) {
+		(void) fprintf(stderr,
+		    "pci_restore_bars: BAR-conflict scratch alloc failed\n");
+		return (-1);
+	}
+	int n = 0;
+
+	for (int bus = 0; bus < MAXBUSES; bus++) {
+		if ((bi = pci_businfo[bus]) == NULL)
+			continue;
+		for (int slot = 0; slot < MAXSLOTS; slot++) {
+			si = &bi->slotinfo[slot];
+			for (int func = 0; func < MAXFUNCS; func++) {
+				fi = &si->si_funcs[func];
+				pi = fi->fi_devi;
+				if (pi == NULL)
+					continue;
+				for (int i = 0; i <= PCI_BARMAX; i++) {
+					enum pcibar_type t = pi->pi_bar[i].type;
+					uint64_t addr = pi->pi_bar[i].addr;
+					uint64_t size = pi->pi_bar[i].size;
+
+					if (t == PCIBAR_NONE ||
+					    t == PCIBAR_MEMHI64)
+						continue;
+					if (addr == 0 || size == 0)
+						continue;
+
+					slots[n].pi = pi;
+					slots[n].idx = i;
+					slots[n].type = t;
+					slots[n].start = addr;
+					slots[n].end = addr + size - 1;
+					n++;
+				}
+			}
+		}
+	}
+
+	/* O(n^2) but n is tiny (< 256 on realistic VMs). */
+	for (int i = 0; i < n; i++) {
+		for (int j = i + 1; j < n; j++) {
+			bool a_io = slots[i].type == PCIBAR_IO;
+			bool b_io = slots[j].type == PCIBAR_IO;
+			if (a_io != b_io)
+				continue;
+
+			/* [s1..e1] and [s2..e2] overlap iff s1<=e2 && s2<=e1. */
+			if (slots[i].start <= slots[j].end &&
+			    slots[j].start <= slots[i].end) {
+				(void) fprintf(stderr,
+				    "pci_restore_bars: BAR conflict — "
+				    "dev%p[%d] type=%d [0x%lx..0x%lx] vs "
+				    "dev%p[%d] type=%d [0x%lx..0x%lx]; "
+				    "refusing restore\n",
+				    (void *)slots[i].pi, slots[i].idx,
+				    (int)slots[i].type,
+				    (unsigned long)slots[i].start,
+				    (unsigned long)slots[i].end,
+				    (void *)slots[j].pi, slots[j].idx,
+				    (int)slots[j].type,
+				    (unsigned long)slots[j].start,
+				    (unsigned long)slots[j].end);
+				free(slots);
+				return (-1);
+			}
+		}
+	}
+	free(slots);
+	return (0);
+}
+
+/*
+ * Re-register every restored BAR with the VMM.
+ *
+ * Must be called after the migration blob has been applied to every
+ * device (via pci_snapshot -> pci_snapshot_pci_dev, which also
+ * unregisters the destination's startup BARs).  Runs two passes:
+ *
+ *   1. pci_restore_bar_conflict — reject overlapping BARs (C-3)
+ *   2. per-BAR register_bar with bar_restore_in_range validation (C-2)
+ *
+ * Returns 0 on success; -1 on detected conflict or out-of-range BAR.
+ */
+int
+pci_restore_bars(void)
+{
+	struct businfo *bi;
+	struct slotinfo *si;
+	struct funcinfo *fi;
+	struct pci_devinst *pi;
+
+	if (pci_restore_bar_conflict() != 0)
+		return (-1);
+
+	for (int bus = 0; bus < MAXBUSES; bus++) {
+		if ((bi = pci_businfo[bus]) == NULL)
+			continue;
+		for (int slot = 0; slot < MAXSLOTS; slot++) {
+			si = &bi->slotinfo[slot];
+			for (int func = 0; func < MAXFUNCS; func++) {
+				fi = &si->si_funcs[func];
+				pi = fi->fi_devi;
+				if (pi == NULL)
+					continue;
+
+				int decode = memen(pi) || porten(pi);
+				if (!decode)
+					continue;
+
+				for (int i = 0; i <= PCI_BARMAX; i++) {
+					enum pcibar_type t = pi->pi_bar[i].type;
+					if (t == PCIBAR_NONE ||
+					    t == PCIBAR_MEMHI64)
+						continue;
+					if (pi->pi_bar[i].addr == 0)
+						continue;
+					int r_decode = (t == PCIBAR_IO) ?
+					    porten(pi) : memen(pi);
+					if (!r_decode)
+						continue;
+
+					if (!bar_restore_in_range(pi, i)) {
+						(void) fprintf(stderr,
+						    "pci_restore_bars: BAR "
+						    "%d out of range "
+						    "(type=%d addr=0x%lx "
+						    "size=0x%lx); refusing "
+						    "restore\n",
+						    i, (int)t,
+						    (unsigned long)
+						    pi->pi_bar[i].addr,
+						    (unsigned long)
+						    pi->pi_bar[i].size);
+						return (-1);
+					}
+					register_bar(pi, i);
+				}
+			}
+		}
+	}
+
+	return (0);
 }
 
 struct pci_devinst *
