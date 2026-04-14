@@ -60,8 +60,14 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/ioctl.h>
 
+#include <machine/vmm.h>
+#include <sys/vmm_data.h>
+#include <sys/vmm_dev.h>
 #include <sys/vmm_snapshot.h>
+
+#include <vmmapi.h>
 
 void
 vm_snapshot_buf_err(const char *bufname, const enum vm_snapshot_op op)
@@ -150,4 +156,207 @@ vm_snapshot_buf_cmp(void *data, size_t data_size, struct vm_snapshot_meta *meta)
 	buffer->buf_rem -= data_size;
 
 	return (ret);
+}
+
+/*
+ * Low-level wrappers around the VM_DATA_READ / VM_DATA_WRITE ioctls.
+ *
+ * These are illumos-specific and have no FreeBSD analogue — FreeBSD's
+ * snapshot path uses a single VM_SNAPSHOT_REQ ioctl that takes a
+ * vm_snapshot_meta directly.  illumos's vmm kernel exposes per-class
+ * data via VDC_* identifiers under VM_DATA_READ / VM_DATA_WRITE; the
+ * vm_snapshot_req() bridge below adapts FreeBSD's snapshot_req contract
+ * onto these.
+ */
+int
+vm_data_read(struct vmctx *ctx, int vcpuid, uint16_t class,
+    uint16_t version, uint32_t flags, void *data, uint32_t len,
+    uint32_t *result_len)
+{
+	struct vm_data_xfer xfer;
+	int ret;
+
+	(void) memset(&xfer, 0, sizeof (xfer));
+	xfer.vdx_vcpuid = vcpuid;
+	xfer.vdx_class = class;
+	xfer.vdx_version = version;
+	xfer.vdx_flags = flags;
+	xfer.vdx_len = len;
+	xfer.vdx_data = data;
+
+	ret = ioctl(vm_get_device_fd(ctx), VM_DATA_READ, &xfer);
+	if (ret == 0 && result_len != NULL)
+		*result_len = xfer.vdx_result_len;
+
+	return (ret);
+}
+
+int
+vm_data_write(struct vmctx *ctx, int vcpuid, uint16_t class,
+    uint16_t version, void *data, uint32_t len)
+{
+	struct vm_data_xfer xfer;
+
+	(void) memset(&xfer, 0, sizeof (xfer));
+	xfer.vdx_vcpuid = vcpuid;
+	xfer.vdx_class = class;
+	xfer.vdx_version = version;
+	xfer.vdx_flags = 0;
+	xfer.vdx_len = len;
+	xfer.vdx_data = data;
+
+	return (ioctl(vm_get_device_fd(ctx), VM_DATA_WRITE, &xfer));
+}
+
+/*
+ * Save or restore one (class, vcpuid) pair through the snapshot meta
+ * buffer.  Wire format is [uint32_t length][length bytes of data] so a
+ * variable-length per-class blob can be reconstructed at restore time
+ * without out-of-band metadata.
+ */
+static int
+snapshot_vmm_class(struct vmctx *ctx, int vcpuid, uint16_t class,
+    uint16_t version, struct vm_snapshot_meta *meta)
+{
+	uint8_t scratch[VM_DATA_XFER_LIMIT];
+	uint32_t len = 0;
+	int ret = 0;
+
+	if (meta->op == VM_SNAPSHOT_SAVE) {
+		if (vm_data_read(ctx, vcpuid, class, version,
+		    VDX_FLAG_WRITE_COPYOUT, scratch, sizeof (scratch),
+		    &len) != 0) {
+			return (errno);
+		}
+		SNAPSHOT_VAR_OR_LEAVE(len, meta, ret, done);
+		SNAPSHOT_BUF_OR_LEAVE(scratch, len, meta, ret, done);
+	} else {
+		SNAPSHOT_VAR_OR_LEAVE(len, meta, ret, done);
+		if (len > sizeof (scratch))
+			return (EOVERFLOW);
+		SNAPSHOT_BUF_OR_LEAVE(scratch, len, meta, ret, done);
+		if (vm_data_write(ctx, vcpuid, class, version, scratch,
+		    len) != 0) {
+			return (errno);
+		}
+	}
+
+done:
+	return (ret);
+}
+
+/*
+ * Iterate a per-vCPU class across every active vCPU.  ncpus is encoded
+ * into the buffer so the restore side can validate.
+ */
+static int
+snapshot_class_per_vcpu(struct vmctx *ctx, uint16_t class,
+    uint16_t version, struct vm_snapshot_meta *meta)
+{
+	int ret = 0;
+	int i, ncpus;
+	uint16_t sockets, cores, threads, maxcpus;
+
+	if (vm_get_topology(ctx, &sockets, &cores, &threads, &maxcpus) != 0)
+		return (errno);
+	ncpus = (int)maxcpus;
+
+	SNAPSHOT_VAR_OR_LEAVE(ncpus, meta, ret, done);
+
+	for (i = 0; i < ncpus; i++) {
+		ret = snapshot_vmm_class(ctx, i, class, version, meta);
+		if (ret != 0)
+			goto done;
+	}
+
+done:
+	return (ret);
+}
+
+/*
+ * STRUCT_VMCX in FreeBSD packs the per-vCPU execution context (general
+ * registers, MSRs, FPU, VMM-arch state) into one snapshot_req.  illumos
+ * splits these across four VDC_* classes; we save them in a stable
+ * order so the restore side can replay them.
+ */
+static int
+snapshot_vmcx(struct vmctx *ctx, struct vm_snapshot_meta *meta)
+{
+	int ret = 0;
+	int i, ncpus;
+	uint16_t sockets, cores, threads, maxcpus;
+	static const uint16_t vmcx_classes[] = {
+		VDC_REGISTER, VDC_MSR, VDC_FPU, VDC_VMM_ARCH,
+	};
+
+	if (vm_get_topology(ctx, &sockets, &cores, &threads, &maxcpus) != 0)
+		return (errno);
+	ncpus = (int)maxcpus;
+
+	SNAPSHOT_VAR_OR_LEAVE(ncpus, meta, ret, done);
+
+	for (i = 0; i < ncpus; i++) {
+		uint_t k;
+		for (k = 0;
+		    k < sizeof (vmcx_classes) / sizeof (vmcx_classes[0]);
+		    k++) {
+			ret = snapshot_vmm_class(ctx, i, vmcx_classes[k], 1,
+			    meta);
+			if (ret != 0)
+				goto done;
+		}
+	}
+
+done:
+	return (ret);
+}
+
+/*
+ * vm_snapshot_req bridges FreeBSD's snapshot_req contract onto illumos's
+ * VM_DATA_READ / VM_DATA_WRITE ioctls plus the VDC_* classes.  Callers
+ * (the snapshot orchestrator) treat this exactly like the FreeBSD
+ * function; the per-class fan-out and per-vCPU iteration is hidden here.
+ */
+int
+vm_snapshot_req(struct vmctx *ctx, struct vm_snapshot_meta *meta)
+{
+	switch (meta->dev_req) {
+	case STRUCT_VIOAPIC:
+		return (snapshot_vmm_class(ctx, -1, VDC_IOAPIC, 1, meta));
+	case STRUCT_VATPIC:
+		return (snapshot_vmm_class(ctx, -1, VDC_ATPIC, 1, meta));
+	case STRUCT_VATPIT:
+		return (snapshot_vmm_class(ctx, -1, VDC_ATPIT, 1, meta));
+	case STRUCT_VHPET:
+		return (snapshot_vmm_class(ctx, -1, VDC_HPET, 1, meta));
+	case STRUCT_VPMTMR:
+		return (snapshot_vmm_class(ctx, -1, VDC_PM_TIMER, 1, meta));
+	case STRUCT_VRTC:
+		return (snapshot_vmm_class(ctx, -1, VDC_RTC, 1, meta));
+	case STRUCT_VM:
+		return (snapshot_vmm_class(ctx, -1, VDC_VMM_TIME, 1, meta));
+	case STRUCT_VLAPIC:
+		return (snapshot_class_per_vcpu(ctx, VDC_LAPIC, 1, meta));
+	case STRUCT_VMCX:
+		return (snapshot_vmcx(ctx, meta));
+	case VM_MEM:
+		/* Memory is snapshotted via the GZ agent's mmap path */
+		return (EINVAL);
+	default:
+		return (EINVAL);
+	}
+}
+
+int
+vm_restore_time(struct vmctx *ctx)
+{
+	/*
+	 * FreeBSD has a dedicated VM_RESTORE_TIME ioctl that re-anchors
+	 * the VM clock to host wall-clock after restore.  illumos folds
+	 * the equivalent into VDC_VMM_TIME write — so the time class
+	 * snapshot itself acts as the trigger.  This is a no-op shim
+	 * provided so callers that match FreeBSD's API contract compile.
+	 */
+	(void) ctx;
+	return (0);
 }

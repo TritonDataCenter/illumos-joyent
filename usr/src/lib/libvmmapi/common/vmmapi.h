@@ -348,7 +348,22 @@ int vm_get_run_state(struct vcpu *vcpu, enum vcpu_run_state *state,
 int vm_set_run_state(struct vcpu *vcpu, enum vcpu_run_state state,
     uint8_t sipi_vector);
 int vm_vcpu_barrier(struct vcpu *vcpu);
+
+/*
+ * Low-level VM_DATA_READ / VM_DATA_WRITE wrappers used by
+ * vm_snapshot_req() and any consumer needing direct VDC_* access.
+ * Userspace-only; not in the FreeBSD libvmmapi.
+ */
+int	vm_data_read(struct vmctx *ctx, int vcpuid, uint16_t class,
+    uint16_t version, uint32_t flags, void *data, uint32_t len,
+    uint32_t *result_len);
+int	vm_data_write(struct vmctx *ctx, int vcpuid, uint16_t class,
+    uint16_t version, void *data, uint32_t len);
 #endif	/* __FreeBSD__ */
+
+struct vm_snapshot_meta;
+int	vm_snapshot_req(struct vmctx *ctx, struct vm_snapshot_meta *meta);
+int	vm_restore_time(struct vmctx *ctx);
 
 #ifdef	__FreeBSD__
 /*
