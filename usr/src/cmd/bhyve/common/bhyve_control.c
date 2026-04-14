@@ -444,6 +444,11 @@ build_save_stream(uint8_t **streamp, size_t *lenp)
 		    CTL_SEC_KERN, (uint8_t)ctl_kern_sections[i].req,
 		    ctl_kern_sections[i].name, sec_save_kern, NULL, NULL);
 		if (ret != 0) {
+			(void) fprintf(stderr,
+			    "build_save_stream: kern section '%s' "
+			    "(req=%d) failed: %s\n",
+			    ctl_kern_sections[i].name,
+			    (int)ctl_kern_sections[i].req, strerror(ret));
 			free(stream);
 			return (ret);
 		}
@@ -464,6 +469,12 @@ build_save_stream(uint8_t **streamp, size_t *lenp)
 			continue;
 		}
 		if (ret != 0) {
+			(void) fprintf(stderr,
+			    "build_save_stream: dev section '%s' "
+			    "(pe_emu=%s) failed: %s\n",
+			    name,
+			    pdi->pi_d != NULL ? pdi->pi_d->pe_emu : "?",
+			    strerror(ret));
 			free(stream);
 			return (ret);
 		}
