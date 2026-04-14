@@ -991,6 +991,25 @@ main(int argc, char *argv[])
 	 * machdep code uses to skip spinup_ap and vm_set_run_state.
 	 */
 	if (get_config_bool_default("migrate.listen", false)) {
+		/*
+		 * Release every zvol fd before we block on import-state.
+		 * The source agent will run the final `zfs recv` while we
+		 * wait, which illumos rejects with EBUSY if bhyve still
+		 * holds the dataset open.  cmd_import_state wakes (re-
+		 * opens) the fds right before applying the state blob.
+		 * Safe on a VM without blockif-backed devices — pci_hibernate
+		 * is a no-op unless pe_hibernate is registered.
+		 */
+		(void) fprintf(stderr,
+		    "migrate-listen: hibernating block-backed devices for "
+		    "zfs recv window\n");
+		if (hibernate_all_devices() != 0) {
+			(void) fprintf(stderr,
+			    "migrate-listen: hibernate_all_devices reported "
+			    "errors; zfs recv on dest may fail with "
+			    "\"dataset is busy\"\n");
+		}
+
 		(void) fprintf(stderr,
 		    "migrate-listen: waiting for import-state via control "
 		    "socket (vCPU threads not yet started)\n");

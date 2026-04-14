@@ -2561,6 +2561,33 @@ pci_resume(struct pci_devinst *pdi)
 	return ((*pde->pe_resume)(pdi));
 }
 
+int
+pci_hibernate(struct pci_devinst *pdi)
+{
+	struct pci_devemu *pde = pdi->pi_d;
+
+	/*
+	 * Only devices with external backing storage (virtio-blk, nvme)
+	 * implement pe_hibernate.  Everything else is a no-op; fbuf /
+	 * virtio-net / lpc / etc. have no fds on ZFS datasets to release.
+	 */
+	if (pde->pe_hibernate == NULL)
+		return (0);
+
+	return ((*pde->pe_hibernate)(pdi));
+}
+
+int
+pci_wake(struct pci_devinst *pdi)
+{
+	struct pci_devemu *pde = pdi->pi_d;
+
+	if (pde->pe_wake == NULL)
+		return (0);
+
+	return ((*pde->pe_wake)(pdi));
+}
+
 /*
  * Validate that a BAR restored from a migration blob is safe to hand
  * to register_bar().  register_bar -> modify_bar_registration ->

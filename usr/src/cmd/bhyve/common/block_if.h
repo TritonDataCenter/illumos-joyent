@@ -88,6 +88,26 @@ int	blockif_close(struct blockif_ctxt *bc);
 #ifdef BHYVE_SNAPSHOT
 void	blockif_pause(struct blockif_ctxt *bc);
 void	blockif_resume(struct blockif_ctxt *bc);
+
+/*
+ * Migrate-listen helpers.  On the destination side of a live migration
+ * we need the underlying backing file (typically a zvol) to not be held
+ * open by bhyve while the final zfs recv runs — illumos rejects
+ * `zfs recv` onto an in-use zvol with EBUSY.
+ *
+ * blockif_hibernate() closes the backing fd but keeps the worker
+ * threads parked (assumes blockif_pause() has already been called,
+ * which the caller is responsible for).  It's safe to call when
+ * already hibernated.
+ *
+ * blockif_wake() re-opens the backing fd using the path + flags
+ * captured at blockif_open() time, re-probes size / sector / WCE
+ * state, and stores the new fd.  blockif_resume() should follow to
+ * let worker threads accept I/O again.
+ */
+void	blockif_hibernate(struct blockif_ctxt *bc);
+int	blockif_wake(struct blockif_ctxt *bc);
+int	blockif_is_hibernated(struct blockif_ctxt *bc);
 #endif
 
 #endif /* _BLOCK_IF_H_ */

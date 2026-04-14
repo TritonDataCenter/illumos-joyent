@@ -87,6 +87,15 @@ struct pci_devemu {
 	int	(*pe_snapshot)(struct vm_snapshot_meta *meta);
 	int	(*pe_pause)(struct pci_devinst *pi);
 	int	(*pe_resume)(struct pci_devinst *pi);
+	/*
+	 * Migrate-listen hibernate / wake (illumos-only).  When the
+	 * destination side of a live migration needs to let the final
+	 * `zfs recv` run, blockif-backed devices (virtio-blk, nvme)
+	 * drop their fds in pe_hibernate and re-open them in pe_wake.
+	 * Optional — devices with no backing file may leave these NULL.
+	 */
+	int	(*pe_hibernate)(struct pci_devinst *pi);
+	int	(*pe_wake)(struct pci_devinst *pi);
 #endif
 };
 #define PCI_EMUL_SET(x)   DATA_SET(pci_devemu_set, x)
@@ -291,6 +300,8 @@ struct pci_devinst *pci_next(const struct pci_devinst *cursor);
 int	pci_snapshot(struct vm_snapshot_meta *meta);
 int	pci_pause(struct pci_devinst *pdi);
 int	pci_resume(struct pci_devinst *pdi);
+int	pci_hibernate(struct pci_devinst *pdi);
+int	pci_wake(struct pci_devinst *pdi);
 
 /*
  * Re-register every device's BARs with the VMM after a migration

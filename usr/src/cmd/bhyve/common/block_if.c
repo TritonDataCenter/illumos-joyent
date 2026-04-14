@@ -134,6 +134,19 @@ struct blockif_ctxt {
 #ifdef BHYVE_SNAPSHOT
 	int			bc_paused;
 	pthread_cond_t		bc_work_done_cond;
+	/*
+	 * State preserved so blockif_wake() can re-open the backing
+	 * file after a blockif_hibernate() drops the fd.  Needed for
+	 * the destination side of live migration, where the zvol has
+	 * to be released while `zfs recv` applies the final incremental
+	 * (illumos rejects `zfs recv` onto an in-use zvol).
+	 */
+	char			*bc_open_path;
+	int			bc_open_extra;	/* open(2) flag bits saved at open */
+	int			bc_open_nodelete;
+	int			bc_open_ssopt;	/* 0 if no override */
+	int			bc_open_pssopt;	/* 0 if no override */
+	int			bc_hibernated;	/* 1 while bc_fd is closed */
 #endif
 	pthread_t		bc_btid[BLOCKIF_NUMTHR];
 	pthread_mutex_t		bc_mtx;
@@ -834,7 +847,21 @@ blockif_open(nvlist_t *nvl, const char *ident)
 	pthread_cond_init(&bc->bc_cond, NULL);
 #ifdef BHYVE_SNAPSHOT
 	bc->bc_paused = 0;
+	bc->bc_hibernated = 0;
 	pthread_cond_init(&bc->bc_work_done_cond, NULL);
+	/*
+	 * Capture enough state to let blockif_wake() recreate the fd
+	 * after a hibernate cycle.  We dup the path string (the nvlist
+	 * we were handed is the device's option bag and may be torn down
+	 * later).  ssopt/pssopt are only non-zero when the caller gave
+	 * an explicit sectorsize=... override; zero means "derive from
+	 * the backing file on re-probe".
+	 */
+	bc->bc_open_path = strdup(path);
+	bc->bc_open_extra = extra;
+	bc->bc_open_nodelete = nodelete;
+	bc->bc_open_ssopt = ssopt;
+	bc->bc_open_pssopt = pssopt;
 #endif
 	TAILQ_INIT(&bc->bc_freeq);
 	TAILQ_INIT(&bc->bc_pendq);
@@ -1272,5 +1299,184 @@ blockif_resume(struct blockif_ctxt *bc)
 	pthread_mutex_lock(&bc->bc_mtx);
 	bc->bc_paused = 0;
 	pthread_mutex_unlock(&bc->bc_mtx);
+}
+
+/*
+ * Close the backing fd while retaining the rest of the blockif state
+ * (worker threads, queues, metadata).  Caller must have pause'd the
+ * blockif first so no worker is in the middle of an I/O on bc_fd.
+ *
+ * This exists so the destination side of a live migration can free
+ * the zvol backing the device long enough for the final incremental
+ * `zfs recv` to run — illumos-joyent's zvol layer rejects `zfs recv`
+ * onto any dataset with an active open.  blockif_wake() re-opens the
+ * same path after the recv completes.
+ */
+void
+blockif_hibernate(struct blockif_ctxt *bc)
+{
+	assert(bc != NULL);
+	assert(bc->bc_magic == BLOCKIF_SIG);
+
+	pthread_mutex_lock(&bc->bc_mtx);
+	if (bc->bc_hibernated) {
+		pthread_mutex_unlock(&bc->bc_mtx);
+		return;
+	}
+	/*
+	 * We only make sense to call after blockif_pause(): an in-flight
+	 * I/O would fault on a closed fd.  Assert rather than silently
+	 * produce undefined behavior — callers are expected to honor
+	 * this ordering (see cmd_pause / pause_all_devices).
+	 */
+	assert(bc->bc_paused == 1);
+
+	if (bc->bc_fd >= 0) {
+		(void) close(bc->bc_fd);
+		bc->bc_fd = -1;
+	}
+	bc->bc_hibernated = 1;
+	pthread_mutex_unlock(&bc->bc_mtx);
+}
+
+int
+blockif_is_hibernated(struct blockif_ctxt *bc)
+{
+	int r;
+
+	assert(bc != NULL);
+	assert(bc->bc_magic == BLOCKIF_SIG);
+
+	pthread_mutex_lock(&bc->bc_mtx);
+	r = bc->bc_hibernated;
+	pthread_mutex_unlock(&bc->bc_mtx);
+	return (r);
+}
+
+/*
+ * Re-open the backing file that blockif_hibernate() closed.  Re-probes
+ * size, sector geometry, and WCE so any delta (e.g. a post-recv
+ * property change on the zvol) is reflected.  Worker threads remain
+ * paused — caller should follow with blockif_resume() when ready to
+ * accept I/O.
+ *
+ * Returns 0 on success, or an errno-style code on failure (in which
+ * case bc_fd stays -1 and bc_hibernated stays 1 — caller can retry).
+ */
+int
+blockif_wake(struct blockif_ctxt *bc)
+{
+	int fd, ro;
+	struct stat sbuf;
+#ifndef __FreeBSD__
+	enum blockif_wce wce = WCE_NONE;
+#endif
+
+	assert(bc != NULL);
+	assert(bc->bc_magic == BLOCKIF_SIG);
+
+	pthread_mutex_lock(&bc->bc_mtx);
+	if (!bc->bc_hibernated) {
+		pthread_mutex_unlock(&bc->bc_mtx);
+		return (0);
+	}
+	if (bc->bc_open_path == NULL) {
+		/*
+		 * Shouldn't happen — every blockif_open path strdup()s the
+		 * path.  Return EINVAL to fail loudly rather than EBADF
+		 * later.
+		 */
+		pthread_mutex_unlock(&bc->bc_mtx);
+		return (EINVAL);
+	}
+
+	ro = bc->bc_rdonly;
+	fd = open(bc->bc_open_path,
+	    (ro ? O_RDONLY : O_RDWR) | bc->bc_open_extra);
+	if (fd < 0 && !ro) {
+		fd = open(bc->bc_open_path, O_RDONLY | bc->bc_open_extra);
+		if (fd >= 0) {
+			bc->bc_rdonly = ro = 1;
+		}
+	}
+	if (fd < 0) {
+		int saved = errno;
+		pthread_mutex_unlock(&bc->bc_mtx);
+		return (saved != 0 ? saved : EIO);
+	}
+	if (fstat(fd, &sbuf) < 0) {
+		int saved = errno;
+		(void) close(fd);
+		pthread_mutex_unlock(&bc->bc_mtx);
+		return (saved != 0 ? saved : EIO);
+	}
+
+	/*
+	 * Refresh the bits that can legitimately differ after a zfs
+	 * recv cycle.  size / sectsz / candelete come straight from the
+	 * re-probed backing; WCE gets re-queried on illumos because
+	 * DKIOCSETWCE from the prior open did not persist across the
+	 * close/re-open on zvols.
+	 */
+#ifndef __FreeBSD__
+	if (S_ISCHR(sbuf.st_mode)) {
+		struct dk_minfo_ext dkmext;
+		int wce_val;
+
+		if (ioctl(fd, DKIOCGMEDIAINFOEXT, &dkmext) == 0) {
+			bc->bc_psectsz = dkmext.dki_pbsize;
+			bc->bc_size = dkmext.dki_lbsize * dkmext.dki_capacity;
+		}
+		if (ioctl(fd, DKIOCGETWCE, &wce_val) == 0) {
+			/*
+			 * Always start with WCE disabled; virtio-blk re-
+			 * enables it if the guest negotiates FLUSH.  Same
+			 * stance blockif_open() takes on a fresh open.
+			 */
+			if (wce_val != 0) {
+				wce_val = 0;
+				if (ioctl(fd, DKIOCSETWCE, &wce_val) == 0)
+					wce = WCE_IOCTL;
+			} else {
+				wce = WCE_IOCTL;
+			}
+		}
+		if (!bc->bc_open_nodelete) {
+			int cd = 0;
+			if (ioctl(fd, DKIOC_CANFREE, &cd) == 0)
+				bc->bc_candelete = cd;
+		}
+	} else {
+		int flags = fcntl(fd, F_GETFL);
+		if (flags >= 0) {
+			flags |= O_DSYNC;
+			if (fcntl(fd, F_SETFL, flags) != -1)
+				wce = WCE_FCNTL;
+		}
+		bc->bc_psectsz = sbuf.st_blksize;
+		bc->bc_size = sbuf.st_size;
+		if (!bc->bc_open_nodelete)
+			bc->bc_candelete = 1;
+	}
+	bc->bc_wce = wce;
+#endif
+
+	if (bc->bc_open_ssopt != 0) {
+		/*
+		 * Caller passed an explicit sectorsize= override originally;
+		 * honor it again on the re-open so the virtio config we
+		 * restored via the snapshot stays consistent with the
+		 * backend.
+		 */
+		bc->bc_sectsz = bc->bc_open_ssopt;
+		bc->bc_psectsz = bc->bc_open_pssopt;
+		bc->bc_psectoff = 0;
+	}
+
+	bc->bc_fd = fd;
+	bc->bc_ischr = S_ISCHR(sbuf.st_mode);
+	bc->bc_hibernated = 0;
+	pthread_mutex_unlock(&bc->bc_mtx);
+	return (0);
 }
 #endif /* BHYVE_SNAPSHOT */
