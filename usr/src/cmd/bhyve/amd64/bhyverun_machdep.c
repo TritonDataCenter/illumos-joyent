@@ -370,9 +370,19 @@ bhyve_start_vcpu(struct vcpu *vcpu, bool bsp, bool suspend)
 		 */
 		if (!get_config_bool_default("migrate.restored", false))
 			spinup_ap(vcpu, 0);
-#endif
 
+		/*
+		 * Skip bhyve_init_vcpu() on the migrate-restored path: the
+		 * AP was already initialised before wait_import (see
+		 * bhyverun.c) so that vm_set_x2apic_state() couldn't wipe
+		 * the imported vLAPIC LDR/DFR/id.  Running it again here
+		 * would undo the restore.
+		 */
+		if (!get_config_bool_default("migrate.restored", false))
+			bhyve_init_vcpu(vcpu);
+#else
 		bhyve_init_vcpu(vcpu);
+#endif
 
 #ifdef	__FreeBSD__
 		/*
