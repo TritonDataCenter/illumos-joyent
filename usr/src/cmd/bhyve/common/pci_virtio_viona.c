@@ -72,6 +72,9 @@
 #include "virtio.h"
 #include "iov.h"
 #include "virtio_net.h"
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 
 /*
  * This is the default number of queues allocated and advertised via the
@@ -200,6 +203,12 @@ static virtio_capstr_t viona_caps[] = {
 	{ VIRTIO_NET_F_SPEED_DUPLEX,	"VIRTIO_NET_F_SPEED_DUPLEX" },
 };
 
+#ifdef BHYVE_SNAPSHOT
+static void pci_viona_pause_inner(void *);
+static void pci_viona_resume_inner(void *);
+static int pci_viona_snapshot_inner(void *, struct vm_snapshot_meta *);
+#endif
+
 static struct virtio_consts viona_vi_consts = {
 	.vc_name		= "viona",
 	.vc_nvq			= 0,	/* set in pci_viona_qalloc() */
@@ -224,6 +233,11 @@ static struct virtio_consts viona_vi_consts = {
 
 	.vc_capstr =		viona_caps,
 	.vc_ncapstr =		ARRAY_SIZE(viona_caps),
+#ifdef BHYVE_SNAPSHOT
+	.vc_pause		= pci_viona_pause_inner,
+	.vc_resume		= pci_viona_resume_inner,
+	.vc_snapshot		= pci_viona_snapshot_inner,
+#endif
 };
 
 static void
@@ -1331,6 +1345,143 @@ struct pci_devemu pci_de_viona = {
 	.pe_barwrite =		vi_pci_write,
 	.pe_barread =		vi_pci_read,
 	.pe_baraddr =		pci_viona_baraddr,
-	.pe_lintrupdate =	pci_viona_lintrupdate
+	.pe_lintrupdate =	pci_viona_lintrupdate,
+#ifdef BHYVE_SNAPSHOT
+	.pe_snapshot =		vi_pci_snapshot,
+	.pe_pause =		vi_pci_pause,
+	.pe_resume =		vi_pci_resume,
+#endif
 };
 PCI_EMUL_SET(pci_de_viona);
+
+#ifdef BHYVE_SNAPSHOT
+/*
+ * pe_pause -> vi_pci_pause -> vc_pause: quiesce viona kernel rings.
+ *
+ * Workers in the viona kernel module stop transitioning state once
+ * paused, which is what lets vc_snapshot read VRS_AVAIL_IDX /
+ * VRS_USED_IDX consistently.
+ */
+static void
+pci_viona_pause_inner(void *vsc)
+{
+	struct pci_viona_softc *sc = vsc;
+	int nrings = VIONA_NRINGS(sc);
+
+	for (int i = 0; i < nrings; i++) {
+		if (ioctl(sc->vsc_vnafd, VNA_IOC_RING_PAUSE, i) != 0) {
+			WPRINTF("viona pause: ring %d failed: %d", i, errno);
+		}
+	}
+}
+
+/*
+ * pe_resume -> vi_pci_resume -> vc_resume: restart all rings.
+ *
+ * vc_snapshot RESTORE has already programmed the SET_STATE for each
+ * ring (which transitions the ring to VRS_RUN); we just need to kick.
+ */
+static void
+pci_viona_resume_inner(void *vsc)
+{
+	struct pci_viona_softc *sc = vsc;
+	int nrings = VIONA_NRINGS(sc);
+
+	for (int i = 0; i < nrings; i++) {
+		if (ioctl(sc->vsc_vnafd, VNA_IOC_RING_KICK, i) != 0) {
+			WPRINTF("viona resume: ring %d kick failed: %d",
+			    i, errno);
+		}
+	}
+}
+
+/*
+ * pe_snapshot -> vi_pci_snapshot -> vc_snapshot: viona-specific state.
+ *
+ * Common virtio softc / consts / queues are saved by vi_pci_snapshot
+ * before this is called.  This function adds:
+ *   - viona network config (MAC, status, MTU, max_qpair)
+ *   - promiscuous-mode setting (mirrored from kernel)
+ *   - msix-active flag
+ *   - vq_usepairs (multi-queue active count)
+ *   - per-ring kernel state (avail_idx, used_idx) read from viona via
+ *     VNA_IOC_RING_GET_STATE.  On RESTORE these are pushed back via
+ *     VNA_IOC_RING_SET_STATE so the kernel resumes from the same point.
+ *
+ * On RESTORE we also re-push promisc + MTU to the kernel; the resume
+ * step (above) follows with KICK to start the worker threads.
+ */
+static int
+pci_viona_snapshot_inner(void *vsc, struct vm_snapshot_meta *meta)
+{
+	struct pci_viona_softc *sc = vsc;
+	int ret = 0;
+	int nrings;
+	int i;
+
+	SNAPSHOT_BUF_OR_LEAVE(&sc->vsc_config, sizeof (sc->vsc_config),
+	    meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->vsc_promisc, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->vsc_msix_active, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->vsc_vq_usepairs, meta, ret, done);
+
+	nrings = VIONA_NRINGS(sc);
+	SNAPSHOT_VAR_OR_LEAVE(nrings, meta, ret, done);
+
+	for (i = 0; i < nrings; i++) {
+		uint16_t avail_idx = 0, used_idx = 0;
+		struct vqueue_info *vq;
+		vioc_ring_state_t vrs;
+
+		if (meta->op == VM_SNAPSHOT_SAVE) {
+			(void) memset(&vrs, 0, sizeof (vrs));
+			vrs.vrs_index = (uint16_t)i;
+			if (ioctl(sc->vsc_vnafd, VNA_IOC_RING_GET_STATE,
+			    &vrs) == 0) {
+				avail_idx = vrs.vrs_avail_idx;
+				used_idx = vrs.vrs_used_idx;
+			}
+		}
+
+		SNAPSHOT_VAR_OR_LEAVE(avail_idx, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(used_idx, meta, ret, done);
+
+		if (meta->op != VM_SNAPSHOT_RESTORE)
+			continue;
+
+		vq = &sc->vsc_queues[i];
+		if (!(vq->vq_flags & VQ_ALLOC))
+			continue;
+
+		(void) ioctl(sc->vsc_vnafd, VNA_IOC_RING_PAUSE, i);
+		(void) ioctl(sc->vsc_vnafd, VNA_IOC_RING_RESET, i);
+
+		(void) memset(&vrs, 0, sizeof (vrs));
+		vrs.vrs_index = (uint16_t)i;
+		vrs.vrs_avail_idx = avail_idx;
+		vrs.vrs_used_idx = used_idx;
+		vrs.vrs_qsize = vq->vq_qsize;
+		vrs.vrs_qaddr_desc = vq->vq_desc_gpa;
+		vrs.vrs_qaddr_avail = vq->vq_avail_gpa;
+		vrs.vrs_qaddr_used = vq->vq_used_gpa;
+
+		if (ioctl(sc->vsc_vnafd, VNA_IOC_RING_SET_STATE, &vrs) != 0) {
+			WPRINTF("viona restore: ring %d SET_STATE failed: %d",
+			    i, errno);
+			continue;
+		}
+
+		pci_viona_ring_set_msix(sc, i);
+	}
+
+	if (meta->op == VM_SNAPSHOT_RESTORE) {
+		(void) ioctl(sc->vsc_vnafd, VNA_IOC_SET_PROMISC,
+		    (int)sc->vsc_promisc);
+		(void) ioctl(sc->vsc_vnafd, VNA_IOC_SET_MTU,
+		    (int)sc->vsc_config.vnc_mtu);
+	}
+
+done:
+	return (ret);
+}
+#endif /* BHYVE_SNAPSHOT */
