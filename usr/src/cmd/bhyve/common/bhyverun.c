@@ -485,8 +485,22 @@ vm_loop(struct vmctx *ctx, struct vcpu *vcpu)
 
 	while (1) {
 		error = vm_run(vcpu, ventry, &vme);
-		if (error != 0)
+		if (error != 0) {
+#ifndef __FreeBSD__
+			/*
+			 * VM_PAUSE (e.g. for snapshot) returns EBUSY from
+			 * vm_run.  Sleep briefly and retry rather than
+			 * tearing down the vCPU loop; the unpause path
+			 * (snapshot complete or migrate-listen import
+			 * finished) lets vm_run progress again.
+			 */
+			if (errno == EBUSY) {
+				(void) usleep(10000);	/* 10 ms */
+				continue;
+			}
+#endif
 			break;
+		}
 
 		if (ventry->cmd != VEC_DEFAULT) {
 			/*
@@ -866,6 +880,27 @@ main(int argc, char *argv[])
 	}
 #endif
 
+#ifndef __FreeBSD__
+	/*
+	 * In migrate-listen mode, the destination bhyve is brought up
+	 * solely to receive a migrated guest's state via the control
+	 * socket.  Bootrom load + vcpu_reset would clobber the soon-to-
+	 * be-imported registers / RIP / CR0 / etc., so skip them.
+	 *
+	 * The trigger is either the explicit `migrate.listen=true` config
+	 * value, or a sentinel file at /tmp/migrate.listen (consumed once
+	 * to avoid sticky behaviour across restarts).
+	 */
+	if (access("/tmp/migrate.listen", F_OK) == 0) {
+		set_config_bool("migrate.listen", true);
+		(void) unlink("/tmp/migrate.listen");
+	}
+	if (get_config_bool_default("migrate.listen", false)) {
+		(void) fprintf(stderr,
+		    "migrate-listen: skipping bootrom + vcpu_reset; "
+		    "guest state will arrive via import-state\n");
+	} else
+#endif
 	if (bootrom_boot()) {
 #ifdef __FreeBSD__
 		if (vm_set_capability(bsp, VM_CAP_UNRESTRICTED_GUEST, 1)) {
