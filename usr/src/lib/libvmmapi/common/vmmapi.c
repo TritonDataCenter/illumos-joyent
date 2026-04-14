@@ -647,7 +647,6 @@ vm_map_gpa(struct vmctx *ctx, vm_paddr_t gaddr, size_t len)
 	return (NULL);
 }
 
-#ifdef	__FreeBSD__
 vm_paddr_t
 vm_rev_map_gpa(struct vmctx *ctx, void *addr)
 {
@@ -672,7 +671,6 @@ vm_get_name(struct vmctx *ctx)
 
 	return (ctx->name);
 }
-#endif /* __FreeBSD__ */
 
 size_t
 vm_get_lowmem_size(struct vmctx *ctx)
