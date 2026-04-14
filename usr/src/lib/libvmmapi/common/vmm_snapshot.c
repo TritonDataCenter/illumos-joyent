@@ -279,26 +279,207 @@ done:
  * splits these across four VDC_* classes; we save them in a stable
  * order so the restore side can replay them.
  */
+/*
+ * VDC_REGISTER and VDC_FPU aren't reachable via VM_DATA_READ on the
+ * illumos VMM kernel today — vmm_data_from_class's per-vCPU path
+ * panics for VDC_REGISTER and returns ENOTSUP for VDC_FPU.  Instead,
+ * general registers round-trip via vm_get/set_register_set with a
+ * fixed list (proven in v1's bhyve_migrate.c), and FPU rides VM_GET/
+ * SET_FPU directly.  Segment descriptors go through vm_get/set_desc
+ * (base/limit/access) and — for non-GDTR/IDTR segs — vm_get/set_register
+ * for the VMCS selector field (CS=0 post-import causes VMX entry
+ * failure inst_error=7, hence both halves).
+ *
+ * VDC_MSR and VDC_VMM_ARCH do work via VM_DATA_READ/WRITE and are
+ * included at the end of each vCPU's VMCX blob.
+ */
+static const int vmcx_gpr_regs[] = {
+	VM_REG_GUEST_RAX, VM_REG_GUEST_RBX, VM_REG_GUEST_RCX,
+	VM_REG_GUEST_RDX, VM_REG_GUEST_RSI, VM_REG_GUEST_RDI,
+	VM_REG_GUEST_RBP, VM_REG_GUEST_RSP, VM_REG_GUEST_R8,
+	VM_REG_GUEST_R9,  VM_REG_GUEST_R10, VM_REG_GUEST_R11,
+	VM_REG_GUEST_R12, VM_REG_GUEST_R13, VM_REG_GUEST_R14,
+	VM_REG_GUEST_R15, VM_REG_GUEST_RIP, VM_REG_GUEST_RFLAGS,
+	VM_REG_GUEST_CR0, VM_REG_GUEST_CR3, VM_REG_GUEST_CR2,
+	VM_REG_GUEST_CR4, VM_REG_GUEST_DR7, VM_REG_GUEST_EFER,
+	VM_REG_GUEST_XCR0,
+};
+#define	N_VMCX_GPR_REGS	\
+	(sizeof (vmcx_gpr_regs) / sizeof (vmcx_gpr_regs[0]))
+
+static const int vmcx_seg_descs[] = {
+	VM_REG_GUEST_CS,   VM_REG_GUEST_DS,   VM_REG_GUEST_ES,
+	VM_REG_GUEST_FS,   VM_REG_GUEST_GS,   VM_REG_GUEST_SS,
+	VM_REG_GUEST_TR,   VM_REG_GUEST_LDTR,
+	VM_REG_GUEST_GDTR, VM_REG_GUEST_IDTR,
+};
+#define	N_VMCX_SEG_DESCS \
+	(sizeof (vmcx_seg_descs) / sizeof (vmcx_seg_descs[0]))
+
+/*
+ * Per-segment wire entry — 28 bytes packed.
+ * GDTR/IDTR don't have selector fields so sel is transmitted as 0.
+ */
+#pragma pack(push, 1)
+struct vmcx_seg_entry {
+	uint32_t	regid;
+	uint64_t	base;
+	uint32_t	limit;
+	uint32_t	access;
+	uint64_t	sel;
+};
+#pragma pack(pop)
+#define	VMCX_SEG_ENTRY_SIZE	28U
+
+#define	VMCX_FPU_BUF_SIZE	8192U
+
+static int
+vmcx_get_fpu(struct vmctx *ctx, int vcpuid, void *buf, size_t len)
+{
+	struct vm_fpu_state fpu = {
+		.vcpuid = vcpuid,
+		.buf = buf,
+		.len = len,
+	};
+	return (ioctl(vm_get_device_fd(ctx), VM_GET_FPU, &fpu));
+}
+
+static int
+vmcx_set_fpu(struct vmctx *ctx, int vcpuid, void *buf, size_t len)
+{
+	struct vm_fpu_state fpu = {
+		.vcpuid = vcpuid,
+		.buf = buf,
+		.len = len,
+	};
+	return (ioctl(vm_get_device_fd(ctx), VM_SET_FPU, &fpu));
+}
+
+/*
+ * Save or restore one vCPU's VMCX blob.  Layout (in order):
+ *   [25 × uint64_t GPRs]        200 bytes
+ *   [10 × struct vmcx_seg_entry]  280 bytes
+ *   [VMCX_FPU_BUF_SIZE FPU buf]  8192 bytes
+ *   [len-prefixed MSR blob]      via VDC_MSR
+ *   [len-prefixed VMM_ARCH blob] via VDC_VMM_ARCH
+ *
+ * On RESTORE the ordering matches the v1 bhyve_migrate.c file-based
+ * import which is known working: registers → segments → FPU → MSR →
+ * VMM_ARCH.  The control-socket path previously tried a different
+ * order (MSRs first) and produced VMX entry failure inst_error=7;
+ * file-based order is the only configuration that resumes cleanly.
+ */
+static int
+snapshot_vmcx_vcpu(struct vmctx *ctx, int vcpuid,
+    struct vm_snapshot_meta *meta)
+{
+	int ret = 0;
+	uint_t i;
+	struct vcpu *vcpu = NULL;
+	uint64_t gprs[N_VMCX_GPR_REGS];
+	uint8_t fpubuf[VMCX_FPU_BUF_SIZE];
+
+	vcpu = vm_vcpu_open(ctx, vcpuid);
+	if (vcpu == NULL)
+		return (errno);
+
+	/* 1. GPRs. */
+	if (meta->op == VM_SNAPSHOT_SAVE) {
+		if (vm_get_register_set(vcpu, N_VMCX_GPR_REGS,
+		    vmcx_gpr_regs, gprs) != 0) {
+			ret = errno;
+			goto done;
+		}
+	}
+	SNAPSHOT_BUF_OR_LEAVE(gprs, sizeof (gprs), meta, ret, done);
+	if (meta->op == VM_SNAPSHOT_RESTORE) {
+		if (vm_set_register_set(vcpu, N_VMCX_GPR_REGS,
+		    vmcx_gpr_regs, gprs) != 0) {
+			ret = errno;
+			goto done;
+		}
+	}
+
+	/* 2. Segment descriptors + selectors. */
+	for (i = 0; i < N_VMCX_SEG_DESCS; i++) {
+		struct vmcx_seg_entry ent;
+		int reg = vmcx_seg_descs[i];
+		bool is_gx = (reg == VM_REG_GUEST_GDTR ||
+		    reg == VM_REG_GUEST_IDTR);
+
+		if (meta->op == VM_SNAPSHOT_SAVE) {
+			ent.regid = (uint32_t)reg;
+			if (vm_get_desc(vcpu, reg, &ent.base, &ent.limit,
+			    &ent.access) != 0) {
+				ret = errno;
+				goto done;
+			}
+			ent.sel = 0;
+			if (!is_gx) {
+				(void) vm_get_register(vcpu, reg, &ent.sel);
+			}
+		}
+		SNAPSHOT_BUF_OR_LEAVE(&ent, VMCX_SEG_ENTRY_SIZE,
+		    meta, ret, done);
+		if (meta->op == VM_SNAPSHOT_RESTORE) {
+			if (vm_set_desc(vcpu, (int)ent.regid, ent.base,
+			    ent.limit, ent.access) != 0) {
+				/* Non-fatal; some segs can be uninitialised. */
+				(void) fprintf(stderr,
+				    "vmcx: vcpu%d reg%u set_desc: %s\n",
+				    vcpuid, ent.regid, strerror(errno));
+			}
+			if (!is_gx) {
+				if (vm_set_register(vcpu, (int)ent.regid,
+				    ent.sel) != 0) {
+					(void) fprintf(stderr,
+					    "vmcx: vcpu%d reg%u set_sel: "
+					    "%s\n", vcpuid, ent.regid,
+					    strerror(errno));
+				}
+			}
+		}
+	}
+
+	/* 3. FPU. */
+	if (meta->op == VM_SNAPSHOT_SAVE) {
+		(void) memset(fpubuf, 0, sizeof (fpubuf));
+		if (vmcx_get_fpu(ctx, vcpuid, fpubuf,
+		    sizeof (fpubuf)) != 0) {
+			ret = errno;
+			goto done;
+		}
+	}
+	SNAPSHOT_BUF_OR_LEAVE(fpubuf, sizeof (fpubuf), meta, ret, done);
+	if (meta->op == VM_SNAPSHOT_RESTORE) {
+		if (vmcx_set_fpu(ctx, vcpuid, fpubuf,
+		    sizeof (fpubuf)) != 0) {
+			/* Not fatal for resume; log and continue. */
+			(void) fprintf(stderr, "vmcx: vcpu%d set_fpu: %s\n",
+			    vcpuid, strerror(errno));
+		}
+	}
+
+	/* 4. MSRs via VDC_MSR. */
+	ret = snapshot_vmm_class(ctx, vcpuid, VDC_MSR, 1, meta);
+	if (ret != 0)
+		goto done;
+
+	/* 5. VMM_ARCH via VDC_VMM_ARCH. */
+	ret = snapshot_vmm_class(ctx, vcpuid, VDC_VMM_ARCH, 1, meta);
+
+done:
+	if (vcpu != NULL)
+		vm_vcpu_close(vcpu);
+	return (ret);
+}
+
 static int
 snapshot_vmcx(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 {
 	int ret = 0;
 	int i, ncpus;
 	uint16_t sockets, cores, threads, maxcpus;
-	/*
-	 * VDC_REGISTER and VDC_FPU are not reachable via VM_DATA_READ on
-	 * illumos today — vmm_data_from_class's per-vCPU path either
-	 * panics (register) or returns ENOTSUP (FPU).  General registers
-	 * need vm_get/set_register_set(), FPU needs VM_GET/SET_FPU; the
-	 * v1 bhyve_migrate.c code does this and the bridge here will
-	 * eventually grow the same side-channel.  For now, ship MSR +
-	 * VMM_ARCH only — enough to test the export/import pipeline end-
-	 * to-end even if the restored vCPU can't actually resume cleanly
-	 * without registers.
-	 */
-	static const uint16_t vmcx_classes[] = {
-		VDC_MSR, VDC_VMM_ARCH,
-	};
 
 	if (vm_get_topology(ctx, &sockets, &cores, &threads, &maxcpus) != 0)
 		return (errno);
@@ -307,15 +488,9 @@ snapshot_vmcx(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 	SNAPSHOT_VAR_OR_LEAVE(ncpus, meta, ret, done);
 
 	for (i = 0; i < ncpus; i++) {
-		uint_t k;
-		for (k = 0;
-		    k < sizeof (vmcx_classes) / sizeof (vmcx_classes[0]);
-		    k++) {
-			ret = snapshot_vmm_class(ctx, i, vmcx_classes[k], 1,
-			    meta);
-			if (ret != 0)
-				goto done;
-		}
+		ret = snapshot_vmcx_vcpu(ctx, i, meta);
+		if (ret != 0)
+			goto done;
 	}
 
 done:
