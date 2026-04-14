@@ -104,6 +104,7 @@
 #ifndef __FreeBSD__
 #include "smbiostbl.h"
 #include "privileges.h"
+#include "bhyve_control.h"
 #endif
 
 #define MB		(1024UL * 1024)
@@ -860,6 +861,23 @@ main(int argc, char *argv[])
 		exit(4);
 	}
 
+#ifndef __FreeBSD__
+	/*
+	 * Bring the migration control socket up after PCI is initialised
+	 * so cmd_export_state / cmd_import_state can iterate via
+	 * pci_next().  Path defaults to /tmp/bhyve.sock (visible from the
+	 * GZ at /zones/<uuid>/root/tmp/bhyve.sock); override with
+	 *   bhyve -o control.socket=<path>
+	 */
+	{
+		const char *ctl_path = get_config_value("control.socket");
+		if (ctl_path == NULL)
+			ctl_path = "/tmp/bhyve.sock";
+		bhyve_control_init(ctx, guest_ncpus, ctl_path);
+		(void) atexit(bhyve_control_fini);
+	}
+#endif
+
 	/*
 	 * Initialize after PCI, to allow a bootrom file to reserve the high
 	 * region.
@@ -938,6 +956,26 @@ main(int argc, char *argv[])
 #ifndef	__FreeBSD__
 	if (vmentry_init(guest_ncpus) != 0)
 		err(EX_OSERR, "vmentry_init() failed");
+#endif
+
+#ifndef __FreeBSD__
+	/*
+	 * In migrate-listen mode, block here until the GZ migration agent
+	 * sends an import-state request via the control socket.  vCPU
+	 * threads must NOT start before state is in place — otherwise
+	 * they'd run with the (zero) registers from the bare bhyve init.
+	 * The import-state command sets migrate.restored, which downstream
+	 * machdep code uses to skip spinup_ap and vm_set_run_state.
+	 */
+	if (get_config_bool_default("migrate.listen", false)) {
+		(void) fprintf(stderr,
+		    "migrate-listen: waiting for import-state via control "
+		    "socket (vCPU threads not yet started)\n");
+		bhyve_control_wait_import();
+		(void) fprintf(stderr,
+		    "migrate-listen: import-state complete, starting "
+		    "vCPU threads\n");
+	}
 #endif
 
 	/*
