@@ -30,6 +30,9 @@
 #include <sys/types.h>
 
 #include <machine/vmm.h>
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 
 #include <assert.h>
 #ifndef WITHOUT_CAPSICUM
