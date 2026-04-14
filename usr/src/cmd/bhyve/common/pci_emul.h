@@ -291,6 +291,14 @@ struct pci_devinst *pci_next(const struct pci_devinst *cursor);
 int	pci_snapshot(struct vm_snapshot_meta *meta);
 int	pci_pause(struct pci_devinst *pdi);
 int	pci_resume(struct pci_devinst *pdi);
+
+/*
+ * Re-register every device's BARs with the VMM after a migration
+ * restore has overwritten pi_bar[] in-place.  Performs a cross-device
+ * BAR-conflict pre-check and per-BAR bounds validation; returns -1
+ * and logs on conflict / out-of-range (migration refused).
+ */
+int	pci_restore_bars(void);
 #endif
 
 static __inline void
