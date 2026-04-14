@@ -762,22 +762,38 @@ static void
 handle_connection(int fd)
 {
 	char line[1024];
-	ssize_t n = read_line(fd, line, sizeof (line));
-	if (n <= 0)
-		return;
 
-	if (strstr(line, "\"status\"") != NULL) {
-		cmd_status(fd);
-	} else if (strstr(line, "\"pause\"") != NULL) {
-		cmd_pause(fd);
-	} else if (strstr(line, "\"resume\"") != NULL) {
-		cmd_resume(fd);
-	} else if (strstr(line, "\"export-state\"") != NULL) {
-		cmd_export_state(fd);
-	} else if (strstr(line, "\"import-state\"") != NULL) {
-		cmd_import_state(fd, line);
-	} else {
-		send_error(fd, "unknown command");
+	/*
+	 * Agents (Rust BhyveCtl) keep a single connection open across
+	 * multiple commands — status -> pause -> export-state etc. on
+	 * the same FD.  Loop reading lines until the peer closes.
+	 */
+	for (;;) {
+		ssize_t n = read_line(fd, line, sizeof (line));
+		if (n <= 0)
+			return;
+
+		if (strstr(line, "\"status\"") != NULL) {
+			cmd_status(fd);
+		} else if (strstr(line, "\"pause\"") != NULL) {
+			cmd_pause(fd);
+		} else if (strstr(line, "\"resume\"") != NULL) {
+			cmd_resume(fd);
+		} else if (strstr(line, "\"export-state\"") != NULL) {
+			cmd_export_state(fd);
+			/*
+			 * export-state writes a large binary blob after
+			 * the JSON response.  Close after the blob ships
+			 * rather than trying to multiplex another command
+			 * on top.
+			 */
+			return;
+		} else if (strstr(line, "\"import-state\"") != NULL) {
+			cmd_import_state(fd, line);
+			return;	/* same rationale; binary payload consumed */
+		} else {
+			send_error(fd, "unknown command");
+		}
 	}
 }
 
