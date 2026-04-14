@@ -123,6 +123,10 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_snapshot_buf;
 		vm_snapshot_buf_cmp;
 		vm_snapshot_buf_err;
+		vm_snapshot_req;
+		vm_restore_time;
+		vm_data_read;
+		vm_data_write;
 		vm_get_snapshot_size;
 		vm_setup_pptdev_msi;
 		vm_setup_pptdev_msix;
