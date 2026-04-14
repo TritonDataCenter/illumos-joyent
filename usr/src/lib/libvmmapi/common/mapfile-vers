@@ -101,6 +101,7 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_pmtmr_set_location;
 		vm_readwrite_kernemu_device;
 		vm_reinit;
+		vm_rev_map_gpa;
 		vm_restart_instruction;
 		vm_resume_all_cpus;
 		vm_resume_cpu;

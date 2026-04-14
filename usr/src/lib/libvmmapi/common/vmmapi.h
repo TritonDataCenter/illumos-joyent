@@ -164,10 +164,8 @@ struct vmctx *vcpu_ctx(struct vcpu *vcpu);
 int	vm_parse_memsize(const char *optarg, size_t *memsize);
 int	vm_setup_memory(struct vmctx *ctx, size_t len, enum vm_mmap_style s);
 void	*vm_map_gpa(struct vmctx *ctx, vm_paddr_t gaddr, size_t len);
-#ifdef	__FreeBSD__
 /* inverse operation to vm_map_gpa - extract guest address from host pointer */
 vm_paddr_t vm_rev_map_gpa(struct vmctx *ctx, void *addr);
-#endif
 int	vm_get_gpa_pmap(struct vmctx *, uint64_t gpa, uint64_t *pte, int *num);
 int	vm_gla2gpa(struct vcpu *vcpu, struct vm_guest_paging *paging,
 		   uint64_t gla, int prot, uint64_t *gpa, int *fault);

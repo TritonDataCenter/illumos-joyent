@@ -63,6 +63,7 @@ COMMON_OBJS = \
 	qemu_fwcfg.o		\
 	qemu_loader.o		\
 	smbiostbl.o		\
+	snapshot.o		\
 	sockstream.o		\
 	tpm_device.o		\
 	tpm_emul_passthru.o	\

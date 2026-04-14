@@ -1,8 +1,15 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2011 NetApp, Inc.
+ * Copyright (c) 2016 Flavius Anton
+ * Copyright (c) 2016 Mihai Tiganus
+ * Copyright (c) 2016-2019 Mihai Carabas
+ * Copyright (c) 2017-2019 Darius Mihai
+ * Copyright (c) 2017-2019 Elena Mihailescu
+ * Copyright (c) 2018-2019 Sergiu Weisz
  * All rights reserved.
+ * The bhyve-snapshot feature was developed under sponsorships
+ * from Matthew Grooms.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,57 +42,35 @@
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
  *
- * Copyright 2015 Pluribus Networks Inc.
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
-#ifndef	_BHYVERUN_H_
-#define	_BHYVERUN_H_
+#ifndef _BHYVE_SNAPSHOT_
+#define	_BHYVE_SNAPSHOT_
 
-#define	VMEXIT_CONTINUE		(0)
-#define	VMEXIT_ABORT		(-1)
+#include <sys/vmm_snapshot.h>
 
-#include <stdbool.h>
-
-extern int guest_ncpus;
-extern uint16_t cpu_cores, cpu_sockets, cpu_threads;
-
-struct vcpu;
 struct vmctx;
-struct vm_exit;
 
-extern void *paddr_guest2host(struct vmctx *ctx, uintptr_t addr, size_t len);
-#ifdef BHYVE_SNAPSHOT
-extern uintptr_t paddr_host2guest(struct vmctx *ctx, void *addr);
-#endif
+int vm_snapshot_guest2host_addr(struct vmctx *ctx, void **addrp, size_t len,
+    bool restore_null, struct vm_snapshot_meta *meta);
 
-struct vcpu *fbsdrun_vcpu(int vcpuid);
-void fbsdrun_addcpu(int vcpuid, bool);
-void fbsdrun_deletecpu(int vcpuid);
+/*
+ * Address variables are pointers to guest memory.
+ *
+ * When RNULL != 0, do not enforce invalid address checks; instead, make the
+ * pointer NULL at restore time.
+ */
+#define	SNAPSHOT_GUEST2HOST_ADDR_OR_LEAVE(CTX, ADDR, LEN, RNULL, META, RES, LABEL) \
+do {										\
+	(RES) = vm_snapshot_guest2host_addr((CTX), (void **)&(ADDR), (LEN),	\
+	    (RNULL), (META));							\
+	if ((RES) != 0) {							\
+		if ((RES) == EFAULT)						\
+			(void) fprintf(stderr,					\
+			    "%s: invalid address: %s\n", __func__, #ADDR);	\
+		goto LABEL;							\
+	}									\
+} while (0)
 
-bool fbsdrun_virtio_msix(void);
-
-typedef int (*vmexit_handler_t)(struct vmctx *, struct vcpu *,
-    struct vm_exit *);
-
-extern int vmexit_task_switch(struct vmctx *, struct vcpu *, struct vm_exit *);
-
-/* Interfaces implemented by machine-dependent code. */
-void bhyve_init_config(void);
-void bhyve_init_vcpu(struct vcpu *vcpu);
-void bhyve_start_vcpu(struct vcpu *vcpu, bool bsp, bool suspend);
-int bhyve_init_platform(struct vmctx *ctx, struct vcpu *bsp);
-int bhyve_init_platform_late(struct vmctx *ctx, struct vcpu *bsp);
-void bhyve_optparse(int argc, char **argv);
-void bhyve_usage(int code);
-
-/* Interfaces used by command-line option-parsing code. */
-bool bhyve_parse_config_option(const char *option);
-void bhyve_parse_simple_config_file(const char *path);
-void bhyve_parse_gdb_options(const char *opt);
-#ifdef	__FreeBSD__
-int bhyve_pincpu_parse(const char *opt);
-#endif
-int bhyve_topology_parse(const char *opt);
-
-#endif
+#endif /* _BHYVE_SNAPSHOT_ */

@@ -1,8 +1,15 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause
  *
- * Copyright (c) 2011 NetApp, Inc.
+ * Copyright (c) 2016 Flavius Anton
+ * Copyright (c) 2016 Mihai Tiganus
+ * Copyright (c) 2016-2019 Mihai Carabas
+ * Copyright (c) 2017-2019 Darius Mihai
+ * Copyright (c) 2017-2019 Elena Mihailescu
+ * Copyright (c) 2018-2019 Sergiu Weisz
  * All rights reserved.
+ * The bhyve-snapshot feature was developed under sponsorships
+ * from Matthew Grooms.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,57 +42,64 @@
  * source.  A copy of the CDDL is also available via the Internet at
  * http://www.illumos.org/license/CDDL.
  *
- * Copyright 2015 Pluribus Networks Inc.
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
-#ifndef	_BHYVERUN_H_
-#define	_BHYVERUN_H_
+/*
+ * bhyve checkpoint / live-migration support.
+ *
+ * Phase 6 scope: only the guest-to-host pointer translation helper used
+ * by device pe_snapshot bodies that need to serialise pointers into
+ * guest RAM (e.g. virtio queue descriptors).
+ *
+ * Subsequent phases will grow this file with the per-VM checkpoint
+ * orchestrator, the IPC checkpoint thread, and the file-format glue.
+ */
 
-#define	VMEXIT_CONTINUE		(0)
-#define	VMEXIT_ABORT		(-1)
-
+#include <sys/types.h>
+#include <errno.h>
 #include <stdbool.h>
+#include <stdio.h>
 
-extern int guest_ncpus;
-extern uint16_t cpu_cores, cpu_sockets, cpu_threads;
+#include <vmmapi.h>
 
-struct vcpu;
-struct vmctx;
-struct vm_exit;
+#include "bhyverun.h"
+#include "snapshot.h"
 
-extern void *paddr_guest2host(struct vmctx *ctx, uintptr_t addr, size_t len);
 #ifdef BHYVE_SNAPSHOT
-extern uintptr_t paddr_host2guest(struct vmctx *ctx, void *addr);
-#endif
+int
+vm_snapshot_guest2host_addr(struct vmctx *ctx, void **addrp, size_t len,
+    bool restore_null, struct vm_snapshot_meta *meta)
+{
+	int ret;
+	vm_paddr_t gaddr;
 
-struct vcpu *fbsdrun_vcpu(int vcpuid);
-void fbsdrun_addcpu(int vcpuid, bool);
-void fbsdrun_deletecpu(int vcpuid);
+	if (meta->op == VM_SNAPSHOT_SAVE) {
+		gaddr = paddr_host2guest(ctx, *addrp);
+		if (gaddr == (vm_paddr_t)-1) {
+			if (!restore_null ||
+			    (restore_null && (*addrp != NULL))) {
+				ret = EFAULT;
+				goto done;
+			}
+		}
 
-bool fbsdrun_virtio_msix(void);
+		SNAPSHOT_VAR_OR_LEAVE(gaddr, meta, ret, done);
+	} else if (meta->op == VM_SNAPSHOT_RESTORE) {
+		SNAPSHOT_VAR_OR_LEAVE(gaddr, meta, ret, done);
+		if (gaddr == (vm_paddr_t)-1) {
+			if (!restore_null) {
+				ret = EFAULT;
+				goto done;
+			}
+		}
 
-typedef int (*vmexit_handler_t)(struct vmctx *, struct vcpu *,
-    struct vm_exit *);
+		*addrp = paddr_guest2host(ctx, gaddr, len);
+	} else {
+		ret = EINVAL;
+	}
 
-extern int vmexit_task_switch(struct vmctx *, struct vcpu *, struct vm_exit *);
-
-/* Interfaces implemented by machine-dependent code. */
-void bhyve_init_config(void);
-void bhyve_init_vcpu(struct vcpu *vcpu);
-void bhyve_start_vcpu(struct vcpu *vcpu, bool bsp, bool suspend);
-int bhyve_init_platform(struct vmctx *ctx, struct vcpu *bsp);
-int bhyve_init_platform_late(struct vmctx *ctx, struct vcpu *bsp);
-void bhyve_optparse(int argc, char **argv);
-void bhyve_usage(int code);
-
-/* Interfaces used by command-line option-parsing code. */
-bool bhyve_parse_config_option(const char *option);
-void bhyve_parse_simple_config_file(const char *path);
-void bhyve_parse_gdb_options(const char *opt);
-#ifdef	__FreeBSD__
-int bhyve_pincpu_parse(const char *opt);
-#endif
-int bhyve_topology_parse(const char *opt);
-
-#endif
+done:
+	return (ret);
+}
+#endif /* BHYVE_SNAPSHOT */
