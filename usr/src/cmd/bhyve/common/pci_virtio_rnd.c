@@ -74,6 +74,9 @@
 #include "debug.h"
 #include "pci_emul.h"
 #include "virtio.h"
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 
 #define VTRND_RINGSZ	64
 
@@ -219,5 +222,8 @@ static const struct pci_devemu pci_de_vrnd = {
 	.pe_cfgread =	vi_pci_cfgread,
 	.pe_barwrite =	vi_pci_write,
 	.pe_barread =	vi_pci_read,
+#ifdef BHYVE_SNAPSHOT
+	.pe_snapshot =	vi_pci_snapshot,
+#endif
 };
 PCI_EMUL_SET(pci_de_vrnd);

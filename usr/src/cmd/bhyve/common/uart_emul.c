@@ -41,6 +41,9 @@
 
 #include "uart_backend.h"
 #include "uart_emul.h"
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 
 #define	COM1_BASE      	0x3F8
 #define	COM1_IRQ	4
@@ -498,3 +501,31 @@ uart_ns16550_tty_open(struct uart_ns16550_softc *sc, const char *device)
 #endif
 	return (uart_tty_open(sc->backend, device, uart_drain, sc));
 }
+
+#ifdef BHYVE_SNAPSHOT
+int
+uart_ns16550_snapshot(struct uart_ns16550_softc *sc,
+    struct vm_snapshot_meta *meta)
+{
+	int ret;
+
+	SNAPSHOT_VAR_OR_LEAVE(sc->data, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->ier, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->lcr, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->mcr, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->lsr, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->msr, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->fcr, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->scr, meta, ret, done);
+
+	SNAPSHOT_VAR_OR_LEAVE(sc->dll, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->dlh, meta, ret, done);
+
+	ret = uart_rxfifo_snapshot(sc->backend, meta);
+
+	sc->thre_int_pending = 1;
+
+done:
+	return (ret);
+}
+#endif /* BHYVE_SNAPSHOT */

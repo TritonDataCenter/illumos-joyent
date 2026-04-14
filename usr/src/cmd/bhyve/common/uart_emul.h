@@ -32,6 +32,7 @@
 #define	UART_NS16550_IO_BAR_SIZE	8
 
 struct uart_ns16550_softc;
+struct vm_snapshot_meta;
 
 typedef void (*uart_intr_func_t)(void *arg);
 
@@ -44,5 +45,10 @@ void	uart_ns16550_write(struct uart_ns16550_softc *sc, int offset,
 	    uint8_t value);
 int	uart_ns16550_tty_open(struct uart_ns16550_softc *sc,
 	    const char *device);
+
+#ifdef BHYVE_SNAPSHOT
+int	uart_ns16550_snapshot(struct uart_ns16550_softc *sc,
+	    struct vm_snapshot_meta *meta);
+#endif
 
 #endif /* _UART_EMUL_H_ */

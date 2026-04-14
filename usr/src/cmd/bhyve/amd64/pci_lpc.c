@@ -54,6 +54,9 @@
 #include "pctestdev.h"
 #include "tpm_device.h"
 #include "uart_emul.h"
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 
 #define	IO_ICU1		0x20
 #define	IO_ICU2		0xA0
@@ -611,12 +614,35 @@ lpc_pirq_routed(void)
 		pci_set_cfgdata8(lpc_bridge, 0x68 + pin, pirq_read(pin + 5));
 }
 
+#ifdef BHYVE_SNAPSHOT
+static int
+pci_lpc_snapshot(struct vm_snapshot_meta *meta)
+{
+	int unit, ret;
+	struct uart_ns16550_softc *sc;
+
+	for (unit = 0; unit < LPC_UART_NUM; unit++) {
+		sc = lpc_uart_softc[unit].uart_softc;
+
+		ret = uart_ns16550_snapshot(sc, meta);
+		if (ret != 0)
+			goto done;
+	}
+
+done:
+	return (ret);
+}
+#endif
+
 static const struct pci_devemu pci_de_lpc = {
 	.pe_emu =	"lpc",
 	.pe_init =	pci_lpc_init,
 	.pe_write_dsdt = pci_lpc_write_dsdt,
 	.pe_cfgwrite =	pci_lpc_cfgwrite,
 	.pe_barwrite =	pci_lpc_write,
-	.pe_barread =	pci_lpc_read
+	.pe_barread =	pci_lpc_read,
+#ifdef BHYVE_SNAPSHOT
+	.pe_snapshot =	pci_lpc_snapshot,
+#endif
 };
 PCI_EMUL_SET(pci_de_lpc);
