@@ -17,7 +17,7 @@
 LIBRARY	= libvmmapi.a
 VERS		= .1
 
-OBJECTS	= vmmapi.o expand_number.o
+OBJECTS	= vmmapi.o vmm_snapshot.o expand_number.o
 
 # include library definitions
 include ../../Makefile.lib
