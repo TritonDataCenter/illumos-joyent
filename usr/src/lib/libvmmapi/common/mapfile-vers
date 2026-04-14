@@ -119,6 +119,10 @@ SYMBOL_VERSION ILLUMOSprivate {
 		vm_set_topology;
 		vm_set_x2apic_state;
 		vm_setup_memory;
+		vm_snapshot_buf;
+		vm_snapshot_buf_cmp;
+		vm_snapshot_buf_err;
+		vm_get_snapshot_size;
 		vm_setup_pptdev_msi;
 		vm_setup_pptdev_msix;
 		vm_suspend;
