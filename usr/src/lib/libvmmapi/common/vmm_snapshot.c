@@ -347,6 +347,25 @@ vm_snapshot_req(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 	}
 }
 
+/*
+ * Pause / resume the entire VM (all vCPUs + kernel timer / device state).
+ * These map to the kernel-side VM_PAUSE / VM_RESUME ioctls and are the
+ * coarsest-grained quiesce primitive we have.  bhyve_control.c uses
+ * them around export-state / import-state so the snapshot is taken
+ * (or applied) against a consistent kernel state.
+ */
+int
+vm_pause_instance(struct vmctx *ctx)
+{
+	return (ioctl(vm_get_device_fd(ctx), VM_PAUSE, 0));
+}
+
+int
+vm_resume_instance(struct vmctx *ctx)
+{
+	return (ioctl(vm_get_device_fd(ctx), VM_RESUME, 0));
+}
+
 int
 vm_restore_time(struct vmctx *ctx)
 {
