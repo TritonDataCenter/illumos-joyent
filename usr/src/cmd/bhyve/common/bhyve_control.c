@@ -767,19 +767,33 @@ cmd_import_state(int fd, const char *line)
 	/*
 	 * The per-device RESTORE branch of pci_snapshot_pci_dev
 	 * unregisters each BAR at its pre-restore (dest-startup) address
-	 * and overwrites pi_bar[] with the source's values, but leaves
-	 * re-registration to this deferred pass so we can run a
-	 * cross-device BAR-conflict check (C-3) and per-BAR bounds
-	 * validation (C-2) before any register_bar() call commits
-	 * routing that might collide.  A failure here is a hard
-	 * migration reject — the VM would have inconsistent MMIO
-	 * routing otherwise.
+	 * and overwrites pi_bar[] with the source's values.  Re-register
+	 * in a second pass so cross-device overlap gets logged and
+	 * per-BAR bounds get validated before register_bar commits.
+	 * Per-BAR out-of-range is a hard reject (prevents VERIFY_IOPORT
+	 * SIGABRT on malformed payload); cross-device overlap is a warn
+	 * since register_mem_int silently dedups the same way at runtime.
 	 */
 	if (pci_restore_bars() != 0) {
 		send_error(fd, "BAR restore rejected "
-		    "(conflict or out-of-range)");
+		    "(out-of-range BAR in payload)");
 		return;
 	}
+
+	/*
+	 * Import is done — now flip the VM back to running.  Without
+	 * this, vCPU threads (started by the main thread after
+	 * bhyve_control_wait_import unblocks) would spin forever in
+	 * vm_run's EBUSY retry loop because the VM stays paused from
+	 * the vm_pause_instance call above.  pe_resume callbacks kick
+	 * viona workers + any other per-device resume logic.
+	 */
+	if (vm_resume_instance(ctl_ctx) != 0) {
+		(void) fprintf(stderr,
+		    "import-state: vm_resume_instance: %s\n",
+		    strerror(errno));
+	}
+	(void) resume_all_devices();
 
 	/*
 	 * Record success + signal anyone waiting in

@@ -2157,10 +2157,21 @@ vi_pci_snapshot_consts(struct virtio_consts *vc, struct vm_snapshot_meta *meta)
 {
 	int ret;
 
-	SNAPSHOT_VAR_CMP_OR_LEAVE(vc->vc_nvq, meta, ret, done);
+	/*
+	 * vc_nvq varies with dynamic queue allocation (viona's MQ grows
+	 * it from 3 to 17).  vc_hv_caps_legacy / vc_hv_caps_modern are
+	 * populated during init and may not have been set on the dest
+	 * yet when the migrate-listen bhyve is blocked waiting for
+	 * import-state.  All three assign source's values — FreeBSD's
+	 * virtio.c uses CMP here but that only works for devices with
+	 * stable-from-init const tables, which viona isn't.  vc_cfgsize
+	 * stays CMP as a sanity check that source and dest agree on the
+	 * device-type config layout.
+	 */
+	SNAPSHOT_VAR_OR_LEAVE(vc->vc_nvq, meta, ret, done);
 	SNAPSHOT_VAR_CMP_OR_LEAVE(vc->vc_cfgsize, meta, ret, done);
-	SNAPSHOT_VAR_CMP_OR_LEAVE(vc->vc_hv_caps_legacy, meta, ret, done);
-	SNAPSHOT_VAR_CMP_OR_LEAVE(vc->vc_hv_caps_modern, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(vc->vc_hv_caps_legacy, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(vc->vc_hv_caps_modern, meta, ret, done);
 
 done:
 	return (ret);
@@ -2183,8 +2194,8 @@ vi_pci_snapshot_queues(struct virtio_softc *vs, struct vm_snapshot_meta *meta)
 	for (i = 0; i < vc->vc_nvq; i++) {
 		vq = &vs->vs_queues[i];
 
-		SNAPSHOT_VAR_CMP_OR_LEAVE(vq->vq_qsize, meta, ret, done);
-		SNAPSHOT_VAR_CMP_OR_LEAVE(vq->vq_num, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_qsize, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_num, meta, ret, done);
 
 		SNAPSHOT_VAR_OR_LEAVE(vq->vq_flags, meta, ret, done);
 		SNAPSHOT_VAR_OR_LEAVE(vq->vq_last_avail, meta, ret, done);
@@ -2193,6 +2204,19 @@ vi_pci_snapshot_queues(struct virtio_softc *vs, struct vm_snapshot_meta *meta)
 		SNAPSHOT_VAR_OR_LEAVE(vq->vq_msix_idx, meta, ret, done);
 
 		SNAPSHOT_VAR_OR_LEAVE(vq->vq_pfn, meta, ret, done);
+
+		/*
+		 * Save the guest-physical ring addresses too.  vq_desc_gpa /
+		 * vq_avail_gpa / vq_used_gpa are set by pci_viona_ring_init
+		 * when the guest writes the modern-virtio queue address
+		 * registers; they're what VNA_IOC_RING_SET_STATE needs for
+		 * cross-host restore.  The SNAPSHOT_GUEST2HOST_ADDR calls
+		 * below restore the host-virtual pointers (vq_desc et al.)
+		 * but NOT the _gpa fields, so save them explicitly.
+		 */
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_desc_gpa, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_avail_gpa, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(vq->vq_used_gpa, meta, ret, done);
 
 		if (!vq_ring_ready(vq))
 			continue;
@@ -2233,6 +2257,23 @@ vi_pci_snapshot(struct vm_snapshot_meta *meta)
 	ret = vi_pci_snapshot_softc(vs, meta);
 	if (ret != 0)
 		goto done;
+
+	/*
+	 * On RESTORE, push the just-restored negotiated feature set
+	 * through the device's apply-features callback before the
+	 * vi_pci_snapshot_consts CMP checks and the per-queue loop
+	 * below.  For MQ-capable virtio devices (viona), this grows
+	 * vc_nvq from its 3-queue default to the negotiated 17 (8
+	 * RX/TX pairs + ctlq); without the call, dest's pre-nego
+	 * vc_nvq won't match source's and the CMP trips.
+	 *
+	 * Matches v1 bhyve_migrate.c's vi_restore_common pattern.
+	 */
+	if (meta->op == VM_SNAPSHOT_RESTORE &&
+	    vc->vc_apply_features != NULL) {
+		(*vc->vc_apply_features)(DEV_SOFTC(vs),
+		    &vs->vs_negotiated_caps);
+	}
 
 	/* Save virtio consts */
 	ret = vi_pci_snapshot_consts(vc, meta);
