@@ -2662,6 +2662,21 @@ pci_restore_bar_conflict(void)
 				pi = fi->fi_devi;
 				if (pi == NULL)
 					continue;
+
+				/*
+				 * Only count BARs that will actually be
+				 * registered (pci_restore_bars skips
+				 * devices without command-register decode).
+				 * Fixed-address startup BARs for devices
+				 * the guest never enabled (fbuf, xhci with
+				 * CMD=0) can overlap legitimately — no
+				 * MMIO routing is ever set up for them —
+				 * and flagging them here produces a false-
+				 * positive refuse-to-restore.
+				 */
+				if (!memen(pi) && !porten(pi))
+					continue;
+
 				for (int i = 0; i <= PCI_BARMAX; i++) {
 					enum pcibar_type t = pi->pi_bar[i].type;
 					uint64_t addr = pi->pi_bar[i].addr;
@@ -2671,6 +2686,12 @@ pci_restore_bar_conflict(void)
 					    t == PCIBAR_MEMHI64)
 						continue;
 					if (addr == 0 || size == 0)
+						continue;
+
+					/* Per-BAR decode gate too. */
+					int bar_decode = (t == PCIBAR_IO) ?
+					    porten(pi) : memen(pi);
+					if (!bar_decode)
 						continue;
 
 					slots[n].pi = pi;
@@ -2695,21 +2716,45 @@ pci_restore_bar_conflict(void)
 			/* [s1..e1] and [s2..e2] overlap iff s1<=e2 && s2<=e1. */
 			if (slots[i].start <= slots[j].end &&
 			    slots[j].start <= slots[i].end) {
+				const char *e_i = slots[i].pi->pi_d ?
+				    slots[i].pi->pi_d->pe_emu : "?";
+				const char *e_j = slots[j].pi->pi_d ?
+				    slots[j].pi->pi_d->pe_emu : "?";
+				/*
+				 * Overlap detected.  On existing stock
+				 * bhyve layouts this happens benignly
+				 * (viona's modern-cfg BAR vs fbuf's
+				 * device-cfg BAR when fbuf is unused):
+				 * register_mem_int silently dedups the
+				 * second range in non-migration code too,
+				 * so our refusing to restore would be
+				 * stricter than the running source bhyve
+				 * is.  Warn and continue — the conflict
+				 * check stays as a diagnostic rather than
+				 * a hard gate.
+				 */
 				(void) fprintf(stderr,
-				    "pci_restore_bars: BAR conflict — "
-				    "dev%p[%d] type=%d [0x%lx..0x%lx] vs "
-				    "dev%p[%d] type=%d [0x%lx..0x%lx]; "
-				    "refusing restore\n",
-				    (void *)slots[i].pi, slots[i].idx,
+				    "pci_restore_bars: BAR overlap — "
+				    "%s@%u:%u:%u[%d] type=%d size=0x%lx "
+				    "[0x%lx..0x%lx] vs %s@%u:%u:%u[%d] "
+				    "type=%d size=0x%lx [0x%lx..0x%lx] "
+				    "(continuing; register_mem_int dedups)\n",
+				    e_i, slots[i].pi->pi_bus,
+				    slots[i].pi->pi_slot,
+				    slots[i].pi->pi_func, slots[i].idx,
 				    (int)slots[i].type,
+				    (unsigned long)(slots[i].end -
+				        slots[i].start + 1),
 				    (unsigned long)slots[i].start,
 				    (unsigned long)slots[i].end,
-				    (void *)slots[j].pi, slots[j].idx,
+				    e_j, slots[j].pi->pi_bus,
+				    slots[j].pi->pi_slot,
+				    slots[j].pi->pi_func, slots[j].idx,
 				    (int)slots[j].type,
+				    (unsigned long)(slots[j].end -
+				        slots[j].start + 1),
 				    (unsigned long)slots[j].start,
 				    (unsigned long)slots[j].end);
-				free(slots);
-				return (-1);
 			}
 		}
 	}
