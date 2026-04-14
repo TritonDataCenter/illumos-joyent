@@ -66,6 +66,9 @@
 
 #include "bhyverun.h"
 #include "config.h"
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 #include "debug.h"
 #include "iov.h"
 #include "pci_emul.h"
@@ -216,6 +219,11 @@ static void pci_vtblk_reset(void *);
 static void pci_vtblk_notify(void *, struct vqueue_info *);
 static int pci_vtblk_cfgread(void *, int, int, uint32_t *);
 static int pci_vtblk_cfgwrite(void *, int, int, uint32_t);
+#ifdef BHYVE_SNAPSHOT
+static void pci_vtblk_pause(void *);
+static void pci_vtblk_resume(void *);
+static int pci_vtblk_snapshot(void *, struct vm_snapshot_meta *);
+#endif
 #ifndef __FreeBSD__
 static void pci_vtblk_apply_feats(void *, uint64_t *);
 #endif
@@ -254,6 +262,11 @@ static struct virtio_consts vtblk_vi_consts = {
 	.vc_hv_caps_modern =	VTBLK_S_HOSTCAPS,
 	.vc_capstr =		vtblk_caps,
 	.vc_ncapstr =		ARRAY_SIZE(vtblk_caps),
+#ifdef BHYVE_SNAPSHOT
+	.vc_pause =		pci_vtblk_pause,
+	.vc_resume =		pci_vtblk_resume,
+	.vc_snapshot =		pci_vtblk_snapshot,
+#endif
 };
 
 static void
@@ -651,6 +664,40 @@ pci_vtblk_apply_feats(void *vsc, uint64_t *caps)
 }
 #endif /* __FreeBSD__ */
 
+#ifdef BHYVE_SNAPSHOT
+static void
+pci_vtblk_pause(void *vsc)
+{
+	struct pci_vtblk_softc *sc = vsc;
+
+	DPRINTF(("vtblk: device pause requested"));
+	blockif_pause(sc->bc);
+}
+
+static void
+pci_vtblk_resume(void *vsc)
+{
+	struct pci_vtblk_softc *sc = vsc;
+
+	DPRINTF(("vtblk: device resume requested"));
+	blockif_resume(sc->bc);
+}
+
+static int
+pci_vtblk_snapshot(void *vsc, struct vm_snapshot_meta *meta)
+{
+	int ret;
+	struct pci_vtblk_softc *sc = vsc;
+
+	SNAPSHOT_VAR_OR_LEAVE(sc->vbsc_cfg, meta, ret, done);
+	SNAPSHOT_BUF_OR_LEAVE(sc->vbsc_ident, sizeof (sc->vbsc_ident),
+	    meta, ret, done);
+
+done:
+	return (ret);
+}
+#endif /* BHYVE_SNAPSHOT */
+
 static const struct pci_devemu pci_de_vblk = {
 	.pe_emu =	"virtio-blk",
 	.pe_init =	pci_vtblk_init,
@@ -659,5 +706,10 @@ static const struct pci_devemu pci_de_vblk = {
 	.pe_cfgread =	vi_pci_cfgread,
 	.pe_barwrite =	vi_pci_write,
 	.pe_barread =	vi_pci_read,
+#ifdef BHYVE_SNAPSHOT
+	.pe_snapshot =	vi_pci_snapshot,
+	.pe_pause =	vi_pci_pause,
+	.pe_resume =	vi_pci_resume,
+#endif
 };
 PCI_EMUL_SET(pci_de_vblk);

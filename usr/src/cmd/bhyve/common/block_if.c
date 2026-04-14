@@ -131,6 +131,10 @@ struct blockif_ctxt {
 	int			bc_psectsz;
 	int			bc_psectoff;
 	int			bc_closing;
+#ifdef BHYVE_SNAPSHOT
+	int			bc_paused;
+	pthread_cond_t		bc_work_done_cond;
+#endif
 	pthread_t		bc_btid[BLOCKIF_NUMTHR];
 	pthread_mutex_t		bc_mtx;
 	pthread_cond_t		bc_cond;
@@ -468,6 +472,13 @@ blockif_thr(void *arg)
 			pthread_mutex_lock(&bc->bc_mtx);
 			blockif_complete(bc, be);
 		}
+
+#ifdef BHYVE_SNAPSHOT
+		/* If none to work, notify any blockif_pause() waiter */
+		if (blockif_empty(bc))
+			pthread_cond_broadcast(&bc->bc_work_done_cond);
+#endif
+
 		/* Check ctxt status here to see if exit requested */
 		if (bc->bc_closing)
 			break;
@@ -821,6 +832,10 @@ blockif_open(nvlist_t *nvl, const char *ident)
 	bc->bc_psectoff = psectoff;
 	pthread_mutex_init(&bc->bc_mtx, NULL);
 	pthread_cond_init(&bc->bc_cond, NULL);
+#ifdef BHYVE_SNAPSHOT
+	bc->bc_paused = 0;
+	pthread_cond_init(&bc->bc_work_done_cond, NULL);
+#endif
 	TAILQ_INIT(&bc->bc_freeq);
 	TAILQ_INIT(&bc->bc_pendq);
 	TAILQ_INIT(&bc->bc_busyq);
@@ -930,6 +945,9 @@ blockif_request(struct blockif_ctxt *bc, struct blockif_req *breq,
 	err = 0;
 
 	pthread_mutex_lock(&bc->bc_mtx);
+#ifdef BHYVE_SNAPSHOT
+	assert(!bc->bc_paused);
+#endif
 	if (!TAILQ_EMPTY(&bc->bc_freeq)) {
 		/*
 		 * Enqueue and inform the block i/o thread
@@ -1224,3 +1242,35 @@ blockif_set_wce(struct blockif_ctxt *bc, int wc_enable)
 	return (res);
 }
 #endif /* __FreeBSD__ */
+
+#ifdef BHYVE_SNAPSHOT
+void
+blockif_pause(struct blockif_ctxt *bc)
+{
+	assert(bc != NULL);
+	assert(bc->bc_magic == BLOCKIF_SIG);
+
+	pthread_mutex_lock(&bc->bc_mtx);
+	bc->bc_paused = 1;
+
+	/* The interface is paused.  Wait for workers to finish their work */
+	while (!blockif_empty(bc))
+		pthread_cond_wait(&bc->bc_work_done_cond, &bc->bc_mtx);
+	pthread_mutex_unlock(&bc->bc_mtx);
+
+	if (!bc->bc_rdonly && blockif_flush_bc(bc))
+		(void) fprintf(stderr,
+		    "%s: [WARN] failed to flush backing file.\n", __func__);
+}
+
+void
+blockif_resume(struct blockif_ctxt *bc)
+{
+	assert(bc != NULL);
+	assert(bc->bc_magic == BLOCKIF_SIG);
+
+	pthread_mutex_lock(&bc->bc_mtx);
+	bc->bc_paused = 0;
+	pthread_mutex_unlock(&bc->bc_mtx);
+}
+#endif /* BHYVE_SNAPSHOT */
