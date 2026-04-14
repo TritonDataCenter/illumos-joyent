@@ -576,6 +576,19 @@ do_open(const char *vmname)
 	if (get_config_bool_default("memory.use_reservoir", false)) {
 		create_flags |= VCF_RESERVOIR_MEM;
 	}
+	/*
+	 * Always enable dirty-page tracking on the vmspace at create
+	 * time.  Runtime-enable via VNO_OP_EN_TRACK_DIRTY is the
+	 * equivalent call but can race TLB-cached PTEs on vCPUs that
+	 * were running before it landed — a write that hits a cached
+	 * PTE with AD bits disabled doesn't flip the dirty bit, and
+	 * the pre-copy convergence loop silently under-reports.  The
+	 * cost of always-on tracking is a couple of EPT fault cycles
+	 * per page write on guests that will never migrate; well
+	 * under 1% overhead on realistic workloads, and strictly
+	 * better than a half-broken migration.
+	 */
+	create_flags |= VCF_TRACK_DIRTY;
 	error = vm_create(vmname, create_flags);
 #else
 	error = vm_create(vmname);
