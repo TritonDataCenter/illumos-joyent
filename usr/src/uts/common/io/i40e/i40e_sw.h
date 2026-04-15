@@ -1070,7 +1070,7 @@ extern boolean_t i40e_ring_tx_quiesce(i40e_trqpair_t *);
  * Transmit-side functions
  */
 mblk_t *i40e_ring_tx(void *, mblk_t *);
-extern void i40e_tx_recycle_ring(i40e_trqpair_t *);
+extern void i40e_tx_recycle_ring(i40e_trqpair_t *, boolean_t);
 extern void i40e_tx_cleanup_ring(i40e_trqpair_t *);
 
 /*

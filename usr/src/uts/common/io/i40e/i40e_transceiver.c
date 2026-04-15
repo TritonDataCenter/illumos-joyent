@@ -2000,14 +2000,15 @@ i40e_tx_cleanup_ring(i40e_trqpair_t *itrq)
  * we're good to go.
  */
 void
-i40e_tx_recycle_ring(i40e_trqpair_t *itrq)
+i40e_tx_recycle_ring(i40e_trqpair_t *itrq, boolean_t caller_held)
 {
 	uint32_t wbhead, toclean, count;
 	i40e_tx_control_block_t *tcbhead;
 	i40e_t *i40e = itrq->itrq_i40e;
 	uint_t desc_per_tcb, i;
 
-	mutex_enter(&itrq->itrq_tx_lock);
+	if (!caller_held)
+		mutex_enter(&itrq->itrq_tx_lock);
 
 	ASSERT(itrq->itrq_desc_free <= itrq->itrq_tx_ring_size);
 	if (itrq->itrq_desc_free == itrq->itrq_tx_ring_size) {
@@ -2017,7 +2018,8 @@ i40e_tx_recycle_ring(i40e_trqpair_t *itrq)
 			    itrq->itrq_mactxring);
 			itrq->itrq_txstat.itxs_num_unblocked.value.ui64++;
 		}
-		mutex_exit(&itrq->itrq_tx_lock);
+		if (!caller_held)
+			mutex_exit(&itrq->itrq_tx_lock);
 		return;
 	}
 
@@ -2032,7 +2034,8 @@ i40e_tx_recycle_ring(i40e_trqpair_t *itrq)
 
 	if (i40e_check_dma_handle(itrq->itrq_desc_area.dmab_dma_handle) !=
 	    DDI_FM_OK) {
-		mutex_exit(&itrq->itrq_tx_lock);
+		if (!caller_held)
+			mutex_exit(&itrq->itrq_tx_lock);
 		ddi_fm_service_impact(i40e->i40e_dip, DDI_SERVICE_DEGRADED);
 		atomic_or_32(&i40e->i40e_state, I40E_ERROR);
 		return;
@@ -2089,10 +2092,12 @@ i40e_tx_recycle_ring(i40e_trqpair_t *itrq)
 		itrq->itrq_txstat.itxs_num_unblocked.value.ui64++;
 	}
 
-	mutex_exit(&itrq->itrq_tx_lock);
+	if (!caller_held)
+		mutex_exit(&itrq->itrq_tx_lock);
 
 	/*
-	 * Now clean up the tcb.
+	 * Now clean up the tcb. Safe even if caller hold itrq_tx_lock,
+	 * see i40e_tx_cleanup_ring().
 	 */
 	while (tcbhead != NULL) {
 		i40e_tx_control_block_t *tcb = tcbhead;
@@ -2159,8 +2164,12 @@ i40e_tx_bind_fragment(i40e_trqpair_t *itrq, const mblk_t *mp,
 	tcb->tcb_bind_info =
 	    kmem_zalloc(ncookies * sizeof (struct i40e_dma_bind_info),
 	    KM_NOSLEEP);
-	if (tcb->tcb_bind_info == NULL)
+	if (tcb->tcb_bind_info == NULL) {
+		/* XXX KEBE SAYS KSTAT, BUT FOR NOW... */
+		DTRACE_PROBE2(i40e__tcb__bind__info, i40e_tx_control_block_t *,
+		    tcb, uint_t, ncookies);
 		goto bffail;
+	}
 
 	while (i < ncookies) {
 		if (i > 0)
@@ -2958,9 +2967,25 @@ i40e_ring_tx(void *arg, mblk_t *mp)
 	mutex_enter(&itrq->itrq_tx_lock);
 	if (itrq->itrq_desc_free < i40e->i40e_tx_block_thresh ||
 	    (itrq->itrq_desc_free - 1) < needed_desc) {
-		txs->itxs_err_nodescs.value.ui64++;
-		mutex_exit(&itrq->itrq_tx_lock);
-		goto txfail;
+		uint32_t  old_desc_head = itrq->itrq_desc_head,
+		    old_desc_tail = itrq->itrq_desc_tail,
+		    old_desc_free = itrq->itrq_desc_free;
+
+		/* Attempt a ring recycle now, note that we hold the lock. */
+		i40e_tx_recycle_ring(itrq, B_TRUE);
+
+		/* And try one more time. */
+		if (itrq->itrq_desc_free < i40e->i40e_tx_block_thresh ||
+		    (itrq->itrq_desc_free - 1) < needed_desc) {
+			txs->itxs_err_nodescs.value.ui64++;
+			mutex_exit(&itrq->itrq_tx_lock);
+			goto txfail;
+		}
+
+		/* Place to check if the recycle was successful! */
+		DTRACE_PROBE4(i40e__tx__time__recycle, i40e_trqpair_t *, itrq,
+		    uint32_t, old_desc_head, uint32_t, old_desc_tail,
+		    uint32_t, old_desc_free);
 	}
 
 	if (do_ctx_desc) {

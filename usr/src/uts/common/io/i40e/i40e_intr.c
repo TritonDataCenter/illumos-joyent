@@ -687,7 +687,7 @@ i40e_intr_rx_work(i40e_t *i40e, i40e_trqpair_t *itrq)
 static void
 i40e_intr_tx_work(i40e_t *i40e, i40e_trqpair_t *itrq)
 {
-	i40e_tx_recycle_ring(itrq);
+	i40e_tx_recycle_ring(itrq, B_FALSE);
 }
 
 /*
