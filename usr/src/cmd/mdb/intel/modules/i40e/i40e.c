@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2026 RackTop Systems, Inc.
  */
 
 #include <mdb/mdb_ctf.h>
@@ -108,6 +109,56 @@ typedef struct mdb_i40e_trqpair {
 	i40e_tx_control_block_t	**itrq_tcb_work_list;
 } mdb_i40e_trqpair_t;
 
+#define	CTX_CMD(x) \
+	((uint64_t)I40E_TX_CTX_DESC_##x << I40E_TXD_CTX_QW1_CMD_SHIFT)
+#define	SWTCH_MASK \
+	(I40E_TX_CTX_DESC_SWTCH_NOTAG|I40E_TX_CTX_DESC_SWTCH_UPLINK| \
+	I40E_TX_CTX_DESC_SWTCH_LOCAL|I40E_TX_CTX_DESC_SWTCH_VSI)
+
+static const mdb_bitmask_t ctx_cmd_mask[] = {
+	{ "TSO", CTX_CMD(TSO), CTX_CMD(TSO) },
+	{ "TSYN", CTX_CMD(TSYN), CTX_CMD(TSYN) },
+	{ "IL2TAG2", CTX_CMD(IL2TAG2), CTX_CMD(IL2TAG2) },
+	{ "IL2TAG_IL2H", CTX_CMD(IL2TAG2_IL2H), CTX_CMD(IL2TAG2_IL2H) },
+	{ "SWTCH_NOTAG", SWTCH_MASK, CTX_CMD(SWTCH_NOTAG) },
+	{ "SWTCH_UPLINK", SWTCH_MASK, CTX_CMD(SWTCH_UPLINK) },
+	{ "SWTCH_LOCAL", SWTCH_MASK, CTX_CMD(SWTCH_LOCAL) },
+	{ "SWTCH_VSI", SWTCH_MASK, CTX_CMD(SWTCH_VSI) },
+	{ "SWPE", CTX_CMD(SWPE), CTX_CMD(SWPE) },
+	{ NULL, 0, 0 }
+};
+
+#define DATA_CMD(x) ((uint64_t)I40E_TX_DESC_CMD_##x << I40E_TXD_QW1_CMD_SHIFT)
+#define	IIPT_MASK \
+	((I40E_TX_DESC_CMD_IIPT_NONIP|I40E_TX_DESC_CMD_IIPT_IPV6| \
+	I40E_TX_DESC_CMD_IIPT_IPV4|I40E_TX_DESC_CMD_IIPT_IPV4_CSUM) << \
+	I40E_TXD_QW1_CMD_SHIFT)
+#define	L4T_MASK \
+	((I40E_TX_DESC_CMD_L4T_EOFT_UNK|I40E_TX_DESC_CMD_L4T_EOFT_TCP| \
+	I40E_TX_DESC_CMD_L4T_EOFT_SCTP|I40E_TX_DESC_CMD_L4T_EOFT_UDP| \
+	I40E_TX_DESC_CMD_L4T_EOFT_EOF_N|I40E_TX_DESC_CMD_L4T_EOFT_EOF_T| \
+	I40E_TX_DESC_CMD_L4T_EOFT_EOF_NI|I40E_TX_DESC_CMD_L4T_EOFT_EOF_A) << \
+	I40E_TXD_QW1_CMD_SHIFT)
+static const mdb_bitmask_t data_cmd_mask[] = {
+	{ "EOP", DATA_CMD(EOP), DATA_CMD(EOP) },
+	{ "RS", DATA_CMD(RS), DATA_CMD(RS) },
+	{ "ICRC", DATA_CMD(ICRC), DATA_CMD(ICRC) },
+	{ "IL2TAG1", DATA_CMD(IL2TAG1), DATA_CMD(IL2TAG1) },
+	{ "DUMMY", DATA_CMD(DUMMY), DATA_CMD(DUMMY) },
+	{ "IIPT_NONIP", IIPT_MASK, DATA_CMD(IIPT_NONIP) },
+	{ "IIPT_IPV6", IIPT_MASK, DATA_CMD(IIPT_IPV6) },
+	{ "IIPT_IPV4", IIPT_MASK, DATA_CMD(IIPT_IPV4) },
+	{ "IIPT_IPV4_CSUM", IIPT_MASK, DATA_CMD(IIPT_IPV4_CSUM) },
+	{ "FCOET", DATA_CMD(FCOET), DATA_CMD(FCOET) },
+	{ "L4T_EOFT_TCP", L4T_MASK, DATA_CMD(L4T_EOFT_TCP) },
+	{ "L4T_EOFT_SCTP", L4T_MASK, DATA_CMD(L4T_EOFT_SCTP) },
+	{ "L4T_EOFT_UDP", L4T_MASK, DATA_CMD(L4T_EOFT_UDP) },
+	{ "L4T_EOFT_EOF_T", L4T_MASK, DATA_CMD(L4T_EOFT_EOF_T) },
+	{ "L4T_EOFT_EOF_NI", L4T_MASK, DATA_CMD(L4T_EOFT_EOF_NI) },
+	{ "L4T_EOFT_EOF_A", L4T_MASK, DATA_CMD(L4T_EOFT_EOF_A) },
+	{ NULL, 0, 0 }
+};
+
 static void
 i40e_tx_ring_help()
 {
@@ -115,8 +166,32 @@ i40e_tx_ring_help()
 	    "\t -a dump all ring entries\n"
 	    "\t or\n"
 	    "\t combine -b [start index] with -e [end index] to specify a \n"
-	    "\t range of ring entries to print\n");
+	    "\t range of ring entries to print\n"
+	    "\t -v show detailed descriptor information\n");
 }
+
+static void
+add_item(char *str, const char *toadd, size_t len)
+{
+	if (str == NULL)
+		return;
+
+	if (str[0] != '\0')
+		(void) strlcat(str, " ", len);
+
+	(void) strlcat(str, toadd, len);
+}
+
+#define	MSS(x)	\
+	(((x) & I40E_TXD_CTX_QW1_MSS_MASK) >> I40E_TXD_CTX_QW1_MSS_SHIFT)
+
+#define	TSO_LEN(x) \
+	(((x) & I40E_TXD_CTX_QW1_TSO_LEN_MASK) >> \
+	I40E_TXD_CTX_QW1_TSO_LEN_SHIFT)
+
+#define	EOP(x) (((x) & I40E_TXD_QW1_CMD_MASK) >> I40E_TXD_QW1_CMD_SHIFT)
+#define	BUF_SZ(x) (((x) & I40E_TXD_QW1_TX_BUF_SZ_MASK) >> \
+	I40E_TXD_QW1_TX_BUF_SZ_SHIFT)
 
 static int
 i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
@@ -128,8 +203,13 @@ i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
 	uint32_t wbhead;
 	size_t ringsz, wklistsz;
 	boolean_t opt_a = B_FALSE;
+	boolean_t opt_r = B_FALSE;
+	boolean_t opt_v = B_FALSE;
 	char *opt_b = NULL, *opt_e = NULL;
 	uint64_t begin = UINT64_MAX, end = UINT64_MAX;
+	uint32_t tso_len = 0;
+	uint16_t mss = 0;
+	boolean_t is_tso = B_FALSE;
 
 	if (!(flags & DCMD_ADDRSPEC)) {
 		mdb_warn("::i40e_tx_ring does not operate globally\n");
@@ -139,7 +219,10 @@ i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
 	if (mdb_getopts(argc, argv,
 	    'a', MDB_OPT_SETBITS, B_TRUE, &opt_a,
 	    'b', MDB_OPT_STR, &opt_b,
-	    'e', MDB_OPT_STR, &opt_e, NULL) != argc)
+	    'e', MDB_OPT_STR, &opt_e,
+	    'r', MDB_OPT_SETBITS, B_TRUE, &opt_r,
+	    'v', MDB_OPT_SETBITS, B_TRUE, &opt_v,
+	    NULL) != argc)
 		return (DCMD_USAGE);
 
 	/*
@@ -149,7 +232,16 @@ i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
 		mdb_warn("-a and -b/-e are mutually exclusive\n");
 		return (DCMD_USAGE);
 	}
-	if (argc > 0 && ! opt_a && (opt_b == NULL || opt_e == NULL)) {
+	if (opt_r && (opt_b != NULL || opt_e != NULL)) {
+		mdb_warn("-r and -b/-e are mutually exclusive\n");
+		return (DCMD_USAGE);
+	}
+	if (opt_a && opt_r) {
+		mdb_warn("-a and -r are mutually exclusive\n");
+		return (DCMD_USAGE);
+	}
+	if (argc > 0 && ! opt_a && ! opt_r &&
+	    (opt_b == NULL || opt_e == NULL)) {
 		mdb_warn("-b/-e must both be specified\n");
 		return (DCMD_USAGE);
 	}
@@ -168,11 +260,16 @@ i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
 		begin = 0;
 		end = trq.itrq_tx_ring_size - 1;
 	}
+	if (opt_r) {
+		begin = trq.itrq_desc_head;
+		end = trq.itrq_desc_tail;
+	}
 
 	/*
 	 * Verify that the requested range of ring entries makes sense.
 	 */
-	if (argc > 0 && (end < begin || begin >= trq.itrq_tx_ring_size ||
+	if (argc > 0 && !opt_r &&
+	    (end < begin || begin >= trq.itrq_tx_ring_size ||
 	    end >= trq.itrq_tx_ring_size)) {
 		mdb_warn("invalid range specified\n");
 		return (DCMD_USAGE);
@@ -219,12 +316,16 @@ i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
 
 	mdb_printf("\n%-10s %-10s %-16s %-16s %-10s\n", "Index", "Desc Type",
 	    "Desc Ptr", "TCB Ptr", "Other");
-	for (uint64_t i = begin; i <= end; i++) {
+	for (uint64_t i = begin; i != end; i++) {
 		const char *dtype;
-		char dother[17];
+		char dother[64];
+		char buf[64];
 		i40e_tx_desc_t *dptr;
 		i40e_tx_control_block_t *tcbptr;
 		uint64_t ctob;
+
+		if (i == trq.itrq_tx_ring_size)
+			i = 0;
 
 		dptr = &descring[i];
 		tcbptr = wklist[i];
@@ -233,14 +334,27 @@ i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
 			dtype = "FREE";
 		} else {
 			switch (ctob & I40E_TXD_QW1_DTYPE_MASK) {
-			case (I40E_TX_DESC_DTYPE_CONTEXT):
+			case I40E_TX_DESC_DTYPE_CONTEXT:
 				dtype = "CONTEXT";
+				if ((ctob & I40E_TXD_CTX_QW1_CMD_MASK) ==
+				    CTX_CMD(TSO)) {
+					is_tso = B_TRUE;
+					mss = MSS(ctob);
+					tso_len = TSO_LEN(ctob);
+				} else {
+					is_tso = B_FALSE;
+					mss = 0;
+					tso_len = 0;
+				}
 				break;
-			case (I40E_TX_DESC_DTYPE_DATA):
+			case I40E_TX_DESC_DTYPE_DATA:
 				dtype = "DATA";
 				break;
-			case (I40E_TX_DESC_DTYPE_FILTER_PROG):
+			case I40E_TX_DESC_DTYPE_FILTER_PROG:
 				dtype = "FILTER";
+				break;
+			case I40E_TX_DESC_DTYPE_DESC_DONE:
+				dtype = "DONE";
 				break;
 			default:
 				dtype = "UNKNOWN";
@@ -248,16 +362,41 @@ i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
 		}
 		dother[0] = '\0';
 		if (i == wbhead)
-			(void) strcat(dother, "WBHEAD");
+			add_item(dother, "WBHEAD", sizeof (dother));
 
 		if (i == trq.itrq_desc_head)
-			(void) strcat(dother,
-			    strlen(dother) > 0 ? " HEAD" : "HEAD");
+			add_item(dother, "HEAD", sizeof (dother));
 
 		if (i == trq.itrq_desc_tail)
-			(void) strcat(dother,
-			    strlen(dother) > 0 ? " TAIL" : "TAIL");
+			add_item(dother, "TAIL", sizeof (dother));
 
+		if (!opt_v || ctob == 0)
+			goto doprint;
+
+		// pkt_len, desc_count, mss, is_tso
+		switch (ctob & I40E_TXD_QW1_DTYPE_MASK) {
+		case I40E_TX_DESC_DTYPE_FILTER_PROG:
+			break;
+		case I40E_TX_DESC_DTYPE_CONTEXT:
+			(void) mdb_snprintf(buf, sizeof (buf), "%lb", ctob,
+			    ctx_cmd_mask);
+			add_item(dother, buf, sizeof (dother));
+
+			if (is_tso) {
+				(void) mdb_snprintf(buf, sizeof (buf),
+				     "TSO_LEN=%u MSS=%u", tso_len, mss);
+				add_item(dother, buf, sizeof (dother));
+			}
+			break;
+		case I40E_TX_DESC_DTYPE_DATA:
+			(void) mdb_snprintf(buf, sizeof (buf),
+			    "%lb BUF_SIZE=%u", ctob, data_cmd_mask,
+			    BUF_SZ(ctob));
+			add_item(dother, buf, sizeof (dother));
+			break;
+		}
+
+doprint:
 		mdb_printf("%-10d %-10s %-16p %-16p %-10s\n", i, dtype, dptr,
 		    tcbptr, dother);
 	}
@@ -270,7 +409,7 @@ i40e_tx_ring_dcmd(uintptr_t addr, uint_t flags, int argc,
 static const mdb_dcmd_t i40e_dcmds[] = {
 	{ "i40e_switch_rsrcs", NULL, "print switch resources",
 	    i40e_switch_rsrcs_dcmd, NULL },
-	{ "i40e_tx_ring", "[-a] -b [start index] -e [end index]\n",
+	{ "i40e_tx_ring", "[-arv] -b [start index] -e [end index]\n",
 	    "dump TX descriptor ring state", i40e_tx_ring_dcmd,
 	    i40e_tx_ring_help },
 	{ NULL }
