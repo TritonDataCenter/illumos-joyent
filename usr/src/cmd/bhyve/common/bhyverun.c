@@ -782,6 +782,27 @@ main(int argc, char *argv[])
 
 #ifndef __FreeBSD__
 	illumos_priv_init();
+
+	/*
+	 * Resolve migrate.listen EARLY — before any code path that branches
+	 * on it.  The value can come from `-o migrate.listen=true` (already
+	 * set by bhyve_optparse above) or from the /tmp/migrate.listen
+	 * sentinel file dropped by the GZ migration agent just before
+	 * invoking bhyve.  The sentinel path is consumed once here so later
+	 * consumers (AP pre-init, bootrom-skip, hibernate, wait_import)
+	 * all see a consistent migrate.listen=true throughout startup.
+	 * Resolving it any later than this risks the AP pre-init block
+	 * below running with the default (false) and skipping
+	 * bhyve_init_vcpu() on every AP — which then never runs at all in
+	 * the migrate-restored path (bhyve_start_vcpu() skips AP init when
+	 * migrate.restored is set), leaving the AP's kernel-side HALT_EXIT
+	 * / x2APIC mode uninitialised and manifesting as timer-softirq
+	 * starvation on AP cores post-resume.
+	 */
+	if (access("/tmp/migrate.listen", F_OK) == 0) {
+		set_config_bool("migrate.listen", true);
+		(void) unlink("/tmp/migrate.listen");
+	}
 #endif
 
 	calc_topology();
@@ -939,16 +960,10 @@ main(int argc, char *argv[])
 	 * In migrate-listen mode, the destination bhyve is brought up
 	 * solely to receive a migrated guest's state via the control
 	 * socket.  Bootrom load + vcpu_reset would clobber the soon-to-
-	 * be-imported registers / RIP / CR0 / etc., so skip them.
-	 *
-	 * The trigger is either the explicit `migrate.listen=true` config
-	 * value, or a sentinel file at /tmp/migrate.listen (consumed once
-	 * to avoid sticky behaviour across restarts).
+	 * be-imported registers / RIP / CR0 / etc., so skip them.  The
+	 * migrate.listen config value was resolved from `-o` or the
+	 * /tmp/migrate.listen sentinel file earlier in main().
 	 */
-	if (access("/tmp/migrate.listen", F_OK) == 0) {
-		set_config_bool("migrate.listen", true);
-		(void) unlink("/tmp/migrate.listen");
-	}
 	if (get_config_bool_default("migrate.listen", false)) {
 		(void) fprintf(stderr,
 		    "migrate-listen: skipping bootrom + vcpu_reset; "
