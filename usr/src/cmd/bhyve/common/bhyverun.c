@@ -429,6 +429,21 @@ fbsdrun_addcpu(int vcpuid, bool suspend)
 	vi = &vcpu_info[vcpuid];
 
 	error = vm_activate_cpu(vi->vcpu);
+#ifndef __FreeBSD__
+	/*
+	 * On the migrate-restored path, cmd_import_state has already
+	 * activated every vCPU in the kernel (so that vm_resume_instance
+	 * would iterate the full active_cpus set and re-arm the LAPIC
+	 * timer callout for every vCPU — see the comment in
+	 * bhyve_control.c::cmd_import_state).  Our call here then
+	 * returns EBUSY from vm_activate_cpu(), which is the expected
+	 * state.  Treat it as success.
+	 */
+	if (error != 0 && errno == EBUSY &&
+	    get_config_bool_default("migrate.restored", false)) {
+		error = 0;
+	}
+#endif
 	if (error != 0)
 		err(EX_OSERR, "could not activate CPU %d", vi->vcpuid);
 

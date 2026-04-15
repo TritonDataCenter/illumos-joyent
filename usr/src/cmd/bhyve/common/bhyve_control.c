@@ -869,6 +869,48 @@ cmd_import_state(int fd, const char *line)
 	}
 
 	/*
+	 * Activate every vCPU in the kernel BEFORE vm_resume_instance so
+	 * the resume iterates them all.
+	 *
+	 * vm_resume_instance (uts/intel/io/vmm/vmm.c:809) walks
+	 * vm->active_cpus and calls vlapic_resume on each — and
+	 * vlapic_resume is what re-arms the LAPIC callout that drives
+	 * guest timer IRQs.  vlapic_data_write (vlapic.c:2039) populates
+	 * vlapic->timer_fire_when during the state restore but skips the
+	 * callout_reset while the VM is paused, relying on the subsequent
+	 * vm_resume_instance to do it.
+	 *
+	 * On the migrate-listen path, vCPUs are not activated until the
+	 * main thread calls fbsdrun_addcpu -> vm_activate_cpu after
+	 * bhyve_control_wait_import returns — i.e. AFTER us.  Without
+	 * this pre-resume activation, vm_resume_instance sees an empty
+	 * active_cpus cpuset, vlapic_resume is never called for anyone,
+	 * and the guest's LAPIC timer never fires on the dest.  Guests
+	 * with a freshly-armed timer deadline at pause instant (anything
+	 * that has run long enough to have active timers on both vCPUs)
+	 * deadlock on whichever core was most dependent on the timer
+	 * IRQ, manifesting as rcu_preempt stalls / hung_task warnings.
+	 *
+	 * fbsdrun_addcpu tolerates the EBUSY that its own vm_activate_cpu
+	 * call will now return for these vCPUs — see bhyverun.c.
+	 */
+	for (int vcpuid = 0; vcpuid < ctl_ncpus; vcpuid++) {
+		struct vcpu *vcpu = vm_vcpu_open(ctl_ctx, vcpuid);
+		if (vcpu == NULL) {
+			(void) fprintf(stderr,
+			    "import-state: vm_vcpu_open(%d) failed\n", vcpuid);
+			continue;
+		}
+		int r = vm_activate_cpu(vcpu);
+		if (r != 0 && errno != EBUSY) {
+			(void) fprintf(stderr,
+			    "import-state: vm_activate_cpu(%d): %s\n",
+			    vcpuid, strerror(errno));
+		}
+		vm_vcpu_close(vcpu);
+	}
+
+	/*
 	 * Import is done — now flip the VM back to running.  Without
 	 * this, vCPU threads (started by the main thread after
 	 * bhyve_control_wait_import unblocks) would spin forever in
