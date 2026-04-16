@@ -607,6 +607,35 @@ add_bhyve_extra_opts(int *argc, char **argv)
 	return (0);
 }
 
+/*
+ * Live-migration destination-side startup.  When the zone attribute
+ * `migrate_listen=true` is set, append `-o migrate.listen=true` to the
+ * bhyve argv so bhyve enters migrate-listen mode: skip bootrom and
+ * vcpu_reset, hibernate block devices for the zfs-recv window, then
+ * block on the control socket until import-state delivers the
+ * migrated guest state.
+ *
+ * The attribute is expected to be cleared by the migration agent
+ * immediately after `zoneadm boot` returns so an incidental reboot
+ * does not re-enter listen mode.  This path replaces the older
+ * `/tmp/migrate.listen` sentinel file mechanism (which is still
+ * honoured by bhyve as a fallback for hand-testing but should not be
+ * used from production tooling — a zone-writable filesystem probe is
+ * a weaker trust boundary than a zone-config attribute).
+ */
+static int
+add_migrate_listen(int *argc, char **argv)
+{
+	if (!is_env_true("attr", "migrate_listen", NULL)) {
+		return (0);
+	}
+	if (add_arg(argc, argv, "-o") != 0 ||
+	    add_arg(argc, argv, "migrate.listen=true") != 0) {
+		return (-1);
+	}
+	return (0);
+}
+
 static int
 add_virtio_opts(int *argc, char **argv)
 {
@@ -901,6 +930,7 @@ main(int argc, char **argv)
 	    add_nets(&zhargc, (char **)&zhargv) != 0 ||
 	    add_virtio_opts(&zhargc, (char **)&zhargv) != 0 ||
 	    add_bhyve_extra_opts(&zhargc, (char **)&zhargv) != 0 ||
+	    add_migrate_listen(&zhargc, (char **)&zhargv) != 0 ||
 	    add_fbuf(&zhargc, (char **)&zhargv) != 0 ||
 	    add_vmname(&zhargc, (char **)&zhargv) != 0) {
 		return (1);
