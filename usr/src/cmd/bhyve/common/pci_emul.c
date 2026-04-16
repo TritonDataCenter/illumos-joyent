@@ -2660,10 +2660,7 @@ struct bar_slot {
 static int
 pci_restore_bar_conflict(void)
 {
-	struct businfo *bi;
-	struct slotinfo *si;
-	struct funcinfo *fi;
-	struct pci_devinst *pi;
+	struct pci_devinst *pi = NULL;
 	/*
 	 * Worst case: 256 buses × 32 slots × 8 funcs × 6 BARs = ~400K
 	 * entries × sizeof(bar_slot) = ~12 MB, past the thread's
@@ -2679,56 +2676,41 @@ pci_restore_bar_conflict(void)
 	}
 	int n = 0;
 
-	for (int bus = 0; bus < MAXBUSES; bus++) {
-		if ((bi = pci_businfo[bus]) == NULL)
+	while ((pi = pci_next(pi)) != NULL) {
+		/*
+		 * Only count BARs that will actually be registered
+		 * (pci_restore_bars skips devices without command-register
+		 * decode).  Fixed-address startup BARs for devices the guest
+		 * never enabled (fbuf, xhci with CMD=0) can overlap
+		 * legitimately — no MMIO routing is ever set up for them —
+		 * and flagging them here produces a false-positive
+		 * refuse-to-restore.
+		 */
+		if (!memen(pi) && !porten(pi))
 			continue;
-		for (int slot = 0; slot < MAXSLOTS; slot++) {
-			si = &bi->slotinfo[slot];
-			for (int func = 0; func < MAXFUNCS; func++) {
-				fi = &si->si_funcs[func];
-				pi = fi->fi_devi;
-				if (pi == NULL)
-					continue;
 
-				/*
-				 * Only count BARs that will actually be
-				 * registered (pci_restore_bars skips
-				 * devices without command-register decode).
-				 * Fixed-address startup BARs for devices
-				 * the guest never enabled (fbuf, xhci with
-				 * CMD=0) can overlap legitimately — no
-				 * MMIO routing is ever set up for them —
-				 * and flagging them here produces a false-
-				 * positive refuse-to-restore.
-				 */
-				if (!memen(pi) && !porten(pi))
-					continue;
+		for (int i = 0; i <= PCI_BARMAX; i++) {
+			enum pcibar_type t = pi->pi_bar[i].type;
+			uint64_t addr = pi->pi_bar[i].addr;
+			uint64_t size = pi->pi_bar[i].size;
 
-				for (int i = 0; i <= PCI_BARMAX; i++) {
-					enum pcibar_type t = pi->pi_bar[i].type;
-					uint64_t addr = pi->pi_bar[i].addr;
-					uint64_t size = pi->pi_bar[i].size;
+			if (t == PCIBAR_NONE || t == PCIBAR_MEMHI64)
+				continue;
+			if (addr == 0 || size == 0)
+				continue;
 
-					if (t == PCIBAR_NONE ||
-					    t == PCIBAR_MEMHI64)
-						continue;
-					if (addr == 0 || size == 0)
-						continue;
+			/* Per-BAR decode gate too. */
+			int bar_decode = (t == PCIBAR_IO) ?
+			    porten(pi) : memen(pi);
+			if (!bar_decode)
+				continue;
 
-					/* Per-BAR decode gate too. */
-					int bar_decode = (t == PCIBAR_IO) ?
-					    porten(pi) : memen(pi);
-					if (!bar_decode)
-						continue;
-
-					slots[n].pi = pi;
-					slots[n].idx = i;
-					slots[n].type = t;
-					slots[n].start = addr;
-					slots[n].end = addr + size - 1;
-					n++;
-				}
-			}
+			slots[n].pi = pi;
+			slots[n].idx = i;
+			slots[n].type = t;
+			slots[n].start = addr;
+			slots[n].end = addr + size - 1;
+			n++;
 		}
 	}
 
@@ -2804,58 +2786,37 @@ pci_restore_bar_conflict(void)
 int
 pci_restore_bars(void)
 {
-	struct businfo *bi;
-	struct slotinfo *si;
-	struct funcinfo *fi;
-	struct pci_devinst *pi;
+	struct pci_devinst *pi = NULL;
 
 	if (pci_restore_bar_conflict() != 0)
 		return (-1);
 
-	for (int bus = 0; bus < MAXBUSES; bus++) {
-		if ((bi = pci_businfo[bus]) == NULL)
+	while ((pi = pci_next(pi)) != NULL) {
+		if (!memen(pi) && !porten(pi))
 			continue;
-		for (int slot = 0; slot < MAXSLOTS; slot++) {
-			si = &bi->slotinfo[slot];
-			for (int func = 0; func < MAXFUNCS; func++) {
-				fi = &si->si_funcs[func];
-				pi = fi->fi_devi;
-				if (pi == NULL)
-					continue;
 
-				int decode = memen(pi) || porten(pi);
-				if (!decode)
-					continue;
+		for (int i = 0; i <= PCI_BARMAX; i++) {
+			enum pcibar_type t = pi->pi_bar[i].type;
+			if (t == PCIBAR_NONE || t == PCIBAR_MEMHI64)
+				continue;
+			if (pi->pi_bar[i].addr == 0)
+				continue;
+			int r_decode = (t == PCIBAR_IO) ?
+			    porten(pi) : memen(pi);
+			if (!r_decode)
+				continue;
 
-				for (int i = 0; i <= PCI_BARMAX; i++) {
-					enum pcibar_type t = pi->pi_bar[i].type;
-					if (t == PCIBAR_NONE ||
-					    t == PCIBAR_MEMHI64)
-						continue;
-					if (pi->pi_bar[i].addr == 0)
-						continue;
-					int r_decode = (t == PCIBAR_IO) ?
-					    porten(pi) : memen(pi);
-					if (!r_decode)
-						continue;
-
-					if (!bar_restore_in_range(pi, i)) {
-						(void) fprintf(stderr,
-						    "pci_restore_bars: BAR "
-						    "%d out of range "
-						    "(type=%d addr=0x%lx "
-						    "size=0x%lx); refusing "
-						    "restore\n",
-						    i, (int)t,
-						    (unsigned long)
-						    pi->pi_bar[i].addr,
-						    (unsigned long)
-						    pi->pi_bar[i].size);
-						return (-1);
-					}
-					register_bar(pi, i);
-				}
+			if (!bar_restore_in_range(pi, i)) {
+				(void) fprintf(stderr,
+				    "pci_restore_bars: BAR %d out of range "
+				    "(type=%d addr=0x%lx size=0x%lx); "
+				    "refusing restore\n",
+				    i, (int)t,
+				    (unsigned long)pi->pi_bar[i].addr,
+				    (unsigned long)pi->pi_bar[i].size);
+				return (-1);
 			}
+			register_bar(pi, i);
 		}
 	}
 
