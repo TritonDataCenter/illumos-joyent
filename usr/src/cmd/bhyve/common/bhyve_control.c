@@ -421,22 +421,68 @@ sec_save_dev(struct vm_snapshot_meta *meta, void *arg)
 	return (pci_snapshot(meta));
 }
 
+/*
+ * Ensure the stream has at least `want` additional bytes of capacity
+ * beyond `*usedp`, doubling (up to CTL_BLOB_MAX) as needed.  Used by
+ * write_section to reserve a worst-case blob window in-place; on
+ * realloc the caller is responsible for re-deriving any pointers into
+ * *streamp since the base may move.
+ */
+static int
+stream_reserve(uint8_t **streamp, size_t *capp, size_t usedp, size_t want)
+{
+	size_t need = usedp + want;
+	if (need <= *capp)
+		return (0);
+	size_t newcap = (*capp == 0) ? (1U << 20) : *capp;
+	while (newcap < need) {
+		newcap *= 2;
+		if (newcap > CTL_BLOB_MAX)
+			return (E2BIG);
+	}
+	uint8_t *grow = realloc(*streamp, newcap);
+	if (grow == NULL)
+		return (ENOMEM);
+	*streamp = grow;
+	*capp = newcap;
+	return (0);
+}
+
 static int
 write_section(uint8_t **streamp, size_t *capp, size_t *usedp,
     uint8_t kind, uint8_t kern_req, const char *name,
     ctl_sec_save_fn fn, void *fn_arg, void *meta_dev_data)
 {
-	uint8_t *scratch = malloc(CTL_SECTION_BUF_MAX);
-	if (scratch == NULL)
-		return (ENOMEM);
+	size_t name_len = strlen(name);
+	if (name_len >= CTL_MAX_NAME_LEN)
+		return (ENAMETOOLONG);
+
+	/*
+	 * Reserve header + name + worst-case blob window up front so we can
+	 * snapshot directly into the stream and skip the 4 MiB scratch
+	 * malloc + final memcpy that the old path did per section.  After
+	 * the snapshot returns, blob_len tells us how much of that window
+	 * was actually used and we back-patch the header accordingly.
+	 */
+	size_t want = sizeof (struct ctl_section_hdr) + name_len +
+	    CTL_SECTION_BUF_MAX;
+	int ret = stream_reserve(streamp, capp, *usedp, want);
+	if (ret != 0)
+		return (ret);
+
+	uint8_t *hdr_p = *streamp + *usedp;
+	uint8_t *name_p = hdr_p + sizeof (struct ctl_section_hdr);
+	uint8_t *blob_p = name_p + name_len;
+
+	(void) memcpy(name_p, name, name_len);
 
 	struct vm_snapshot_meta meta = {
 		.dev_name = name,
 		.dev_data = meta_dev_data,
 		.buffer = {
-			.buf_start = scratch,
+			.buf_start = blob_p,
 			.buf_size = CTL_SECTION_BUF_MAX,
-			.buf = scratch,
+			.buf = blob_p,
 			.buf_rem = CTL_SECTION_BUF_MAX,
 		},
 		.op = VM_SNAPSHOT_SAVE,
@@ -444,49 +490,19 @@ write_section(uint8_t **streamp, size_t *capp, size_t *usedp,
 	if (kind == CTL_SEC_KERN)
 		meta.dev_req = (enum snapshot_req)kern_req;
 
-	int ret = fn(&meta, fn_arg);
-	if (ret != 0) {
-		free(scratch);
+	ret = fn(&meta, fn_arg);
+	if (ret != 0)
 		return (ret);
-	}
 
 	size_t blob_len = vm_get_snapshot_size(&meta);
-	size_t name_len = strlen(name);
-	if (name_len >= CTL_MAX_NAME_LEN) {
-		free(scratch);
-		return (ENAMETOOLONG);
-	}
-
-	size_t need = sizeof (struct ctl_section_hdr) + name_len + blob_len;
-	while (*usedp + need > *capp) {
-		size_t newcap = (*capp == 0) ? (1U << 20) : (*capp * 2);
-		if (newcap > CTL_BLOB_MAX) {
-			free(scratch);
-			return (E2BIG);
-		}
-		uint8_t *grow = realloc(*streamp, newcap);
-		if (grow == NULL) {
-			free(scratch);
-			return (ENOMEM);
-		}
-		*streamp = grow;
-		*capp = newcap;
-	}
-
 	struct ctl_section_hdr sh = {
 		.kind = kind,
 		.kern_req = kern_req,
 		.name_len = (uint16_t)name_len,
 		.blob_len = (uint32_t)blob_len,
 	};
-	(void) memcpy(*streamp + *usedp, &sh, sizeof (sh));
-	*usedp += sizeof (sh);
-	(void) memcpy(*streamp + *usedp, name, name_len);
-	*usedp += name_len;
-	(void) memcpy(*streamp + *usedp, scratch, blob_len);
-	*usedp += blob_len;
-
-	free(scratch);
+	(void) memcpy(hdr_p, &sh, sizeof (sh));
+	*usedp += sizeof (sh) + name_len + blob_len;
 	return (0);
 }
 
@@ -792,137 +808,166 @@ cmd_export_state(int fd)
 	free(stream);
 }
 
-static void
-cmd_import_state(int fd, const char *line)
-{
-	uint64_t blob_len_u64 = 0;
+/*
+ * cmd_import_state is the heart of the dest-side migration path.  The
+ * flow is broken into single-purpose phases below so each step has one
+ * obvious failure mode and the top-level orchestrator reads as a plain
+ * recipe rather than 170 lines of interleaved malloc / pause / apply /
+ * activate / resume.  The ordering invariants these phases encode are
+ * documented inline as they arise.
+ */
 
-	/* C-1: only valid in migrate-listen mode. */
+/*
+ * import_check_preconditions: enforce C-1 (listen-only, one-shot) and
+ * parse blob_len out of the command JSON.  Any failure here is
+ * reported to the peer and no state has been touched yet.
+ */
+static int
+import_check_preconditions(int fd, const char *line, size_t *blob_len_out)
+{
 	if (!bhyve_migrate_listen()) {
 		send_error(fd, "import-state requires migrate.listen=true");
-		return;
+		return (EPERM);
 	}
 
-	/* C-1: one-shot — reject if a previous import succeeded. */
 	(void) pthread_mutex_lock(&ctl.import_mtx);
-	if (ctl.import_done) {
-		(void) pthread_mutex_unlock(&ctl.import_mtx);
-		send_error(fd, "import-state already completed");
-		return;
-	}
+	bool done = ctl.import_done;
 	(void) pthread_mutex_unlock(&ctl.import_mtx);
+	if (done) {
+		send_error(fd, "import-state already completed");
+		return (EEXIST);
+	}
 
+	uint64_t blob_len_u64 = 0;
 	if (json_get_uint(line, "blob_len", &blob_len_u64) != 0) {
 		send_error(fd, "missing blob_len");
-		return;
+		return (EINVAL);
 	}
 	if (blob_len_u64 == 0 || blob_len_u64 > CTL_BLOB_MAX) {
 		send_error(fd, "invalid blob_len");
-		return;
+		return (EINVAL);
 	}
-	size_t blob_len = (size_t)blob_len_u64;
+	*blob_len_out = (size_t)blob_len_u64;
+	return (0);
+}
 
+/*
+ * Read the TLV blob from the connection.  Caller frees *stream_out.
+ */
+static int
+import_read_blob(int fd, size_t blob_len, uint8_t **stream_out)
+{
 	uint8_t *stream = malloc(blob_len);
 	if (stream == NULL) {
 		send_error(fd, "out of memory");
-		return;
+		return (ENOMEM);
 	}
 	if ((size_t)read_full(fd, stream, blob_len) != blob_len) {
 		send_error(fd, "short read");
 		free(stream);
-		return;
+		return (EIO);
 	}
+	*stream_out = stream;
+	return (0);
+}
 
-	/*
-	 * Pause everything before writing state (no-op if already paused).
-	 * vCPUs first so there's no window where devices are pause-flagged
-	 * while a guest notify path can still call into blockif_request()
-	 * and trip the bc_paused assert (see cmd_pause comment).  On the
-	 * dest in migrate-listen mode vCPU threads haven't started yet,
-	 * so vm_pause_instance is effectively a no-op here, but we issue
-	 * it for symmetry with cmd_pause and to cover the snapshot-restore
-	 * case where vCPUs are running.
-	 */
+/*
+ * Pause vCPUs and then every PCI device.  vCPU-first ordering matters:
+ * if we paused devices first, a still-running vCPU could fire one more
+ * virtio queue-notify which would land in blockif_request() and trip
+ * its assert(!bc->bc_paused) (see cmd_pause).  On the migrate-listen
+ * path the vCPU threads haven't started yet so vm_pause_instance is
+ * effectively a no-op, but we issue it for symmetry with cmd_pause and
+ * to cover the snapshot-restore case where vCPUs are running.
+ */
+static void
+import_pause(void)
+{
 	if (vm_pause_instance(ctl.ctx) != 0) {
 		(void) fprintf(stderr,
-		    "import-state: vm_pause_instance: %s\n",
-		    strerror(errno));
+		    "import-state: vm_pause_instance: %s\n", strerror(errno));
 	}
 	(void) for_each_pci(pci_pause);
+}
 
-	/*
-	 * Re-open any blockif fds that were hibernated while we waited
-	 * for `zfs recv` to finish on the destination zvol.  Devices
-	 * that never hibernated (normal non-migrate boot, or devices
-	 * without backing fds) will be a no-op.
-	 *
-	 * This MUST happen before parse_and_apply_stream: the stream
-	 * carries BARs/register state that subsequently gets restored,
-	 * and pci_restore_bars -> pci_restore_bar_conflict calls into
-	 * device callbacks that expect a working blockif.  We also want
-	 * the imported bc_size / bc_sectsz to reflect the post-recv zvol
-	 * rather than the pre-hibernate @mig-sync-N state.
-	 */
-	int wake_err = for_each_pci(pci_wake);
-	if (wake_err != 0) {
+/*
+ * Re-open any blockif fds that were hibernated while the dest agent
+ * ran its final `zfs recv` on the destination zvol.  Devices that
+ * never hibernated (normal non-migrate boot, or devices without
+ * backing fds) are a no-op.
+ *
+ * MUST run before import_apply_stream: the stream carries BAR/register
+ * state whose RESTORE calls into device callbacks that assume a
+ * working blockif, and we need the imported bc_size / bc_sectsz to
+ * reflect the post-recv zvol rather than the pre-hibernate snapshot.
+ */
+static int
+import_wake_devices(int fd)
+{
+	int err = for_each_pci(pci_wake);
+	if (err != 0) {
 		(void) fprintf(stderr,
-		    "import-state: pci_wake: %s\n",
-		    strerror(wake_err));
-		send_error(fd, strerror(wake_err));
-		free(stream);
-		return;
+		    "import-state: pci_wake: %s\n", strerror(err));
+		send_error(fd, strerror(err));
 	}
+	return (err);
+}
 
+static int
+import_apply_stream(int fd, uint8_t *stream, size_t blob_len)
+{
 	int ret = parse_and_apply_stream(stream, blob_len);
-	free(stream);
-
-	if (ret != 0) {
+	if (ret != 0)
 		send_error(fd, strerror(ret));
-		return;
-	}
+	return (ret);
+}
 
-	/*
-	 * The per-device RESTORE branch of pci_snapshot_pci_dev
-	 * unregisters each BAR at its pre-restore (dest-startup) address
-	 * and overwrites pi_bar[] with the source's values.  Re-register
-	 * in a second pass so cross-device overlap gets logged and
-	 * per-BAR bounds get validated before register_bar commits.
-	 * Per-BAR out-of-range is a hard reject (prevents VERIFY_IOPORT
-	 * SIGABRT on malformed payload); cross-device overlap is a warn
-	 * since register_mem_int silently dedups the same way at runtime.
-	 */
+/*
+ * The per-device RESTORE branch of pci_snapshot_pci_dev unregisters
+ * each BAR at its pre-restore (dest-startup) address and overwrites
+ * pi_bar[] with the source's values.  Re-register in a second pass so
+ * cross-device overlap gets logged and per-BAR bounds get validated
+ * before register_bar commits.  Per-BAR out-of-range is a hard reject
+ * (prevents VERIFY_IOPORT SIGABRT on malformed payload); cross-device
+ * overlap is a warn since register_mem_int silently dedups the same
+ * way at runtime.
+ */
+static int
+import_restore_bars(int fd)
+{
 	if (pci_restore_bars() != 0) {
-		send_error(fd, "BAR restore rejected "
-		    "(out-of-range BAR in payload)");
-		return;
+		send_error(fd,
+		    "BAR restore rejected (out-of-range BAR in payload)");
+		return (-1);
 	}
+	return (0);
+}
 
-	/*
-	 * Activate every vCPU in the kernel BEFORE vm_resume_instance so
-	 * the resume iterates them all.
-	 *
-	 * vm_resume_instance (uts/intel/io/vmm/vmm.c:809) walks
-	 * vm->active_cpus and calls vlapic_resume on each — and
-	 * vlapic_resume is what re-arms the LAPIC callout that drives
-	 * guest timer IRQs.  vlapic_data_write (vlapic.c:2039) populates
-	 * vlapic->timer_fire_when during the state restore but skips the
-	 * callout_reset while the VM is paused, relying on the subsequent
-	 * vm_resume_instance to do it.
-	 *
-	 * On the migrate-listen path, vCPUs are not activated until the
-	 * main thread calls fbsdrun_addcpu -> vm_activate_cpu after
-	 * bhyve_control_wait_import returns — i.e. AFTER us.  Without
-	 * this pre-resume activation, vm_resume_instance sees an empty
-	 * active_cpus cpuset, vlapic_resume is never called for anyone,
-	 * and the guest's LAPIC timer never fires on the dest.  Guests
-	 * with a freshly-armed timer deadline at pause instant (anything
-	 * that has run long enough to have active timers on both vCPUs)
-	 * deadlock on whichever core was most dependent on the timer
-	 * IRQ, manifesting as rcu_preempt stalls / hung_task warnings.
-	 *
-	 * fbsdrun_addcpu tolerates the EBUSY that its own vm_activate_cpu
-	 * call will now return for these vCPUs — see bhyverun.c.
-	 */
+/*
+ * Activate every vCPU in the kernel BEFORE vm_resume_instance so the
+ * resume iterates them all.
+ *
+ * vm_resume_instance (uts/intel/io/vmm/vmm.c) walks vm->active_cpus
+ * and calls vlapic_resume on each — and vlapic_resume is what re-arms
+ * the LAPIC callout that drives guest timer IRQs.  vlapic_data_write
+ * populates vlapic->timer_fire_when during the state restore but
+ * skips the callout_reset while the VM is paused, relying on the
+ * subsequent vm_resume_instance to do it.
+ *
+ * On the migrate-listen path, vCPUs are not activated until the main
+ * thread calls fbsdrun_addcpu -> vm_activate_cpu after
+ * bhyve_control_wait_import returns — i.e. AFTER us.  Without this
+ * pre-resume activation, vm_resume_instance sees an empty active_cpus
+ * cpuset, vlapic_resume is never called for anyone, and the guest's
+ * LAPIC timer never fires on the dest — manifests as rcu_preempt
+ * stalls / hung_task warnings on the vCPU most dependent on the timer.
+ *
+ * fbsdrun_addcpu tolerates the EBUSY that its own vm_activate_cpu
+ * call will return for these vCPUs (see bhyverun.c).
+ */
+static void
+import_activate_vcpus(void)
+{
 	for (int vcpuid = 0; vcpuid < ctl.ncpus; vcpuid++) {
 		struct vcpu *vcpu = vm_vcpu_open(ctl.ctx, vcpuid);
 		if (vcpu == NULL) {
@@ -938,28 +983,34 @@ cmd_import_state(int fd, const char *line)
 		}
 		vm_vcpu_close(vcpu);
 	}
+}
 
-	/*
-	 * Import is done — now flip the VM back to running.  Without
-	 * this, vCPU threads (started by the main thread after
-	 * bhyve_control_wait_import unblocks) would spin forever in
-	 * vm_run's EBUSY retry loop because the VM stays paused from
-	 * the vm_pause_instance call above.  pe_resume callbacks kick
-	 * viona workers + any other per-device resume logic.
-	 */
+/*
+ * Import is done — flip the VM back to running.  Without this, vCPU
+ * threads (started by the main thread after bhyve_control_wait_import
+ * unblocks) would spin forever in vm_run's EBUSY retry loop because
+ * the VM stays paused from import_pause above.  pe_resume callbacks
+ * kick viona workers + any other per-device resume logic.
+ */
+static void
+import_resume(void)
+{
 	if (vm_resume_instance(ctl.ctx) != 0) {
 		(void) fprintf(stderr,
-		    "import-state: vm_resume_instance: %s\n",
-		    strerror(errno));
+		    "import-state: vm_resume_instance: %s\n", strerror(errno));
 	}
 	(void) for_each_pci(pci_resume);
+}
 
-	/*
-	 * Record success + signal anyone waiting in
-	 * bhyve_control_wait_import().  The caller (orchestrator) is
-	 * expected to send a separate "resume" once it is ready for the
-	 * vCPU threads to make forward progress.
-	 */
+/*
+ * Mark import complete.  Signals anyone parked in
+ * bhyve_control_wait_import() (the main thread) so vCPU threads can be
+ * created.  The orchestrator is expected to send a separate "resume"
+ * once it is ready for the vCPU threads to make forward progress.
+ */
+static void
+import_signal_done(int fd)
+{
 	(void) pthread_mutex_lock(&ctl.import_mtx);
 	ctl.import_done = true;
 	(void) pthread_cond_broadcast(&ctl.import_cv);
@@ -967,6 +1018,37 @@ cmd_import_state(int fd, const char *line)
 
 	bhyve_migrate_set_restored();
 	send_ok(fd);
+}
+
+static void
+cmd_import_state(int fd, const char *line)
+{
+	size_t blob_len = 0;
+	uint8_t *stream = NULL;
+
+	if (import_check_preconditions(fd, line, &blob_len) != 0)
+		return;
+	if (import_read_blob(fd, blob_len, &stream) != 0)
+		return;
+
+	import_pause();
+
+	if (import_wake_devices(fd) != 0) {
+		free(stream);
+		return;
+	}
+
+	int apply_ret = import_apply_stream(fd, stream, blob_len);
+	free(stream);
+	if (apply_ret != 0)
+		return;
+
+	if (import_restore_bars(fd) != 0)
+		return;
+
+	import_activate_vcpus();
+	import_resume();
+	import_signal_done(fd);
 }
 
 /* ---------------------------------------------------------------- */
