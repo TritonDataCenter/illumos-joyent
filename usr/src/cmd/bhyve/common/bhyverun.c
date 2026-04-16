@@ -829,15 +829,8 @@ main(int argc, char *argv[])
 	illumos_priv_init();
 
 	/*
-	 * Resolve migrate-listen mode EARLY — before any code path that
-	 * branches on it.  The value can come from `-o migrate.listen=true`
-	 * (already set by bhyve_optparse above) or from the
-	 * /tmp/migrate.listen sentinel file dropped by the GZ migration
-	 * agent just before invoking bhyve.  Freeze it into a static bool
-	 * here so later consumers (AP pre-init, bootrom-skip, hibernate,
-	 * wait_import) all see a single source of truth: a rename of the
-	 * config key would now fail to compile instead of silently
-	 * defaulting to false.
+	 * Resolve migrate-listen mode early and freeze into a static bool.
+	 * See docs/bhyve-snapshot-port.md#migrate-listen-resolution-timing.
 	 */
 	if (access("/tmp/migrate.listen", F_OK) == 0) {
 		set_config_bool("migrate.listen", true);
@@ -882,17 +875,9 @@ main(int argc, char *argv[])
 
 #ifndef	__FreeBSD__
 	/*
-	 * When the destination bhyve is going to wait for an imported
-	 * snapshot, pre-initialize every non-BSP vCPU now (before the
-	 * imported LAPIC blob arrives).  bhyve_init_vcpu() -> vm_set_x2apic_state()
-	 * unconditionally rewrites the vLAPIC id/LDR/DFR and toggles the
-	 * X2APIC bit in APICBASE (see vlapic_set_x2apic_state()); running it
-	 * after VDC_LAPIC restore wipes the AP's logical destination register
-	 * and starves the AP of timer/IPI delivery on the destination host.
-	 * The BSP is already initialised a few lines above for the same
-	 * reason.  bhyve_start_vcpu() below skips its per-vCPU init for APs
-	 * when migrate.restored is set so we don't double-init and clobber
-	 * the just-imported state a second time.
+	 * AP pre-init on the migrate-listen path.  See
+	 * docs/bhyve-snapshot-port.md#ap-pre-init-ordering — we need APs
+	 * initialised BEFORE the imported LAPIC blob arrives, not after.
 	 */
 	if (bhyve_migrate_listen()) {
 		for (int vcpuid = 0; vcpuid < guest_ncpus; vcpuid++) {

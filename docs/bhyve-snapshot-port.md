@@ -220,6 +220,120 @@ remaining ~40% is illumos-unique work concentrated in 3-4 files
   `mariana-trench/services/vmm-migrate-agent/` — what ships on top
   of whichever bhyve base we're building against.
 
+## Runtime invariants and ordering
+
+Per-topic rationale for the ordering contracts that the code enforces.
+The source keeps one-line pointers at each call site; the reasoning
+lives here so the code is scannable.
+
+### migrate-listen-resolution-timing
+
+<!-- pointer: bhyverun.c, main(), /tmp/migrate.listen block -->
+
+migrate-listen mode must be resolved BEFORE any startup code that
+branches on it.  Two sources feed the flag:
+
+- `-o migrate.listen=true` already set by `bhyve_optparse()` before
+  `main()` reaches the resolution block.
+- `/tmp/migrate.listen` sentinel file dropped by the GZ migration
+  agent immediately before it invokes bhyve.
+
+We resolve into a static bool (`migrate_listen_mode`) in `bhyverun.c`
+so the rest of startup reads a single source of truth.  If resolution
+slipped later than this point, the AP pre-init block (which gates on
+the flag) would run with the default (false) and skip
+`bhyve_init_vcpu()` on every AP — which then never runs at all in the
+migrate-restored path, because `bhyve_start_vcpu()` skips AP init when
+`migrate.restored` is set.  The AP's kernel-side HALT_EXIT / x2APIC
+bits stay uninitialised and the guest manifests timer-softirq
+starvation on AP cores post-resume.
+
+### ap-pre-init-ordering
+
+<!-- pointer: bhyverun.c, the `if (bhyve_migrate_listen())` AP loop -->
+
+On the destination side of a migration, non-BSP vCPUs are
+pre-initialised BEFORE `bhyve_control_wait_import()` blocks.
+Ordering matters because `bhyve_init_vcpu()` → `vm_set_x2apic_state()`
+unconditionally rewrites the vLAPIC id / LDR / DFR and toggles the
+X2APIC bit in APICBASE (see `vlapic_set_x2apic_state()`); running it
+after `VDC_LAPIC` restore would wipe the AP's logical destination
+register and starve the AP of timer / IPI delivery on the destination
+host.
+
+`bhyve_init_vcpu()` is idempotent (batch 2a) so the second call at
+`bhyve_start_vcpu()` time is a no-op; the pre-import loop stays for
+ORDERING, not for double-init avoidance.
+
+### import-pause-vcpu-first
+
+<!-- pointer: bhyve_control.c, import_pause() and cmd_pause() -->
+
+Pause vCPUs BEFORE devices.  If devices pause first (marking e.g.
+blockif `bc_paused = 1`), a still-running vCPU can fire one more
+virtio queue-notify which traps into bhyve, which in turn calls
+`blockif_request()` and trips the `assert(!bc->bc_paused)` in
+`block_if.c`.  FreeBSD's `vm_checkpoint()` enforces this order too.
+On the migrate-listen path vCPU threads haven't started yet so
+`vm_pause_instance` is effectively a no-op; we issue it anyway for
+symmetry with `cmd_pause()` and for the snapshot-restore case.
+
+### import-wake-before-apply
+
+<!-- pointer: bhyve_control.c, import_wake_devices() -->
+
+Re-open hibernated blockif fds BEFORE applying the state stream.
+The stream carries BAR / register state whose RESTORE dispatches into
+device callbacks that assume a working blockif.  We also want the
+imported `bc_size` / `bc_sectsz` to reflect the post-`zfs recv` zvol
+rather than the pre-hibernate snapshot's geometry.
+
+### vcpu-activation-before-resume
+
+<!-- pointer: bhyve_control.c, import_activate_vcpus() -->
+
+Activate every vCPU in the kernel BEFORE `vm_resume_instance` so the
+resume iterates them all.  The mechanism:
+
+- `vm_resume_instance()` walks `vm->active_cpus` and calls
+  `vlapic_resume()` on each.
+- `vlapic_resume()` is what re-arms the LAPIC callout that drives
+  guest timer IRQs.
+- `vlapic_data_write()` populates `vlapic->timer_fire_when` during
+  the state restore but skips the `callout_reset` while the VM is
+  paused, relying on the subsequent `vm_resume_instance()` to do it.
+
+On the migrate-listen path, vCPU threads (and thus
+`vm_activate_cpu()` from `fbsdrun_addcpu()`) are not started until
+the main thread resumes from `bhyve_control_wait_import()` — i.e.
+AFTER import-state returns.  Without this pre-resume activation,
+`vm_resume_instance` sees an empty `active_cpus` cpuset,
+`vlapic_resume` is never called for anyone, and the guest's LAPIC
+timer never fires on the dest.  Guests with active timer deadlines
+at pause instant deadlock on the core most dependent on the timer
+IRQ; manifests as rcu_preempt stalls / hung_task warnings.
+
+`fbsdrun_addcpu()` tolerates the `EBUSY` that its own
+`vm_activate_cpu()` call will return for these vCPUs after this
+pre-activation (`bhyverun.c`).
+
+### bar-restore-two-phase
+
+<!-- pointer: pci_emul.c, pci_snapshot_pci_dev + pci_restore_bars -->
+
+`pci_snapshot_pci_dev()`'s RESTORE branch unregisters each BAR at
+its pre-restore (dest-startup) address and overwrites `pi_bar[]`
+with the source's values — but does NOT re-register at the new
+address.  `pci_restore_bars()` runs a second pass after every device
+has been parsed so cross-device overlap gets logged and per-BAR
+bounds get validated before `register_bar()` commits.
+
+Per-BAR out-of-range is a hard reject (`ERANGE`) to prevent
+`VERIFY_IOPORT` SIGABRT on malformed payload.  Cross-device overlap
+is a warn, not a reject: `register_mem_int()` silently dedups the
+same way at runtime, so refusing to restore would be stricter than
+the running source bhyve is.
+
 ## Feature gate
 
 Phase 1 through 8 build but are unreachable without wiring in

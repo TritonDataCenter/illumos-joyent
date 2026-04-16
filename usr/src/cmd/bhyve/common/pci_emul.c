@@ -2478,16 +2478,13 @@ pci_snapshot_pci_dev(struct vm_snapshot_meta *meta)
 	SNAPSHOT_BUF_OR_LEAVE(pi->pi_cfgdata, sizeof (pi->pi_cfgdata),
 	    meta, ret, done);
 
+	/*
+	 * On RESTORE we unregister the dest-startup BAR address here,
+	 * BEFORE overwriting pi_bar[].addr with the source's value.
+	 * Re-register happens in pci_restore_bars() once every device has
+	 * been parsed (see docs/bhyve-snapshot-port.md#bar-restore-two-phase).
+	 */
 	for (i = 0; i < (int)nitems(pi->pi_bar); i++) {
-		/*
-		 * On RESTORE, tear down the current VMM-side MMIO / IO
-		 * registration at the destination's startup BAR address
-		 * BEFORE the SNAPSHOT_VAR_OR_LEAVE calls overwrite
-		 * pi_bar[].addr with the source's value.  Re-registration
-		 * at the new address happens in pci_restore_bars() once
-		 * every device has been parsed and the cross-device
-		 * conflict check has run.
-		 */
 		if (meta->op == VM_SNAPSHOT_RESTORE &&
 		    pi->pi_bar[i].type != PCIBAR_NONE &&
 		    pi->pi_bar[i].type != PCIBAR_MEMHI64 &&
@@ -2672,7 +2669,7 @@ pci_restore_bar_conflict(void)
 	if (slots == NULL) {
 		(void) fprintf(stderr,
 		    "pci_restore_bars: BAR-conflict scratch alloc failed\n");
-		return (-1);
+		return (ENOMEM);
 	}
 	int n = 0;
 
@@ -2787,9 +2784,9 @@ int
 pci_restore_bars(void)
 {
 	struct pci_devinst *pi = NULL;
-
-	if (pci_restore_bar_conflict() != 0)
-		return (-1);
+	int err = pci_restore_bar_conflict();
+	if (err != 0)
+		return (err);
 
 	while ((pi = pci_next(pi)) != NULL) {
 		if (!memen(pi) && !porten(pi))
@@ -2814,7 +2811,7 @@ pci_restore_bars(void)
 				    i, (int)t,
 				    (unsigned long)pi->pi_bar[i].addr,
 				    (unsigned long)pi->pi_bar[i].size);
-				return (-1);
+				return (ERANGE);
 			}
 			register_bar(pi, i);
 		}
