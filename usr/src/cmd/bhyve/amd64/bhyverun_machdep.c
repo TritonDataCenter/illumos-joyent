@@ -295,10 +295,29 @@ bhyve_init_config(void)
 	set_config_value("lpc.fwcfg", "bhyve");
 }
 
+#ifndef __FreeBSD__
+/*
+ * Per-vCPU "already initialised" bitmap.  bhyve_init_vcpu() rewrites
+ * vLAPIC id/LDR/DFR via vm_set_x2apic_state(), which on the
+ * migrate-listen path would clobber the just-imported vLAPIC blob if
+ * called a second time after import-state completed.  The old code
+ * handled this with a "!bhyve_migrate_restored()" guard at each
+ * call site; making the function self-guarding removes that footgun
+ * from future init-path contributors.
+ */
+static cpuset_t bhyve_vcpu_initialized;
+#endif
+
 void
 bhyve_init_vcpu(struct vcpu *vcpu)
 {
 	int err, tmp;
+
+#ifndef __FreeBSD__
+	int vid = vcpu_id(vcpu);
+	if (CPU_ISSET(vid, &bhyve_vcpu_initialized))
+		return;
+#endif
 
 #ifdef	__FreeBSD__
 	if (get_config_bool_default("x86.vmexit_on_hlt", false)) {
@@ -351,6 +370,10 @@ bhyve_init_vcpu(struct vcpu *vcpu)
 	err = vm_set_capability(vcpu, VM_CAP_IPI_EXIT, 1);
 	assert(err == 0);
 #endif
+
+#ifndef __FreeBSD__
+	CPU_SET_ATOMIC(vid, &bhyve_vcpu_initialized);
+#endif
 }
 
 void
@@ -372,14 +395,14 @@ bhyve_start_vcpu(struct vcpu *vcpu, bool bsp, bool suspend)
 			spinup_ap(vcpu, 0);
 
 		/*
-		 * Skip bhyve_init_vcpu() on the migrate-restored path: the
-		 * AP was already initialised before wait_import (see
-		 * bhyverun.c) so that vm_set_x2apic_state() couldn't wipe
-		 * the imported vLAPIC LDR/DFR/id.  Running it again here
-		 * would undo the restore.
+		 * bhyve_init_vcpu() is self-guarding: each vcpu is initialised
+		 * at most once per bhyve lifetime (see the bhyve_vcpu_initialized
+		 * bitmap above the function).  On the migrate-restored path the
+		 * AP was already initialised before wait_import, so this is a
+		 * no-op here — but no guard is needed and a future caller added
+		 * after this one can't accidentally double-init.
 		 */
-		if (!bhyve_migrate_restored())
-			bhyve_init_vcpu(vcpu);
+		bhyve_init_vcpu(vcpu);
 #else
 		bhyve_init_vcpu(vcpu);
 #endif
