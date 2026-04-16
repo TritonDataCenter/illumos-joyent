@@ -117,6 +117,7 @@
 
 #include "config.h"
 #include "bhyve_control.h"
+#include "bhyverun.h"
 #include "pci_emul.h"
 
 /* ---------------------------------------------------------------- */
@@ -128,6 +129,13 @@
 
 #define	CTL_SEC_KERN		1
 #define	CTL_SEC_DEV		2
+
+/*
+ * Upper bound on section names ("vmm_time", "vioapic", "<bus>:<slot>:<func>",
+ * ...).  Applied on both SAVE (write_section) and RESTORE
+ * (parse_and_apply_stream) so the two sides can't disagree.
+ */
+#define	CTL_MAX_NAME_LEN	64
 
 #pragma pack(push, 1)
 struct ctl_blob_hdr {
@@ -189,17 +197,31 @@ static const struct ctl_kern_section ctl_kern_sections[] = {
 /* Module-private state						    */
 /* ---------------------------------------------------------------- */
 
-static struct vmctx	*ctl_ctx;
-static int		ctl_ncpus;
-static int		ctl_listenfd = -1;
-static char		*ctl_path;
-static pthread_t	ctl_listen_tid;
-static volatile int	ctl_stop;
+/*
+ * All module globals in one bag for grep-ability and to make any future
+ * "multiple control sockets per bhyve" work a trivial struct instancing
+ * exercise rather than a hunt-every-static affair.
+ *
+ * import_{mtx,cv,done} are the C-1 one-shot import gate — import-state
+ * may run at most once per bhyve lifetime, and only in migrate-listen
+ * mode.  bhyve_control_wait_import() blocks on the cv.
+ */
+static struct {
+	struct vmctx		*ctx;
+	int			ncpus;
+	int			listenfd;
+	char			*path;
+	pthread_t		listen_tid;
+	volatile int		stop;
 
-/* C-1: import-state may run at most once, and only in migrate-listen */
-static pthread_mutex_t	ctl_import_mtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t	ctl_import_cv = PTHREAD_COND_INITIALIZER;
-static bool		ctl_import_done;
+	pthread_mutex_t		import_mtx;
+	pthread_cond_t		import_cv;
+	bool			import_done;
+} ctl = {
+	.listenfd = -1,
+	.import_mtx = PTHREAD_MUTEX_INITIALIZER,
+	.import_cv = PTHREAD_COND_INITIALIZER,
+};
 
 /* ---------------------------------------------------------------- */
 /* I/O helpers							    */
@@ -308,9 +330,18 @@ send_ok(int fd)
 	send_json(fd, "{\"status\":\"ok\"}");
 }
 
-/* Find `"key":<digits>` in a JSON line.  Returns 0 on success. */
+/*
+ * Tiny purpose-built JSON field extractors.  The agent writes flat one-line
+ * objects with string/uint values and no nesting, so a full parser would be
+ * overkill; but strstr() matching of the key substring anywhere in the line
+ * is also wrong (it matches both {"command":"status"} and our own reply
+ * {"status":"ok"}).  These helpers look up the value for a specific top-level
+ * key by scanning for "key":, tolerate whitespace, and never run off the end.
+ *
+ * Returns 0 on success, -1 if the key is missing or malformed.
+ */
 static int
-json_get_uint(const char *line, const char *key, uint64_t *out)
+json_find_value(const char *line, const char *key, const char **valp)
 {
 	char needle[64];
 	(void) snprintf(needle, sizeof (needle), "\"%s\":", key);
@@ -320,11 +351,47 @@ json_get_uint(const char *line, const char *key, uint64_t *out)
 	p += strlen(needle);
 	while (*p == ' ' || *p == '\t')
 		p++;
+	*valp = p;
+	return (0);
+}
+
+static int
+json_get_uint(const char *line, const char *key, uint64_t *out)
+{
+	const char *p;
+	if (json_find_value(line, key, &p) != 0)
+		return (-1);
 	char *end;
 	unsigned long long v = strtoull(p, &end, 10);
 	if (end == p)
 		return (-1);
 	*out = (uint64_t)v;
+	return (0);
+}
+
+/*
+ * Copy the string value for `key` into `buf` (NUL-terminated, truncated on
+ * overflow).  Returns 0 on success, -1 on missing key / not-a-string.
+ * Does not handle JSON escapes — our payloads are all ASCII command names.
+ */
+static int
+json_get_string(const char *line, const char *key, char *buf, size_t cap)
+{
+	const char *p;
+	if (cap == 0 || json_find_value(line, key, &p) != 0)
+		return (-1);
+	if (*p != '"')
+		return (-1);
+	p++;
+	size_t n = 0;
+	while (*p != '\0' && *p != '"') {
+		if (n + 1 >= cap)
+			return (-1);
+		buf[n++] = *p++;
+	}
+	if (*p != '"')
+		return (-1);
+	buf[n] = '\0';
 	return (0);
 }
 
@@ -344,7 +411,7 @@ static int
 sec_save_kern(struct vm_snapshot_meta *meta, void *arg)
 {
 	(void) arg;
-	return (vm_snapshot_req(ctl_ctx, meta));
+	return (vm_snapshot_req(ctl.ctx, meta));
 }
 
 static int
@@ -385,7 +452,7 @@ write_section(uint8_t **streamp, size_t *capp, size_t *usedp,
 
 	size_t blob_len = vm_get_snapshot_size(&meta);
 	size_t name_len = strlen(name);
-	if (name_len > UINT16_MAX) {
+	if (name_len >= CTL_MAX_NAME_LEN) {
 		free(scratch);
 		return (ENAMETOOLONG);
 	}
@@ -529,7 +596,7 @@ apply_section(uint8_t kind, uint8_t kern_req, const char *name,
 
 	if (kind == CTL_SEC_KERN) {
 		meta.dev_req = (enum snapshot_req)kern_req;
-		return (vm_snapshot_req(ctl_ctx, &meta));
+		return (vm_snapshot_req(ctl.ctx, &meta));
 	}
 
 	if (kind != CTL_SEC_DEV)
@@ -570,10 +637,10 @@ parse_and_apply_stream(uint8_t *stream, size_t len)
 
 		if (off + sh.name_len + sh.blob_len > len)
 			return (EBADMSG);
-		if (sh.name_len >= 64)
+		if (sh.name_len >= CTL_MAX_NAME_LEN)
 			return (EBADMSG);
 
-		char name[64];
+		char name[CTL_MAX_NAME_LEN];
 		(void) memcpy(name, stream + off, sh.name_len);
 		name[sh.name_len] = '\0';
 		off += sh.name_len;
@@ -626,35 +693,29 @@ parse_and_apply_stream(uint8_t *stream, size_t len)
 static void
 cmd_status(int fd)
 {
-	const char *name = vm_get_name(ctl_ctx);
-	size_t lowmem = vm_get_lowmem_size(ctl_ctx);
-	size_t highmem = vm_get_highmem_size(ctl_ctx);
+	const char *name = vm_get_name(ctl.ctx);
+	size_t lowmem = vm_get_lowmem_size(ctl.ctx);
+	size_t highmem = vm_get_highmem_size(ctl.ctx);
 	send_json(fd,
 	    "{\"status\":\"ok\",\"name\":\"%s\",\"ncpus\":%d,"
 	    "\"lowmem\":%zu,\"highmem\":%zu}",
-	    name != NULL ? name : "", ctl_ncpus, lowmem, highmem);
+	    name != NULL ? name : "", ctl.ncpus, lowmem, highmem);
 }
 
+/*
+ * Apply `op` to every PCI device in pci_next() order.  Returns 0 if
+ * every callback returned 0, otherwise the last non-zero return (we
+ * keep going so one broken device can't strand the rest).  Used for
+ * pause / resume / hibernate / wake sweeps — four nearly-identical
+ * loops that used to live side by side.
+ */
 static int
-pause_all_devices(void)
+for_each_pci(int (*op)(struct pci_devinst *))
 {
 	int last_err = 0;
 	struct pci_devinst *pdi = NULL;
 	while ((pdi = pci_next(pdi)) != NULL) {
-		int e = pci_pause(pdi);
-		if (e != 0)
-			last_err = e;
-	}
-	return (last_err);
-}
-
-static int
-resume_all_devices(void)
-{
-	int last_err = 0;
-	struct pci_devinst *pdi = NULL;
-	while ((pdi = pci_next(pdi)) != NULL) {
-		int e = pci_resume(pdi);
+		int e = op(pdi);
 		if (e != 0)
 			last_err = e;
 	}
@@ -665,48 +726,16 @@ resume_all_devices(void)
  * Hibernate every PCI device that registers the optional pe_hibernate
  * callback — in practice virtio-blk and nvme, which hold open fds on
  * zvols that the destination side of a live migration needs to
- * release while `zfs recv` runs.  We pause first internally because
- * blockif_hibernate() asserts bc_paused == 1 (needed so no worker is
- * mid-syscall when we close its fd).
+ * release while `zfs recv` runs.  blockif_hibernate() asserts
+ * bc_paused == 1 so no worker is mid-syscall when we close its fd;
+ * we pause up-front here so callers don't have to remember the order.
  */
 int
 hibernate_all_devices(void)
 {
-	int last_err = 0;
-	struct pci_devinst *pdi = NULL;
-
-	/*
-	 * Guarantee the pause invariant blockif_hibernate needs, without
-	 * requiring every caller to remember the ordering.  pci_pause is
-	 * idempotent on an already-paused device.
-	 */
-	pdi = NULL;
-	while ((pdi = pci_next(pdi)) != NULL) {
-		int e = pci_pause(pdi);
-		if (e != 0)
-			last_err = e;
-	}
-
-	pdi = NULL;
-	while ((pdi = pci_next(pdi)) != NULL) {
-		int e = pci_hibernate(pdi);
-		if (e != 0)
-			last_err = e;
-	}
-	return (last_err);
-}
-
-static int
-wake_all_devices(void)
-{
-	int last_err = 0;
-	struct pci_devinst *pdi = NULL;
-	while ((pdi = pci_next(pdi)) != NULL) {
-		int e = pci_wake(pdi);
-		if (e != 0)
-			last_err = e;
-	}
-	return (last_err);
+	int err1 = for_each_pci(pci_pause);	/* pci_pause is idempotent */
+	int err2 = for_each_pci(pci_hibernate);
+	return (err2 != 0 ? err2 : err1);
 }
 
 static void
@@ -720,11 +749,11 @@ cmd_pause(int fd)
 	 * trips the assert(!bc->bc_paused) in block_if.c:949.  FreeBSD's
 	 * vm_checkpoint() enforces this order too (see snapshot.c:1270).
 	 */
-	if (vm_pause_instance(ctl_ctx) != 0) {
+	if (vm_pause_instance(ctl.ctx) != 0) {
 		send_error(fd, strerror(errno));
 		return;
 	}
-	int e = pause_all_devices();
+	int e = for_each_pci(pci_pause);
 	if (e != 0) {
 		send_error(fd, strerror(e));
 		return;
@@ -735,11 +764,11 @@ cmd_pause(int fd)
 static void
 cmd_resume(int fd)
 {
-	if (vm_resume_instance(ctl_ctx) != 0) {
+	if (vm_resume_instance(ctl.ctx) != 0) {
 		send_error(fd, strerror(errno));
 		return;
 	}
-	int e = resume_all_devices();
+	int e = for_each_pci(pci_resume);
 	if (e != 0) {
 		send_error(fd, strerror(e));
 		return;
@@ -769,19 +798,19 @@ cmd_import_state(int fd, const char *line)
 	uint64_t blob_len_u64 = 0;
 
 	/* C-1: only valid in migrate-listen mode. */
-	if (!get_config_bool_default("migrate.listen", false)) {
+	if (!bhyve_migrate_listen()) {
 		send_error(fd, "import-state requires migrate.listen=true");
 		return;
 	}
 
 	/* C-1: one-shot — reject if a previous import succeeded. */
-	(void) pthread_mutex_lock(&ctl_import_mtx);
-	if (ctl_import_done) {
-		(void) pthread_mutex_unlock(&ctl_import_mtx);
+	(void) pthread_mutex_lock(&ctl.import_mtx);
+	if (ctl.import_done) {
+		(void) pthread_mutex_unlock(&ctl.import_mtx);
 		send_error(fd, "import-state already completed");
 		return;
 	}
-	(void) pthread_mutex_unlock(&ctl_import_mtx);
+	(void) pthread_mutex_unlock(&ctl.import_mtx);
 
 	if (json_get_uint(line, "blob_len", &blob_len_u64) != 0) {
 		send_error(fd, "missing blob_len");
@@ -814,12 +843,12 @@ cmd_import_state(int fd, const char *line)
 	 * it for symmetry with cmd_pause and to cover the snapshot-restore
 	 * case where vCPUs are running.
 	 */
-	if (vm_pause_instance(ctl_ctx) != 0) {
+	if (vm_pause_instance(ctl.ctx) != 0) {
 		(void) fprintf(stderr,
 		    "import-state: vm_pause_instance: %s\n",
 		    strerror(errno));
 	}
-	(void) pause_all_devices();
+	(void) for_each_pci(pci_pause);
 
 	/*
 	 * Re-open any blockif fds that were hibernated while we waited
@@ -834,10 +863,10 @@ cmd_import_state(int fd, const char *line)
 	 * the imported bc_size / bc_sectsz to reflect the post-recv zvol
 	 * rather than the pre-hibernate @mig-sync-N state.
 	 */
-	int wake_err = wake_all_devices();
+	int wake_err = for_each_pci(pci_wake);
 	if (wake_err != 0) {
 		(void) fprintf(stderr,
-		    "import-state: wake_all_devices: %s\n",
+		    "import-state: pci_wake: %s\n",
 		    strerror(wake_err));
 		send_error(fd, strerror(wake_err));
 		free(stream);
@@ -894,8 +923,8 @@ cmd_import_state(int fd, const char *line)
 	 * fbsdrun_addcpu tolerates the EBUSY that its own vm_activate_cpu
 	 * call will now return for these vCPUs — see bhyverun.c.
 	 */
-	for (int vcpuid = 0; vcpuid < ctl_ncpus; vcpuid++) {
-		struct vcpu *vcpu = vm_vcpu_open(ctl_ctx, vcpuid);
+	for (int vcpuid = 0; vcpuid < ctl.ncpus; vcpuid++) {
+		struct vcpu *vcpu = vm_vcpu_open(ctl.ctx, vcpuid);
 		if (vcpu == NULL) {
 			(void) fprintf(stderr,
 			    "import-state: vm_vcpu_open(%d) failed\n", vcpuid);
@@ -918,12 +947,12 @@ cmd_import_state(int fd, const char *line)
 	 * the vm_pause_instance call above.  pe_resume callbacks kick
 	 * viona workers + any other per-device resume logic.
 	 */
-	if (vm_resume_instance(ctl_ctx) != 0) {
+	if (vm_resume_instance(ctl.ctx) != 0) {
 		(void) fprintf(stderr,
 		    "import-state: vm_resume_instance: %s\n",
 		    strerror(errno));
 	}
-	(void) resume_all_devices();
+	(void) for_each_pci(pci_resume);
 
 	/*
 	 * Record success + signal anyone waiting in
@@ -931,12 +960,12 @@ cmd_import_state(int fd, const char *line)
 	 * expected to send a separate "resume" once it is ready for the
 	 * vCPU threads to make forward progress.
 	 */
-	(void) pthread_mutex_lock(&ctl_import_mtx);
-	ctl_import_done = true;
-	(void) pthread_cond_broadcast(&ctl_import_cv);
-	(void) pthread_mutex_unlock(&ctl_import_mtx);
+	(void) pthread_mutex_lock(&ctl.import_mtx);
+	ctl.import_done = true;
+	(void) pthread_cond_broadcast(&ctl.import_cv);
+	(void) pthread_mutex_unlock(&ctl.import_mtx);
 
-	set_config_bool("migrate.restored", true);
+	bhyve_migrate_set_restored();
 	send_ok(fd);
 }
 
@@ -948,24 +977,35 @@ static void
 handle_connection(int fd)
 {
 	char line[1024];
+	char cmd[32];
 
 	/*
 	 * Agents (Rust BhyveCtl) keep a single connection open across
 	 * multiple commands — status -> pause -> export-state etc. on
 	 * the same FD.  Loop reading lines until the peer closes.
+	 *
+	 * Dispatch is on the value of the "command" field specifically,
+	 * not on substring-match of the whole JSON line: {"command":"status"}
+	 * must not collide with our own reply shape {"status":"ok"}, nor
+	 * with any other key whose literal appears in a peer payload.
 	 */
 	for (;;) {
 		ssize_t n = read_line(fd, line, sizeof (line));
 		if (n <= 0)
 			return;
 
-		if (strstr(line, "\"status\"") != NULL) {
+		if (json_get_string(line, "command", cmd, sizeof (cmd)) != 0) {
+			send_error(fd, "missing command");
+			continue;
+		}
+
+		if (strcmp(cmd, "status") == 0) {
 			cmd_status(fd);
-		} else if (strstr(line, "\"pause\"") != NULL) {
+		} else if (strcmp(cmd, "pause") == 0) {
 			cmd_pause(fd);
-		} else if (strstr(line, "\"resume\"") != NULL) {
+		} else if (strcmp(cmd, "resume") == 0) {
 			cmd_resume(fd);
-		} else if (strstr(line, "\"export-state\"") != NULL) {
+		} else if (strcmp(cmd, "export-state") == 0) {
 			cmd_export_state(fd);
 			/*
 			 * export-state writes a large binary blob after
@@ -974,7 +1014,7 @@ handle_connection(int fd)
 			 * on top.
 			 */
 			return;
-		} else if (strstr(line, "\"import-state\"") != NULL) {
+		} else if (strcmp(cmd, "import-state") == 0) {
 			cmd_import_state(fd, line);
 			return;	/* same rationale; binary payload consumed */
 		} else {
@@ -987,15 +1027,17 @@ static void *
 listener_thread(void *arg)
 {
 	(void) arg;
-	while (!ctl_stop) {
-		int conn = accept(ctl_listenfd, NULL, NULL);
+	/*
+	 * bhyve_control_fini() sets stop and does shutdown(SHUT_RDWR) on
+	 * listenfd, which reliably unblocks a pending accept() with EBADF
+	 * or similar — no need for a second stop-check or a sleep retry.
+	 */
+	while (!ctl.stop) {
+		int conn = accept(ctl.listenfd, NULL, NULL);
 		if (conn < 0) {
 			if (errno == EINTR)
 				continue;
-			if (ctl_stop)
-				break;
-			(void) usleep(10000);
-			continue;
+			break;
 		}
 		handle_connection(conn);
 		(void) close(conn);
@@ -1007,20 +1049,48 @@ listener_thread(void *arg)
 /* Public API							    */
 /* ---------------------------------------------------------------- */
 
+/*
+ * Roll back everything bhyve_control_init() has done so far and
+ * return.  Each step is only undone if it actually happened:
+ * listenfd >= 0 means the socket was created (and possibly bound /
+ * listening); a non-NULL ctl.path means strdup succeeded and the
+ * on-disk socket file may exist.  Safe to call from any point in
+ * the init sequence.
+ */
+static void
+fail_init(const char *stage, int err)
+{
+	if (err != 0) {
+		(void) fprintf(stderr, "bhyve_control_init: %s: %s\n",
+		    stage, strerror(err));
+	} else {
+		(void) fprintf(stderr, "bhyve_control_init: %s\n", stage);
+	}
+
+	if (ctl.listenfd >= 0) {
+		(void) close(ctl.listenfd);
+		ctl.listenfd = -1;
+	}
+	if (ctl.path != NULL) {
+		(void) unlink(ctl.path);
+		free(ctl.path);
+		ctl.path = NULL;
+	}
+}
+
 void
 bhyve_control_init(struct vmctx *ctx, int ncpus, const char *path)
 {
 	struct sockaddr_un addr;
 
-	if (ctl_listenfd >= 0)
+	if (ctl.listenfd >= 0)
 		return;	/* already initialised */
 
-	ctl_ctx = ctx;
-	ctl_ncpus = ncpus;
-	ctl_path = strdup(path);
-	if (ctl_path == NULL) {
-		(void) fprintf(stderr,
-		    "bhyve_control_init: strdup failed\n");
+	ctl.ctx = ctx;
+	ctl.ncpus = ncpus;
+	ctl.path = strdup(path);
+	if (ctl.path == NULL) {
+		fail_init("strdup", ENOMEM);
 		return;
 	}
 
@@ -1028,60 +1098,35 @@ bhyve_control_init(struct vmctx *ctx, int ncpus, const char *path)
 	addr.sun_family = AF_UNIX;
 	if (strlcpy(addr.sun_path, path, sizeof (addr.sun_path)) >=
 	    sizeof (addr.sun_path)) {
-		(void) fprintf(stderr,
-		    "bhyve_control_init: socket path too long\n");
-		free(ctl_path);
-		ctl_path = NULL;
+		fail_init("socket path too long", 0);
 		return;
 	}
 
-	ctl_listenfd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (ctl_listenfd < 0) {
-		(void) fprintf(stderr,
-		    "bhyve_control_init: socket: %s\n", strerror(errno));
-		free(ctl_path);
-		ctl_path = NULL;
+	ctl.listenfd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (ctl.listenfd < 0) {
+		fail_init("socket", errno);
 		return;
 	}
 
 	(void) unlink(path);
-	if (bind(ctl_listenfd, (struct sockaddr *)&addr,
+	if (bind(ctl.listenfd, (struct sockaddr *)&addr,
 	    sizeof (addr)) != 0) {
-		(void) fprintf(stderr,
-		    "bhyve_control_init: bind %s: %s\n",
-		    path, strerror(errno));
-		(void) close(ctl_listenfd);
-		ctl_listenfd = -1;
-		free(ctl_path);
-		ctl_path = NULL;
+		fail_init("bind", errno);
 		return;
 	}
 	(void) chmod(path, 0600);
 
-	if (listen(ctl_listenfd, 4) != 0) {
-		(void) fprintf(stderr,
-		    "bhyve_control_init: listen: %s\n", strerror(errno));
-		(void) close(ctl_listenfd);
-		ctl_listenfd = -1;
-		(void) unlink(path);
-		free(ctl_path);
-		ctl_path = NULL;
+	if (listen(ctl.listenfd, 4) != 0) {
+		fail_init("listen", errno);
 		return;
 	}
 
-	if (pthread_create(&ctl_listen_tid, NULL, listener_thread,
+	if (pthread_create(&ctl.listen_tid, NULL, listener_thread,
 	    NULL) != 0) {
-		(void) fprintf(stderr,
-		    "bhyve_control_init: pthread_create: %s\n",
-		    strerror(errno));
-		(void) close(ctl_listenfd);
-		ctl_listenfd = -1;
-		(void) unlink(path);
-		free(ctl_path);
-		ctl_path = NULL;
+		fail_init("pthread_create", errno);
 		return;
 	}
-	(void) pthread_setname_np(ctl_listen_tid, "bhyve_ctl");
+	(void) pthread_setname_np(ctl.listen_tid, "bhyve_ctl");
 
 	(void) fprintf(stderr,
 	    "bhyve_control: listening on %s (ncpus=%d)\n",
@@ -1091,24 +1136,24 @@ bhyve_control_init(struct vmctx *ctx, int ncpus, const char *path)
 void
 bhyve_control_fini(void)
 {
-	ctl_stop = 1;
-	if (ctl_listenfd >= 0) {
-		(void) shutdown(ctl_listenfd, SHUT_RDWR);
-		(void) close(ctl_listenfd);
-		ctl_listenfd = -1;
+	ctl.stop = 1;
+	if (ctl.listenfd >= 0) {
+		(void) shutdown(ctl.listenfd, SHUT_RDWR);
+		(void) close(ctl.listenfd);
+		ctl.listenfd = -1;
 	}
-	if (ctl_path != NULL) {
-		(void) unlink(ctl_path);
-		free(ctl_path);
-		ctl_path = NULL;
+	if (ctl.path != NULL) {
+		(void) unlink(ctl.path);
+		free(ctl.path);
+		ctl.path = NULL;
 	}
 }
 
 void
 bhyve_control_wait_import(void)
 {
-	(void) pthread_mutex_lock(&ctl_import_mtx);
-	while (!ctl_import_done)
-		(void) pthread_cond_wait(&ctl_import_cv, &ctl_import_mtx);
-	(void) pthread_mutex_unlock(&ctl_import_mtx);
+	(void) pthread_mutex_lock(&ctl.import_mtx);
+	while (!ctl.import_done)
+		(void) pthread_cond_wait(&ctl.import_cv, &ctl.import_mtx);
+	(void) pthread_mutex_unlock(&ctl.import_mtx);
 }

@@ -65,6 +65,25 @@ void fbsdrun_deletecpu(int vcpuid);
 
 bool fbsdrun_virtio_msix(void);
 
+#ifndef	__FreeBSD__
+/*
+ * Live-migration startup mode.  Resolved once in main() from either
+ * `-o migrate.listen=true` or the /tmp/migrate.listen sentinel file
+ * so later hot paths (AP pre-init, bootrom-skip, hibernate,
+ * wait_import) don't each re-read config by string key and risk
+ * typo-induced drift.
+ */
+bool bhyve_migrate_listen(void);
+
+/*
+ * True once cmd_import_state has completed successfully.  Consumers
+ * use it to skip reinitialisation paths (vcpu_reset, bhyve_init_vcpu,
+ * vm_set_run_state, spinup_ap) that would clobber imported state.
+ */
+bool bhyve_migrate_restored(void);
+void bhyve_migrate_set_restored(void);
+#endif
+
 typedef int (*vmexit_handler_t)(struct vmctx *, struct vcpu *,
     struct vm_exit *);
 
