@@ -369,36 +369,28 @@ vmcx_set_fpu(struct vmctx *ctx, int vcpuid, void *buf, size_t len)
  * order (MSRs first) and produced VMX entry failure inst_error=7;
  * file-based order is the only configuration that resumes cleanly.
  */
+/*
+ * SAVE path for a single vCPU's VMCX bundle.  The wire format is:
+ * GPRs | seg descs | FPU | MSRs | VMM_ARCH | {run_state, sipi_vector}.
+ * restore_vmcx_vcpu() reads in the exact same order — keep these two
+ * helpers aligned when extending.
+ */
 static int
-snapshot_vmcx_vcpu(struct vmctx *ctx, int vcpuid,
+save_vmcx_vcpu(struct vmctx *ctx, struct vcpu *vcpu, int vcpuid,
     struct vm_snapshot_meta *meta)
 {
 	int ret = 0;
 	uint_t i;
-	struct vcpu *vcpu = NULL;
 	uint64_t gprs[N_VMCX_GPR_REGS];
 	uint8_t fpubuf[VMCX_FPU_BUF_SIZE];
-
-	vcpu = vm_vcpu_open(ctx, vcpuid);
-	if (vcpu == NULL)
-		return (errno);
+	enum vcpu_run_state rstate;
+	uint8_t sipi_vector;
 
 	/* 1. GPRs. */
-	if (meta->op == VM_SNAPSHOT_SAVE) {
-		if (vm_get_register_set(vcpu, N_VMCX_GPR_REGS,
-		    vmcx_gpr_regs, gprs) != 0) {
-			ret = errno;
-			goto done;
-		}
-	}
+	if (vm_get_register_set(vcpu, N_VMCX_GPR_REGS,
+	    vmcx_gpr_regs, gprs) != 0)
+		return (errno);
 	SNAPSHOT_BUF_OR_LEAVE(gprs, sizeof (gprs), meta, ret, done);
-	if (meta->op == VM_SNAPSHOT_RESTORE) {
-		if (vm_set_register_set(vcpu, N_VMCX_GPR_REGS,
-		    vmcx_gpr_regs, gprs) != 0) {
-			ret = errno;
-			goto done;
-		}
-	}
 
 	/* 2. Segment descriptors + selectors. */
 	for (i = 0; i < N_VMCX_SEG_DESCS; i++) {
@@ -407,105 +399,136 @@ snapshot_vmcx_vcpu(struct vmctx *ctx, int vcpuid,
 		bool is_gx = (reg == VM_REG_GUEST_GDTR ||
 		    reg == VM_REG_GUEST_IDTR);
 
-		if (meta->op == VM_SNAPSHOT_SAVE) {
-			ent.regid = (uint32_t)reg;
-			if (vm_get_desc(vcpu, reg, &ent.base, &ent.limit,
-			    &ent.access) != 0) {
-				ret = errno;
-				goto done;
-			}
-			ent.sel = 0;
-			if (!is_gx) {
-				(void) vm_get_register(vcpu, reg, &ent.sel);
-			}
-		}
+		ent.regid = (uint32_t)reg;
+		if (vm_get_desc(vcpu, reg, &ent.base, &ent.limit,
+		    &ent.access) != 0)
+			return (errno);
+		ent.sel = 0;
+		if (!is_gx)
+			(void) vm_get_register(vcpu, reg, &ent.sel);
 		SNAPSHOT_BUF_OR_LEAVE(&ent, VMCX_SEG_ENTRY_SIZE,
 		    meta, ret, done);
-		if (meta->op == VM_SNAPSHOT_RESTORE) {
-			if (vm_set_desc(vcpu, (int)ent.regid, ent.base,
-			    ent.limit, ent.access) != 0) {
-				/* Non-fatal; some segs can be uninitialised. */
+	}
+
+	/* 3. FPU. */
+	(void) memset(fpubuf, 0, sizeof (fpubuf));
+	if (vmcx_get_fpu(ctx, vcpuid, fpubuf, sizeof (fpubuf)) != 0)
+		return (errno);
+	SNAPSHOT_BUF_OR_LEAVE(fpubuf, sizeof (fpubuf), meta, ret, done);
+
+	/* 4. MSRs + 5. VMM_ARCH. */
+	if ((ret = snapshot_vmm_class(ctx, vcpuid, VDC_MSR, 1, meta)) != 0)
+		return (ret);
+	if ((ret = snapshot_vmm_class(ctx, vcpuid, VDC_VMM_ARCH, 1, meta)) != 0)
+		return (ret);
+
+	/*
+	 * 6. vCPU run state (VRS_RUN / VRS_HALT / VRS_INIT / VRS_SIPI_*).
+	 * Without this, dest vCPUs would start in post-init defaults and
+	 * lose the source's running-state — v1 file-based migrations saw
+	 * vm_run wedge (BSP with valid regs but "not yet runnable").
+	 */
+	if (vm_get_run_state(vcpu, &rstate, &sipi_vector) != 0) {
+		rstate = VRS_HALT;
+		sipi_vector = 0;
+	}
+	SNAPSHOT_VAR_OR_LEAVE(rstate, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sipi_vector, meta, ret, done);
+
+done:
+	return (ret);
+}
+
+/*
+ * RESTORE path.  Reads the same wire sections save_vmcx_vcpu wrote
+ * and applies each to the kernel VMM.  Some sub-steps log on failure
+ * and continue because the kernel tolerates partial state (e.g. some
+ * segment registers may be uninitialised on certain guests).
+ */
+static int
+restore_vmcx_vcpu(struct vmctx *ctx, struct vcpu *vcpu, int vcpuid,
+    struct vm_snapshot_meta *meta)
+{
+	int ret = 0;
+	uint_t i;
+	uint64_t gprs[N_VMCX_GPR_REGS];
+	uint8_t fpubuf[VMCX_FPU_BUF_SIZE];
+	enum vcpu_run_state rstate;
+	uint8_t sipi_vector;
+
+	/* 1. GPRs. */
+	SNAPSHOT_BUF_OR_LEAVE(gprs, sizeof (gprs), meta, ret, done);
+	if (vm_set_register_set(vcpu, N_VMCX_GPR_REGS,
+	    vmcx_gpr_regs, gprs) != 0)
+		return (errno);
+
+	/* 2. Segment descriptors + selectors. */
+	for (i = 0; i < N_VMCX_SEG_DESCS; i++) {
+		struct vmcx_seg_entry ent;
+		int reg = vmcx_seg_descs[i];
+		bool is_gx = (reg == VM_REG_GUEST_GDTR ||
+		    reg == VM_REG_GUEST_IDTR);
+
+		SNAPSHOT_BUF_OR_LEAVE(&ent, VMCX_SEG_ENTRY_SIZE,
+		    meta, ret, done);
+		if (vm_set_desc(vcpu, (int)ent.regid, ent.base, ent.limit,
+		    ent.access) != 0) {
+			/* Non-fatal; some segs can be uninitialised. */
+			(void) fprintf(stderr,
+			    "vmcx: vcpu%d reg%u set_desc: %s\n",
+			    vcpuid, ent.regid, strerror(errno));
+		}
+		if (!is_gx) {
+			if (vm_set_register(vcpu, (int)ent.regid,
+			    ent.sel) != 0) {
 				(void) fprintf(stderr,
-				    "vmcx: vcpu%d reg%u set_desc: %s\n",
+				    "vmcx: vcpu%d reg%u set_sel: %s\n",
 				    vcpuid, ent.regid, strerror(errno));
-			}
-			if (!is_gx) {
-				if (vm_set_register(vcpu, (int)ent.regid,
-				    ent.sel) != 0) {
-					(void) fprintf(stderr,
-					    "vmcx: vcpu%d reg%u set_sel: "
-					    "%s\n", vcpuid, ent.regid,
-					    strerror(errno));
-				}
 			}
 		}
 	}
 
 	/* 3. FPU. */
-	if (meta->op == VM_SNAPSHOT_SAVE) {
-		(void) memset(fpubuf, 0, sizeof (fpubuf));
-		if (vmcx_get_fpu(ctx, vcpuid, fpubuf,
-		    sizeof (fpubuf)) != 0) {
-			ret = errno;
-			goto done;
-		}
-	}
 	SNAPSHOT_BUF_OR_LEAVE(fpubuf, sizeof (fpubuf), meta, ret, done);
-	if (meta->op == VM_SNAPSHOT_RESTORE) {
-		if (vmcx_set_fpu(ctx, vcpuid, fpubuf,
-		    sizeof (fpubuf)) != 0) {
-			/* Not fatal for resume; log and continue. */
-			(void) fprintf(stderr, "vmcx: vcpu%d set_fpu: %s\n",
-			    vcpuid, strerror(errno));
-		}
+	if (vmcx_set_fpu(ctx, vcpuid, fpubuf, sizeof (fpubuf)) != 0) {
+		/* Not fatal for resume; log and continue. */
+		(void) fprintf(stderr, "vmcx: vcpu%d set_fpu: %s\n",
+		    vcpuid, strerror(errno));
 	}
 
-	/* 4. MSRs via VDC_MSR. */
-	ret = snapshot_vmm_class(ctx, vcpuid, VDC_MSR, 1, meta);
-	if (ret != 0)
-		goto done;
+	/* 4. MSRs + 5. VMM_ARCH. */
+	if ((ret = snapshot_vmm_class(ctx, vcpuid, VDC_MSR, 1, meta)) != 0)
+		return (ret);
+	if ((ret = snapshot_vmm_class(ctx, vcpuid, VDC_VMM_ARCH, 1, meta)) != 0)
+		return (ret);
 
-	/* 5. VMM_ARCH via VDC_VMM_ARCH. */
-	ret = snapshot_vmm_class(ctx, vcpuid, VDC_VMM_ARCH, 1, meta);
-	if (ret != 0)
-		goto done;
-
-	/*
-	 * 6. vCPU run state (VRS_RUN / VRS_HALT / VRS_INIT / VRS_SIPI_*).
-	 *
-	 * Without this, dest vCPUs start in their default post-init state
-	 * (BSP VRS_RUN-after-vm_set_run_state is skipped via
-	 * migrate.restored, APs VRS_HALT by default), losing the source's
-	 * running-state information.  In the file-based v1 path this
-	 * caused vm_run to wedge immediately: BSP had valid registers but
-	 * run_state said "not yet runnable," so no guest code executed.
-	 * Same per-vcpu_run_state field v1 bhyve_migrate.c saves.
-	 */
-	{
-		enum vcpu_run_state rstate;
-		uint8_t sipi_vector;
-
-		if (meta->op == VM_SNAPSHOT_SAVE) {
-			if (vm_get_run_state(vcpu, &rstate, &sipi_vector) != 0) {
-				rstate = VRS_HALT;
-				sipi_vector = 0;
-			}
-		}
-		SNAPSHOT_VAR_OR_LEAVE(rstate, meta, ret, done);
-		SNAPSHOT_VAR_OR_LEAVE(sipi_vector, meta, ret, done);
-		if (meta->op == VM_SNAPSHOT_RESTORE) {
-			if (vm_set_run_state(vcpu, rstate, sipi_vector) != 0) {
-				(void) fprintf(stderr,
-				    "vmcx: vcpu%d set_run_state(%u,%u): %s\n",
-				    vcpuid, (unsigned)rstate,
-				    (unsigned)sipi_vector, strerror(errno));
-			}
-		}
+	/* 6. vCPU run state. */
+	SNAPSHOT_VAR_OR_LEAVE(rstate, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sipi_vector, meta, ret, done);
+	if (vm_set_run_state(vcpu, rstate, sipi_vector) != 0) {
+		(void) fprintf(stderr,
+		    "vmcx: vcpu%d set_run_state(%u,%u): %s\n",
+		    vcpuid, (unsigned)rstate, (unsigned)sipi_vector,
+		    strerror(errno));
 	}
 
 done:
-	if (vcpu != NULL)
-		vm_vcpu_close(vcpu);
+	return (ret);
+}
+
+static int
+snapshot_vmcx_vcpu(struct vmctx *ctx, int vcpuid,
+    struct vm_snapshot_meta *meta)
+{
+	struct vcpu *vcpu = vm_vcpu_open(ctx, vcpuid);
+	if (vcpu == NULL)
+		return (errno);
+
+	int ret = (meta->op == VM_SNAPSHOT_SAVE)
+	    ? save_vmcx_vcpu(ctx, vcpu, vcpuid, meta)
+	    : restore_vmcx_vcpu(ctx, vcpu, vcpuid, meta);
+
+	vm_vcpu_close(vcpu);
 	return (ret);
 }
 
@@ -553,34 +576,29 @@ done:
  * guest_freq with dest's.  Algorithm is ported verbatim from
  * bhyve_migrate.c@4f95ad6c98; see that file for the full rationale.
  */
+/*
+ * Consume [uint32 src_len][src_len bytes] from the snapshot stream.
+ * The leading uint32 gates forward-compat: we accept src_len >=
+ * sizeof(struct vdi_time_info_v1) and discard any trailing bytes past
+ * the known struct so v2 blobs land on a v1 reader cleanly.
+ */
 static int
-snapshot_vmm_time_merge(struct vmctx *ctx, struct vm_snapshot_meta *meta)
+read_time_wire(struct vm_snapshot_meta *meta, struct vdi_time_info_v1 *src)
 {
 	uint32_t src_len = 0;
-	struct vdi_time_info_v1 src;
-	struct vdi_time_info_v1 dst;
-	uint32_t dst_result_len = 0;
 	int ret = 0;
 
-	(void) memset(&src, 0, sizeof (src));
-	(void) memset(&dst, 0, sizeof (dst));
-
-	/*
-	 * Wire format: [uint32 src_len][src_len bytes of data].
-	 * Expect src_len >= sizeof(vdi_time_info_v1); extra bytes
-	 * (forward-compat trailer) are discarded.
-	 */
 	SNAPSHOT_VAR_OR_LEAVE(src_len, meta, ret, done);
-	if (src_len < sizeof (src)) {
+	if (src_len < sizeof (*src)) {
 		(void) fprintf(stderr,
 		    "vmm_time: source blob too short (%u < %zu)\n",
-		    src_len, sizeof (src));
+		    src_len, sizeof (*src));
 		return (EINVAL);
 	}
-	SNAPSHOT_BUF_OR_LEAVE(&src, sizeof (src), meta, ret, done);
-	if (src_len > sizeof (src)) {
+	SNAPSHOT_BUF_OR_LEAVE(src, sizeof (*src), meta, ret, done);
+	if (src_len > sizeof (*src)) {
 		uint8_t discard[256];
-		uint32_t rem = src_len - (uint32_t)sizeof (src);
+		uint32_t rem = src_len - (uint32_t)sizeof (*src);
 		while (rem > 0) {
 			uint32_t chunk = rem > sizeof (discard) ?
 			    (uint32_t)sizeof (discard) : rem;
@@ -589,56 +607,103 @@ snapshot_vmm_time_merge(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 		}
 	}
 
-	/* Read dest's live time snapshot. */
+done:
+	return (ret);
+}
+
+/*
+ * Rebase the source's hrtime so the guest's uptime (hrtime -
+ * boot_hrtime) stays intact under the destination host's hrtime
+ * clock, accounting for the wall-clock drift accumulated during
+ * the migration.  vt_hres_{sec,ns} get overwritten with the dest's
+ * live wall-clock so subsequent guest time queries match the host
+ * wall clock the guest is actually running on.
+ *
+ * Returns the wall-clock delta in nanoseconds.  The caller uses it
+ * to bump TSC by an equivalent amount so guest CLOCK_MONOTONIC
+ * advances consistently across the pause.
+ */
+static int64_t
+rebase_hrtime(struct vdi_time_info_v1 *src,
+    const struct vdi_time_info_v1 *dst)
+{
+	int64_t guest_uptime = src->vt_hrtime - src->vt_boot_hrtime;
+	uint64_t src_wc_ns = src->vt_hres_sec * 1000000000ULL +
+	    src->vt_hres_ns;
+	uint64_t dst_wc_ns = dst->vt_hres_sec * 1000000000ULL +
+	    dst->vt_hres_ns;
+	int64_t migrate_delta_ns = 0;
+	if (dst_wc_ns > src_wc_ns)
+		migrate_delta_ns = (int64_t)(dst_wc_ns - src_wc_ns);
+
+	src->vt_boot_hrtime = dst->vt_hrtime -
+	    (guest_uptime + migrate_delta_ns);
+	src->vt_hrtime = dst->vt_hrtime;
+	src->vt_hres_sec = dst->vt_hres_sec;
+	src->vt_hres_ns = dst->vt_hres_ns;
+
+	return (migrate_delta_ns);
+}
+
+/*
+ * Rescale the source's guest TSC for any freq mismatch between src
+ * and dst hosts, then also bump by the wall-clock delta so guest
+ * CLOCK_MONOTONIC (which typically derives from TSC) reflects the
+ * real time elapsed during migration.
+ *
+ * new_tsc = old_tsc * dst_freq / src_freq, computed via quotient +
+ * remainder to avoid the 128-bit divide the VMM kernel path would
+ * otherwise require.
+ */
+static void
+rescale_tsc(struct vdi_time_info_v1 *src,
+    const struct vdi_time_info_v1 *dst, int64_t migrate_delta_ns)
+{
+	if (src->vt_guest_freq != dst->vt_guest_freq) {
+		if (src->vt_guest_freq != 0) {
+			uint64_t q = src->vt_guest_tsc / src->vt_guest_freq;
+			uint64_t r = src->vt_guest_tsc % src->vt_guest_freq;
+			src->vt_guest_tsc = q * dst->vt_guest_freq +
+			    r * dst->vt_guest_freq / src->vt_guest_freq;
+		}
+		src->vt_guest_freq = dst->vt_guest_freq;
+	}
+
+	if (migrate_delta_ns > 0 && src->vt_guest_freq > 0) {
+		uint64_t ns = (uint64_t)migrate_delta_ns;
+		uint64_t q = ns / 1000000000ULL;
+		uint64_t r = ns % 1000000000ULL;
+		uint64_t tsc_delta = q * src->vt_guest_freq +
+		    r * src->vt_guest_freq / 1000000000ULL;
+		src->vt_guest_tsc += tsc_delta;
+	}
+}
+
+static int
+snapshot_vmm_time_merge(struct vmctx *ctx, struct vm_snapshot_meta *meta)
+{
+	struct vdi_time_info_v1 src = { 0 };
+	struct vdi_time_info_v1 dst = { 0 };
+	uint32_t dst_result_len = 0;
+	int ret;
+
+	ret = read_time_wire(meta, &src);
+	if (ret != 0)
+		return (ret);
+
 	if (vm_data_read(ctx, -1, VDC_VMM_TIME, 1, VDX_FLAG_WRITE_COPYOUT,
 	    &dst, sizeof (dst), &dst_result_len) != 0) {
 		return (errno);
 	}
 
-	int64_t guest_uptime = src.vt_hrtime - src.vt_boot_hrtime;
-	uint64_t src_wc_ns = src.vt_hres_sec * 1000000000ULL + src.vt_hres_ns;
-	uint64_t dst_wc_ns = dst.vt_hres_sec * 1000000000ULL + dst.vt_hres_ns;
-	int64_t migrate_delta_ns = 0;
-	if (dst_wc_ns > src_wc_ns) {
-		migrate_delta_ns = (int64_t)(dst_wc_ns - src_wc_ns);
-	}
-
-	src.vt_boot_hrtime = dst.vt_hrtime -
-	    (guest_uptime + migrate_delta_ns);
-	src.vt_hrtime = dst.vt_hrtime;
-	src.vt_hres_sec = dst.vt_hres_sec;
-	src.vt_hres_ns = dst.vt_hres_ns;
-
-	if (src.vt_guest_freq != dst.vt_guest_freq) {
-		if (src.vt_guest_freq != 0) {
-			/*
-			 * new_tsc = old_tsc * dst_freq / src_freq, split
-			 * into quotient + remainder to avoid 128-bit div.
-			 */
-			uint64_t q = src.vt_guest_tsc / src.vt_guest_freq;
-			uint64_t r = src.vt_guest_tsc % src.vt_guest_freq;
-			src.vt_guest_tsc = q * dst.vt_guest_freq +
-			    r * dst.vt_guest_freq / src.vt_guest_freq;
-		}
-		src.vt_guest_freq = dst.vt_guest_freq;
-	}
-
-	if (migrate_delta_ns > 0 && src.vt_guest_freq > 0) {
-		uint64_t ns = (uint64_t)migrate_delta_ns;
-		uint64_t q = ns / 1000000000ULL;
-		uint64_t r = ns % 1000000000ULL;
-		uint64_t tsc_delta = q * src.vt_guest_freq +
-		    r * src.vt_guest_freq / 1000000000ULL;
-		src.vt_guest_tsc += tsc_delta;
-	}
+	int64_t migrate_delta_ns = rebase_hrtime(&src, &dst);
+	rescale_tsc(&src, &dst, migrate_delta_ns);
 
 	if (vm_data_write(ctx, -1, VDC_VMM_TIME, 1, &src,
 	    sizeof (src)) != 0) {
 		return (errno);
 	}
-
-done:
-	return (ret);
+	return (0);
 }
 
 int
