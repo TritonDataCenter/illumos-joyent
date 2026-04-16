@@ -113,6 +113,37 @@
 int guest_ncpus;
 uint16_t cpu_cores, cpu_sockets, cpu_threads;
 
+#ifndef __FreeBSD__
+/*
+ * Live-migration flags.  Resolved once in main() (see the
+ * migrate.listen resolution block) and mutated once at the end of
+ * cmd_import_state via bhyve_migrate_set_restored().  Kept as static
+ * bools rather than re-read from the string-keyed config store on
+ * every hot path so a future rename of either key can't silently
+ * break the migration — one compilation error points at every user.
+ */
+static bool migrate_listen_mode;
+static bool migrate_restored_mode;
+
+bool
+bhyve_migrate_listen(void)
+{
+	return (migrate_listen_mode);
+}
+
+bool
+bhyve_migrate_restored(void)
+{
+	return (migrate_restored_mode);
+}
+
+void
+bhyve_migrate_set_restored(void)
+{
+	migrate_restored_mode = true;
+}
+#endif
+
 int raw_stdio = 0;
 
 static const int BSP = 0;
@@ -439,8 +470,7 @@ fbsdrun_addcpu(int vcpuid, bool suspend)
 	 * returns EBUSY from vm_activate_cpu(), which is the expected
 	 * state.  Treat it as success.
 	 */
-	if (error != 0 && errno == EBUSY &&
-	    get_config_bool_default("migrate.restored", false)) {
+	if (error != 0 && errno == EBUSY && bhyve_migrate_restored()) {
 		error = 0;
 	}
 #endif
@@ -799,25 +829,21 @@ main(int argc, char *argv[])
 	illumos_priv_init();
 
 	/*
-	 * Resolve migrate.listen EARLY — before any code path that branches
-	 * on it.  The value can come from `-o migrate.listen=true` (already
-	 * set by bhyve_optparse above) or from the /tmp/migrate.listen
-	 * sentinel file dropped by the GZ migration agent just before
-	 * invoking bhyve.  The sentinel path is consumed once here so later
-	 * consumers (AP pre-init, bootrom-skip, hibernate, wait_import)
-	 * all see a consistent migrate.listen=true throughout startup.
-	 * Resolving it any later than this risks the AP pre-init block
-	 * below running with the default (false) and skipping
-	 * bhyve_init_vcpu() on every AP — which then never runs at all in
-	 * the migrate-restored path (bhyve_start_vcpu() skips AP init when
-	 * migrate.restored is set), leaving the AP's kernel-side HALT_EXIT
-	 * / x2APIC mode uninitialised and manifesting as timer-softirq
-	 * starvation on AP cores post-resume.
+	 * Resolve migrate-listen mode EARLY — before any code path that
+	 * branches on it.  The value can come from `-o migrate.listen=true`
+	 * (already set by bhyve_optparse above) or from the
+	 * /tmp/migrate.listen sentinel file dropped by the GZ migration
+	 * agent just before invoking bhyve.  Freeze it into a static bool
+	 * here so later consumers (AP pre-init, bootrom-skip, hibernate,
+	 * wait_import) all see a single source of truth: a rename of the
+	 * config key would now fail to compile instead of silently
+	 * defaulting to false.
 	 */
 	if (access("/tmp/migrate.listen", F_OK) == 0) {
 		set_config_bool("migrate.listen", true);
 		(void) unlink("/tmp/migrate.listen");
 	}
+	migrate_listen_mode = get_config_bool_default("migrate.listen", false);
 #endif
 
 	calc_topology();
@@ -868,7 +894,7 @@ main(int argc, char *argv[])
 	 * when migrate.restored is set so we don't double-init and clobber
 	 * the just-imported state a second time.
 	 */
-	if (get_config_bool_default("migrate.listen", false)) {
+	if (bhyve_migrate_listen()) {
 		for (int vcpuid = 0; vcpuid < guest_ncpus; vcpuid++) {
 			if (vcpuid == BSP)
 				continue;
@@ -979,7 +1005,7 @@ main(int argc, char *argv[])
 	 * migrate.listen config value was resolved from `-o` or the
 	 * /tmp/migrate.listen sentinel file earlier in main().
 	 */
-	if (get_config_bool_default("migrate.listen", false)) {
+	if (bhyve_migrate_listen()) {
 		(void) fprintf(stderr,
 		    "migrate-listen: skipping bootrom + vcpu_reset; "
 		    "guest state will arrive via import-state\n");
@@ -1033,7 +1059,7 @@ main(int argc, char *argv[])
 	 * The import-state command sets migrate.restored, which downstream
 	 * machdep code uses to skip spinup_ap and vm_set_run_state.
 	 */
-	if (get_config_bool_default("migrate.listen", false)) {
+	if (bhyve_migrate_listen()) {
 		/*
 		 * Release every zvol fd before we block on import-state.
 		 * The source agent will run the final `zfs recv` while we

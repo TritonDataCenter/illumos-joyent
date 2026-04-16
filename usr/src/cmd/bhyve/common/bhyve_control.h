@@ -39,7 +39,7 @@ void	bhyve_control_wait_import(void);
 /*
  * Ask every PCI device that registered pe_hibernate to drop its backing
  * fd.  Used on the destination side of a live migration right after
- * pause_all_devices(): with the zvols released, the GZ agent can run
+ * pci_pause via for_each_pci: with the zvols released, the GZ agent can run
  * the final `zfs recv` before import-state arrives.  Idempotent; a
  * device that never opened an fd (fbuf, viona, xhci, ...) is a no-op.
  *

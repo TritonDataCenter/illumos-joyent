@@ -1327,7 +1327,7 @@ blockif_hibernate(struct blockif_ctxt *bc)
 	 * We only make sense to call after blockif_pause(): an in-flight
 	 * I/O would fault on a closed fd.  Assert rather than silently
 	 * produce undefined behavior — callers are expected to honor
-	 * this ordering (see cmd_pause / pause_all_devices).
+	 * this ordering (see cmd_pause / for_each_pci(pci_pause)).
 	 */
 	assert(bc->bc_paused == 1);
 

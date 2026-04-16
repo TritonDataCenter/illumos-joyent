@@ -368,7 +368,7 @@ bhyve_start_vcpu(struct vcpu *vcpu, bool bsp, bool suspend)
 		 * the AP run-state was already imported and another spinup
 		 * call would clobber it.
 		 */
-		if (!get_config_bool_default("migrate.restored", false))
+		if (!bhyve_migrate_restored())
 			spinup_ap(vcpu, 0);
 
 		/*
@@ -378,7 +378,7 @@ bhyve_start_vcpu(struct vcpu *vcpu, bool bsp, bool suspend)
 		 * the imported vLAPIC LDR/DFR/id.  Running it again here
 		 * would undo the restore.
 		 */
-		if (!get_config_bool_default("migrate.restored", false))
+		if (!bhyve_migrate_restored())
 			bhyve_init_vcpu(vcpu);
 #else
 		bhyve_init_vcpu(vcpu);
@@ -405,7 +405,7 @@ bhyve_start_vcpu(struct vcpu *vcpu, bool bsp, bool suspend)
 	 * Skip the run-state reset when restoring from a migration or
 	 * snapshot: the imported run-state is what we want to preserve.
 	 */
-	if (!get_config_bool_default("migrate.restored", false)) {
+	if (!bhyve_migrate_restored()) {
 		error = vm_set_run_state(vcpu, bsp ? VRS_RUN : VRS_HALT, 0);
 		assert(error == 0);
 	}
