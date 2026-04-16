@@ -227,7 +227,17 @@ static struct {
 /* I/O helpers							    */
 /* ---------------------------------------------------------------- */
 
-static ssize_t
+/*
+ * Read exactly `len` bytes from `fd` into `buf`, looping past EINTR.
+ *
+ * Returns 0 on full-len success, -1 on any short read.  On EOF before
+ * len bytes are available, errno is set to EIO so callers can
+ * distinguish a truncated peer from a real I/O error via errno.  The
+ * old "return got on EOF, -1 on error" contract let a size_t-cast bug
+ * in a caller silently treat "got 7 bytes of 12" as "got SIZE_MAX -
+ * success" — explicit error is safer.
+ */
+static int
 read_full(int fd, void *buf, size_t len)
 {
 	uint8_t *p = buf;
@@ -235,8 +245,10 @@ read_full(int fd, void *buf, size_t len)
 
 	while (got < len) {
 		ssize_t n = read(fd, p + got, len - got);
-		if (n == 0)
-			return ((ssize_t)got);
+		if (n == 0) {
+			errno = EIO;	/* short stream / peer closed early */
+			return (-1);
+		}
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
@@ -244,7 +256,7 @@ read_full(int fd, void *buf, size_t len)
 		}
 		got += (size_t)n;
 	}
-	return ((ssize_t)got);
+	return (0);
 }
 
 static ssize_t
@@ -862,24 +874,16 @@ import_read_blob(int fd, size_t blob_len, uint8_t **stream_out)
 		send_error(fd, "out of memory");
 		return (ENOMEM);
 	}
-	if ((size_t)read_full(fd, stream, blob_len) != blob_len) {
-		send_error(fd, "short read");
+	if (read_full(fd, stream, blob_len) != 0) {
+		send_error(fd, strerror(errno));
 		free(stream);
-		return (EIO);
+		return (errno);
 	}
 	*stream_out = stream;
 	return (0);
 }
 
-/*
- * Pause vCPUs and then every PCI device.  vCPU-first ordering matters:
- * if we paused devices first, a still-running vCPU could fire one more
- * virtio queue-notify which would land in blockif_request() and trip
- * its assert(!bc->bc_paused) (see cmd_pause).  On the migrate-listen
- * path the vCPU threads haven't started yet so vm_pause_instance is
- * effectively a no-op, but we issue it for symmetry with cmd_pause and
- * to cover the snapshot-restore case where vCPUs are running.
- */
+/* vCPU-first pause order — see docs/bhyve-snapshot-port.md#import-pause-vcpu-first. */
 static void
 import_pause(void)
 {
@@ -890,17 +894,7 @@ import_pause(void)
 	(void) for_each_pci(pci_pause);
 }
 
-/*
- * Re-open any blockif fds that were hibernated while the dest agent
- * ran its final `zfs recv` on the destination zvol.  Devices that
- * never hibernated (normal non-migrate boot, or devices without
- * backing fds) are a no-op.
- *
- * MUST run before import_apply_stream: the stream carries BAR/register
- * state whose RESTORE calls into device callbacks that assume a
- * working blockif, and we need the imported bc_size / bc_sectsz to
- * reflect the post-recv zvol rather than the pre-hibernate snapshot.
- */
+/* Wake-before-apply invariant — see docs/bhyve-snapshot-port.md#import-wake-before-apply. */
 static int
 import_wake_devices(int fd)
 {
@@ -932,39 +926,21 @@ import_apply_stream(int fd, uint8_t *stream, size_t blob_len)
  * overlap is a warn since register_mem_int silently dedups the same
  * way at runtime.
  */
+/* Two-phase BAR restore — see docs/bhyve-snapshot-port.md#bar-restore-two-phase. */
 static int
 import_restore_bars(int fd)
 {
-	if (pci_restore_bars() != 0) {
-		send_error(fd,
-		    "BAR restore rejected (out-of-range BAR in payload)");
-		return (-1);
-	}
-	return (0);
+	int err = pci_restore_bars();
+	if (err == 0)
+		return (0);
+	const char *msg = (err == ERANGE)
+	    ? "BAR restore rejected (out-of-range BAR in payload)"
+	    : strerror(err);
+	send_error(fd, msg);
+	return (err);
 }
 
-/*
- * Activate every vCPU in the kernel BEFORE vm_resume_instance so the
- * resume iterates them all.
- *
- * vm_resume_instance (uts/intel/io/vmm/vmm.c) walks vm->active_cpus
- * and calls vlapic_resume on each — and vlapic_resume is what re-arms
- * the LAPIC callout that drives guest timer IRQs.  vlapic_data_write
- * populates vlapic->timer_fire_when during the state restore but
- * skips the callout_reset while the VM is paused, relying on the
- * subsequent vm_resume_instance to do it.
- *
- * On the migrate-listen path, vCPUs are not activated until the main
- * thread calls fbsdrun_addcpu -> vm_activate_cpu after
- * bhyve_control_wait_import returns — i.e. AFTER us.  Without this
- * pre-resume activation, vm_resume_instance sees an empty active_cpus
- * cpuset, vlapic_resume is never called for anyone, and the guest's
- * LAPIC timer never fires on the dest — manifests as rcu_preempt
- * stalls / hung_task warnings on the vCPU most dependent on the timer.
- *
- * fbsdrun_addcpu tolerates the EBUSY that its own vm_activate_cpu
- * call will return for these vCPUs (see bhyverun.c).
- */
+/* Activate before resume — see docs/bhyve-snapshot-port.md#vcpu-activation-before-resume. */
 static void
 import_activate_vcpus(void)
 {
