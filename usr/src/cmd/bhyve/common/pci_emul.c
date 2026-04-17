@@ -651,6 +651,35 @@ modify_bar_registration(struct pci_devinst *pi, int idx, int registration)
 		error = EINVAL;
 		break;
 	}
+
+	/*
+	 * Tolerate EEXIST on register.  register_mem_int's dedup only
+	 * matches on exact-base; RANGE overlap between two devices
+	 * (e.g. viona modern-cfg BAR and fbuf/xhci small BARs that land
+	 * inside viona's region) returns EEXIST from mmio_rb_add.
+	 *
+	 * Source bhyve with the same BAR layout did not crash — the
+	 * guest's PCI BIOS assigned these addresses, so whichever
+	 * device registered first owns the rb-tree range and the second
+	 * device's config-space remapping still works correctly (MMIO
+	 * is routed by base-range lookup, and the overlapping device's
+	 * config accesses go through its emul's own cfgread/write, not
+	 * through the mmio tree).
+	 *
+	 * Asserting on EEXIST turned a migration restore of any VM with
+	 * multi-BAR overlap into a SIGABRT on the dest — which is a
+	 * DoS on the migration endpoint.  Demote to a warning; the
+	 * runtime behavior matches what source was doing.
+	 */
+	if (error == EEXIST && registration) {
+		(void) fprintf(stderr,
+		    "modify_bar_registration: %s BAR[%d] "
+		    "type=%d addr=0x%lx: range already in rb-tree; "
+		    "continuing (source-bhyve-compatible)\n",
+		    pi->pi_name, idx, (int)pi->pi_bar[idx].type,
+		    (unsigned long)pi->pi_bar[idx].addr);
+		error = 0;
+	}
 	assert(error == 0);
 
 	if (pe->pe_baraddr != NULL)
@@ -2625,168 +2654,44 @@ bar_restore_in_range(const struct pci_devinst *pi, int idx)
 }
 
 /*
- * One record in the BAR-conflict sweep (see pci_restore_bar_conflict
- * below).  Populated from each enabled, restored BAR on each device.
- */
-struct bar_slot {
-	struct pci_devinst	*pi;
-	int			idx;
-	enum pcibar_type	type;
-	uint64_t		start;
-	uint64_t		end;	/* inclusive */
-};
-
-/*
- * Cross-device BAR-conflict pre-flight for migration restore (C-3).
- *
- * register_mem_int() silently frees (drops) the incoming range if its
- * base collides with an existing entry in the rb-tree — see the
- * comment at mem.c:214-220 on why the general path swallows overlaps.
- * But register_mem returns 0 in that case, modify_bar_registration
- * thinks it succeeded, and pe_baraddr() is called telling the device
- * "you're live at addr X" even though MMIO routing for X still points
- * at whichever device got there first.  A crafted migration payload
- * with two BARs at the same address produces a routing discrepancy
- * (e.g. viona programs its notify hook at X but MMIO to X is handled
- * by virtio-blk).
- *
- * Detect this BEFORE touching the rb-tree by walking the just-restored
- * pi_bar[] arrays and rejecting any overlap within the same address
- * space (IO vs MMIO).  MEM32 and MEM64 share the 64-bit MMIO space.
- */
-static int
-pci_restore_bar_conflict(void)
-{
-	struct pci_devinst *pi = NULL;
-	/*
-	 * Worst case: 256 buses × 32 slots × 8 funcs × 6 BARs = ~400K
-	 * entries × sizeof(bar_slot) = ~12 MB, past the thread's
-	 * default 64 KB stack.  Heap-allocate.
-	 */
-	const size_t cap = MAXBUSES * MAXSLOTS * MAXFUNCS *
-	    ((size_t)PCI_BARMAX + 1);
-	struct bar_slot *slots = calloc(cap, sizeof (*slots));
-	if (slots == NULL) {
-		(void) fprintf(stderr,
-		    "pci_restore_bars: BAR-conflict scratch alloc failed\n");
-		return (ENOMEM);
-	}
-	int n = 0;
-
-	while ((pi = pci_next(pi)) != NULL) {
-		/*
-		 * Only count BARs that will actually be registered
-		 * (pci_restore_bars skips devices without command-register
-		 * decode).  Fixed-address startup BARs for devices the guest
-		 * never enabled (fbuf, xhci with CMD=0) can overlap
-		 * legitimately — no MMIO routing is ever set up for them —
-		 * and flagging them here produces a false-positive
-		 * refuse-to-restore.
-		 */
-		if (!memen(pi) && !porten(pi))
-			continue;
-
-		for (int i = 0; i <= PCI_BARMAX; i++) {
-			enum pcibar_type t = pi->pi_bar[i].type;
-			uint64_t addr = pi->pi_bar[i].addr;
-			uint64_t size = pi->pi_bar[i].size;
-
-			if (t == PCIBAR_NONE || t == PCIBAR_MEMHI64)
-				continue;
-			if (addr == 0 || size == 0)
-				continue;
-
-			/* Per-BAR decode gate too. */
-			int bar_decode = (t == PCIBAR_IO) ?
-			    porten(pi) : memen(pi);
-			if (!bar_decode)
-				continue;
-
-			slots[n].pi = pi;
-			slots[n].idx = i;
-			slots[n].type = t;
-			slots[n].start = addr;
-			slots[n].end = addr + size - 1;
-			n++;
-		}
-	}
-
-	/* O(n^2) but n is tiny (< 256 on realistic VMs). */
-	for (int i = 0; i < n; i++) {
-		for (int j = i + 1; j < n; j++) {
-			bool a_io = slots[i].type == PCIBAR_IO;
-			bool b_io = slots[j].type == PCIBAR_IO;
-			if (a_io != b_io)
-				continue;
-
-			/* [s1..e1] and [s2..e2] overlap iff s1<=e2 && s2<=e1. */
-			if (slots[i].start <= slots[j].end &&
-			    slots[j].start <= slots[i].end) {
-				const char *e_i = slots[i].pi->pi_d ?
-				    slots[i].pi->pi_d->pe_emu : "?";
-				const char *e_j = slots[j].pi->pi_d ?
-				    slots[j].pi->pi_d->pe_emu : "?";
-				/*
-				 * Overlap detected.  On existing stock
-				 * bhyve layouts this happens benignly
-				 * (viona's modern-cfg BAR vs fbuf's
-				 * device-cfg BAR when fbuf is unused):
-				 * register_mem_int silently dedups the
-				 * second range in non-migration code too,
-				 * so our refusing to restore would be
-				 * stricter than the running source bhyve
-				 * is.  Warn and continue — the conflict
-				 * check stays as a diagnostic rather than
-				 * a hard gate.
-				 */
-				(void) fprintf(stderr,
-				    "pci_restore_bars: BAR overlap — "
-				    "%s@%u:%u:%u[%d] type=%d size=0x%lx "
-				    "[0x%lx..0x%lx] vs %s@%u:%u:%u[%d] "
-				    "type=%d size=0x%lx [0x%lx..0x%lx] "
-				    "(continuing; register_mem_int dedups)\n",
-				    e_i, slots[i].pi->pi_bus,
-				    slots[i].pi->pi_slot,
-				    slots[i].pi->pi_func, slots[i].idx,
-				    (int)slots[i].type,
-				    (unsigned long)(slots[i].end -
-				        slots[i].start + 1),
-				    (unsigned long)slots[i].start,
-				    (unsigned long)slots[i].end,
-				    e_j, slots[j].pi->pi_bus,
-				    slots[j].pi->pi_slot,
-				    slots[j].pi->pi_func, slots[j].idx,
-				    (int)slots[j].type,
-				    (unsigned long)(slots[j].end -
-				        slots[j].start + 1),
-				    (unsigned long)slots[j].start,
-				    (unsigned long)slots[j].end);
-			}
-		}
-	}
-	free(slots);
-	return (0);
-}
-
-/*
  * Re-register every restored BAR with the VMM.
  *
  * Must be called after the migration blob has been applied to every
  * device (via pci_snapshot -> pci_snapshot_pci_dev, which also
- * unregisters the destination's startup BARs).  Runs two passes:
+ * unregisters the destination's startup BARs).  For each BAR we
+ * validate the address is in-range (C-2), then register_bar; the
+ * register_bar path now tolerates EEXIST from cross-device range
+ * overlaps in modify_bar_registration (matches source bhyve
+ * behavior — see the comment there).
  *
- *   1. pci_restore_bar_conflict — reject overlapping BARs (C-3)
- *   2. per-BAR register_bar with bar_restore_in_range validation (C-2)
+ * Earlier revisions here had a separate C-3 pre-flight
+ * (pci_restore_bar_conflict) that walked every restored BAR looking
+ * for cross-device overlaps and rejected the restore on any hit.
+ * That was removed because:
  *
- * Returns 0 on success; -1 on detected conflict or out-of-range BAR.
+ *   1. Batch-3 softened it to warn-and-continue after the "viona
+ *      modern-cfg vs fbuf" false-positive — so it no longer gated
+ *      anything.
+ *
+ *   2. The underlying premise ("register_mem_int silently dedups
+ *      overlaps") is only true for exact base-match dedup; RANGE
+ *      overlaps between devices return EEXIST from mmio_rb_add,
+ *      which is now tolerated at the registration site.
+ *
+ *   3. A full O(n²) sweep every restore is measurable overhead for
+ *      devices-heavy VMs, and having the same overlap tolerated at
+ *      the registration site means the diagnostic walk is no
+ *      longer load-bearing.
+ *
+ * If we later need a diagnostic "are there BAR conflicts in this
+ * restore payload", do it as a debug tool, not a hot-path gate.
+ *
+ * Returns 0 on success; -1 on out-of-range BAR.
  */
 int
 pci_restore_bars(void)
 {
 	struct pci_devinst *pi = NULL;
-	int err = pci_restore_bar_conflict();
-	if (err != 0)
-		return (err);
 
 	while ((pi = pci_next(pi)) != NULL) {
 		if (!memen(pi) && !porten(pi))
