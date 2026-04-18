@@ -69,6 +69,27 @@
  * Self-describing TLV stream — no separate manifest.  All multi-byte
  * fields are little-endian (host-endian on amd64).
  *
+ * We intentionally do NOT use libnvpair here even though libnvpair is
+ * already linked into bhyve and would give us typed key-value
+ * serialisation for free.  The rationale:
+ *
+ *   1. write_section streams directly into the outbound buffer with
+ *      no intermediate allocation; nvlist_pack would allocate a
+ *      single flat buffer sized to the entire payload, adding
+ *      ~100 MiB of transient heap on a 8 GiB VM (one memcpy per
+ *      section for RAM-sized entries).
+ *   2. Cross-version compatibility here is controlled by the
+ *      ctl_blob_hdr.version field; the two sides are always built
+ *      from the same bhyve tree, so nvlist's forward-compat
+ *      semantics aren't needed.
+ *   3. Byte-for-byte wire format lets us diff two captures with
+ *      `cmp` / `xxd` when debugging — nvlist's packed representation
+ *      is deterministic but opaque.
+ *
+ * If nvlist's ergonomics become worth the cost someday (e.g. if the
+ * snapshot surface grows beyond a dozen kinds), this is the file to
+ * swap.  The on-wire format below is versioned for exactly that.
+ *
  *   struct ctl_blob_hdr {
  *       uint32_t magic;          // CTL_BLOB_MAGIC
  *       uint32_t version;        // CTL_BLOB_VERSION
