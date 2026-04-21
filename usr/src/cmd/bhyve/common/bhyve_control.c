@@ -653,9 +653,17 @@ apply_section(uint8_t kind, uint8_t kern_req, const char *name,
 
 	struct pci_devinst *pdi = find_dev_by_name(name);
 	if (pdi == NULL) {
+		/*
+		 * Source sent device state for a PCI slot the destination
+		 * doesn't have.  Silently skipping here would leave the
+		 * guest driver talking to a default-configured device,
+		 * which is worse than refusing the migration.  Fail hard
+		 * so the operator has to reconcile the topology.
+		 */
 		(void) fprintf(stderr,
-		    "import-state: unknown device '%s' — skipping\n", name);
-		return (0);
+		    "import-state: unknown PCI device '%s' on destination; "
+		    "source/dest topology mismatch\n", name);
+		return (EINVAL);
 	}
 	meta.dev_data = pdi;
 	int ret = pci_snapshot(&meta);
@@ -988,15 +996,23 @@ import_activate_vcpus(void)
  * unblocks) would spin forever in vm_run's EBUSY retry loop because
  * the VM stays paused from import_pause above.  pe_resume callbacks
  * kick viona workers + any other per-device resume logic.
+ *
+ * Returns 0 on success, errno on vm_resume_instance failure.  A
+ * failure here is fatal for the import: callers must not signal
+ * import-done, because the main thread would unblock and create vCPU
+ * threads that spin forever against a still-paused VM.
  */
-static void
+static int
 import_resume(void)
 {
 	if (vm_resume_instance(ctl.ctx) != 0) {
+		int e = errno;
 		(void) fprintf(stderr,
-		    "import-state: vm_resume_instance: %s\n", strerror(errno));
+		    "import-state: vm_resume_instance: %s\n", strerror(e));
+		return (e);
 	}
 	(void) for_each_pci(pci_resume);
+	return (0);
 }
 
 /*
@@ -1044,7 +1060,21 @@ cmd_import_state(int fd, const char *line)
 		return;
 
 	import_activate_vcpus();
-	import_resume();
+
+	int resume_ret = import_resume();
+	if (resume_ret != 0) {
+		/*
+		 * vm_resume_instance failed: the VM is still paused but
+		 * vCPUs have been activated.  Do not signal import-done,
+		 * because that would unblock the main thread and spawn
+		 * vCPU threads that would spin forever in vm_run's EBUSY
+		 * retry loop.  Surface the error to the orchestrator
+		 * instead so it can abort the migration.
+		 */
+		send_error(fd, strerror(resume_ret));
+		return;
+	}
+
 	import_signal_done(fd);
 }
 
