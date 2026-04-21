@@ -247,21 +247,34 @@ done:
 
 /*
  * Iterate a per-vCPU class across every active vCPU.  ncpus is encoded
- * into the buffer so the restore side can validate.
+ * into the buffer so the restore side can validate source-vs-dest
+ * topology before walking per-vCPU state.  A mismatch is fatal:
+ * walking more vCPUs than exist would fault on vm_vcpu_open, and
+ * walking fewer would leave the extra vCPUs with indeterminate state
+ * yet they would still be activated by cmd_import_state.
  */
 static int
 snapshot_class_per_vcpu(struct vmctx *ctx, uint16_t class,
     uint16_t version, struct vm_snapshot_meta *meta)
 {
 	int ret = 0;
-	int i, ncpus;
+	int i, ncpus, local_ncpus;
 	uint16_t sockets, cores, threads, maxcpus;
 
 	if (vm_get_topology(ctx, &sockets, &cores, &threads, &maxcpus) != 0)
 		return (errno);
-	ncpus = (int)maxcpus;
+	local_ncpus = (int)maxcpus;
+	ncpus = local_ncpus;
 
 	SNAPSHOT_VAR_OR_LEAVE(ncpus, meta, ret, done);
+
+	if (meta->op == VM_SNAPSHOT_RESTORE && ncpus != local_ncpus) {
+		fprintf(stderr,
+		    "snapshot_class_per_vcpu: ncpus mismatch class=%u "
+		    "source=%d dest=%d\n", class, ncpus, local_ncpus);
+		ret = EINVAL;
+		goto done;
+	}
 
 	for (i = 0; i < ncpus; i++) {
 		ret = snapshot_vmm_class(ctx, i, class, version, meta);
@@ -536,14 +549,23 @@ static int
 snapshot_vmcx(struct vmctx *ctx, struct vm_snapshot_meta *meta)
 {
 	int ret = 0;
-	int i, ncpus;
+	int i, ncpus, local_ncpus;
 	uint16_t sockets, cores, threads, maxcpus;
 
 	if (vm_get_topology(ctx, &sockets, &cores, &threads, &maxcpus) != 0)
 		return (errno);
-	ncpus = (int)maxcpus;
+	local_ncpus = (int)maxcpus;
+	ncpus = local_ncpus;
 
 	SNAPSHOT_VAR_OR_LEAVE(ncpus, meta, ret, done);
+
+	if (meta->op == VM_SNAPSHOT_RESTORE && ncpus != local_ncpus) {
+		fprintf(stderr,
+		    "snapshot_vmcx: ncpus mismatch source=%d dest=%d\n",
+		    ncpus, local_ncpus);
+		ret = EINVAL;
+		goto done;
+	}
 
 	for (i = 0; i < ncpus; i++) {
 		ret = snapshot_vmcx_vcpu(ctx, i, meta);
