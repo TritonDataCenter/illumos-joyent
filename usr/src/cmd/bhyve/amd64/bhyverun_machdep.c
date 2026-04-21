@@ -39,6 +39,7 @@
  * Copyright 2018 Joyent, Inc.
  * Copyright 2025 Oxide Computer Company
  * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>

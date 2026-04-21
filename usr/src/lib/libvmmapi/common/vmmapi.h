@@ -38,6 +38,7 @@
  * Copyright 2015 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2023 Oxide Computer Company
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _VMMAPI_H_
