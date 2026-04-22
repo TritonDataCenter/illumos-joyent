@@ -867,8 +867,12 @@ ppt_flr(dev_info_t *dip, boolean_t force)
 	(void) PCI_CAP_PUT16(hdl, 0, cap_ptr, PCIE_DEVCTL,
 	    ctl | PCIE_DEVCTL_INITIATE_FLR);
 
-	/* Wait for at least 100ms */
-	delay(drv_usectohz((100 + compl_delay) * 1000));
+	/*
+	 * Wait for at least 500ms.  PCIe spec mandates 100ms minimum, but
+	 * NVIDIA HGX H100 SXM5 GPUs need longer for NVLink-fabric-adjacent
+	 * silicon to quiesce before issuing further config cycles.
+	 */
+	delay(drv_usectohz((500 + compl_delay) * 1000));
 
 	pci_config_teardown(&hdl);
 	return (B_TRUE);
@@ -880,6 +884,41 @@ fail:
 	 */
 	pci_config_teardown(&hdl);
 	return (B_FALSE);
+}
+
+/*
+ * Force a D0 -> D3hot -> D0 power state cycle on the device.  This is more
+ * thorough than an FLR for PCI devices whose on-chip peripherals (e.g. NVLink
+ * fabric silicon on NVIDIA HGX H100 SXM5 GPUs) are not fully reset by the
+ * PCIe function-level reset.  Without this, multi-device passthrough of such
+ * GPUs exhibits non-deterministic RmInitAdapter failures on all but one of
+ * the devices in a VM.
+ */
+static void
+ppt_power_cycle(dev_info_t *dip)
+{
+	ddi_acc_handle_t cfg;
+	uint16_t cap_ptr;
+
+	if (pci_config_setup(dip, &cfg) != DDI_SUCCESS)
+		return;
+
+	if (PCI_CAP_LOCATE(cfg, PCI_CAP_ID_PM, &cap_ptr) == DDI_SUCCESS) {
+		uint16_t val;
+
+		val = PCI_CAP_GET16(cfg, 0, cap_ptr, PCI_PMCSR);
+		/* D0 -> D3hot */
+		(void) PCI_CAP_PUT16(cfg, 0, cap_ptr, PCI_PMCSR,
+		    (val & ~PCI_PMCSR_STATE_MASK) | PCI_PMCSR_D3HOT);
+		delay(drv_usectohz(20000));	/* 20 ms in D3hot */
+
+		/* D3hot -> D0 */
+		(void) PCI_CAP_PUT16(cfg, 0, cap_ptr, PCI_PMCSR,
+		    (val & ~PCI_PMCSR_STATE_MASK) | PCI_PMCSR_D0);
+		delay(drv_usectohz(50000));	/* 50 ms to settle */
+	}
+
+	pci_config_teardown(&cfg);
 }
 
 static int
@@ -1073,6 +1112,16 @@ ppt_assign_device(struct vm *vm, int pptfd)
 		err = EIO;
 		goto done;
 	}
+
+	/*
+	 * Force a power state cycle before FLR to more thoroughly reset
+	 * peripheral silicon (e.g. NVLink fabric on HGX H100 SXM5).  The
+	 * standard PCIe FLR alone does not reach all internal blocks on
+	 * these devices, causing non-deterministic driver init failures
+	 * when multiple such devices are assigned to a single guest.
+	 */
+	ppt_power_cycle(ppt->pptd_dip);
+
 	ppt_flr(ppt->pptd_dip, B_TRUE);
 
 	/*
