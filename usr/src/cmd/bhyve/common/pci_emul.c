@@ -159,7 +159,13 @@ SYSRES_MEM(PCI_EMUL_ECFG_BASE, PCI_EMUL_ECFG_SIZE);
  */
 #define PCI_EMUL_MEMBASE32 0xC0000000
 #define	PCI_EMUL_MEMLIMIT32	PCI_EMUL_ECFG_BASE
-#define	PCI_EMUL_MEMSIZE64	(32*GB)
+/*
+ * The 64-bit PCI MMIO hole.  Sized to accommodate 4x NVIDIA H100 SXM5 GPUs
+ * (each with a 128 GiB BAR1 HBM aperture) with headroom for larger GPUs such
+ * as H200 (192 GiB BAR1).  The original 32 GiB sizing came from an era where
+ * no single-device BAR exceeded a few GiB.
+ */
+#define	PCI_EMUL_MEMSIZE64	(1024UL * GB)
 
 static struct pci_devemu *pci_emul_finddev(const char *name);
 static void pci_lintr_route(struct pci_devinst *pi);
