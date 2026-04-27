@@ -463,7 +463,7 @@ ipmi_check_entity(ipmi_handle_t *ihp, ipmi_entity_t *ep, void *data)
 	}
 
 	len = strlen(label);
-	(void) snprintf(label + len, sizeof (label) - len, "%s %d",
+	(void) snprintf(label + len, sizeof (label) - len, "%s %" PRIu64,
 	    labelname, edp->ed_instance);
 
 	nvlist_free(fmri);

@@ -57,6 +57,7 @@
 #include <locale.h>
 #include <string.h>	/* strerror() */
 #include <stdarg.h>
+#include "msgs.h"
 
 #define	USER	05700	/* user's bits */
 #define	GROUP	02070	/* group's bits */
@@ -76,15 +77,10 @@
 
 static char *msp;
 
-extern void
-errmsg(int severity, int code, char *format, ...);
+static int what(void);
 
-static int
-what(void);
-
-static mode_t
-abs(mode_t mode, o_mode_t *group_clear_bits, o_mode_t *group_set_bits),
-who(void);
+static mode_t abs(mode_t, o_mode_t *, o_mode_t *);
+static mode_t who(void);
 
 mode_t
 newmode_common(char *ms, mode_t new_mode, mode_t umsk, char *file, char *path,
@@ -441,7 +437,7 @@ newmode_common(char *ms, mode_t new_mode, mode_t umsk, char *file, char *path,
 				if (scheck == 1 &&
 				    (perms_msk & EXEC & (USER | GROUP)) !=
 				    (who_msk & EXEC & (USER | GROUP)) &&
-					!S_ISDIR(new_mode)) {
+				    !S_ISDIR(new_mode)) {
 					errmsg(1, 2,
 					    gettext("Execute permission "
 					    "required for set-ID on "

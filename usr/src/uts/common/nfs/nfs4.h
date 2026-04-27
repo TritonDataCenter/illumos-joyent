@@ -78,7 +78,8 @@ typedef struct nfs4_fhandle {
 typedef uint8_t nfs4_minor_t;
 
 #define	NFS4_MINORVERSION	0
-#define	CB4_MINORVERSION	0
+#define	CB4_MINORVERSION_v0	0
+#define	CB4_MINORVERSION_v1	1
 
 #define	FIRST_NFS4_OP   OP_ACCESS
 #define	LAST_NFS40_OP   OP_RELEASE_LOCKOWNER
@@ -514,6 +515,7 @@ typedef struct rfs4_client {
 	clientid4		rc_clientid;
 	nfs_client_id4		rc_nfs_client;
 	verifier4		rc_confirm_verf;
+	uint8_t			rc_minorversion;
 	unsigned		rc_need_confirm:1;
 	unsigned		rc_unlksys_completed:1;
 	unsigned		rc_can_reclaim:1;
@@ -678,9 +680,11 @@ typedef struct rfs4_deleg_state {
 	time_t			rds_time_granted;
 	time_t			rds_time_recalled;
 	time_t			rds_time_revoked;
+	bool_t			rds_revoked;	/* awaiting FREE_STATEID */
 	struct rfs4_file	*rds_finfo;
 	rfs4_client_t		*rds_client;
 	list_node_t		rds_node;
+	rfs41_drs_info_t	rds_rs;		/* 4.1 only */
 } rfs4_deleg_state_t;
 
 /*
@@ -778,18 +782,21 @@ typedef enum {
 extern void rfs4_disable_delegation(void), rfs4_enable_delegation(void);
 
 /*
- * Request types for delegation. These correspond with
- * open_delegation_type4 with the addition of a new value, DELEG_ANY,
- * to reqequest any delegation.
+ * Delegation want type.  The values DELEG_WANT_NO_PREF through
+ * DELEG_WANT_CANCEL correspond to the OPEN4_SHARE_WANT_* wire flags
+ * (see nfs4x_share_to_delegreq()).  DELEG_DISABLE is a server-side
+ * sentinel meaning "do not attempt a delegation at this call site"
+ * (e.g. CLAIM_DELEGATE_CUR, unconfirmed open owner).
  */
 typedef enum {
-	DELEG_NONE = 0,		/* Corresponds to OPEN_DELEG_NONE */
-	DELEG_READ = 1,		/* Corresponds to OPEN_DELEG_READ */
-	DELEG_WRITE = 2,	/* Corresponds to OPEN_DELEG_WRITE */
-	DELEG_ANY = -1		/* New value to request any delegation type */
+	DELEG_WANT_NO_PREF	= 0,	/* server chooses type freely */
+	DELEG_WANT_READ		= 1,	/* client prefers read delegation */
+	DELEG_WANT_WRITE	= 2,	/* client prefers write delegation */
+	DELEG_WANT_ANY		= 3,	/* client accepts any delegation */
+	DELEG_WANT_NONE		= 4,	/* client does not want a delegation */
+	DELEG_WANT_CANCEL	= 5,	/* client cancels a prior want */
+	DELEG_DISABLE		= -1	/* caller suppresses delegation */
 } delegreq_t;
-
-#define	NFS4_DELEG4TYPE2REQTYPE(x) (delegreq_t)(x)
 
 /*
  * Zone global variables of NFSv4 server
@@ -870,6 +877,7 @@ typedef struct nfs4_srv {
 	/* nfs4.x */
 	rfs4_table_t	*rfs4_session_tab;
 	rfs4_index_t	*rfs4_session_idx;
+	rfs4_index_t	*rfs4_session_clid_idx;
 
 	/* client stable storage */
 	int rfs4_ss_enabled;
@@ -909,6 +917,9 @@ extern void		rfs4_grace_start(rfs4_servinst_t *);
 extern void		rfs4_grace_start_new(nfs4_srv_t *);
 extern void		rfs4_grace_reset_all(nfs4_srv_t *);
 extern void		rfs4_dss_readstate(nfs4_srv_t *, int, char **);
+extern rfs4_session_t	*rfs4x_findsession_by_clid(clientid4);
+extern rfs4_cbstate_t	rfs4x_cbcheck(rfs4_state_t *);
+extern rfs4_cbstate_t	rfs4_cbcheck(rfs4_state_t *);
 
 /*
  * Various interfaces to manipulate the state structures introduced
@@ -978,10 +989,15 @@ extern nfsstat4		rfs4_get_state_nolock(stateid4 *, rfs4_state_t **,
 					rfs4_dbsearch_type_t);
 extern void rfs4_state_rele_nounlock(rfs4_state_t *);
 
+extern	nfsstat4	rfs4_get_deleg_any(stateid4 *,
+					rfs4_deleg_state_t **);
 extern	nfsstat4	rfs4_get_deleg_state(stateid4 *,
 					rfs4_deleg_state_t **);
 extern	nfsstat4	rfs4_get_lo_state(stateid4 *, rfs4_lo_state_t **,
 					bool_t);
+extern	nfsstat4	rfs4_get_all_state(stateid4 *, rfs4_state_t **,
+				rfs4_deleg_state_t **, rfs4_lo_state_t **);
+
 struct compound_state;
 extern	nfsstat4	rfs4_check_stateid(int, vnode_t *, stateid4 *,
 					bool_t, bool_t *, bool_t,
@@ -1025,7 +1041,7 @@ extern	int		rfs4_get_deleg(rfs4_state_t *,  open_delegation_type4,
 			open_delegation_type4 (*policy)(rfs4_state_t *,
 				open_delegation_type4 dtype));
 extern	rfs4_deleg_state_t *rfs4_grant_delegation(delegreq_t, rfs4_state_t *,
-				int *);
+				int *, bool_t);
 extern	void		rfs4_set_deleg_response(rfs4_deleg_state_t *,
 				open_delegation4 *, nfsace4 *, int);
 extern	void		rfs4_return_deleg(rfs4_deleg_state_t *, bool_t);
@@ -1034,6 +1050,15 @@ extern	void		rfs4_deleg_state_rele(rfs4_deleg_state_t *);
 extern	bool_t		rfs4_check_delegated_byfp(int, rfs4_file_t *,
 					bool_t, bool_t, bool_t, clientid4 *);
 extern	void		rfs4_clear_dont_grant(rfs4_file_t *);
+extern delegreq_t	nfs4x_share_to_delegreq(uint32_t);
+extern void		rfs4x_rs_erase(void *);
+extern void		rfs4x_rs_record(struct compound_state *,
+				rfs4_deleg_state_t *);
+extern bool_t		rfs4_find_write_deleg_byfp(rfs4_file_t *,
+				rfs4_deleg_state_t **);
+extern bool_t		rfs4_find_write_deleg(vnode_t *, rfs4_deleg_state_t **);
+extern void		rfs4_cb_getattr(rfs4_deleg_state_t *,
+				fattr4_change *, fattr4_size *);
 
 /*
  * nfs4 monitored operations.
@@ -1532,6 +1557,12 @@ extern stateid4 clnt_special1;
 #define	CLNT_ISSPECIAL(id) (stateid4_cmp(id, &clnt_special0) || \
 				stateid4_cmp(id, &clnt_special1))
 
+/*
+ * callers of CTO*SD macros MUST have cn_lock acquired
+ */
+#define	CTOBSD(c) ((sess_bcsd_t *)c->cn_csd)
+#define	SNTOBC(s) ((sess_channel_t *)(((rfs4_session_t *)(s))->sn_back))
+
 /* State's functions */
 extern void rfs4_ss_clid(nfs4_srv_t *nsrv4, rfs4_client_t *);
 extern void rfs4_ss_chkclid(nfs4_srv_t *nsrv4, rfs4_client_t *);
@@ -1563,6 +1594,10 @@ extern void	rfs4_state_zone_init(nfs4_srv_t *);
 extern void	rfs4_state_g_fini(void);
 extern void	rfs4_state_zone_fini(void);
 extern nfs4_srv_t *nfs4_get_srv(void);
+extern CLIENT	*rfs4_cb_getch(rfs4_cbinfo_t *);
+extern CLIENT	*rfs4x_cb_getch(rfs4_session_t *);
+extern void	rfs4_cb_freech(rfs4_cbinfo_t *, CLIENT *, bool_t);
+extern void	rfs4x_cb_freech(rfs4_session_t *, CLIENT *);
 
 void put_stateid4(struct compound_state *, stateid4 *);
 void get_stateid4(struct compound_state *, stateid4 *);

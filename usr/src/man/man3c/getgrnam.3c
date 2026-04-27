@@ -43,13 +43,13 @@
 .\" Copyright 1989 AT&T
 .\" Copyright (c) 2001, The IEEE and The Open Group.  All Rights Reserved.
 .\" Portions Copyright (c) 2004, Sun Microsystems, Inc.  All Rights Reserved.
+.\" Copyright 2026 Oxide Computer Company
 .\"
-.TH GETGRNAM 3C "Feb 25, 2017"
+.TH GETGRNAM 3C "March 31, 2026"
 .SH NAME
 getgrnam, getgrnam_r, getgrent, getgrent_r, getgrgid, getgrgid_r, setgrent,
 endgrent, fgetgrent, fgetgrent_r \- group database entry functions
 .SH SYNOPSIS
-.LP
 .nf
 #include <grp.h>
 
@@ -105,7 +105,6 @@ endgrent, fgetgrent, fgetgrent_r \- group database entry functions
 .fi
 
 .SS "Standard conforming"
-.LP
 .nf
 cc [ \fIflag\fR... ] \fIfile\fR... \fB-D_POSIX_PTHREAD_SEMANTICS\fR [ \fIlibrary\fR... ]
 
@@ -120,7 +119,6 @@ cc [ \fIflag\fR... ] \fIfile\fR... \fB-D_POSIX_PTHREAD_SEMANTICS\fR [ \fIlibrary
 .fi
 
 .SH DESCRIPTION
-.LP
 These functions are used to obtain entries describing user groups. Entries can
 come from any of the sources for \fBgroup\fR specified in the
 \fB/etc/nsswitch.conf\fR file (see \fBnsswitch.conf\fR(5)).
@@ -162,7 +160,6 @@ The \fBfgetgrent()\fR function, unlike the other functions above, does not use
 which is assumed to have the format of the \fBgroup\fR file (see
 \fBgroup\fR(5)).
 .SS "Reentrant Interfaces"
-.LP
 The  \fBgetgrnam()\fR, \fBgetgrgid()\fR, \fBgetgrent()\fR, and
 \fBfgetgrent()\fR functions use thread-specific storage that is reused in each
 call to one of these functions by the same thread, making them safe to use but
@@ -203,7 +200,6 @@ to \fBgetgrent_r()\fR, the threads will enumerate disjoint subsets of the group
 database. Like their non-reentrant counterparts, \fBgetgrnam_r()\fR and
 \fBgetgrgid_r()\fR leave the enumeration position in an indeterminate state.
 .SS "group Structure"
-.LP
 Group entries are represented by the \fBstruct group\fR structure defined in
 <\fBgrp.h\fR>:
 .sp
@@ -220,14 +216,19 @@ struct group {
 .in -2
 
 .SH RETURN VALUES
-.LP
 The \fBgetgrnam()\fR, \fBgetgrnam_r()\fR, \fBgetgrgid()\fR, and
 \fBgetgrgid_r()\fR functions each return a pointer to a \fBstruct group\fR if
 they successfully locate the requested entry. They return a null pointer if
 either the requested entry was not found or an error occurred. On error,
-\fBerrno\fR is set to indicate the error. The standard-conforming functions
-\fBgetgrnam_r()\fR and \fBgetgrgid_r()\fR return \fB0\fR upon success or an
-error number in case of failure.
+\fBerrno\fR is set to indicate the error.
+.sp
+.LP
+The standard-conforming functions
+\fBgetgrnam_r()\fR and \fBgetgrgid_r()\fR return \fB0\fR on success (including
+when the requested entry is not found) or an error number in case of failure.
+To distinguish between a successful lookup and a not-found condition, the caller
+must check the pointer stored at the location pointed to by \fIresult\fR: it
+will be non-NULL if the entry was found and NULL if it was not.
 .sp
 .LP
 The  \fBgetgrent()\fR, \fBgetgrent_r()\fR, \fBfgetgrent()\fR, and
@@ -252,7 +253,6 @@ before calling \fBgetgrnam()\fR, \fBgetgrnam_r()\fR, \fBgetgrent()\fR,
 \fBfgetgrent_r()\fR. If these functions return a null pointer and \fBerrno\fR
 is non-zero, an error occurred.
 .SH ERRORS
-.LP
 The \fBgetgrent_r()\fR, \fBfgetgrent()\fR, and \fBfgetgrent_r()\fR functions
 will fail if:
 .sp
@@ -351,7 +351,6 @@ the data to be referenced by the resulting \fBgroup\fR structure.
 .RE
 
 .SH ATTRIBUTES
-.LP
 See \fBattributes\fR(7) for descriptions of the following attributes:
 .sp
 
@@ -373,7 +372,6 @@ The \fBendgrent()\fR, \fBgetgrent()\fR, \fBgetgrgid()\fR, \fBgetgrgid_r()\fR,
 \fBgetgrnam()\fR, \fBgetgrnam_r()\fR, and \fBsetgrent()\fR functions are
 Standard.
 .SH SEE ALSO
-.LP
 .BR Intro (3),
 .BR getpwnam (3C),
 .BR group (5),
@@ -382,7 +380,6 @@ Standard.
 .BR attributes (7),
 .BR standards (7)
 .SH NOTES
-.LP
 When compiling multithreaded programs, see \fBIntro\fR(3).
 .sp
 .LP

@@ -583,7 +583,7 @@ unsigned int t4_link_fwcap_to_speed(fw_port_cap32_t caps);
 fw_port_cap32_t t4_link_fwcap_to_fwspeed(fw_port_cap32_t acaps);
 int t4_link_set_autoneg(struct port_info *pi, u8 autoneg,
 			fw_port_cap32_t *new_caps);
-int t4_link_set_pause(struct port_info *pi, cc_pause_t pause,
+void t4_link_set_pause(struct port_info *pi, cc_pause_t pause,
 		      fw_port_cap32_t *new_caps);
 int t4_link_set_fec(struct port_info *pi, cc_fec_t fec,
 		    fw_port_cap32_t *new_caps);

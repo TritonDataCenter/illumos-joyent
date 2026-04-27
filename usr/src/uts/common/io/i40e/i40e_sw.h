@@ -14,7 +14,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright 2017 Tegile Systems, Inc.  All rights reserved.
  * Copyright 2020 Ryan Zezeski
- * Copyright 2020 RackTop Systems, Inc.
+ * Copyright 2026 RackTop Systems, Inc.
  */
 
 /*
@@ -137,6 +137,15 @@ extern "C" {
 #define	I40E_MAX_MTU	9706
 #define	I40E_MIN_MTU	ETHERMIN
 #define	I40E_DEF_MTU	ETHERMTU
+
+/*
+ * This is somewhat buried, but in section 8.4.2.2.1 of the I40E datasheet
+ * (revision 3.9), the table that lists the Segmentation Parameters (it's
+ * formatted a bit poorly) in the MSS / TARGET_VSI row, it states that the
+ * MSS value should be no smaller than 64. Real world experience shows using
+ * a smaller number will stop the ring from processing packets.
+ */
+#define	I40E_MIN_MSS	64
 
 /*
  * Interrupt throttling related values. Interrupt throttling values are defined
@@ -555,6 +564,7 @@ typedef struct i40e_txq_stat {
 	kstat_named_t	itxs_err_context;	/* Total context failures */
 
 	kstat_named_t	itxs_num_unblocked;	/* Number of MAC unblocks */
+	kstat_named_t	itxs_bad_mss;		/* Given an unsupported MSS */
 } i40e_txq_stat_t;
 
 /*

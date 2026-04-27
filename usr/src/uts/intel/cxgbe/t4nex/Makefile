@@ -13,7 +13,7 @@
 # Copyright (c) 2013 by Chelsio Communications, Inc. All rights reserved.
 #
 # Copyright (c) 2018, Joyent, Inc.
-# Copyright 2023 Oxide Computer Company
+# Copyright 2025 Oxide Computer Company
 
 #
 # This makefile drives the production of the Chelsio Terminator 4 10G Ethernet
@@ -53,8 +53,11 @@ CFLAGS += -I$(UTSBASE)/common/io/cxgbe -I$(UTSBASE)/common/io/cxgbe/common \
 #
 LDFLAGS += -N misc/mac -N drv/ip
 
-# needs work
-SMOFF += all_func_returns,snprintf_overflow
+# "common" code is still not smatch clean
+T4NEX_SMOFF_OBJS	= t4_hw.o cudbg_lib.o cudbg_wtp.o cudbg_flash_utils.o \
+			fastlz_api.o
+T4NEX_SMOFF_PATHS	= $(T4NEX_SMOFF_OBJS:%=$(OBJS_DIR)/%)
+$(T4NEX_SMOFF_PATHS)	:= SMOFF += all_func_returns
 
 #
 # Default build targets.

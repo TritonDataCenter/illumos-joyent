@@ -21,6 +21,7 @@
 #
 # Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
+# Copyright 2026 Oxide Computer Company
 #
 
 .KEEP_STATE:
@@ -28,8 +29,8 @@
 
 MODCLASS = plugins
 
-include ../../../../Makefile.lib
 include ../../../../../Makefile.lib
+include ../../../../../../Makefile.lib
 
 #
 # Set PROG and OBJS based on the values of MODULE and SRCS.  We expect that
@@ -46,27 +47,40 @@ OBJS = $(MODULESRCS:%.c=%.o) $(SHAREDSRCS:%.c=%.o)
 # We expect these macros to be defined by the Makefile that is including us.
 #
 common_ROOTPROG = $(ROOT)/usr/lib/fm/topo/plugins/$(PROG)
+common_ROOTPROG64 = $(ROOT)/usr/lib/fm/topo/plugins/64/$(PROG)
 arch_ROOTPROG = $(ROOT)/usr/platform/$(ARCH)/lib/fm/topo/plugins/$(PROG)
+arch_ROOTPROG64 = $(ROOT)/usr/platform/$(ARCH)/lib/fm/topo/plugins/64/$(PROG)
 plat_ROOTPROG = $(PLATFORMS:%=$(ROOT)/usr/platform/%/lib/fm/topo/plugins/$(PROG))
+plat_ROOTPROG64 = $(PLATFORMS:%=$(ROOT)/usr/platform/%/lib/fm/topo/plugins/64/$(PROG))
 ROOTPROG = $($(CLASS)_ROOTPROG)
+ROOTPROG64 = $($(CLASS)_ROOTPROG64)
 
-common_ROOTCONF = $(ROOT)/usr/lib/fm/topo/plugins/$(CONF)
-arch_ROOTCONF = $(ROOT)/usr/platform/$(ARCH)/lib/fm/topo/plugins/$(CONF)
-plat_ROOTCONF = $(PLATFORMS:%=$(ROOT)/usr/platform/%/lib/fm/topo/plugins/$(CONF))
-ROOTCONF = $($(CLASS)_ROOTCONF)
-
-APIMAP = ../../../libtopo/common/topo_mod.map
+APIMAP = ../../../../libtopo/common/topo_mod.map
 MAPFILES =		# use APIMAP instead
 
 CSTD  = $(CSTD_GNU99)
+#
+# Makefile.plugin.64 uses Makefile.master.64 which assigns CFLAGS64 to
+# CFLAGS, so we need this set for both unlike the rest of the fields.
+#
 CFLAGS += $(CTF_FLAGS) $(CCVERBOSE) $(CC_PICFLAGS)
 CFLAGS += $(GSHARED)
+CFLAGS64 += $(CTF_FLAGS) $(CCVERBOSE) $(CC_PICFLAGS)
+CFLAGS64 += $(GSHARED)
 
+#
+# The ELFCLASS macro is overriden by Makefile.plugin.64 to 64, allowing plugins
+# to set LDFLAGS and LBLIBS paths to 32/64-bit dependent values.
+#
 CPPFLAGS += -I.
 CPPFLAGS += -D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT
-LDFLAGS += $(ZIGNORE) -Wl,-M$(APIMAP)
-LDLIBS += -L$(ROOTLIBDIR)/fm -ltopo -lnvpair -lc
-DYNFLAGS += -R/usr/lib/fm
+ELFCLASS = 32
+LDFLAGS_ELF32 = -R/usr/lib/fm
+LDFLAGS_ELF64 = -R/usr/lib/fm/64
+LDFLAGS += $(ZIGNORE) -Wl,-M$(APIMAP) $(LDFLAGS_ELF$(ELFCLASS))
+LDLIBS_ELF32 = -L$(ROOTLIBDIR)/fm
+LDLIBS_ELF64 = -L$(ROOTLIBDIR)/fm/64
+LDLIBS += $(LDLIBS_ELF$(ELFCLASS)) -ltopo -lnvpair -lc
 
 all: $(PROG)
 
@@ -78,15 +92,15 @@ $(PROG): $(OBJS) $(APIMAP)
 	$(CTFMERGE) -L VERSION -o $@ $(OBJS)
 	$(POST_PROCESS_SO)
 
-%.o: ../../common/$(MODULE)/%.c
+%.o: ../../../common/$(MODULE)/%.c
 	$(COMPILE.c) $<
 	$(CTFCONVERT_O)
 
-%.o: ../../common/$(SHAREDMODULE)/%.c
+%.o: ../../../common/$(SHAREDMODULE)/%.c
 	$(COMPILE.c) $<
 	$(CTFCONVERT_O)
 
-%.o: %.c
+%.o: ../%.c
 	$(COMPILE.c) $<
 	$(CTFCONVERT_O)
 
@@ -103,6 +117,7 @@ install_h:
 $(ROOTPROG): $$(@D) $(PROG)
 	$(RM) $@; $(INS) -s -m 0555 -f $(@D) $(PROG)
 
-install: $(ROOTPROG)
+$(ROOTPROG64): $$(@D) $(PROG)
+	$(RM) $@; $(INS) -s -m 0555 -f $(@D) $(PROG)
 
-include ../../../Makefile.rootdirs
+include ../../../../Makefile.rootdirs

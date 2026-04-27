@@ -507,7 +507,7 @@ sof_sonode_inherit_filters(struct sonode *so, struct sonode *pso)
 	}
 
 out:
-	if (laddr != &laddrbuf) {
+	if (so->so_proto_props.sopp_maxaddrlen > sizeof (laddrbuf)) {
 		kmem_free(laddr, so->so_proto_props.sopp_maxaddrlen);
 		kmem_free(faddr, so->so_proto_props.sopp_maxaddrlen);
 	}

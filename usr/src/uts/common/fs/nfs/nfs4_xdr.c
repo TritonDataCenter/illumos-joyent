@@ -3217,69 +3217,10 @@ xdr_OPEN4res(XDR *xdrs, OPEN4res *objp)
 			return (FALSE);
 		if (!xdr_bitmap4(xdrs, &objp->attrset))
 			return (FALSE);
-		if (!xdr_int(xdrs,
-		    (int *)&objp->delegation.delegation_type))
+		if (!xdr_open_delegation4(xdrs,
+		    (open_delegation4 *)&objp->delegation))
 			return (FALSE);
-		switch (objp->delegation.delegation_type) {
-		case OPEN_DELEGATE_NONE:
-			return (TRUE);
-		case OPEN_DELEGATE_READ:
-			if (!xdr_u_int(xdrs, &objp->delegation.
-			    open_delegation4_u.read.stateid.seqid))
-				return (FALSE);
-			if (!xdr_opaque(xdrs, objp->delegation.
-			    open_delegation4_u.read.stateid.other,
-			    NFS4_OTHER_SIZE))
-				return (FALSE);
-			if (!xdr_bool(xdrs, &objp->delegation.
-			    open_delegation4_u.read.recall))
-				return (FALSE);
-			return (xdr_nfsace4(xdrs, &objp->delegation.
-			    open_delegation4_u.read.permissions));
-		case OPEN_DELEGATE_WRITE:
-			if (!xdr_u_int(xdrs, &objp->delegation.
-			    open_delegation4_u.write.stateid.seqid))
-				return (FALSE);
-			if (!xdr_opaque(xdrs, objp->delegation.
-			    open_delegation4_u.write.stateid.other,
-			    NFS4_OTHER_SIZE))
-				return (FALSE);
-			if (!xdr_bool(xdrs, &objp->delegation.
-			    open_delegation4_u.write.recall))
-				return (FALSE);
-			if (!xdr_int(xdrs, (int *)&objp->delegation.
-			    open_delegation4_u.write.space_limit.
-			    limitby))
-				return (FALSE);
-			switch (objp->delegation.
-			    open_delegation4_u.write.space_limit.
-			    limitby) {
-			case NFS_LIMIT_SIZE:
-				if (!xdr_u_longlong_t(xdrs,
-				    (u_longlong_t *)&objp->delegation.
-				    open_delegation4_u.write.space_limit.
-				    nfs_space_limit4_u.filesize))
-					return (FALSE);
-				break;
-			case NFS_LIMIT_BLOCKS:
-				if (!xdr_u_int(xdrs,
-				    &objp->delegation.open_delegation4_u.write.
-				    space_limit.nfs_space_limit4_u.
-				    mod_blocks.num_blocks))
-					return (FALSE);
-				if (!xdr_u_int(xdrs, &objp->delegation.
-				    open_delegation4_u.write.space_limit.
-				    nfs_space_limit4_u.mod_blocks.
-				    bytes_per_block))
-					return (FALSE);
-				break;
-			default:
-				return (FALSE);
-			}
-			return (xdr_nfsace4(xdrs, &objp->delegation.
-			    open_delegation4_u.write.permissions));
-		}
-		return (FALSE);
+		return (TRUE);
 	}
 
 	/*
@@ -3288,25 +3229,8 @@ xdr_OPEN4res(XDR *xdrs, OPEN4res *objp)
 	if (objp->status != NFS4_OK)
 		return (TRUE);
 
-	switch (objp->delegation.delegation_type) {
-	case OPEN_DELEGATE_NONE:
-		return (TRUE);
-	case OPEN_DELEGATE_READ:
-		return (xdr_nfsace4(xdrs, &objp->delegation.
-		    open_delegation4_u.read.permissions));
-	case OPEN_DELEGATE_WRITE:
-		switch (objp->delegation.
-		    open_delegation4_u.write.space_limit.limitby) {
-		case NFS_LIMIT_SIZE:
-		case NFS_LIMIT_BLOCKS:
-			break;
-		default:
-			return (FALSE);
-		}
-		return (xdr_nfsace4(xdrs, &objp->delegation.
-		    open_delegation4_u.write.permissions));
-	}
-	return (FALSE);
+	return (xdr_open_delegation4(xdrs,
+	    (open_delegation4 *)&objp->delegation));
 }
 
 static bool_t
@@ -5187,6 +5111,10 @@ xdr_snfs_cb_argop4(XDR *xdrs, nfs_cb_argop4 *objp)
 	if (!XDR_PUTINT32(xdrs, (int32_t *)&objp->argop))
 		return (FALSE);
 
+	/*
+	 * Operations that differ between server and client are here,
+	 * and the common ones are in xdr_nfs_cb_argop4 via default:
+	 */
 	switch (objp->argop) {
 	case OP_CB_GETATTR:
 		gargs = &objp->nfs_cb_argop4_u.opcbgetattr;
@@ -5206,8 +5134,10 @@ xdr_snfs_cb_argop4(XDR *xdrs, nfs_cb_argop4 *objp)
 		return (xdr_encode_nfs_fh4(xdrs, &rargs->fh));
 	case OP_CB_ILLEGAL:
 		return (TRUE);
+	default:
+		/* OP_CB_SEQUENCE, OP_CB_NOTIFY, OP_CB_RECALL_... */
+		return (xdr_nfs_cb_argop4(xdrs, objp));
 	}
-	return (FALSE);
 }
 
 /*
@@ -5224,6 +5154,15 @@ xdr_cnfs_cb_argop4(XDR *xdrs, nfs_cb_argop4 *objp)
 
 	if (!xdr_u_int(xdrs, &objp->argop))
 		return (FALSE);
+
+	/*
+	 * Operations that differ between server and client are here,
+	 * and the common ones are in xdr_nfs_cb_argop4 via default:
+	 *
+	 * The client does not handle CB_SEQUENCE yet (v4.0 only)
+	 * but we should be prepared to decode so we can return a
+	 * proper "proc not supported" error instead of XDR failed.
+	 */
 	switch (objp->argop) {
 	case OP_CB_GETATTR:
 		gargs = &objp->nfs_cb_argop4_u.opcbgetattr;
@@ -5245,8 +5184,10 @@ xdr_cnfs_cb_argop4(XDR *xdrs, nfs_cb_argop4 *objp)
 		    (uint_t *)&rargs->fh.nfs_fh4_len, NFS4_FHSIZE));
 	case OP_CB_ILLEGAL:
 		return (TRUE);
+	default:
+		/* OP_CB_SEQUENCE, OP_CB_NOTIFY, OP_CB_RECALL_... */
+		return (xdr_nfs_cb_argop4(xdrs, objp));
 	}
-	return (FALSE);
 }
 
 /*

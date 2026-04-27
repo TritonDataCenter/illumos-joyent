@@ -3389,7 +3389,7 @@ collect_tid(struct cudbg_init *pdbg_init,
 	rc = compress_buff(&scratch_buff, dbg_buff);
 
 err1:
-	ADAPTER_UNLOCK(padap);
+	ADAPTER_LOCK(padap);
 	release_scratch_buff(&scratch_buff, dbg_buff);
 err:
 	return rc;

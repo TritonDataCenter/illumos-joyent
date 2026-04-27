@@ -2783,8 +2783,9 @@ nvme_wait_cmd(nvme_cmd_t *cmd, uint32_t sec)
 	DTRACE_PROBE1(nvme_admin_cmd_timeout, nvme_cmd_t *, cmd);
 	csts.r = nvme_get32(nvme, NVME_REG_CSTS);
 	dev_err(nvme->n_dip, CE_WARN, "!command %d/%d timeout, "
-	    "OPC = %x, CFS = %d", cmd->nc_sqe.sqe_cid, cmd->nc_sqid,
-	    cmd->nc_sqe.sqe_opc, csts.b.csts_cfs);
+	    "OPC = 0x%x, CFS = %u, STATUS = 0x%x",
+	    cmd->nc_sqe.sqe_cid, cmd->nc_sqid, cmd->nc_sqe.sqe_opc,
+	    csts.b.csts_cfs, csts.r);
 	NVME_BUMP_STAT(nvme, cmd_timeout);
 
 	/*
@@ -4605,7 +4606,8 @@ nvme_init(nvme_t *nvme)
 
 			if (csts.b.csts_cfs == 1) {
 				dev_err(nvme->n_dip, CE_WARN,
-				    "!controller fatal status at init");
+				    "!controller fatal status at init "
+				    "(STATUS = 0x%x)", csts.r);
 				ddi_fm_service_impact(nvme->n_dip,
 				    DDI_SERVICE_LOST);
 				nvme->n_dead = B_TRUE;

@@ -10,14 +10,11 @@
 #
 
 #
-# Copyright 2023 Oxide Computer Company
+# Copyright 2026 Oxide Computer Company
 #
 
-MODULE = dimm
-CLASS = common
+include $(SRC)/Makefile.master
 
-MODULESRCS = topo_dimm.c
+SUBDIRS = $(MACH) $(MACH64)
 
-include ../../Makefile.plugin
-
-LDLIBS += -ljedec
+include ../../../../Makefile.subdirs

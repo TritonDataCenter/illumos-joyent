@@ -112,7 +112,7 @@ mc_onchip(topo_instance_t id)
 {
 	char path[64];
 
-	(void) snprintf(path, sizeof (path), "/dev/mc/mc%d", id);
+	(void) snprintf(path, sizeof (path), "/dev/mc/mc%" PRIu64, id);
 	mc_fd = open(path, O_RDONLY);
 	return (mc_fd != -1);
 }

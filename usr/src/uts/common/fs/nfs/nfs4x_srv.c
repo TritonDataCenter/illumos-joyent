@@ -30,6 +30,7 @@
 #include <rpc/auth.h>
 #include <rpc/rpcsec_gss.h>
 #include <sys/sdt.h>
+#include <sys/ddi.h>
 #include <sys/disp.h>
 #include <nfs/nfs.h>
 #include <nfs/nfs4.h>
@@ -406,6 +407,7 @@ out:
 	rok->eir_flags = 0;
 	if (resp->eir_status == NFS4_OK && !cp->rc_need_confirm)
 		rok->eir_flags |= EXCHGID4_FLAG_CONFIRMED_R;
+	cp->rc_minorversion = cs->minorversion;
 
 	/*
 	 * State Protection (See sec. 2.10.8.3)
@@ -647,9 +649,9 @@ rfs4x_op_create_session(nfs_argop4 *argop, nfs_resop4 *resop,
 	cp->rc_contrived.xi_sid++;
 
 	rok->csr_fore_chan_attrs =
-	    crp->csr_fore_chan_attrs = sp->sn_fore->cn_attrs;
+	    crp->csr_fore_chan_attrs = sp->cn_attrs;
 	rok->csr_back_chan_attrs = crp->csr_back_chan_attrs =
-	    sp->sn_fore->cn_back_attrs;
+	    sp->cn_back_attrs;
 
 	rfs4_update_lease(cp);
 
@@ -667,10 +669,9 @@ out:
 	    CREATE_SESSION4res *, resp);
 }
 
-/* ARGSUSED */
 void
 rfs4x_op_destroy_session(nfs_argop4 *argop, nfs_resop4 *resop,
-    struct svc_req *req, compound_state_t *cs)
+    struct svc_req *req __unused, compound_state_t *cs)
 {
 	DESTROY_SESSION4args	*args = &argop->nfs_argop4_u.opdestroy_session;
 	DESTROY_SESSION4res	*resp = &resop->nfs_resop4_u.opdestroy_session;
@@ -753,6 +754,142 @@ out:
 }
 
 /*
+ * The thread will traverse the entire list pinging the connections
+ * that need it and refreshing any stale/dead connections.
+ */
+static void
+ping_cb_null_thr(rfs4_session_t *sp)
+{
+	CLIENT			*ch = NULL;
+	struct timeval		tv;
+	enum clnt_stat		cs;
+	int			conn_num, attempts = 5;
+
+	tv.tv_sec = 30;
+	tv.tv_usec = 0;
+
+	if ((ch = rfs4x_cb_getch(sp)) == NULL)
+		goto out;
+
+	/*
+	 * Flag to let RPC know these are ping calls. RPC will only use
+	 * untested connections.
+	 */
+
+	CLNT_CONTROL(ch, CLSET_CB_TEST, (void *)NULL);
+
+	/*
+	 * If another thread is working on the pings then
+	 * just exit.
+	 */
+
+	rfs4_dbe_lock(sp->sn_dbe);
+	if (sp->sn_bc.pnginprog != 0) {
+		rfs4_dbe_unlock(sp->sn_dbe);
+		goto out;
+	}
+	sp->sn_bc.pnginprog = 1;
+	rfs4_dbe_unlock(sp->sn_dbe);
+
+	/*
+	 * Get the number of untested conections
+	 */
+
+	if (!CLNT_CONTROL(ch, CLGET_CB_UNTESTED, (void *)&conn_num))
+		goto out;
+
+	/*
+	 * If number of untested connections is zero, either
+	 * - another thread's already tested it
+	 * - a previously tested connection is being reused
+	 * So no further testing is required
+	 */
+
+	if (conn_num == 0) {
+		rfs4_dbe_lock(sp->sn_dbe);
+		sp->sn_bc.paths++;
+		if (sp->sn_bc.pngcnt)
+			sp->sn_bc.pngcnt--;
+		rfs4_dbe_unlock(sp->sn_dbe);
+		goto out;
+	}
+
+call_again:
+	while (conn_num-- > 0) {
+
+		/*
+		 * With CB_TEST flag set, RPC iterates over untested
+		 * connections for each of these CLNT_CALL()
+		 */
+
+		cs = CLNT_CALL(ch, CB_NULL, xdr_void, NULL, xdr_void, NULL, tv);
+		if (cs == RPC_SUCCESS) {
+			rfs4_dbe_lock(sp->sn_dbe);
+			sp->sn_bc.paths++;
+			sp->sn_bc.pngcnt--;
+			rfs4_dbe_unlock(sp->sn_dbe);
+		}
+	}
+
+	rfs4_dbe_lock(sp->sn_dbe);
+	if (sp->sn_bc.paths == 0) {
+		sp->sn_bc.failed = 1;
+		cmn_err(CE_NOTE, "Unable to ping any back channel\n");
+	}
+	rfs4_dbe_unlock(sp->sn_dbe);
+
+	if (!CLNT_CONTROL(ch, CLGET_CB_UNTESTED, (void *)&conn_num))
+		goto out;
+
+	if (conn_num != 0) {
+		/*
+		 * Pause inbetween attempts and
+		 * only try 5 times.
+		 */
+		attempts--;
+		if (attempts > 0) {
+			delay(2 * drv_usectohz(1000000));
+			goto call_again;
+		}
+		DTRACE_PROBE(nfss41__i__cb_null_failed_attempts);
+	}
+out:
+	rfs4_dbe_lock(sp->sn_dbe);
+	sp->sn_bc.pnginprog = 0;
+	rfs4_dbe_unlock(sp->sn_dbe);
+
+	if (ch != NULL) {
+		(void) CLNT_CONTROL(ch, CLSET_CB_TEST_CLEAR, NULL);
+		rfs4x_cb_freech(sp, ch);
+	}
+
+	rfs4x_session_rele(sp);
+	thread_exit();
+}
+
+/*
+ * rfs4x_cbcheck: verify callback path to nfs41 client is up
+ * called via nfs_serv_instance.deleg_cbcheck
+ */
+rfs4_cbstate_t
+rfs4x_cbcheck(rfs4_state_t *sp)
+{
+	rfs4_session_t *sessp;
+	rfs4_cbstate_t cbs = CB_NONE;
+	clientid4 clid;
+
+	clid = sp->rs_owner->ro_client->rc_clientid;
+	if ((sessp = rfs4x_findsession_by_clid(clid)) == NULL)
+		return (CB_UNINIT);
+
+	if (SN_CB_CHAN_EST(sessp) && SN_CB_CHAN_OK(sessp))
+		cbs = CB_OK;
+
+	rfs4x_session_rele(sessp);
+	return (cbs);
+}
+
+/*
  * Find session and validate sequence args.
  * If this function successfully completes the compound state
  * will contain a session pointer.
@@ -769,7 +906,7 @@ rfs4x_find_session(SEQUENCE4args *sargs, struct compound_state *cs)
 		return (NFS4ERR_BADSESSION);
 
 	slot = sargs->sa_slotid;
-	if (slot >= sp->sn_fore->cn_attrs.ca_maxrequests) {
+	if (slot >= sp->cn_attrs.ca_maxrequests) {
 		rfs4x_session_rele(sp);
 		return (NFS4ERR_BADSLOT);
 	}
@@ -841,11 +978,11 @@ rfs4x_sequence_prep(COMPOUND4args *args, COMPOUND4res *resp,
 
 	ASSERT(cs->sp != NULL);
 
-	if (args->array_len > cs->sp->sn_fore->cn_attrs.ca_maxoperations)
+	if (args->array_len > cs->sp->cn_attrs.ca_maxoperations)
 		return (NFS4ERR_TOO_MANY_OPS);
 
 	xdrs = &xprt->xp_xdrin;
-	if (xdr_getpos(xdrs) > cs->sp->sn_fore->cn_attrs.ca_maxrequestsize)
+	if (xdr_getpos(xdrs) > cs->sp->cn_attrs.ca_maxrequestsize)
 		return (NFS4ERR_REQ_TOO_BIG);
 
 	/*  have reference to session */
@@ -871,6 +1008,17 @@ rfs4x_sequence_prep(COMPOUND4args *args, COMPOUND4res *resp,
 	} else if (status == NFS4_OK) {
 		slot->se_flags |= RFS4_SLOT_INUSE;
 		cs->slot = slot;
+
+		/*
+		 * slot previously used to return recallable state;
+		 * since slot reused (NEW request) we are guaranteed
+		 * the client saw the reply, so it's safe to nuke the
+		 * race-detection accounting info.
+		 */
+		if (slot->se_p != NULL) {
+			rfs4x_rs_erase(slot->se_p);
+			slot->se_p = NULL;
+		}
 	}
 	mutex_exit(&slot->se_lock);
 
@@ -920,10 +1068,9 @@ rfs4x_sequence_done(COMPOUND4res *resp, compound_state_t *cs)
  * Process the SEQUENCE operation. The session pointer has already been
  * cached in the compound state, so we just dereference
  */
-/*ARGSUSED*/
 void
 rfs4x_op_sequence(nfs_argop4 *argop, nfs_resop4 *resop,
-    struct svc_req *req, compound_state_t *cs)
+    struct svc_req *req __unused, compound_state_t *cs)
 {
 	SEQUENCE4args	*args = &argop->nfs_argop4_u.opsequence;
 	SEQUENCE4res	*resp = &resop->nfs_resop4_u.opsequence;
@@ -951,8 +1098,8 @@ rfs4x_op_sequence(nfs_argop4 *argop, nfs_resop4 *resop,
 	}
 
 	buflen = args->sa_cachethis ?
-	    sp->sn_fore->cn_attrs.ca_maxresponsesize_cached :
-	    sp->sn_fore->cn_attrs.ca_maxresponsesize;
+	    sp->cn_attrs.ca_maxresponsesize_cached :
+	    sp->cn_attrs.ca_maxresponsesize;
 
 	if (buflen < NFS4_MIN_HDR_SEQSZ) {
 		status = args->sa_cachethis ?
@@ -960,7 +1107,33 @@ rfs4x_op_sequence(nfs_argop4 *argop, nfs_resop4 *resop,
 		goto out;
 	}
 
+	/*
+	 * If the back channel has been established...
+	 *	. if the channel has _not_ been marked as failed _AND_
+	 *	  there are connections that have pings outstanding,
+	 *	  we go ahead and fire the thread to traverse all of
+	 *	  the session's conns, issuing CB_NULL's to those that
+	 *	  need a ping.
+	 *	. if the channel is _not_ OK (ie. failed), then notify
+	 *	  client that there is currently a problem with the CB
+	 *	  path.
+	 */
 	rfs4_dbe_lock(sp->sn_dbe);
+	if (SN_CB_CHAN_EST(sp)) {
+		if (SN_CB_CHAN_OK(sp)) {
+			if (sp->sn_bc.pngcnt > 0 && !sp->sn_bc.pnginprog) {
+				kthread_t *t;
+
+				rfs4x_session_hold(sp);
+				t = thread_create(NULL, 0, ping_cb_null_thr,
+				    sp, 0, &p0, TS_RUN, minclsyspri);
+				if (!t)
+					rfs4x_session_rele(sp);
+			}
+		} else {
+			cbstat |= SEQ4_STATUS_CB_PATH_DOWN;
+		}
+	}
 	cs->client = sp->sn_clnt;
 
 	DTRACE_PROBE1(compound_clid, clientid4, cs->client->rc_clientid);
@@ -984,9 +1157,11 @@ rfs4x_op_sequence(nfs_argop4 *argop, nfs_resop4 *resop,
 	rok->sr_sequenceid = slot->se_seqid;
 	rok->sr_slotid = args->sa_slotid;
 	rok->sr_highest_slotid =
-	    sp->sn_fore->cn_attrs.ca_maxrequests - 1;
+	    sp->cn_attrs.ca_maxrequests - 1;
 	rok->sr_target_highest_slotid =
-	    sp->sn_fore->cn_attrs.ca_maxrequests - 1;
+	    sp->cn_attrs.ca_maxrequests - 1;
+	if (cs->client->rc_deleg_revoked > 0)
+		cbstat |= SEQ4_STATUS_RECALLABLE_STATE_REVOKED;
 	rok->sr_status_flags |= cbstat;
 	rfs4_dbe_unlock(sp->sn_dbe);
 
@@ -1000,10 +1175,9 @@ out:
 	    SEQUENCE4res *, resp);
 }
 
-/* ARGSUSED */
 void
 rfs4x_op_reclaim_complete(nfs_argop4 *argop, nfs_resop4 *resop,
-    struct svc_req *req, compound_state_t *cs)
+    struct svc_req *req __unused, compound_state_t *cs)
 {
 	RECLAIM_COMPLETE4args *args = &argop->nfs_argop4_u.opreclaim_complete;
 	RECLAIM_COMPLETE4res *resp = &resop->nfs_resop4_u.opreclaim_complete;
@@ -1041,10 +1215,9 @@ out:
 	    RECLAIM_COMPLETE4res *, resp);
 }
 
-/* ARGSUSED */
 void
 rfs4x_op_destroy_clientid(nfs_argop4 *argop, nfs_resop4 *resop,
-    struct svc_req *req, compound_state_t *cs)
+    struct svc_req *req __unused, compound_state_t *cs)
 {
 	DESTROY_CLIENTID4args *args = &argop->nfs_argop4_u.opdestroy_clientid;
 	DESTROY_CLIENTID4res *resp = &resop->nfs_resop4_u.opdestroy_clientid;
@@ -1080,10 +1253,56 @@ end:
 	    DESTROY_CLIENTID4res *, resp);
 }
 
-/*ARGSUSED*/
+void
+rfs4x_bc_setup(rfs4_session_t *sp)
+{
+	sess_channel_t	*bcp;
+	sess_bcsd_t	*bsdp;
+
+	ASSERT(sp != NULL);
+
+	/* If sn_back != NULL, Nothing to do */
+	rfs4_dbe_lock(sp->sn_dbe);
+	if (SN_CB_CHAN_EST(sp)) {
+		rfs4_dbe_unlock(sp->sn_dbe);
+		return;
+	}
+
+	/* Create the back channel */
+	bcp = rfs41_create_session_channel(CDFS4_BACK);
+	rfs4_dbe_unlock(sp->sn_dbe);
+
+	/*
+	 * Setup and initialize the back channel.
+	 */
+	rw_enter(&bcp->cn_lock, RW_WRITER);
+	bcp->cn_dir |= CDFS4_BACK;
+	bsdp = CTOBSD(bcp);
+	ASSERT(bsdp != NULL);
+	slot_table_create(&bsdp->bsd_stok, sp->cn_back_attrs.ca_maxrequests);
+	rw_exit(&bcp->cn_lock);
+
+	/*
+	 * If no back channel yet, make sure we set the session's
+	 * back channel appropriately with the one we created now.
+	 * Otherwise clean up the back channel we created above.
+	 */
+	rfs4_dbe_lock(sp->sn_dbe);
+	if (atomic_cas_ptr(&sp->sn_back, NULL, bcp) != NULL) {
+		rfs4_dbe_unlock(sp->sn_dbe);
+		slot_table_destroy(bsdp->bsd_stok);
+		rfs41_destroy_back_channel(bcp);
+		return;
+	}
+	rfs4_dbe_unlock(sp->sn_dbe);
+
+	/* now set the conn's state so we know a ping is needed */
+	atomic_inc_32(&sp->sn_bc.pngcnt);
+}
+
 void
 rfs4x_op_bind_conn_to_session(nfs_argop4 *argop, nfs_resop4 *resop,
-    struct svc_req *req, compound_state_t *cs)
+    struct svc_req *req __unused, compound_state_t *cs)
 {
 	BIND_CONN_TO_SESSION4args  *args =
 	    &argop->nfs_argop4_u.opbind_conn_to_session;
@@ -1093,6 +1312,9 @@ rfs4x_op_bind_conn_to_session(nfs_argop4 *argop, nfs_resop4 *resop,
 	    &resp->BIND_CONN_TO_SESSION4res_u.bctsr_resok4;
 	rfs4_session_t	*sp;
 	nfsstat4 status = NFS4_OK;
+	SVCCB_ARGS			cbargs;
+	rpcprog_t			prog;
+	SVCMASTERXPRT			*mxprt;
 
 	DTRACE_NFSV4_2(op__bind__conn__to__session__start,
 	    struct compound_state *, cs,
@@ -1109,13 +1331,20 @@ rfs4x_op_bind_conn_to_session(nfs_argop4 *argop, nfs_resop4 *resop,
 		goto end;
 	}
 
+	if (rfs4_lease_expired(sp->sn_clnt)) {
+		status = NFS4ERR_BADSESSION;
+		goto end;
+	}
+
 	rfs4_update_lease(sp->sn_clnt); /* no need lock protection */
 
 	rfs4_dbe_lock(sp->sn_dbe);
 	sp->sn_laccess = nfs_sys_uptime();
+	prog = sp->sn_bc.progno;
 	rfs4_dbe_unlock(sp->sn_dbe);
 
 	rok->bctsr_use_conn_in_rdma_mode = FALSE;
+	mxprt = (SVCMASTERXPRT *)req->rq_xprt->xp_master;
 
 	switch (args->bctsa_dir) {
 	case CDFC4_FORE:
@@ -1126,8 +1355,20 @@ rfs4x_op_bind_conn_to_session(nfs_argop4 *argop, nfs_resop4 *resop,
 
 	case CDFC4_BACK:
 	case CDFC4_BACK_OR_BOTH:
-		/* TODO: always map to Back */
-		rok->bctsr_dir = CDFS4_FORE;
+		/* always map to Back */
+		rok->bctsr_dir = CDFS4_BACK;
+		rfs4x_bc_setup(sp);
+		(void) SVC_CTL(req->rq_xprt,
+		    SVCCTL_SET_TAG, (void *)sp->sn_sessid);
+
+		cbargs.xprt = mxprt;
+		cbargs.prog = prog;
+		cbargs.vers = NFS_CB;
+		cbargs.family = AF_INET;
+		cbargs.tag = (void *)sp->sn_sessid;
+
+		(void) SVC_CTL(req->rq_xprt,
+		    SVCCTL_SET_CBCONN, (void *)&cbargs);
 		break;
 	default:
 		break;
@@ -1143,10 +1384,9 @@ end:
 	    BIND_CONN_TO_SESSION4res *, resp);
 }
 
-/* ARGSUSED */
 void
 rfs4x_op_secinfo_noname(nfs_argop4 *argop, nfs_resop4 *resop,
-    struct svc_req *req, compound_state_t *cs)
+    struct svc_req *req __unused, compound_state_t *cs)
 {
 	SECINFO_NO_NAME4res *resp = &resop->nfs_resop4_u.opsecinfo_no_name;
 	nfsstat4 status;
@@ -1184,13 +1424,66 @@ out:
 }
 
 /*
+ * TEST_STATEID (RFC 5661 §18.48): for each input stateid, return
+ * a status code indicating its current validity.  The compound
+ * always succeeds; individual errors are in the per-stateid array.
+ */
+void
+rfs4x_op_test_stateid(nfs_argop4 *argop, nfs_resop4 *resop,
+    struct svc_req *req __unused, compound_state_t *cs)
+{
+	TEST_STATEID4args	*args = &argop->nfs_argop4_u.optest_stateid;
+	TEST_STATEID4res	*resp = &resop->nfs_resop4_u.optest_stateid;
+	TEST_STATEID4resok	*rok  = &resp->TEST_STATEID4res_u.tsr_resok4;
+	nfsstat4		*codes = NULL;
+	uint_t			i, n;
+
+	DTRACE_NFSV4_2(op__test__stateid__start,
+	    struct compound_state *, cs,
+	    TEST_STATEID4args *, args);
+
+	n = args->ts_stateids.ts_stateids_len;
+	if (n > 0)
+		codes = kmem_alloc(n * sizeof (nfsstat4), KM_SLEEP);
+
+	for (i = 0; i < n; i++) {
+		stateid4 *sid = &args->ts_stateids.ts_stateids_val[i];
+		rfs4_state_t *sp = NULL;
+		rfs4_deleg_state_t *dsp = NULL;
+		rfs4_lo_state_t *lsp = NULL;
+		nfsstat4 st;
+
+		get_stateid4(cs, sid);
+		st = rfs4_get_all_state(sid, &sp, &dsp, &lsp);
+		if (st == NFS4_OK) {
+			if (sp != NULL)
+				rfs4_state_rele(sp);
+			if (dsp != NULL)
+				rfs4_deleg_state_rele(dsp);
+			if (lsp != NULL)
+				rfs4_lo_state_rele(lsp, FALSE);
+		}
+		codes[i] = st;
+	}
+
+	rok->tsr_status_codes.tsr_status_codes_len = n;
+	rok->tsr_status_codes.tsr_status_codes_val = codes;
+
+	*cs->statusp = resp->tsr_status = NFS4_OK;
+
+	DTRACE_NFSV4_2(op__test__stateid__done,
+	    struct compound_state *, cs,
+	    TEST_STATEID4res *, resp);
+}
+
+/*
  * Used to free a stateid that no longer has any associated locks.
  * If there are valid locks, error NFS4ERR_LOCKS_HELD is returned.
  * NB: Actual freeing of stateid will be taken care by reaper_thread().
  */
 void
 rfs4x_op_free_stateid(nfs_argop4 *argop, nfs_resop4 *resop,
-    struct svc_req *req, compound_state_t *cs)
+    struct svc_req *req __unused, compound_state_t *cs)
 {
 	FREE_STATEID4args	*args = &argop->nfs_argop4_u.opfree_stateid;
 	FREE_STATEID4res	*resp = &resop->nfs_resop4_u.opfree_stateid;
@@ -1268,11 +1561,57 @@ rfs4x_op_free_stateid(nfs_argop4 *argop, nfs_resop4 *resop,
 	case DELEGID: {
 		rfs4_deleg_state_t *dsp;
 
-		status = rfs4_get_deleg_state(sid, &dsp);
+		/*
+		 * Use rfs4_get_deleg_any() to retrieve the delegation even
+		 * if it has been revoked — FREE_STATEID must acknowledge
+		 * revoked delegations and return NFS4_OK (RFC 5661 §18.38).
+		 *
+		 * If this succeeds, must call rfs4_deleg_state_rele()
+		 */
+		status = rfs4_get_deleg_any(sid, &dsp);
 		if (status != NFS4_OK)
 			goto final;
 
 		rfs4_update_lease(dsp->rds_client);
+
+		/*
+		 * Compare with rfs4_get_deleg_state()
+		 * Except here in FREE_STATEID, if revoked:
+		 * we now invalidate the revoked delegation.
+		 */
+		rfs4_dbe_lock(dsp->rds_dbe);
+		if (dsp->rds_revoked) {
+			dsp->rds_revoked = FALSE;
+			rfs4_dbe_invalidate(dsp->rds_dbe);
+			rfs4_dbe_unlock(dsp->rds_dbe);
+
+			/*
+			 * Adjust client's revoked count.
+			 */
+			rfs4_dbe_lock(dsp->rds_client->rc_dbe);
+			if (dsp->rds_client->rc_deleg_revoked > 0)
+				dsp->rds_client->rc_deleg_revoked--;
+			rfs4_dbe_unlock(dsp->rds_client->rc_dbe);
+
+			rfs4_deleg_state_rele(dsp);
+			status = NFS4_OK;
+			goto final;
+		}
+		rfs4_dbe_unlock(dsp->rds_dbe);
+
+		/*
+		 * Compare with rfs4_get_deleg_state()
+		 * lease expired?
+		 */
+		if (rfs4_lease_expired(dsp->rds_client)) {
+			rfs4_deleg_state_rele(dsp);
+			status = NFS4ERR_EXPIRED;
+			goto final;
+		}
+
+		/*
+		 * Finally the original FREE_STATEID actions.
+		 */
 		rfs4_deleg_state_rele(dsp);
 		status = NFS4ERR_LOCKS_HELD;
 		break;
@@ -1289,4 +1628,255 @@ final:
 	DTRACE_NFSV4_2(op__free__stateid__done,
 	    struct compound_state *, cs,
 	    FREE_STATEID4res *, resp);
+}
+
+void
+rfs4x_op_backchannel_ctl(nfs_argop4 *argop, nfs_resop4 *resop,
+    struct svc_req *req, compound_state_t *cs)
+{
+	rfs4_session_t		*sp = cs->sp;
+	nfsstat4		status = NFS4_OK;
+	BACKCHANNEL_CTL4args	*args = &argop->nfs_argop4_u.opbackchannel_ctl;
+	BACKCHANNEL_CTL4res	*resp = &resop->nfs_resop4_u.opbackchannel_ctl;
+
+	ASSERT(sp != NULL);
+
+	DTRACE_NFSV4_2(op__backchannel__ctl__start,
+	    struct compound_state *, cs,
+	    BACKCHANNEL_CTL4args *, args);
+
+	if ((args->bca_sec_parms.bca_sec_parms_len == 0) ||
+	    (args->bca_sec_parms.bca_sec_parms_val == NULL)) {
+		cmn_err(CE_WARN, "Invalid backchannel security.");
+		status = NFS4ERR_INVAL;
+		goto final;
+	}
+
+	if (!rfs4x_cbsec_valid(args->bca_sec_parms.bca_sec_parms_val)) {
+		cmn_err(CE_WARN, "Unsupported backchannel security.");
+		status = NFS4ERR_INVAL;
+		goto final;
+	}
+
+	/*
+	 * Currently AUTH_NONE and AUTH_UNIX (AUTH_SYS) are
+	 * supported. TODO: RPCSEC_GSS support.
+	 */
+	rfs4_dbe_lock(sp->sn_dbe);
+	sp->sn_bc.progno = args->bca_cb_program;
+	rfs4x_cbsec_init(sp->sn_bc.secprms.csa_sec_parms_val,
+	    args->bca_sec_parms.bca_sec_parms_val);
+	rfs4_dbe_unlock(sp->sn_dbe);
+
+	/*
+	 * 1. Flush all the stale cached channels
+	 * 2. Mark the backchannel that PING is needed
+	 */
+	rfs4x_cb_chflush(sp);
+	atomic_inc_32(&sp->sn_bc.pngcnt);
+
+final:
+	*cs->statusp = resp->bcr_status = status;
+
+	DTRACE_NFSV4_2(op__backchannel__ctl__done,
+	    struct compound_state *, cs,
+	    BACKCHANNEL_CTL4res *, resp);
+}
+
+/*
+ * Validate the backchannel security part.
+ * Supports only AUTH_NONE and AUTH_SYS
+ * TODO: RPCSEC_GSS support
+ */
+bool_t
+rfs4x_cbsec_valid(callback_sec_parms4 *secp)
+{
+	ASSERT(secp != NULL);
+
+	switch (secp->cb_secflavor) {
+	case AUTH_NONE:
+	case AUTH_SYS:
+		return (TRUE);
+	default:
+		return (FALSE);
+	}
+}
+
+uid_t
+rfs4x_cbsec_getuid(callback_sec_parms4 *secp)
+{
+	ASSERT(secp != NULL);
+
+	if (secp->cb_secflavor == AUTH_SYS) {
+		uid_t uid = secp->callback_sec_parms4_u.cbsp_sys_cred.aup_uid;
+		return (uid);
+	}
+
+	return (0);
+}
+
+gid_t
+rfs4x_cbsec_getgid(callback_sec_parms4 *secp)
+{
+	ASSERT(secp != NULL);
+
+	if (secp->cb_secflavor == AUTH_SYS) {
+		gid_t gid = secp->callback_sec_parms4_u.cbsp_sys_cred.aup_gid;
+		return (gid);
+	}
+
+	return (0);
+}
+
+/*
+ * Init the backchannel security part.
+ * Supports only AUTH_NONE and AUTH_SYS
+ * TODO: RPCSEC_GSS support
+ */
+void
+rfs4x_cbsec_init(callback_sec_parms4 *tsp, callback_sec_parms4 *ssp)
+{
+	ASSERT(tsp != NULL);
+	ASSERT(ssp != NULL);
+
+	memset(tsp, 0, sizeof (callback_sec_parms4));
+
+	tsp->cb_secflavor = ssp->cb_secflavor;
+	if (ssp->cb_secflavor == AUTH_SYS) {
+		authsys_parms *aup;
+		aup = &tsp->callback_sec_parms4_u.cbsp_sys_cred;
+		aup->aup_uid = rfs4x_cbsec_getuid(ssp);
+		aup->aup_gid = rfs4x_cbsec_getgid(ssp);
+	}
+}
+
+/*
+ * Free up the backchannel security part.
+ * Supports only AUTH_NONE and AUTH_SYS
+ * TODO: RPCSEC_GSS support
+ */
+void
+rfs4x_cbsec_fini(rfs4_session_t *sp)
+{
+	ASSERT(sp != NULL);
+
+	if (sp->sn_bc.cr != NULL) {
+		crfree(sp->sn_bc.cr);
+		sp->sn_bc.cr = NULL;
+	}
+
+	if (sp->sn_bc.secprms.csa_sec_parms_len != 0) {
+		ASSERT(sp->sn_bc.secprms.csa_sec_parms_val != NULL);
+		kmem_free(sp->sn_bc.secprms.csa_sec_parms_val,
+		    sizeof (callback_sec_parms4));
+		sp->sn_bc.secprms.csa_sec_parms_val = NULL;
+		sp->sn_bc.secprms.csa_sec_parms_len = 0;
+	}
+}
+
+/*
+ * We could implement nfs4x_share_to_delegreq() as just
+ * (deleg_want & mask) >> 8, but let's not, for now.
+ */
+/* BEGIN CSTYLED */
+CTASSERT((DELEG_WANT_NO_PREF << 8) == OPEN4_SHARE_WANT_NO_PREFERENCE);
+CTASSERT((DELEG_WANT_READ    << 8) == OPEN4_SHARE_WANT_READ_DELEG);
+CTASSERT((DELEG_WANT_WRITE   << 8) == OPEN4_SHARE_WANT_WRITE_DELEG);
+CTASSERT((DELEG_WANT_ANY     << 8) == OPEN4_SHARE_WANT_ANY_DELEG);
+CTASSERT((DELEG_WANT_NONE    << 8) == OPEN4_SHARE_WANT_NO_DELEG);
+CTASSERT((DELEG_WANT_CANCEL  << 8) == OPEN4_SHARE_WANT_CANCEL);
+/* END CSTYLED */
+
+/*
+ * The OPEN4_SHARE_WANT_*_DELEG flags were stashed in OPEN4args.deleg_want
+ * by the (custom) XDR code in xdr_OPEN4args().  This converts those flags
+ * to one of the delegreq_t values.
+ */
+delegreq_t
+nfs4x_share_to_delegreq(uint32_t deleg_want)
+{
+	delegreq_t dreq;
+
+	switch (deleg_want & OPEN4_SHARE_WANT_MASK) {
+
+	default:
+	case OPEN4_SHARE_WANT_NO_PREFERENCE:
+		dreq = DELEG_WANT_NO_PREF;
+		break;
+	case OPEN4_SHARE_WANT_READ_DELEG:
+		dreq = DELEG_WANT_READ;
+		break;
+	case OPEN4_SHARE_WANT_WRITE_DELEG:
+		dreq = DELEG_WANT_WRITE;
+		break;
+	case OPEN4_SHARE_WANT_ANY_DELEG:
+		dreq = DELEG_WANT_ANY;
+		break;
+	case OPEN4_SHARE_WANT_NO_DELEG:
+		dreq = DELEG_WANT_NONE;
+		break;
+	case OPEN4_SHARE_WANT_CANCEL:
+		dreq = DELEG_WANT_CANCEL;
+		break;
+	}
+	return (dreq);
+}
+
+void
+rfs4x_rs_record(struct compound_state *cs, rfs4_deleg_state_t *dsp)
+{
+	rfs4_slot_t		*slotent;
+
+#ifdef DEBUG_VERBOSE
+	ulong_t			offset;
+	char			*who;
+
+	who = modgetsymname((uintptr_t)caller(), &offset);
+
+	/* sessid/slot/seqid + rsid */
+	ASSERT(cs != NULL && cs->sp != NULL);
+
+	ASSERT(dsp != NULL);
+
+	cmn_err(CE_NOTE, "rfs41_rs_record: (%s, dsp = 0x%p)", who, dsp);
+#endif /* DEBUG_VERBOSE */
+
+	/* delegation state id stored in rfs4_deleg_state_t */
+	bcopy(cs->sp->sn_sessid, dsp->rds_rs.sessid,
+	    sizeof (sessionid4));
+	rfs41_deleg_rs_hold(dsp);
+
+	slotent = cs->slot;
+	ASSERT(slotent != NULL);
+	ASSERT(slotent->se_p == NULL);
+	mutex_enter(&slotent->se_lock);
+	dsp->rds_rs.seqid = cs->slot->se_seqid;
+	dsp->rds_rs.slotno = cs->slotno;
+	slotent->se_p = dsp;
+	mutex_exit(&slotent->se_lock);
+
+	rfs4_dbe_hold(dsp->rds_dbe);	/* added ref to deleg_state */
+}
+
+void
+rfs4x_rs_erase(void *p)
+{
+	rfs4_deleg_state_t	*dsp = (rfs4_deleg_state_t *)p;
+#ifdef DEBUG_VERBOSE
+	/*
+	 * XXX - Do not change this to a static D probe;
+	 *	this is not intended for production !!!
+	 */
+	ulong_t			offset;
+	char			*who;
+
+	who = modgetsymname((uintptr_t)caller(), &offset);
+	cmn_err(CE_NOTE, "rfs41_rs_erase: (%s, dsp = 0x%p)", who, dsp);
+#endif /* DEBUG_VERBOSE */
+
+	ASSERT(dsp != NULL);
+	if (dsp->rds_rs.refcnt > 0) {
+		rfs41_deleg_rs_rele(dsp);
+		rfs4_deleg_state_rele(dsp);
+	}
 }

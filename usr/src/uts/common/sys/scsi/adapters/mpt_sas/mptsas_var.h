@@ -25,6 +25,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2014, Tegile Systems Inc. All rights reserved.
  * Copyright 2023 Racktop Systems, Inc.
+ * Copyright 2026 Hans Rosenfeld
  */
 
 /*
@@ -133,8 +134,7 @@ typedef uint32_t		mptsas_phymask_t;
  * DMA-support routines can use it to break up the I/O request, so we
  * define it here.
  */
-#define	MPTSAS_MAX_DMA_SEGS	256
-#define	MPTSAS_MAX_CMD_SEGS	257
+#define	MPTSAS_MAX_DMA_SEGS	257
 
 #define	MPTSAS_MAX_FRAME_SGES(mpt) \
 	(((mpt->m_req_frame_size - (sizeof (MPI2_SCSI_IO_REQUEST))) / 8) + 1)

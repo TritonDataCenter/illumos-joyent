@@ -2460,6 +2460,12 @@ typedef struct channel_attrs4 channel_attrs4;
 
 #define	CREATE_SESSION4_FLAG_MASK 0x07
 
+/* added manually; ie. not part of rpcgened mojo */
+typedef struct {
+	uint_t	csa_sec_parms_len;
+	callback_sec_parms4	*csa_sec_parms_val;
+} csa_sec_parms_t;
+
 struct CREATE_SESSION4args {
 	clientid4 csa_clientid;
 	sequenceid4 csa_sequence;
@@ -3657,6 +3663,11 @@ struct CB_NOTIFY_DEVICEID4res {
 	nfsstat4 cndr_status;
 };
 typedef struct CB_NOTIFY_DEVICEID4res CB_NOTIFY_DEVICEID4res;
+
+#define	csa_rcall_llen	csa_referring_call_lists.csa_referring_call_lists_len
+#define	csa_rcall_lval	csa_referring_call_lists.csa_referring_call_lists_val
+#define	rcl_len		rcl_referring_calls.rcl_referring_calls_len
+#define	rcl_val		rcl_referring_calls.rcl_referring_calls_val
 
 /* Callback operations new to NFSv4.1 */
 

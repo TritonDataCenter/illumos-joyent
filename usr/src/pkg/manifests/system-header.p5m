@@ -549,6 +549,7 @@ file path=usr/include/rpc/rpc_com.h
 file path=usr/include/rpc/rpc_msg.h
 file path=usr/include/rpc/rpc_rdma.h
 file path=usr/include/rpc/rpc_sztypes.h
+file path=usr/include/rpc/rpc_tags.h
 file path=usr/include/rpc/rpcb_clnt.h
 file path=usr/include/rpc/rpcb_prot.h
 file path=usr/include/rpc/rpcb_prot.x

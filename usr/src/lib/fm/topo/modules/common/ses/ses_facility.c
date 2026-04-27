@@ -933,7 +933,7 @@ ses_add_enclosure_sensors(topo_mod_t *mod, tnode_t *tn, ses_node_t *agg,
 				len--;
 
 			(void) snprintf(rawname, sizeof (rawname),
-			    "%.*s %llu", len, desc, index);
+			    "%.*s %" PRIu64, (int)len, desc, index);
 		}
 
 		if ((name = topo_mod_clean_str(mod, rawname)) == NULL)

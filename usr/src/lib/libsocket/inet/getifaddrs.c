@@ -23,6 +23,7 @@
  * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2017 RackTop Systems.
  * Copyright 2022 Sebastian Wiedenroth
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <netdb.h>
@@ -432,6 +433,9 @@ retry:
 
 		linkid = DATALINK_INVALID_LINKID;
 		for (;;) {
+			struct sockaddr_storage *s;
+			size_t len;
+
 			if (dl_get_next(door_fd, linkid, DATALINK_CLASS_ALL,
 			    DATALINK_ANY_MEDIATYPE, DLMGMT_ACTIVE,
 			    &next_retval) != 0) {
@@ -476,10 +480,14 @@ retry:
 			    NULL)
 				goto fail;
 
-			curr->ifa_addr =
-			    calloc(1, sizeof (struct sockaddr_storage));
-			if (curr->ifa_addr == NULL)
+			/*
+			 * We split this allocation and assignment to satisfy
+			 * smatch.
+			 */
+			s = calloc(1, sizeof (struct sockaddr_storage));
+			if (s == NULL)
 				goto fail;
+			curr->ifa_addr = (struct sockaddr *)s;
 
 			curr->ifa_data = calloc(1, sizeof (if_data_t));
 			if (curr->ifa_data == NULL)
@@ -489,12 +497,32 @@ retry:
 			ifa_addr = (struct sockaddr_dl *)curr->ifa_addr;
 			ifa_data = curr->ifa_data;
 
-			(void) memcpy(ifa_addr->sdl_data, dmip->dmi_addr,
-			    dmip->dmi_addrlen);
+			/*
+			 * Place both the interface name and the address in
+			 * sdl_data[] as long as both fit. The name will not
+			 * include a NUL terminator in the data section. In
+			 * general, both of these should fit due to the system
+			 * constraints of a 31-character link name
+			 * (MAXLINKNAMELEN).
+			 *
+			 * Verify both fit. If they don't, skip the interface
+			 * name.
+			 */
+			len = strlen(curr->ifa_name);
+			if (len + dmip->dmi_addrlen <=
+			    sizeof (ifa_addr->sdl_data)) {
+				ifa_addr->sdl_nlen = len;
+				(void) memcpy(ifa_addr->sdl_data,
+				    curr->ifa_name, len);
+			}
 			ifa_addr->sdl_alen = dmip->dmi_addrlen;
+			(void) memcpy(LLADDR(ifa_addr), dmip->dmi_addr,
+			    dmip->dmi_addrlen);
 
 			ifa_data->ifi_mtu = dia.dia_max_sdu;
 			ifa_data->ifi_type = dlpi_iftype(next_retval.lr_media);
+			ifa_data->ifi_addrlen = dmip->dmi_addrlen;
+			ifa_addr->sdl_type = ifa_data->ifi_type;
 
 			/*
 			 * get interface index

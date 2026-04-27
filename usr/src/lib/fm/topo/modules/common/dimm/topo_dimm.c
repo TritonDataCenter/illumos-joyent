@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -504,6 +504,21 @@ topo_dimm_add_props(topo_mod_t *mod, tnode_t *dimm, const spd_cache_t *cache)
 		topo_mod_dprintf(mod, "failed to set basic DIMM properties: %s",
 		    topo_mod_errmsg(mod));
 		return (false);
+	}
+
+	if (cache->sc_pkg_sl[0] == SPD_SL_3DS) {
+		uint32_t height = cache->sc_pkg_ndie[0];
+		uint32_t lranks = cache->sc_pkg_ndie[0] * cache->sc_nranks;
+
+		if (topo_create_props(mod, dimm, TOPO_PROP_IMMUTABLE,
+		    &topo_dimm_pgroup,
+		    TOPO_PROP_DIMM_LRANKS, TOPO_TYPE_UINT32, lranks,
+		    TOPO_PROP_DIMM_STACK, TOPO_TYPE_UINT32, height,
+		    NULL) != 0) {
+			topo_mod_dprintf(mod, "failed to set 3DS DIMM "
+			    "properties: %s", topo_mod_errmsg(mod));
+			return (false);
+		}
 	}
 
 	return (true);

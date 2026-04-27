@@ -24,6 +24,7 @@
 # Copyright 2020 Joyent, Inc.
 # Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2019 Peter Tribble.
+# Copyright 2026 Oxide Computer Company
 #
 
 #
@@ -418,6 +419,22 @@ dir  path=usr/lib/fm/topo/maps variant.opensolaris.zone=__NODEFAULT
 #
 file path=usr/lib/fm/topo/maps/xfp-hc-topology.xml mode=0444
 dir  path=usr/lib/fm/topo/plugins variant.opensolaris.zone=__NODEFAULT
+dir  path=usr/lib/fm/topo/plugins/$(ARCH64) variant.opensolaris.zone=__NODEFAULT
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/dimm.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/disk.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/fac_prov_ahci.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/fac_prov_ipmi.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/fac_prov_libhp.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/fac_prov_mptsas.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/ipmi.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/nic.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/ses.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/smbios.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/ufm.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/usb.so mode=0555
+file path=usr/lib/fm/topo/plugins/$(ARCH64)/xfp.so mode=0555
+link path=usr/lib/fm/topo/plugins/64 target=$(ARCH64) \
+    variant.opensolaris.zone=__NODEFAULT
 file path=usr/lib/fm/topo/plugins/dimm.so mode=0555
 file path=usr/lib/fm/topo/plugins/disk.so mode=0555
 file path=usr/lib/fm/topo/plugins/fac_prov_ahci.so mode=0555
@@ -671,6 +688,21 @@ $(i386_ONLY)file \
 $(i386_ONLY)file path=usr/platform/i86pc/lib/fm/topo/maps/psu-hc-topology.xml \
     mode=0444
 $(i386_ONLY)dir path=usr/platform/i86pc/lib/fm/topo/plugins
+$(i386_ONLY)dir path=usr/platform/i86pc/lib/fm/topo/plugins/$(ARCH64)
+$(i386_ONLY)file path=usr/platform/i86pc/lib/fm/topo/plugins/$(ARCH64)/chip.so \
+    mode=0555
+$(i386_ONLY)file \
+    path=usr/platform/i86pc/lib/fm/topo/plugins/$(ARCH64)/chipset.so mode=0555
+$(i386_ONLY)file \
+    path=usr/platform/i86pc/lib/fm/topo/plugins/$(ARCH64)/hostbridge.so \
+    mode=0555
+$(i386_ONLY)file \
+    path=usr/platform/i86pc/lib/fm/topo/plugins/$(ARCH64)/pcibus.so mode=0555
+$(i386_ONLY)file \
+    path=usr/platform/i86pc/lib/fm/topo/plugins/$(ARCH64)/x86pi.so mode=0555
+$(i386_ONLY)file path=usr/platform/i86pc/lib/fm/topo/plugins/$(ARCH64)/zen.so \
+    mode=0555
+$(i386_ONLY)link path=usr/platform/i86pc/lib/fm/topo/plugins/64 target=$(ARCH64)
 $(i386_ONLY)file path=usr/platform/i86pc/lib/fm/topo/plugins/chip.so mode=0555
 $(i386_ONLY)file path=usr/platform/i86pc/lib/fm/topo/plugins/chipset.so \
     mode=0555

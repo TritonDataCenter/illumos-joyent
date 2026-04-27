@@ -47,13 +47,14 @@
 #include <stdlib.h>
 #include <libintl.h>
 #include <limits.h>
+#include <err.h>
 
 #ifdef SYSV
 #define	index	strchr
 #endif /* SYSV */
 
 static void rnetrc(const char *host, char **aname, char **apass);
-static int token();
+static int token(void);
 
 #define	DEFAULT	1
 #define	LOGIN	2
@@ -81,7 +82,7 @@ static struct ruserdata {
 
 
 static struct ruserdata *
-_ruserdata()
+_ruserdata(void)
 {
 	struct ruserdata *d = ruserdata;
 	struct toktab *t;
@@ -144,7 +145,6 @@ _ruserpass(const char *host, char **aname, char **apass)
 	}
 }
 
-
 static void
 rnetrc(const char *host, char **aname, char **apass)
 {
@@ -177,55 +177,76 @@ rnetrc(const char *host, char **aname, char **apass)
 		return;
 	}
 next:
-	while ((t = token()))
-	switch (t) {
+	while ((t = token())) {
+		if (t == DEFAULT) {
+			(void) token();
+			continue;
+		} else if (t != MACHINE) {
+			continue;
+		}
 
-	case DEFAULT:
-		(void) token();
-		continue;
-
-	case MACHINE:
 		if (token() != ID || strcmp(host, d->tokval))
 			continue;
-		while ((t = token()) != 0 && t != MACHINE)
-		switch (t) {
-
-		case LOGIN:
-			if (token())
-				if (*aname == 0) {
-					*aname = malloc(strlen(d->tokval) + 1);
-					(void) strcpy(*aname, d->tokval);
+		while ((t = token()) != 0 && t != MACHINE) {
+			switch (t) {
+			case LOGIN:
+				if (token() == 0) {
+					break;
+				}
+				if (*aname == NULL) {
+					size_t len = strlen(d->tokval) + 1;
+					*aname = malloc(len);
+					if (*aname == NULL) {
+						/*
+						 * There's no good recovery path
+						 * here today, unfortunately.
+						 */
+						err(EXIT_FAILURE, dgettext(
+						    TEXT_DOMAIN, "Fatal Error "
+						    "- failed to allocate "
+						    "memory"));
+					}
+					(void) memcpy(*aname, d->tokval, len);
 				} else {
 					if (strcmp(*aname, d->tokval))
 						goto next;
 				}
-			break;
-		case PASSWD:
-			if (fstat64(fileno(d->cfile), &stb) >= 0 &&
-			    (stb.st_mode & 077) != 0) {
-				(void) fprintf(stderr,
-				    dgettext(TEXT_DOMAIN,
-				    "Error - .netrc file not correct mode.\n"));
-				(void) fprintf(stderr,
-				    dgettext(TEXT_DOMAIN,
-				    "Remove password or correct mode.\n"));
-				exit(1);
+				break;
+			case PASSWD:
+				if (fstat64(fileno(d->cfile), &stb) >= 0 &&
+				    (stb.st_mode & 077) != 0) {
+					(void) fprintf(stderr,
+					    dgettext(TEXT_DOMAIN,
+					    "Error - .netrc file not correct "
+					    "mode.\n"));
+					(void) fprintf(stderr,
+					    dgettext(TEXT_DOMAIN, "Remove "
+					    "password or correct mode.\n"));
+					exit(1);
+				}
+				if (token() && *apass == NULL) {
+					size_t len = strlen(d->tokval) + 1;
+					*apass = malloc(len);
+					if (*apass == NULL) {
+						err(EXIT_FAILURE, dgettext(
+						    TEXT_DOMAIN, "Fatal Error "
+						    "- failed to allocate "
+						    "memory"));
+					}
+					(void) memcpy(*apass, d->tokval, len);
+				}
+				break;
+			case COMMAND:
+			case NOTIFY:
+			case WRITE:
+			case FORCE:
+				(void) token();
+				break;
+			default:
+				(void) fprintf(stderr, dgettext(TEXT_DOMAIN,
+				    "Unknown .netrc option %s\n"), d->tokval);
+				break;
 			}
-			if (token() && *apass == 0) {
-				*apass = malloc(strlen(d->tokval) + 1);
-				(void) strcpy(*apass, d->tokval);
-			}
-			break;
-		case COMMAND:
-		case NOTIFY:
-		case WRITE:
-		case FORCE:
-			(void) token();
-			break;
-		default:
-			(void) fprintf(stderr, dgettext(TEXT_DOMAIN,
-			    "Unknown .netrc option %s\n"), d->tokval);
-			break;
 		}
 		goto done;
 	}
@@ -234,7 +255,7 @@ done:
 }
 
 static int
-token()
+token(void)
 {
 	struct ruserdata *d = _ruserdata();
 	char *cp;

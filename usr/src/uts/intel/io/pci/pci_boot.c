@@ -510,9 +510,7 @@ pci_cache_free_list(nvf_handle_t hdl)
 	ASSERT(RW_WRITE_HELD(nvf_lock(hdl)));
 
 	listp = nvf_list(hdl);
-	for (pua = list_head(listp); pua != NULL;
-	    pua = list_next(listp, pua)) {
-		list_remove(listp, pua);
+	while ((pua = list_remove_head(listp)) != NULL) {
 		kmem_free(pua, sizeof (pua_node_t));
 	}
 }

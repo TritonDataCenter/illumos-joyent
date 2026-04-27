@@ -119,8 +119,8 @@ static char *family_sw[] = {
  * The path is malloc'ed and has to be freed by the caller.
  */
 int
-_s_netconfig_path(int family, int type, int protocol,
-	char **pathp, int *prototype)
+_s_netconfig_path(int family, int type, int protocol, char **pathp,
+    int *prototype)
 {
 	struct netconfig	*net;
 	void				*nethandle;
@@ -149,22 +149,22 @@ retry:
 			errno = EPFNOSUPPORT;
 			break;
 		}
-		endnetconfig(nethandle); /* finished with netconfig struct */
+		(void) endnetconfig(nethandle);
 		return (-1);
 	}
 	if (!S_ISCHR(stats.st_mode)) {
 		errno = EPFNOSUPPORT;
-		endnetconfig(nethandle); /* finished with netconfig struct */
+		(void) endnetconfig(nethandle);
 		return (-1);
 	}
 	*pathp = malloc(strlen(net->nc_device) + 1);
 	if (*pathp == NULL) {
-		endnetconfig(nethandle);
+		(void) endnetconfig(nethandle);
 		errno = ENOMEM;
 		return (-1);
 	}
 	(void) strcpy(*pathp, net->nc_device);
-	endnetconfig(nethandle); /* finished with netconfig struct */
+	(void) endnetconfig(nethandle); /* finished with netconfig struct */
 	return (0);
 }
 
@@ -237,7 +237,7 @@ _s_match_netconf(int family, int type, int proto, void **nethandle)
 		net = maybe;
 
 	if (net == NULL) {
-		endnetconfig(*nethandle);
+		(void) endnetconfig(*nethandle);
 		errno = EPROTONOSUPPORT;
 		return (NULL);
 	}

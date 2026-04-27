@@ -44,12 +44,74 @@ typedef struct rfs4_slot {
 	uint32_t	se_flags;
 	sequenceid4	se_seqid;
 	COMPOUND4res	se_buf;	/* Buf for slot and replays */
+	void		*se_p;	/* Call-back race detection info buf */
 	kmutex_t	se_lock;
 } rfs4_slot_t;
 
+/* se_state values */
+#define	SLRC_EMPTY_SLOT		0x00000001
+#define	SLRC_CACHED_OKAY	0x00000002
+#define	SLRC_CACHED_PURGING	0x00000004
+#define	SLRC_INPROG_NEWREQ	0x00000008
+#define	SLRC_INPROG_REPLAY	0x00000010
+#define	SLOT_FREE		0x00000020
+#define	SLOT_ERROR		0x00000040
+#define	SLOT_INUSE		0x00000080
+#define	SLOT_RECALLED		0x00000100
+
+/* Slot entry structure */
+typedef struct slot_ent {
+	avl_node_t	se_node;
+	slotid4		se_sltno;
+	uint32_t	se_state;
+	sequenceid4	se_seqid;
+	COMPOUND4res	se_buf;	/* Buf for slot and replays */
+	void		*se_p;	/* Call-back race detection info buf */
+	kmutex_t	se_lock;
+	kcondvar_t	se_wait;
+} slot_ent_t;
+
+/* Slot table token */
+typedef struct slot_tab_token {
+	uint_t		st_currw;	/* current width of slot table */
+	uint_t		st_fslots;	/* current # of available slots */
+	avl_tree_t	*st_sltab;	/* tree of 'currw' pointers */
+	kmutex_t	st_lock;	/* cache lock; resize or destroy */
+	kcondvar_t	st_wait;
+	void		(*cleanup_entry)(slot_ent_t *);
+} stok_t;
+
+typedef enum {
+	SLT_NOSLEEP	= 0,
+	SLT_SLEEP	= 1
+} slt_wait_t;
+
+#define	SA_SLOT_ANY	0x0001
+#define	SA_SLOT_SPEC	0x0002
+
+typedef struct {
+	slotid4		sa_sltno;
+	uint16_t	sa_flags;
+} slt_arg_t;
+
+typedef enum {
+	SLT_MAXSLOT	= 1
+} slt_query_t;
+
 /*
- * NFSv4.1 Sessions
+ * NFSv4.x Sessions
  */
+
+/*
+ * 4.1 only: delegation recallable state info.
+ * struct contents meaningful iff refcnt > 0
+ */
+typedef struct {
+	uint32_t	refcnt;
+	sessionid4	sessid;
+	sequenceid4	seqid;
+	slotid4		slotno;
+} rfs41_drs_info_t;
 
 typedef struct rfs41_csr {	/* contrived create_session result */
 	sequenceid4		xi_sid;		/* seqid response to EXCHG_ID */
@@ -72,19 +134,15 @@ typedef struct rfs41_csr {	/* contrived create_session result */
 
 #define		MAX_CH_CACHE	10
 typedef struct {				/* Back Chan Specific Data */
-	rfs4_slot_t		 *bsd_slots;	/* opaque token for slot tab */
+	stok_t			 *bsd_stok;	/* opaque token for slot tab */
 	nfsstat4		  bsd_stat;
-	krwlock_t		  bsd_rwlock;	/* protect slot tab info */
-	uint64_t		  bsd_idx;	/* Index of next spare CLNT */
-	uint64_t		  bsd_cur;	/* Most recent added CLNT */
+	kmutex_t		  bsd_lock;	/* protect slot tab info */
 	int			  bsd_ch_free;
 	CLIENT			 *bsd_clnt[MAX_CH_CACHE];
 } sess_bcsd_t;
 
 typedef struct {
 	channel_dir_from_server4 cn_dir;		/* Chan Direction */
-	channel_attrs4		 cn_attrs;		/* chan Attrs */
-	channel_attrs4		 cn_back_attrs;		/* back channel Attrs */
 	sess_bcsd_t		*cn_csd;		/* Chan Specific Data */
 	krwlock_t		 cn_lock;
 } sess_channel_t;
@@ -93,7 +151,7 @@ typedef struct {
  * Maximum number of concurrent COMPOUND requests per session
  */
 #define	MAXSLOTS	256
-#define	MAXSLOTS_BACK	4
+#define	MAXSLOTS_BACK	16
 
 typedef struct {
 	state_protect_how4	 sp_type;
@@ -144,16 +202,23 @@ typedef struct rfs4_session {
 	struct rfs4_client	*sn_clnt;	/* back ptr to client state */
 	sess_channel_t		*sn_fore;	/* fore chan for this session */
 	sess_channel_t		*sn_back;	/* back chan for this session */
+	channel_attrs4		cn_attrs;	/* chan Attrs */
+	channel_attrs4		cn_back_attrs;	/* back channel Attrs */
 	rfs4_slot_t		*sn_slots;	/* slot replay cache */
 	time_t			 sn_laccess;	/* struct was last accessed */
 	int			 sn_csflags;	/* create_session only flags */
+	bool_t			 sn_bdrpc;
 	uint32_t		 sn_flags;	/* SEQ4 status bits */
 	list_node_t		 sn_node;	/* link node to rfs4_client */
 	struct	{
 		uint32_t	pngcnt;		/* conn pings outstanding */
+		uint32_t	paths;		/* callback paths verified */
 		uint32_t	progno;		/* cb_program number */
+		csa_sec_parms_t	secprms;	/* csa_sec_params */
 		uint32_t	failed:1;	/* TRUE if no cb path avail */
 		uint32_t	pnginprog:1;
+		uint32_t	_reserved:30;
+		cred_t		*cr;
 	} sn_bc;
 	uint32_t		 sn_rcached;	/* cached replies, for stat */
 } rfs4_session_t;
@@ -189,6 +254,7 @@ rfs4_session_t *rfs4x_createsession(session41_create_t *);
 nfsstat4 rfs4x_destroysession(rfs4_session_t *, unsigned useref);
 void rfs4x_client_session_remove(struct rfs4_client *);
 rfs4_session_t *rfs4x_findsession_by_id(sessionid4);
+
 void rfs4x_session_hold(rfs4_session_t *);
 void rfs4x_session_rele(rfs4_session_t *);
 
@@ -200,6 +266,38 @@ void rfs4x_state_fini(struct nfs4_srv *);
 int rfs4x_sequence_prep(COMPOUND4args *, COMPOUND4res *,
     struct compound_state *, SVCXPRT *);
 void rfs4x_sequence_done(COMPOUND4res *, struct compound_state *);
+
+extern void rfs4x_cb_chflush(rfs4_session_t *);
+
+/*
+ * NFS4.1 backchannel security
+ */
+struct rfs4_deleg_state;
+struct rfs4_client;
+
+extern bool_t rfs4x_cbsec_valid(callback_sec_parms4 *);
+extern void rfs4x_cbsec_init(callback_sec_parms4 *, callback_sec_parms4 *);
+extern void rfs4x_cbsec_fini(rfs4_session_t *);
+extern uid_t rfs4x_cbsec_getuid(callback_sec_parms4 *);
+extern gid_t rfs4x_cbsec_getgid(callback_sec_parms4 *);
+extern sess_channel_t *rfs41_create_session_channel(channel_dir_from_server4);
+extern void rfs41_destroy_back_channel(sess_channel_t *);
+extern slotid4 svc_slot_maxslot(rfs4_session_t *);
+extern nfsstat4 slot_cb_status(stok_t *);
+extern void rfs41_deleg_rs_hold(struct rfs4_deleg_state *);
+extern void rfs41_deleg_rs_rele(struct rfs4_deleg_state *);
+
+
+/*
+ * NFS4.1 Backchannel slot support.
+ */
+extern int slot_alloc(stok_t *, slt_wait_t, slot_ent_t **);
+extern void slot_free(stok_t *, slot_ent_t *);
+extern void slot_table_create(stok_t **, int);
+extern void slot_incr_seq(slot_ent_t *);
+extern void slot_table_destroy(stok_t *);
+extern void slot_table_query(stok_t *, slt_query_t, void *);
+extern slot_ent_t *slot_get(stok_t *, slotid4);
 
 #endif	/* _KERNEL */
 

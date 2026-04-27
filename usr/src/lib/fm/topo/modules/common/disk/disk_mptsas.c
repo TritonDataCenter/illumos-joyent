@@ -88,7 +88,7 @@ get_sas_address(topo_mod_t *mod, char *devctl, uint32_t enclosure,
 	for (i = 0; i < gdi.DiskCount; i++) {
 		if (di[i].Enclosure == enclosure && di[i].Slot == slot) {
 			char sas[17]; /* 16 hex digits and NUL */
-			(void) snprintf(sas, 17, "%llx", di[i].SasAddress);
+			(void) snprintf(sas, 17, "%" PRIx64, di[i].SasAddress);
 			topo_mod_dprintf(mod, "found mpt_sas disk (%d/%d) "
 			    "with adddress %s\n", enclosure, slot, sas);
 			*sas_address = topo_mod_strdup(mod, sas);

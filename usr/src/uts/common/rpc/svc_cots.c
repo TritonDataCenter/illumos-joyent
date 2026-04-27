@@ -60,12 +60,15 @@
 #include <sys/cmn_err.h>
 #include <sys/kstat.h>
 #include <sys/vtrace.h>
+#include <sys/sdt.h>
 
 #include <rpc/types.h>
 #include <rpc/xdr.h>
 #include <rpc/auth.h>
 #include <rpc/rpc_msg.h>
+#include <rpc/rpc_tags.h>
 #include <rpc/svc.h>
+#include <rpc/clnt.h>
 #include <inet/ip.h>
 
 #define	COTS_MAX_ALLOCSIZE	2048
@@ -89,37 +92,55 @@ static void		svc_cots_kfreeres(SVCXPRT *);
 static void		svc_cots_kclone_destroy(SVCXPRT *);
 static void		svc_cots_kstart(SVCMASTERXPRT *);
 static void		svc_cots_ktattrs(SVCXPRT *, int, void **);
+static int		svc_cots_kctl(SVCXPRT *, int, void *);
+static int		svc_cots_tag(SVCXPRT *, int, void *);
 
 /*
  * Server transport operations vector.
  */
 struct svc_ops svc_cots_op = {
-	svc_cots_krecv,		/* Get requests */
-	svc_cots_kgetargs,	/* Deserialize arguments */
-	svc_cots_ksend,		/* Send reply */
-	svc_cots_kfreeargs,	/* Free argument data space */
-	svc_cots_kdestroy,	/* Destroy transport handle */
-	svc_cots_kdup,		/* Check entry in dup req cache */
-	svc_cots_kdupdone,	/* Mark entry in dup req cache as done */
-	svc_cots_kgetres,	/* Get pointer to response buffer */
-	svc_cots_kfreeres,	/* Destroy pre-serialized response header */
-	svc_cots_kclone_destroy, /* Destroy a clone xprt */
-	svc_cots_kstart,	/* Tell `ready-to-receive' to rpcmod */
-	NULL,			/* Transport specific clone xprt */
-	svc_cots_ktattrs,	/* Transport Attributes */
-	mir_svc_hold,		/* Increment transport reference count */
-	mir_svc_release		/* Decrement transport reference count */
+	.xp_recv = svc_cots_krecv,
+	.xp_getargs = svc_cots_kgetargs,
+	.xp_reply = svc_cots_ksend,
+	.xp_freeargs = svc_cots_kfreeargs,
+	.xp_destroy = svc_cots_kdestroy,
+	.xp_dup = svc_cots_kdup,
+	.xp_dupdone = svc_cots_kdupdone,
+	.xp_getres = svc_cots_kgetres,
+	.xp_freeres = svc_cots_kfreeres,
+	.xp_clone_destroy = svc_cots_kclone_destroy,
+	.xp_start = svc_cots_kstart,
+	.xp_clone_xprt = NULL,
+	.xp_tattrs = svc_cots_ktattrs,
+	.xp_ctl = svc_cots_kctl,
+	.xp_hold = mir_svc_hold,
+	.xp_release = mir_svc_release
 };
 
 /*
  * Master transport private data.
  * Kept in xprt->xp_p2.
+ * -----------------------------------------------------------
+ *
+ * cmd_xprt_started	flag for clone routine to call rpcmod's
+ *			start routine
+ * cmd_stats		stats for zone
+ * cmd_addrs		Addresses for local and remote.
+ *
+ * !! WARNING !!
+ *
+ * The size of cots_master_data is larger than
+ * "sizeof (struct cots_master_data)" since the local and remote
+ * addresses are stored after the cmd_addrs structure, so keep
+ * that as the last element or the T_ADDR_REQ will stomp on
+ * your data.
+ *
+ * -----------------------------------------------------------
  */
 struct cots_master_data {
-	char	*cmd_src_addr;	/* client's address */
-	int	cmd_xprt_started; /* flag for clone routine to call */
-				/* rpcmod's start routine. */
-	struct rpc_cots_server *cmd_stats;	/* stats for zone */
+	int	cmd_xprt_started;
+	struct rpc_cots_server *cmd_stats;
+	struct T_addr_ack cmd_addrs;
 };
 
 /*
@@ -154,9 +175,15 @@ static const struct rpc_cots_server {
 };
 
 #define	CLONE2STATS(clone_xprt)	\
-	((struct cots_master_data *)(clone_xprt)->xp_master->xp_p2)->cmd_stats
+	((clone_xprt)->xp_master != NULL ? \
+	((struct cots_master_data *) \
+		(clone_xprt)->xp_master->xp_p2)->cmd_stats : NULL)
+
 #define	RSSTAT_INCR(s, x)	\
-	atomic_inc_64(&(s)->x.value.ui64)
+	if ((s) != NULL)	\
+		atomic_inc_64(&(s)->x.value.ui64)
+
+static rpc_tag_hd_t svc_tag_hd;
 
 /*
  * Pointer to a transport specific `ready to receive' function in rpcmod
@@ -198,6 +225,7 @@ svc_cots_kcreate(file_t *fp, uint_t max_msgsize, struct T_info_ack *tinfo,
 	struct rpcstat *rpcstat;
 	struct T_addr_ack *ack_p;
 	struct strioctl getaddr;
+	int cmd_sz, ack_p_sz;
 
 	if (nxprt == NULL)
 		return (EINVAL);
@@ -207,10 +235,12 @@ svc_cots_kcreate(file_t *fp, uint_t max_msgsize, struct T_info_ack *tinfo,
 
 	xprt = kmem_zalloc(sizeof (SVCMASTERXPRT), KM_SLEEP);
 
-	cmd = kmem_zalloc(sizeof (*cmd) + sizeof (*ack_p)
-	    + (2 * sizeof (sin6_t)), KM_SLEEP);
-
-	ack_p = (struct T_addr_ack *)&cmd[1];
+	/*
+	 * Size such that we can fit the maximum possible reply.
+	 * cots_master_data includes a T_addr_ack struct.
+	 */
+	cmd_sz = sizeof (*cmd) + (2 * sizeof (sin6_t));
+	cmd = kmem_zalloc(cmd_sz, KM_SLEEP);
 
 	if ((tinfo->TIDU_size > COTS_MAX_ALLOCSIZE) ||
 	    (tinfo->TIDU_size <= 0))
@@ -224,30 +254,32 @@ svc_cots_kcreate(file_t *fp, uint_t max_msgsize, struct T_info_ack *tinfo,
 	xprt->xp_p2 = (caddr_t)cmd;
 	cmd->cmd_xprt_started = 0;
 	cmd->cmd_stats = rpcstat->rpc_cots_server;
+	ack_p = &cmd->cmd_addrs;
+	ack_p_sz = sizeof (*ack_p) + (2 * sizeof (sin6_t));
 
 	getaddr.ic_cmd = TI_GETINFO;
 	getaddr.ic_timout = -1;
-	getaddr.ic_len = sizeof (*ack_p) + (2 * sizeof (sin6_t));
+	getaddr.ic_len = ack_p_sz;
 	getaddr.ic_dp = (char *)ack_p;
 	ack_p->PRIM_type = T_ADDR_REQ;
 
 	err = strioctl(fp->f_vnode, I_STR, (intptr_t)&getaddr,
 	    0, K_TO_K, CRED(), &retval);
-	if (err) {
-		kmem_free(cmd, sizeof (*cmd) + sizeof (*ack_p) +
-		    (2 * sizeof (sin6_t)));
+	if (err || retval) {
 		kmem_free(xprt, sizeof (SVCMASTERXPRT));
+		kmem_free(cmd, cmd_sz);
 		return (err);
 	}
 
 	xprt->xp_rtaddr.maxlen = ack_p->REMADDR_length;
 	xprt->xp_rtaddr.len = ack_p->REMADDR_length;
-	cmd->cmd_src_addr = xprt->xp_rtaddr.buf =
-	    (char *)ack_p + ack_p->REMADDR_offset;
+	xprt->xp_rtaddr.buf = (char *)ack_p + ack_p->REMADDR_offset;
 
 	xprt->xp_lcladdr.maxlen = ack_p->LOCADDR_length;
 	xprt->xp_lcladdr.len = ack_p->LOCADDR_length;
 	xprt->xp_lcladdr.buf = (char *)ack_p + ack_p->LOCADDR_offset;
+
+	rpc_init_taglist(&xprt->xp_tags);
 
 	/*
 	 * If the current sanity check size in rpcmod is smaller
@@ -270,6 +302,20 @@ svc_cots_kcreate(file_t *fp, uint_t max_msgsize, struct T_info_ack *tinfo,
 }
 
 /*
+ * Create a connection manager entry for callback
+ */
+static int
+svc_cots_cbconn(void *cb_args)
+{
+	SVCCB_ARGS *cb = (SVCCB_ARGS *)cb_args;
+	int err;
+
+	err = connmgr_cb_create((void *)cb->xprt, cb->prog, cb->vers,
+	    cb->family, cb->tag);
+	return (err);
+}
+
+/*
  * Destroy a master transport record.
  * Frees the space allocated for a transport record.
  */
@@ -285,12 +331,15 @@ svc_cots_kdestroy(SVCMASTERXPRT *xprt)
 	if (xprt->xp_addrmask.maxlen)
 		kmem_free(xprt->xp_addrmask.buf, xprt->xp_addrmask.maxlen);
 
+	if (!rpc_is_taglist_empty(xprt->xp_tags))
+		rpc_remove_all_tag(&svc_tag_hd, (void *)xprt);
+
+	rpc_destroy_taglist(&xprt->xp_tags);
+
 	mutex_destroy(&xprt->xp_req_lock);
 	mutex_destroy(&xprt->xp_thread_lock);
 
-	kmem_free(cmd, sizeof (*cmd) + sizeof (struct T_addr_ack) +
-	    (2 * sizeof (sin6_t)));
-
+	kmem_free(cmd, sizeof (*cmd) + (2 * sizeof (sin6_t)));
 	kmem_free(xprt, sizeof (SVCMASTERXPRT));
 }
 
@@ -421,9 +470,6 @@ svc_cots_ksend(SVCXPRT *clone_xprt, struct rpc_msg *msg)
 	caddr_t xdr_location;
 	bool_t has_args;
 
-	TRACE_0(TR_FAC_KRPC, TR_SVC_COTS_KSEND_START,
-	    "svc_cots_ksend_start:");
-
 	/*
 	 * If there is a result procedure specified in the reply message,
 	 * it will be processed in the xdr_replymsg and SVCAUTH_WRAP.
@@ -530,8 +576,6 @@ svc_cots_ksend(SVCXPRT *clone_xprt, struct rpc_msg *msg)
 			TRACE_1(TR_FAC_KRPC, TR_XDR_REPLYMSG_END,
 			    "xdr_replymsg_end:(%S)", "bad");
 			freemsg(mp);
-			RPCLOG0(1, "svc_cots_ksend: xdr_replymsg/SVCAUTH_WRAP "
-			    "failed\n");
 			goto out;
 		}
 		TRACE_1(TR_FAC_KRPC, TR_XDR_REPLYMSG_END,
@@ -705,6 +749,34 @@ svc_cots_kfreeres(SVCXPRT *clone_xprt)
 		cd->cd_mp = (mblk_t *)NULL;
 		freemsg(mp);
 	}
+}
+
+static int
+svc_cots_kctl(SVCXPRT *clone_xprt, int cmd, void *arg)
+{
+	int rc = 0;
+
+	switch (cmd) {
+	case SVCCTL_SET_ASD:
+		clone_xprt->xp_asd = arg;
+		break;
+
+	case SVCCTL_GET_ASD:
+		*(char **)arg = clone_xprt->xp_asd;
+		break;
+
+	case SVCCTL_SET_CBCONN:
+		rc = svc_cots_cbconn(arg);
+		break;
+
+	case SVCCTL_SET_TAG:
+	case SVCCTL_SET_TAG_CLEAR:
+	case SVCCTL_CMP_TAG:
+		rc = svc_cots_tag(clone_xprt, cmd, arg);
+		break;
+	}
+
+	return (rc);
 }
 
 /*
@@ -909,6 +981,67 @@ svc_cots_kdupdone(struct dupreq *dr, caddr_t res, void (*dis_resfree)(),
 	dr->dr_status = status;
 }
 
+static int
+svc_cots_tag(SVCXPRT *clone_xprt, int cmd, void *arg)
+{
+	SVCMASTERXPRT *xprt = clone_xprt->xp_master;
+	rpc_tag_t *tag;
+
+	switch (cmd) {
+
+	case SVCCTL_SET_TAG:
+		rpc_add_tag(&svc_tag_hd, (void *)xprt, arg);
+		break;
+
+	case SVCCTL_SET_TAG_CLEAR:
+		if (rpc_is_taglist_empty(xprt->xp_tags)) {
+			DTRACE_PROBE1(krpc__svc__tag, char *,
+			    "tag clear called on xprt with no tags");
+			return (1);
+		}
+
+		/* First, get the tag */
+		tag = rpc_lookup_tag(&svc_tag_hd, arg, FALSE);
+
+		if (tag == NULL) {
+			DTRACE_PROBE1(krpc__svc__tag, char *,
+			    "could not find a matching tag");
+			return (1);
+		}
+
+		/* Remove the xprt from the tag */
+		mutex_enter(&tag->rt_lock);
+		rpc_remove_xprt(&svc_tag_hd, tag, (void *)xprt);
+		mutex_exit(&tag->rt_lock);
+
+		/* Remove the tag from the xprt */
+		rpc_remove_tag(&svc_tag_hd, (void *)xprt, tag->rt_id);
+
+		/*
+		 * Release the refcnt acquired by rpc_lookup_tag()
+		 */
+		RPC_TAG_RELE(tag);
+
+		break;
+
+	case SVCCTL_CMP_TAG:
+		/*
+		 * CMP_TAG is called with a tag as the argument.
+		 * If a matching tag is found on the xprt, returns 0, else 1.
+		 */
+		if (rpc_is_taglist_empty(xprt->xp_tags)) {
+			DTRACE_PROBE1(krpc__svc__tag, char *,
+			    "tag match called on xprt with no tags");
+			return (1);
+		}
+		if (!rpc_cmp_tag(xprt->xp_tags, arg))
+			return (1);
+		break;
+	}
+
+	return (0);
+}
+
 /*
  * This routine expects that the mutex, cotsdupreq_lock, is already held.
  */
@@ -961,9 +1094,9 @@ svc_cots_init(void)
 	 * the stack buffer allocated by svc_run.  The ASSERT is a safety
 	 * net if the cots_data_t structure ever changes.
 	 */
-	/*CONSTANTCONDITION*/
 	ASSERT(sizeof (cots_data_t) <= SVC_P2LEN);
 
 	mutex_init(&cots_kcreate_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&cotsdupreq_lock, NULL, MUTEX_DEFAULT, NULL);
+	rpc_taghd_init(&svc_tag_hd, offsetof(SVCMASTERXPRT, xp_tags));
 }

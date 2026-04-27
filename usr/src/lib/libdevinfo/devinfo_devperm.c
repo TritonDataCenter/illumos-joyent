@@ -22,6 +22,8 @@
  * Copyright (c) 2011 Gary Mills
  *
  * Copyright (c) 2003, 2010, Oracle and/or its affiliates. All rights reserved.
+ *
+ * Copyright 2026 Oxide Computer Company
  */
 
 #define	_POSIX_PTHREAD_SEMANTICS	/* for getgrnam_r */
@@ -587,7 +589,8 @@ di_devperm_login(const char *ttyn, uid_t uid, gid_t gid,
 		return (-1);
 	}
 
-	if (getgrnam_r("tty", &grp, grbuf, NSS_BUFLEN_GROUP, &grpp) != 0) {
+	if (getgrnam_r("tty", &grp, grbuf, NSS_BUFLEN_GROUP, &grpp) == 0 &&
+	    grpp != NULL) {
 		tty_gid = grpp->gr_gid;
 	} else {
 		/*

@@ -177,6 +177,17 @@ extern "C" {
 #define	__HIDDEN		__attribute__((visibility("hidden")))
 #define	__cacheline_aligned	__aligned(_CACHE_LINE_SIZE)
 
+#if defined(__has_attribute)
+#if __has_attribute(__nonstring__)
+/* To silence warnings about null terminator not fitting into an array. */
+#define	__nonstring	__attribute__((__nonstring__))
+#endif
+#endif /* __has_attribute */
+
+#if !defined(__nonstring)
+#define	__nonstring
+#endif
+
 #ifdef	__cplusplus
 }
 #endif

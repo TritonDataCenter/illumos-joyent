@@ -22,11 +22,11 @@
 # Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
 # Use is subject to license terms.
 #
-#ident	"%Z%%M%	%I%	%E% SMI"
 
 #
 # Define the transitive set of rules to create a common module's install dir
-# within the proto area.  This is used by all Makefile.<class> files.
+# within the proto area.  This is used by all Makefile.<class> files.  64-bit
+# targets are defined by Targetdirs due to symlinks and races.
 #
 $(ROOT)/usr/lib/fm:
 	$(INS.dir)

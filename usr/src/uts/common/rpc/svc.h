@@ -47,6 +47,7 @@
 
 #ifdef	_KERNEL
 #include <rpc/svc_auth.h>
+#include <rpc/rpc_tags.h>
 #include <sys/callb.h>
 #endif	/* _KERNEL */
 
@@ -192,11 +193,23 @@ struct svc_ops {
 	void	(*xp_clone_xprt)(SVCXPRT *, SVCXPRT *);
 		/* transport specific clone function */
 	void	(*xp_tattrs)(SVCXPRT *, int, void **);
+		/* kernel level control */
+	int	(*xp_ctl)(SVCXPRT *, int, void *);
 		/* transport specific hold function */
 	void	(*xp_hold)(queue_t *);
 		/* transport specific release function */
 	void	(*xp_release)(queue_t *, mblk_t *, bool_t);
 };
+
+/*
+ * Kernel SVC Control Requests.
+ */
+#define	SVCCTL_SET_ASD		1
+#define	SVCCTL_GET_ASD		2
+#define	SVCCTL_SET_CBCONN	3
+#define	SVCCTL_SET_TAG		4
+#define	SVCCTL_SET_TAG_CLEAR	5
+#define	SVCCTL_CMP_TAG		6
 
 #define	SVC_TATTR_ADDRMASK	1
 
@@ -405,6 +418,7 @@ typedef struct __svcxprt_common {
 	struct netbuf	xpc_rtaddr;	/* remote transport address	*/
 	struct netbuf	xpc_lcladdr;	/* local transport address	*/
 	char		*xpc_netid;	/* network token		*/
+	void		*xpc_tags;	/* network token		*/
 	SVC_CALLOUT_TABLE *xpc_sct;
 } __SVCXPRT_COMMON;
 
@@ -418,6 +432,7 @@ typedef struct __svcxprt_common {
 #define	xp_lcladdr	xp_xpc.xpc_lcladdr
 #define	xp_sct		xp_xpc.xpc_sct
 #define	xp_netid	xp_xpc.xpc_netid
+#define	xp_tags		xp_xpc.xpc_tags
 
 struct __svcmasterxprt {
 	SVCMASTERXPRT	*xp_next;	/* Next transport in the list	*/
@@ -441,6 +456,14 @@ struct __svcmasterxprt {
 	int		xp_reqs;	/* number of requests queued	*/
 	size_t		xp_size;	/* total size of queued msgs	*/
 };
+
+typedef struct __svccb_args {
+	SVCMASTERXPRT *xprt;
+	rpcprog_t prog;
+	rpcvers_t vers;
+	int family;
+	void *tag;
+} SVCCB_ARGS;
 
 /*
  * Service thread `clone' transport handle (SVCXPRT)
@@ -478,6 +501,7 @@ struct __svcxprt {
 	/* Private for svc ops */
 	char		xp_p2buf[SVC_P2LEN]; /* udp_data or cots_data_t */
 						/* or clone_rdma_data_t */
+	void		*xp_asd;
 };
 #else	/* _KERNEL */
 struct __svcxprt {
@@ -600,6 +624,9 @@ struct __svcxprt {
 
 #define	SVC_START(xprt) \
 	(*(xprt)->xp_ops->xp_start)(xprt)
+
+#define	SVC_CTL(clone_xprt, rq, arg) \
+	(*(clone_xprt)->xp_ops->xp_ctl)((clone_xprt), (rq), (arg))
 
 #else	/* _KERNEL */
 
@@ -1156,6 +1183,7 @@ extern int	__svc_vc_dupdone();
  * change in future releases.
  */
 extern SVCXPRT *svc_clone_init(void);
+extern void svc_init_clone_xprt(SVCXPRT *, queue_t *);
 extern void svc_clone_free(SVCXPRT *);
 extern void svc_clone_link(SVCMASTERXPRT *, SVCXPRT *, SVCXPRT *);
 extern void svc_clone_unlink(SVCXPRT *);

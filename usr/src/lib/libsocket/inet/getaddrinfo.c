@@ -209,7 +209,6 @@ _getaddrinfo(const char *hostname, const char *servname,
 	struct addrinfo *aip;
 	struct addrinfo ai;
 	int error;
-	uint_t i;
 
 	/*
 	 * We currently accumulate three services in the

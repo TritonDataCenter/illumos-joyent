@@ -94,8 +94,9 @@ pci_create_dev_sensors(topo_mod_t *mod, tnode_t *dev)
 	for (i = 0; i < ARRAY_SIZE(pci_sensor_types); i++) {
 		int ret;
 
-		if (snprintf(path, sizeof (path), "/dev/sensors/%s/pci/%x.%x",
-		    pci_sensor_types[i], binst, dinst) >= sizeof (path)) {
+		if (snprintf(path, sizeof (path), "/dev/sensors/%s/pci/%" PRIx64
+		    ".%" PRIx64, pci_sensor_types[i], binst, dinst) >=
+		    sizeof (path)) {
 			topo_mod_dprintf(mod, "failed to construct %s sensor "
 			    "directory path, path too long",
 			    pci_sensor_types[i]);

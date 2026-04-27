@@ -21,6 +21,7 @@
 
 /*
  * Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <stdio.h>
@@ -56,7 +57,7 @@ if_nametoindex(const char *ifname)
 
 
 	/* Make sure the given name is not NULL */
-	if ((ifname == NULL)||(*ifname == '\0')) {
+	if (ifname == NULL || *ifname == '\0') {
 		errno = ENXIO;
 		return (0);
 	}
@@ -72,7 +73,7 @@ if_nametoindex(const char *ifname)
 		return (0);
 	}
 
-	strncpy(lifr.lifr_name, ifname, size +1);
+	(void) memcpy(lifr.lifr_name, ifname, size + 1);
 
 	/* Check the v4 interfaces first */
 	s = socket(AF_INET, SOCK_DGRAM, 0);
@@ -116,7 +117,7 @@ if_indextoname(uint32_t ifindex, char *ifname)
 	struct lifreq	*lifrp;
 	int		numifs;
 	size_t		bufsize;
-	boolean_t 	found;
+	boolean_t	found;
 	uint_t		flags;
 
 	flags = LIFC_NOXMIT | LIFC_TEMPORARY | LIFC_ALLZONES | LIFC_UNDER_IPMP;
@@ -224,9 +225,8 @@ if_nameindex(void)
 	struct lifconf	lifc;
 	struct lifreq	*lifrp;
 	int		numifs;
-	int		index;
 	int		i;
-	int 		physinterf_num;
+	int		physinterf_num;
 	size_t		bufsize;
 	struct if_nameindex	 *interface_list;
 	struct if_nameindex	 *interface_entry;

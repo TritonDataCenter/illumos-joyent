@@ -1123,10 +1123,11 @@ des_common_init_ctx(des_ctx_t *des_ctx, crypto_spi_ctx_template_t *template,
 		 * Initialize key schedule.
 		 * Key length is stored in the key.
 		 */
-		if ((rv = init_keysched(key, keysched,
-		    strength)) != CRYPTO_SUCCESS)
+		rv = init_keysched(key, keysched, strength);
+		if (rv != CRYPTO_SUCCESS) {
 			kmem_free(keysched, size);
-
+			return (rv);
+		}
 		des_ctx->dc_flags |= PROVIDER_OWNS_KEY_SCHEDULE;
 		des_ctx->dc_keysched_len = size;
 	} else {

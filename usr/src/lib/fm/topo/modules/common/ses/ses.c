@@ -582,7 +582,7 @@ ses_contract_thread(void *arg)
 		/* see if it is an event we are expecting */
 		ctid = ct_event_get_ctid(ev);
 		(void) snprintf(buf, sizeof (buf),
-		    "got contract event ctid=%d", ctid);
+		    "got contract event ctid=%" _PRIdID, ctid);
 		ses_ct_print(buf);
 		event = ct_event_get_type(ev);
 		if (event != CT_DEV_EV_OFFLINE && event != CT_EV_NEGEND) {
@@ -596,8 +596,8 @@ ses_contract_thread(void *arg)
 
 		/* find target pointer saved in cookie */
 		evid = ct_event_get_evid(ev);
-		(void) snprintf(path, PATH_MAX, CTFS_ROOT "/device/%ld/status",
-		    ctid);
+		(void) snprintf(path, PATH_MAX, CTFS_ROOT "/device/%" _PRIdID
+		    "/status", ctid);
 		statfd = open64(path, O_RDONLY);
 		(void) ct_status_read(statfd, CTD_COMMON, &stathdl);
 		stp = (ses_enum_target_t *)(uintptr_t)
@@ -611,7 +611,7 @@ ses_contract_thread(void *arg)
 			    "contract already abandoned %x", event);
 			ses_ct_print(buf);
 			(void) snprintf(path, PATH_MAX,
-			    CTFS_ROOT "/device/%ld/ctl", ctid);
+			    CTFS_ROOT "/device/%" _PRIdID "/ctl", ctid);
 			ctlfd = open64(path, O_WRONLY);
 			if (event != CT_EV_NEGEND)
 				(void) ct_ctl_ack(ctlfd, evid);
@@ -625,8 +625,8 @@ ses_contract_thread(void *arg)
 
 		/* find control device for ack/abandon */
 		(void) pthread_mutex_lock(&stp->set_lock);
-		(void) snprintf(path, PATH_MAX, CTFS_ROOT "/device/%ld/ctl",
-		    ctid);
+		(void) snprintf(path, PATH_MAX, CTFS_ROOT "/device/%" _PRIdID
+		    "/ctl", ctid);
 		ctlfd = open64(path, O_WRONLY);
 		if (event != CT_EV_NEGEND) {
 			/* if this is an offline event, do the offline */
@@ -643,7 +643,8 @@ ses_contract_thread(void *arg)
 			ses_ct_print("got contract negend");
 			if (stp->set_ctid) {
 				(void) snprintf(buf, sizeof (buf),
-				    "abandon old contract %d", stp->set_ctid);
+				    "abandon old contract %" _PRIdID,
+				    stp->set_ctid);
 				ses_ct_print(buf);
 				stp->set_ctid = 0;
 			}
@@ -1430,11 +1431,11 @@ ses_add_bay_props(topo_mod_t *mod, tnode_t *tn, ses_enum_node_t *snp)
 			    &addr) != 0)
 				continue;
 
-			len = snprintf(NULL, 0, "%016llx", addr) + 1;
+			len = snprintf(NULL, 0, "%016" PRIx64, addr) + 1;
 			if ((paths[i] = topo_mod_alloc(mod, len)) == NULL)
 				goto error;
 
-			(void) snprintf(paths[i], len, "%016llx", addr);
+			(void) snprintf(paths[i], len, "%016" PRIx64, addr);
 
 			++i;
 		}
@@ -1553,7 +1554,7 @@ ses_create_generic(ses_enum_data_t *sdp, ses_enum_node_t *snp, tnode_t *pnode,
 		if (nvlist_lookup_string(aprops, SES_PROP_CLASS_DESCRIPTION,
 		    &desc) != 0 || desc[0] == '\0')
 			desc = (char *)labelname;
-		(void) snprintf(label, sizeof (label), "%s %llu", desc,
+		(void) snprintf(label, sizeof (label), "%s %" PRIu64, desc,
 		    instance);
 		desc = label;
 	}
@@ -1686,7 +1687,7 @@ ses_set_expander_props(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 		goto error;
 	}
 
-	(void) sprintf(sasaddr_str, "%llx", sasaddr);
+	(void) sprintf(sasaddr_str, "%" PRIx64, sasaddr);
 
 	/* search matching dev_di_node. */
 	for (dnode = topo_list_next(&sdp->sed_devs); dnode != NULL;
@@ -1935,7 +1936,7 @@ ses_set_connector_props(ses_enum_data_t *sdp, ses_enum_node_t *snp,
 	/*
 	 * convert phy mask to string.
 	 */
-	(void) snprintf(phymask_str, 17, "%llx", phy_mask);
+	(void) snprintf(phymask_str, 17, "%" PRIx64, phy_mask);
 
 	/* create the storage group */
 	if (topo_pgroup_create(tnode, &storage_pgroup, &err) != 0) {
@@ -2435,11 +2436,11 @@ ses_create_subchassis(ses_enum_data_t *sdp, tnode_t *pnode,
 	    desc[0] == '\0') {
 		if (nvlist_lookup_string(props, SES_PROP_CLASS_DESCRIPTION,
 		    &desc) == 0 && desc[0] != '\0')
-			(void) snprintf(label, sizeof (label), "%s %llu", desc,
-			    instance);
+			(void) snprintf(label, sizeof (label), "%s %" PRIu64,
+			    desc, instance);
 		else
 			(void) snprintf(label, sizeof (label),
-			    "SUBCHASSIS %llu", instance);
+			    "SUBCHASSIS %" PRIu64, instance);
 		desc = label;
 	}
 

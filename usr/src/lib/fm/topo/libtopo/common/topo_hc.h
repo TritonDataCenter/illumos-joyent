@@ -22,7 +22,7 @@
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2020 Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 #ifndef _TOPO_HC_H
@@ -286,6 +286,8 @@ extern "C" {
 #define	TOPO_PROP_DIMM_MODULE_TYPE	"module-type"
 #define	TOPO_PROP_DIMM_SIZE		"size"
 #define	TOPO_PROP_DIMM_RANKS		"ranks"
+#define	TOPO_PROP_DIMM_LRANKS		"logical-ranks"
+#define	TOPO_PROP_DIMM_STACK		"stack-height"
 #define	TOPO_PROP_DIMM_BANKS		"banks"
 #define	TOPO_PROP_DIMM_BANK_GROUPS	"bank-groups"
 #define	TOPO_PROP_DIMM_BANKS_PER_GROUP	"banks-per-bank-group"

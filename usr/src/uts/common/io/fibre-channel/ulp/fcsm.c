@@ -2094,8 +2094,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		if (rval != DDI_SUCCESS) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2104,8 +2104,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		if (real_len < cmd_len) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2116,8 +2116,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		if (rval != DDI_DMA_MAPPED) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2127,8 +2127,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		    pinfo->port_cmd_dma_attr->dma_attr_sgllen) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2141,8 +2141,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		if (cp == NULL) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2167,8 +2167,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		if (rval != DDI_SUCCESS) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2177,8 +2177,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		if (real_len < resp_len) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2189,8 +2189,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		if (rval != DDI_DMA_MAPPED) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2200,8 +2200,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		    pinfo->port_resp_dma_attr->dma_attr_sgllen) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 
@@ -2214,8 +2214,8 @@ fcsm_alloc_cmd(fcsm_t *fcsm, uint32_t cmd_len, uint32_t resp_len, int sleep)
 		if (cp == NULL) {
 			(void) fc_ulp_uninit_packet(
 			    (opaque_t)pinfo->port_handle, pkt);
-			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			fcsm_free_cmd_dma(cmd);
+			kmem_cache_free(fcsm->sm_cmd_cache, (void *)cmd);
 			return (NULL);
 		}
 

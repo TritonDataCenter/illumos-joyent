@@ -1427,6 +1427,14 @@ svc_clone_init(void)
 	return (clone_xprt);
 }
 
+void
+svc_init_clone_xprt(SVCXPRT *clone_xprt, queue_t *wq)
+{
+	extern struct svc_ops svc_cots_op;
+	clone_xprt->xp_ops = &svc_cots_op;
+	clone_xprt->xp_wq = wq;
+}
+
 /*
  * Free memory allocated by svc_clone_init.
  */

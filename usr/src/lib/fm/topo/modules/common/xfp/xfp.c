@@ -158,7 +158,7 @@ xfp_label_set(topo_mod_t *mod, tnode_t *parent, tnode_t *node,
 
 	len = strlen(plabel) + strlen(xfplabel) + 2;
 	label = topo_mod_alloc(mod, len);
-	(void) snprintf(label, len, "%s%s%d", plabel, xfplabel, n);
+	(void) snprintf(label, len, "%s%s%" PRId64, plabel, xfplabel, n);
 	topo_mod_strfree(mod, plabel);
 
 	if (label != NULL) {

@@ -575,7 +575,7 @@ cb_compound(CB_COMPOUND4args *args, CB_COMPOUND4res *resp, struct svc_req *req,
 	/*
 	 * XXX for now, minorversion should be zero
 	 */
-	if (args->minorversion != CB4_MINORVERSION) {
+	if (args->minorversion != CB4_MINORVERSION_v0) {
 		resp->array_len = 0;
 		resp->array = NULL;
 		resp->status = NFS4ERR_MINOR_VERS_MISMATCH;

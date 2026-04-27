@@ -111,7 +111,11 @@
 #include <topo_subr.h>
 #include <topo_tree.h>
 
+#if !defined(_ILP32)
+#define	PLUGIN_PATH	"plugins/64"
+#else
 #define	PLUGIN_PATH	"plugins"
+#endif
 #define	PLUGIN_PATH_LEN	MAXNAMELEN + 5
 
 topo_mod_t *

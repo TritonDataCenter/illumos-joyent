@@ -91,21 +91,22 @@ static void		svc_clts_ktattrs(SVCXPRT *, int, void **);
  * Server transport operations vector.
  */
 struct svc_ops svc_clts_op = {
-	svc_clts_krecv,		/* Get requests */
-	svc_clts_kgetargs,	/* Deserialize arguments */
-	svc_clts_ksend,		/* Send reply */
-	svc_clts_kfreeargs,	/* Free argument data space */
-	svc_clts_kdestroy,	/* Destroy transport handle */
-	svc_clts_kdup,		/* Check entry in dup req cache */
-	svc_clts_kdupdone,	/* Mark entry in dup req cache as done */
-	svc_clts_kgetres,	/* Get pointer to response buffer */
-	svc_clts_kfreeres,	/* Destroy pre-serialized response header */
-	svc_clts_kclone_destroy, /* Destroy a clone xprt */
-	svc_clts_kstart,	/* Tell `ready-to-receive' to rpcmod */
-	svc_clts_kclone_xprt,	/* transport specific clone xprt function */
-	svc_clts_ktattrs,	/* Transport specific attributes */
-	rpcmod_hold,		/* Increment transport reference count */
-	rpcmod_release		/* Decrement transport reference count */
+	.xp_recv = svc_clts_krecv,
+	.xp_getargs = svc_clts_kgetargs,
+	.xp_reply = svc_clts_ksend,
+	.xp_freeargs = svc_clts_kfreeargs,
+	.xp_destroy = svc_clts_kdestroy,
+	.xp_dup = svc_clts_kdup,
+	.xp_dupdone = svc_clts_kdupdone,
+	.xp_getres = svc_clts_kgetres,
+	.xp_freeres = svc_clts_kfreeres,
+	.xp_clone_destroy = svc_clts_kclone_destroy,
+	.xp_start = svc_clts_kstart,
+	.xp_clone_xprt = svc_clts_kclone_xprt,
+	.xp_tattrs = svc_clts_ktattrs,
+	.xp_ctl = NULL,
+	.xp_hold = rpcmod_hold,
+	.xp_release = rpcmod_release
 };
 
 /*

@@ -31,7 +31,6 @@
 #include <sys/mac_provider.h>
 #include <sys/mac_ether.h>
 #include <sys/strsubr.h>
-#include <sys/queue.h>
 
 #include "common/common.h"
 #include "common/t4_regs.h"
@@ -50,37 +49,20 @@ static int t4_mc_getprop(void *arg, const char *name, mac_prop_id_t id,
 static void t4_mc_propinfo(void *arg, const char *name, mac_prop_id_t id,
     mac_prop_info_handle_t ph);
 
-static int t4_init_synchronized(struct port_info *pi);
-static int t4_uninit_synchronized(struct port_info *pi);
+static int t4_port_enable(struct port_info *pi);
+static int t4_port_disable(struct port_info *pi);
 static void t4_propinfo_priv(struct port_info *, const char *,
     mac_prop_info_handle_t);
 static int t4_getprop_priv(struct port_info *, const char *, uint_t, void *);
 static int t4_setprop_priv(struct port_info *, const char *, const void *);
 
-mac_callbacks_t t4_m_callbacks = {
+mac_callbacks_t t4_mac_callbacks = {
 	.mc_callbacks	= MC_GETCAPAB | MC_PROPERTIES,
 	.mc_getstat	= t4_mc_getstat,
 	.mc_start	= t4_mc_start,
 	.mc_stop	= t4_mc_stop,
 	.mc_setpromisc	= t4_mc_setpromisc,
 	.mc_multicst	= t4_mc_multicst,
-	.mc_unicst	= t4_mc_unicst,
-	.mc_tx		= t4_mc_tx,
-	.mc_getcapab	= t4_mc_getcapab,
-	.mc_setprop	= t4_mc_setprop,
-	.mc_getprop	= t4_mc_getprop,
-	.mc_propinfo	= t4_mc_propinfo,
-};
-
-mac_callbacks_t t4_m_ring_callbacks = {
-	.mc_callbacks	= MC_GETCAPAB | MC_PROPERTIES,
-	.mc_getstat	= t4_mc_getstat,
-	.mc_start	= t4_mc_start,
-	.mc_stop	= t4_mc_stop,
-	.mc_setpromisc	= t4_mc_setpromisc,
-	.mc_multicst	= t4_mc_multicst,
-	.mc_unicst	= NULL, /* t4_addmac */
-	.mc_tx		= NULL, /* t4_eth_tx */
 	.mc_getcapab	= t4_mc_getcapab,
 	.mc_setprop	= t4_mc_setprop,
 	.mc_getprop	= t4_mc_getprop,
@@ -401,7 +383,8 @@ t4_mc_getstat(void *arg, uint_t stat, uint64_t *val)
 		break;
 
 	case MAC_STAT_NORCVBUF:
-		*val = 0;	/* TODO should come from rxq->nomem */
+		/* TODO: pull from freelist stats? */
+		*val = 0;
 		break;
 
 	case MAC_STAT_IERRORS:
@@ -725,7 +708,7 @@ t4_mc_start(void *arg)
 	struct port_info *pi = arg;
 
 	ADAPTER_LOCK(pi->adapter);
-	const int rc = t4_init_synchronized(pi);
+	const int rc = t4_port_enable(pi);
 	ADAPTER_UNLOCK(pi->adapter);
 
 	return (rc);
@@ -737,7 +720,7 @@ t4_mc_stop(void *arg)
 	struct port_info *pi = arg;
 
 	ADAPTER_LOCK(pi->adapter);
-	(void) t4_uninit_synchronized(pi);
+	(void) t4_port_disable(pi);
 	ADAPTER_UNLOCK(pi->adapter);
 }
 
@@ -746,11 +729,10 @@ t4_mc_setpromisc(void *arg, boolean_t on)
 {
 	struct port_info *pi = arg;
 	struct adapter *sc = pi->adapter;
-	int rc;
 
 	ADAPTER_LOCK(sc);
-	rc = -t4_set_rxmode(sc, sc->mbox, pi->viid, -1, on ? 1 : 0, -1, -1, -1,
-	    false);
+	const int rc = -t4_set_rxmode(sc, sc->mbox, pi->viid, -1, on ? 1 : 0,
+	    -1, -1, -1, false);
 	ADAPTER_UNLOCK(sc);
 
 	return (rc);
@@ -766,10 +748,10 @@ t4_mc_multicst(void *arg, boolean_t add, const uint8_t *mcaddr)
 	struct port_info *pi = arg;
 	struct adapter *sc = pi->adapter;
 	struct fw_vi_mac_cmd c;
-	int len16, rc;
+	int rc = 0;
+	int len16 = howmany(sizeof (c.op_to_viid) +
+	    sizeof (c.freemacs_to_len16) + sizeof (c.u.exact[0]), 16);
 
-	len16 = howmany(sizeof (c.op_to_viid) + sizeof (c.freemacs_to_len16) +
-	    sizeof (c.u.exact[0]), 16);
 	c.op_to_viid = htonl(V_FW_CMD_OP(FW_VI_MAC_CMD) | F_FW_CMD_REQUEST |
 	    F_FW_CMD_WRITE | V_FW_VI_MAC_CMD_VIID(pi->viid));
 	c.freemacs_to_len16 = htonl(V_FW_CMD_LEN16(len16));
@@ -781,26 +763,8 @@ t4_mc_multicst(void *arg, boolean_t add, const uint8_t *mcaddr)
 	ADAPTER_LOCK(sc);
 	rc = -t4_wr_mbox_meat(sc, sc->mbox, &c, len16 * 16, &c, true);
 	ADAPTER_UNLOCK(sc);
-	if (rc != 0)
-		return (rc);
-#ifdef DEBUG
-	/*
-	 * TODO: Firmware doesn't seem to return the correct index on removal
-	 * (it gives back 0x3fd FW_VI_MAC_MAC_BASED_FREE unchanged. Remove this
-	 * code once it is fixed.
-	 */
-	else {
-		uint16_t idx;
 
-		idx = G_FW_VI_MAC_CMD_IDX(ntohs(c.u.exact[0].valid_to_idx));
-		cxgb_printf(pi->dip, CE_NOTE,
-		    "%02x:%02x:%02x:%02x:%02x:%02x %s %d", mcaddr[0],
-		    mcaddr[1], mcaddr[2], mcaddr[3], mcaddr[4], mcaddr[5],
-		    add ? "added at index" : "removed from index", idx);
-	}
-#endif
-
-	return (0);
+	return (rc);
 }
 
 int
@@ -808,30 +772,31 @@ t4_mc_unicst(void *arg, const uint8_t *ucaddr)
 {
 	struct port_info *pi = arg;
 	struct adapter *sc = pi->adapter;
-	int rc;
 
-	if (ucaddr == NULL)
+	if (ucaddr == NULL) {
 		return (EINVAL);
+	}
 
 	ADAPTER_LOCK(sc);
 
 	/* We will support adding only one mac address */
-	if (pi->adapter->props.multi_rings && pi->macaddr_cnt) {
+	if (pi->macaddr_cnt) {
 		ADAPTER_UNLOCK(sc);
 		return (ENOSPC);
 	}
-	rc = t4_change_mac(sc, sc->mbox, pi->viid, pi->xact_addr_filt, ucaddr,
-	    true, &pi->smt_idx);
+
+	const int rc = t4_change_mac(sc, sc->mbox, pi->viid, pi->xact_addr_filt,
+	    ucaddr, true, &pi->smt_idx);
 	if (rc < 0) {
-		rc = -rc;
-	} else {
-		pi->macaddr_cnt++;
-		pi->xact_addr_filt = rc;
-		rc = 0;
+		PORT_UNLOCK(pi);
+		return (-rc);
 	}
+
+	pi->macaddr_cnt++;
+	pi->xact_addr_filt = rc;
 	ADAPTER_UNLOCK(sc);
 
-	return (rc);
+	return (0);
 }
 
 int
@@ -845,9 +810,9 @@ t4_remmac(void *arg, const uint8_t *mac_addr)
 {
 	struct port_info *pi = arg;
 
-	ADAPTER_LOCK(pi->adapter);
+	PORT_LOCK(pi);
 	pi->macaddr_cnt--;
-	ADAPTER_UNLOCK(pi->adapter);
+	PORT_UNLOCK(pi);
 
 	return (0);
 }
@@ -868,7 +833,7 @@ t4_fill_group(void *arg, mac_ring_type_t rtype, const int rg_index,
 		infop->mgi_stop = NULL;
 		infop->mgi_addmac = t4_addmac;
 		infop->mgi_remmac = t4_remmac;
-		infop->mgi_count = pi->nrxq;
+		infop->mgi_count = pi->rxq_count;
 		break;
 	}
 	case MAC_RING_TYPE_TX:
@@ -879,52 +844,45 @@ t4_fill_group(void *arg, mac_ring_type_t rtype, const int rg_index,
 }
 
 static int
-t4_ring_start(mac_ring_driver_t rh, uint64_t mr_gen_num)
+t4_ring_rx_start(mac_ring_driver_t rh, uint64_t mr_gen_num)
 {
 	struct sge_rxq *rxq = (struct sge_rxq *)rh;
+	t4_sge_iq_t *iq = &rxq->iq;
 
-	RXQ_LOCK(rxq);
+	IQ_LOCK(iq);
 	rxq->ring_gen_num = mr_gen_num;
-	RXQ_UNLOCK(rxq);
+	IQ_UNLOCK(iq);
+
 	return (0);
 }
 
-/*
- * Enable interrupt on the specificed rx ring.
- */
 int
 t4_ring_intr_enable(mac_intr_handle_t intrh)
 {
 	struct sge_rxq *rxq = (struct sge_rxq *)intrh;
-	struct sge_iq *iq = &rxq->iq;
+	t4_sge_iq_t *iq = &rxq->iq;
 
-	RXQ_LOCK(rxq);
-	iq->polling = 0;
-	iq->state = IQS_IDLE;
-	t4_iq_gts_update(iq, iq->intr_params, 0);
-	RXQ_UNLOCK(rxq);
+	IQ_LOCK(iq);
+	iq->tsi_flags &= ~IQ_POLLING;
+	t4_iq_gts_update(iq, iq->tsi_gts_rearm, 0);
+	IQ_UNLOCK(iq);
+
 	return (0);
 }
 
-/*
- * Disable interrupt on the specificed rx ring.
- */
 int
 t4_ring_intr_disable(mac_intr_handle_t intrh)
 {
 	struct sge_rxq *rxq = (struct sge_rxq *)intrh;
-	struct sge_iq *iq;
+	t4_sge_iq_t *iq = &rxq->iq;
 
+	IQ_LOCK(iq);
 	/*
 	 * Nothing to be done here WRT the interrupt, as it will not fire until
 	 * re-enabled through the t4_iq_gts_update() in t4_ring_intr_enable().
 	 */
-
-	iq = &rxq->iq;
-	RXQ_LOCK(rxq);
-	iq->polling = 1;
-	iq->state = IQS_BUSY;
-	RXQ_UNLOCK(rxq);
+	iq->tsi_flags |= IQ_POLLING;
+	IQ_UNLOCK(iq);
 
 	return (0);
 }
@@ -933,17 +891,17 @@ mblk_t *
 t4_poll_ring(void *arg, int n_bytes)
 {
 	struct sge_rxq *rxq = (struct sge_rxq *)arg;
-	mblk_t *mp = NULL;
 
 	ASSERT(n_bytes >= 0);
 	if (n_bytes == 0)
 		return (NULL);
 
-	RXQ_LOCK(rxq);
-	mp = t4_ring_rx(rxq, n_bytes);
-	RXQ_UNLOCK(rxq);
-
-	return (mp);
+	struct t4_poll_req req = {
+		.tpr_byte_budget = n_bytes,
+		.tpr_mp = NULL,
+	};
+	(void) t4_process_rx_iq(&rxq->iq, 0, &req);
+	return (req.tpr_mp);
 }
 
 /*
@@ -956,11 +914,11 @@ t4_rx_stat(mac_ring_driver_t rh, uint_t stat, uint64_t *val)
 
 	switch (stat) {
 	case MAC_STAT_RBYTES:
-		*val = rxq->rxbytes;
+		*val = rxq->stats.rxbytes;
 		break;
 
 	case MAC_STAT_IPACKETS:
-		*val = rxq->rxpkts;
+		*val = rxq->stats.rxpkts;
 		break;
 
 	default:
@@ -980,12 +938,12 @@ t4_tx_stat(mac_ring_driver_t rh, uint_t stat, uint64_t *val)
 	struct sge_txq *txq = (struct sge_txq *)rh;
 
 	switch (stat) {
-	case MAC_STAT_RBYTES:
-		*val = txq->txbytes;
+	case MAC_STAT_OBYTES:
+		*val = txq->stats.txbytes;
 		break;
 
-	case MAC_STAT_IPACKETS:
-		*val = txq->txpkts;
+	case MAC_STAT_OPACKETS:
+		*val = txq->stats.txpkts;
 		break;
 
 	default:
@@ -997,9 +955,8 @@ t4_tx_stat(mac_ring_driver_t rh, uint_t stat, uint64_t *val)
 }
 
 /*
- * Callback funtion for MAC layer to register all rings
- * for given ring_group, noted by group_index.
- * Since we have only one group, ring index becomes
+ * Callback funtion for MAC layer to register all rings for given ring_group,
+ * noted by group_index. Since we have only one group, ring index becomes
  * absolute index.
  */
 void
@@ -1007,22 +964,25 @@ t4_fill_ring(void *arg, mac_ring_type_t rtype, const int group_index,
     const int ring_index, mac_ring_info_t *infop, mac_ring_handle_t rh)
 {
 	struct port_info *pi = arg;
-	mac_intr_t *mintr;
+
+	ASSERT3S(ring_index, >=, 0);
 
 	switch (rtype) {
 	case MAC_RING_TYPE_RX: {
-		struct sge_rxq *rxq;
+		struct sge_rxq *rxq =
+		    &pi->adapter->sge.rxq[pi->rxq_start + ring_index];
+		mac_intr_t *mintr = &infop->mri_intr;
 
-		rxq = &pi->adapter->sge.rxq[pi->first_rxq + ring_index];
+		ASSERT3S(ring_index, <, pi->rxq_count);
+
 		rxq->ring_handle = rh;
 
 		infop->mri_driver = (mac_ring_driver_t)rxq;
-		infop->mri_start = t4_ring_start;
+		infop->mri_start = t4_ring_rx_start;
 		infop->mri_stop = NULL;
 		infop->mri_poll = t4_poll_ring;
 		infop->mri_stat = t4_rx_stat;
 
-		mintr = &infop->mri_intr;
 		mintr->mi_handle = (mac_intr_handle_t)rxq;
 		mintr->mi_enable = t4_ring_intr_enable;
 		mintr->mi_disable = t4_ring_intr_disable;
@@ -1031,8 +991,12 @@ t4_fill_ring(void *arg, mac_ring_type_t rtype, const int group_index,
 	}
 	case MAC_RING_TYPE_TX: {
 		struct sge_txq *txq =
-		    &pi->adapter->sge.txq[pi->first_txq + ring_index];
+		    &pi->adapter->sge.txq[pi->txq_start + ring_index];
+
+		ASSERT3S(ring_index, <, pi->txq_count);
+
 		txq->ring_handle = rh;
+
 		infop->mri_driver = (mac_ring_driver_t)txq;
 		infop->mri_start = NULL;
 		infop->mri_stop = NULL;
@@ -1041,19 +1005,9 @@ t4_fill_ring(void *arg, mac_ring_type_t rtype, const int group_index,
 		break;
 	}
 	default:
-		ASSERT(0);
+		panic("unexpected ring type: %d", rtype);
 		break;
 	}
-}
-
-mblk_t *
-t4_mc_tx(void *arg, mblk_t *m)
-{
-	struct port_info *pi = arg;
-	struct adapter *sc = pi->adapter;
-	struct sge_txq *txq = &sc->sge.txq[pi->first_txq];
-
-	return (t4_eth_tx(txq, m));
 }
 
 static int
@@ -1140,10 +1094,7 @@ t4_port_led_set(void *arg, mac_led_mode_t mode, uint_t flags)
 		return (ENOTSUP);
 	}
 
-	ADAPTER_LOCK(sc);
 	rc = -t4_identify_port(sc, sc->mbox, pi->viid, val);
-	ADAPTER_UNLOCK(sc);
-
 	return (rc);
 }
 
@@ -1152,8 +1103,6 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 {
 	struct port_info *pi = arg;
 	boolean_t status = B_TRUE;
-	mac_capab_transceiver_t *mct;
-	mac_capab_led_t *mcl;
 
 	switch (cap) {
 	case MAC_CAPAB_HCKSUM:
@@ -1161,8 +1110,9 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 			uint32_t *d = data;
 			*d = HCKSUM_INET_FULL_V4 | HCKSUM_IPHDRCKSUM |
 			    HCKSUM_INET_FULL_V6;
-		} else
+		} else {
 			status = B_FALSE;
+		}
 		break;
 
 	case MAC_CAPAB_LSO:
@@ -1175,21 +1125,18 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 			    LSO_TX_BASIC_TCP_IPV6;
 			d->lso_basic_tcp_ipv4.lso_max = 65535;
 			d->lso_basic_tcp_ipv6.lso_max = 65535;
-		} else
+		} else {
 			status = B_FALSE;
+		}
 		break;
 
 	case MAC_CAPAB_RINGS: {
 		mac_capab_rings_t *cap_rings = data;
 
-		if (!pi->adapter->props.multi_rings) {
-			status = B_FALSE;
-			break;
-		}
 		switch (cap_rings->mr_type) {
 		case MAC_RING_TYPE_RX:
 			cap_rings->mr_group_type = MAC_GROUP_TYPE_STATIC;
-			cap_rings->mr_rnum = pi->nrxq;
+			cap_rings->mr_rnum = pi->rxq_count;
 			cap_rings->mr_gnum = 1;
 			cap_rings->mr_rget = t4_fill_ring;
 			cap_rings->mr_gget = t4_fill_group;
@@ -1198,7 +1145,7 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 			break;
 		case MAC_RING_TYPE_TX:
 			cap_rings->mr_group_type = MAC_GROUP_TYPE_STATIC;
-			cap_rings->mr_rnum = pi->ntxq;
+			cap_rings->mr_rnum = pi->txq_count;
 			cap_rings->mr_gnum = 0;
 			cap_rings->mr_rget = t4_fill_ring;
 			cap_rings->mr_gget = NULL;
@@ -1207,20 +1154,24 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 		break;
 	}
 
-	case MAC_CAPAB_TRANSCEIVER:
-		mct = data;
+	case MAC_CAPAB_TRANSCEIVER: {
+		mac_capab_transceiver_t *mct = data;
 
 		mct->mct_flags = 0;
 		mct->mct_ntransceivers = 1;
 		mct->mct_info = t4_mc_transceiver_info;
 		mct->mct_read = t4_mc_transceiver_read;
 		break;
-	case MAC_CAPAB_LED:
-		mcl = data;
+	}
+
+	case MAC_CAPAB_LED: {
+		mac_capab_led_t *mcl = data;
+
 		mcl->mcl_flags = 0;
 		mcl->mcl_modes = MAC_LED_DEFAULT | MAC_LED_IDENT;
 		mcl->mcl_set = t4_port_led_set;
 		break;
+	}
 
 	default:
 		status = B_FALSE; /* cap not supported */
@@ -1229,28 +1180,22 @@ t4_mc_getcapab(void *arg, mac_capab_t cap, void *data)
 	return (status);
 }
 
-static void
-t4_mac_link_caps_to_flowctrl(fw_port_cap32_t caps, link_flowctrl_t *fc)
+static link_flowctrl_t
+t4_mac_link_caps_to_flowctrl(fw_port_cap32_t caps)
 {
-	u8 pause_tx = 0, pause_rx = 0;
-
-	if (caps & FW_PORT_CAP32_FC_TX)
-		pause_tx = 1;
-
-	if (caps & FW_PORT_CAP32_FC_RX)
-		pause_rx = 1;
-
-	if (pause_rx & pause_tx)
-		*fc = LINK_FLOWCTRL_BI;
-	else if (pause_tx)
-		*fc = LINK_FLOWCTRL_TX;
-	else if (pause_rx)
-		*fc = LINK_FLOWCTRL_RX;
-	else
-		*fc = LINK_FLOWCTRL_NONE;
+	switch (caps & (FW_PORT_CAP32_FC_TX | FW_PORT_CAP32_FC_RX)) {
+	case (FW_PORT_CAP32_FC_TX | FW_PORT_CAP32_FC_RX):
+		return (LINK_FLOWCTRL_BI);
+	case FW_PORT_CAP32_FC_TX:
+		return (LINK_FLOWCTRL_TX);
+	case FW_PORT_CAP32_FC_RX:
+		return (LINK_FLOWCTRL_RX);
+	default:
+		return (LINK_FLOWCTRL_NONE);
+	}
 }
 
-static int
+static void
 t4_mac_flowctrl_to_link_caps(struct port_info *pi, link_flowctrl_t fc,
     fw_port_cap32_t *new_caps)
 {
@@ -1273,7 +1218,7 @@ t4_mac_flowctrl_to_link_caps(struct port_info *pi, link_flowctrl_t fc,
 	if (pi->link_cfg.admin_caps & FW_PORT_CAP32_ANEG)
 		pause |= PAUSE_AUTONEG;
 
-	return (t4_link_set_pause(pi, pause, new_caps));
+	t4_link_set_pause(pi, pause, new_caps);
 }
 
 static link_fec_t
@@ -1297,20 +1242,13 @@ t4_mac_port_caps_to_fec_cap(fw_port_cap32_t caps)
 	return (link_fec);
 }
 
-static void
-t4_mac_admin_caps_to_fec_cap(fw_port_cap32_t caps, link_fec_t *fec)
+static link_fec_t
+t4_mac_link_caps_to_fec_cap(fw_port_cap32_t caps)
 {
-	*fec = t4_mac_port_caps_to_fec_cap(caps);
-}
+	const link_fec_t link_fec =
+	    t4_mac_port_caps_to_fec_cap(caps & ~FW_PORT_CAP32_FEC_NO_FEC);
 
-static void
-t4_mac_link_caps_to_fec_cap(fw_port_cap32_t caps, link_fec_t *fec)
-{
-	link_fec_t link_fec;
-
-	caps &= ~FW_PORT_CAP32_FEC_NO_FEC;
-	link_fec = t4_mac_port_caps_to_fec_cap(caps);
-	*fec = link_fec ? link_fec : LINK_FEC_NONE;
+	return (link_fec ? link_fec : LINK_FEC_NONE);
 }
 
 static int
@@ -1350,7 +1288,6 @@ out:
 	return (t4_link_set_fec(pi, fec, new_caps));
 }
 
-/* ARGSUSED */
 static int
 t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
     const void *val)
@@ -1380,8 +1317,8 @@ t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 		break;
 
 	case MAC_PROP_FLOWCTRL:
-		rc = t4_mac_flowctrl_to_link_caps(pi,
-		    *(const link_flowctrl_t *)val, &new_caps);
+		t4_mac_flowctrl_to_link_caps(pi, *(const link_flowctrl_t *)val,
+		    &new_caps);
 		relink = 1;
 		break;
 
@@ -1441,8 +1378,9 @@ t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 		break;
 	}
 
-	if (rc != 0)
+	if (rc != 0) {
 		return (rc);
+	}
 
 	if ((pi->flags & TPF_OPEN) != 0) {
 		if (relink != 0) {
@@ -1453,6 +1391,7 @@ t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 			if (rc != 0) {
 				cxgb_printf(pi->dip, CE_WARN,
 				    "%s link config failed: %d", __func__, rc);
+				PORT_UNLOCK(pi);
 				return (rc);
 			}
 		}
@@ -1465,6 +1404,7 @@ t4_mc_setprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 			if (rc != 0) {
 				cxgb_printf(pi->dip, CE_WARN,
 				    "set_rxmode failed: %d", rc);
+				PORT_UNLOCK(pi);
 				return (rc);
 			}
 		}
@@ -1519,15 +1459,18 @@ t4_mc_getprop(void *arg, const char *name, mac_prop_id_t id, uint_t size,
 		break;
 
 	case MAC_PROP_FLOWCTRL:
-		t4_mac_link_caps_to_flowctrl(lc->link_caps, val);
+		*(link_flowctrl_t *)val =
+		    t4_mac_link_caps_to_flowctrl(lc->link_caps);
 		break;
 
 	case MAC_PROP_ADV_FEC_CAP:
-		t4_mac_link_caps_to_fec_cap(lc->link_caps, val);
+		*(link_fec_t *)val =
+		    t4_mac_link_caps_to_fec_cap(lc->link_caps);
 		break;
 
 	case MAC_PROP_EN_FEC_CAP:
-		t4_mac_admin_caps_to_fec_cap(lc->admin_caps, val);
+		*(link_fec_t *)val =
+		    t4_mac_port_caps_to_fec_cap(lc->admin_caps);
 		break;
 
 	case MAC_PROP_ADV_100GFDX_CAP:
@@ -1703,7 +1646,7 @@ t4_mc_propinfo(void *arg, const char *name, mac_prop_id_t id,
 }
 
 static int
-t4_init_synchronized(struct port_info *pi)
+t4_port_enable(struct port_info *pi)
 {
 	struct adapter *sc = pi->adapter;
 	int rc = 0;
@@ -1724,9 +1667,8 @@ t4_init_synchronized(struct port_info *pi)
 			PORT_UNLOCK(pi);
 			return (rc); /* error message displayed already */
 		}
-	} else {
-		t4_port_queues_enable(pi);
 	}
+	t4_port_queues_enable(pi);
 
 	rc = -t4_set_rxmode(sc, sc->mbox, pi->viid, pi->mtu, 0, 0, 1, 0, false);
 	if (rc != 0) {
@@ -1755,41 +1697,41 @@ t4_init_synchronized(struct port_info *pi)
 		cxgb_printf(pi->dip, CE_WARN, "enable_vi failed: %d", rc);
 		goto done;
 	}
+	pi->flags |= TPF_VI_ENABLED;
 
 	/* all ok */
 	pi->flags |= TPF_OPEN;
 done:
 	PORT_UNLOCK(pi);
 	if (rc != 0)
-		(void) t4_uninit_synchronized(pi);
+		(void) t4_port_disable(pi);
 
 	return (rc);
 }
 
-/*
- * Idempotent.
- */
 static int
-t4_uninit_synchronized(struct port_info *pi)
+t4_port_disable(struct port_info *pi)
 {
 	struct adapter *sc = pi->adapter;
-	int rc;
 
 	ADAPTER_LOCK_ASSERT_OWNED(pi->adapter);
 
 	PORT_LOCK(pi);
 	/*
 	 * Disable the VI so that all its data in either direction is discarded
-	 * by the MPS.  Leave everything else (the queues, interrupts, and 1Hz
-	 * tick) intact as the TP can deliver negative advice or data that it's
-	 * holding in its RAM (for an offloaded connection) even after the VI is
-	 * disabled.
+	 * by the MPS.  Leave everything else (queues, interrupts, etc) so any
+	 * straggling work in flight has a safe place to land.
 	 */
-	rc = -t4_enable_vi(sc, sc->mbox, pi->viid, false, false);
-	if (rc != 0) {
-		cxgb_printf(pi->dip, CE_WARN, "disable_vi failed: %d", rc);
-		PORT_UNLOCK(pi);
-		return (rc);
+	if (pi->flags & TPF_VI_ENABLED) {
+		const int rc =
+		    -t4_enable_vi(sc, sc->mbox, pi->viid, false, false);
+		if (rc != 0) {
+			cxgb_printf(pi->dip, CE_WARN,
+			    "disable_vi failed: %d", rc);
+			PORT_UNLOCK(pi);
+			return (rc);
+		}
+		pi->flags &= ~TPF_VI_ENABLED;
 	}
 
 	t4_port_queues_disable(pi);
@@ -1833,8 +1775,8 @@ t4_propinfo_priv(struct port_info *pi, const char *name,
     mac_prop_info_handle_t ph)
 {
 	struct adapter *sc = pi->adapter;
-	struct driver_properties *dp = &sc->props;
-	struct link_config *lc = &pi->link_cfg;
+	const struct driver_properties *dp = &sc->props;
+	const struct link_config *lc = &pi->link_cfg;
 
 	const t4_priv_prop_t *prop = t4_priv_prop_match(name);
 	if (prop == NULL || !t4_priv_prop_supported(pi, prop)) {
@@ -1844,18 +1786,16 @@ t4_propinfo_priv(struct port_info *pi, const char *name,
 	int v = 0;
 	switch (prop->tpp_id) {
 	case T4PROP_FW_TMR:
-		v = t4_convert_holdoff_timer(sc, sc->props.fwq_tmr_idx);
+		v = t4_convert_holdoff_timer(sc, dp->fwq_tmr_idx);
 		break;
 	case T4PROP_FW_PKTC:
-		v = t4_convert_holdoff_pktcnt(sc, sc->props.fwq_pktc_idx);
+		v = t4_convert_holdoff_pktcnt(sc, dp->fwq_pktc_idx);
 		break;
 	case T4PROP_RX_TMR:
-		v = t4_convert_holdoff_timer(sc, t4_port_is_10xg(pi) ?
-		    dp->tmr_idx_10g : dp->tmr_idx_1g);
+		v = t4_convert_holdoff_timer(sc, dp->ethq_tmr_idx);
 		break;
 	case T4PROP_RX_PKTC:
-		v = t4_convert_holdoff_pktcnt(sc, t4_port_is_10xg(pi) ?
-		    dp->pktc_idx_10g : dp->pktc_idx_1g);
+		v = t4_convert_holdoff_pktcnt(sc, dp->ethq_pktc_idx);
 		break;
 	case T4PROP_TX_TMR:
 		v = t4_convert_dbq_timer(sc, dp->dbq_timer_idx);
@@ -1892,7 +1832,6 @@ t4_getprop_priv(struct port_info *pi, const char *name, uint_t size, void *val)
 		return (ENOTSUP);
 	}
 
-	PORT_LOCK(pi);
 	int v = 0;
 	switch (prop->tpp_id) {
 	case T4PROP_FW_TMR:
@@ -1923,10 +1862,8 @@ t4_getprop_priv(struct port_info *pi, const char *name, uint_t size, void *val)
 		v = (lc->link_caps & FW_PORT_CAP32_FC_RX) ? 1 : 0;
 		break;
 	default:
-		PORT_UNLOCK(pi);
 		return (ENOTSUP);
 	}
-	PORT_UNLOCK(pi);
 
 	(void) snprintf(val, size, "%d", v);
 	return (0);
@@ -2000,7 +1937,6 @@ t4_choose_dbq_timer(struct adapter *sc, uint_t target_us)
 	return (chosen_idx);
 }
 
-
 static int
 t4_setprop_priv(struct port_info *pi, const char *name, const void *val)
 {
@@ -2028,7 +1964,7 @@ t4_setprop_priv(struct port_info *pi, const char *name, const void *val)
 
 	switch (prop->tpp_id) {
 	case T4PROP_FW_TMR: {
-		struct sge_iq *fwq = &sc->sge.fwq;
+		t4_sge_iq_t *fwq = &sc->sge.fwq;
 		const uint8_t idx = t4_choose_holdoff_timer(sc, MAX(0, v));
 
 		IQ_LOCK(fwq);
@@ -2039,7 +1975,7 @@ t4_setprop_priv(struct port_info *pi, const char *name, const void *val)
 		break;
 	}
 	case T4PROP_FW_PKTC: {
-		struct sge_iq *fwq = &sc->sge.fwq;
+		t4_sge_iq_t *fwq = &sc->sge.fwq;
 		const int8_t idx = t4_choose_holdoff_pktcnt(sc, (int)v);
 
 		IQ_LOCK(fwq);
@@ -2079,7 +2015,7 @@ t4_setprop_priv(struct port_info *pi, const char *name, const void *val)
 			int i;
 			struct sge_txq *txq;
 			for_each_txq(pi, i, txq) {
-				struct sge_eq *eq = &txq->eq;
+				t4_sge_eq_t *eq = &txq->eq;
 
 				EQ_LOCK(eq);
 				t4_eq_update_dbq_timer(eq, pi);
@@ -2133,7 +2069,7 @@ t4_setprop_priv(struct port_info *pi, const char *name, const void *val)
 		PORT_LOCK(pi);
 		if ((pi->flags & TPF_OPEN) != 0) {
 			for_each_rxq(pi, i, rxq) {
-				struct sge_iq *iq = &rxq->iq;
+				t4_sge_iq_t *iq = &rxq->iq;
 
 				IQ_LOCK(iq);
 				t4_iq_update_intr_cfg(iq, pi->tmr_idx,
@@ -2171,15 +2107,6 @@ t4_setprop_priv(struct port_info *pi, const char *name, const void *val)
 }
 
 void
-t4_mc_cb_init(struct port_info *pi)
-{
-	if (pi->adapter->props.multi_rings)
-		pi->mc = &t4_m_ring_callbacks;
-	else
-		pi->mc = &t4_m_callbacks;
-}
-
-void
 t4_os_link_changed(struct adapter *sc, int idx, int link_stat)
 {
 	struct port_info *pi = sc->port[idx];
@@ -2187,18 +2114,8 @@ t4_os_link_changed(struct adapter *sc, int idx, int link_stat)
 	mac_link_update(pi->mh, link_stat ? LINK_STATE_UP : LINK_STATE_DOWN);
 }
 
-/* ARGSUSED */
-void
-t4_mac_rx(struct port_info *pi, struct sge_rxq *rxq, mblk_t *m)
-{
-	mac_rx(pi->mh, NULL, m);
-}
-
 void
 t4_mac_tx_update(struct port_info *pi, struct sge_txq *txq)
 {
-	if (pi->adapter->props.multi_rings)
-		mac_tx_ring_update(pi->mh, txq->ring_handle);
-	else
-		mac_tx_update(pi->mh);
+	mac_tx_ring_update(pi->mh, txq->ring_handle);
 }

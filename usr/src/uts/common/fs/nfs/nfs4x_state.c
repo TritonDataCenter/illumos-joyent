@@ -30,6 +30,10 @@
 #include <sys/atomic.h>
 #include <nfs/nfs4.h>
 
+extern uint32_t clientid_hash(void *);
+extern bool_t clientid_compare(rfs4_entry_t, void *);
+extern void *clientid_mkkey(rfs4_entry_t);
+
 #ifdef DEBUG
 #define	RFS4_TABSIZE 17
 #else
@@ -40,6 +44,10 @@
 
 slotid4 rfs4_max_slots		= MAXSLOTS;		/* fore channel */
 slotid4 rfs4_back_max_slots	= MAXSLOTS_BACK;	/* back channel */
+
+static const callback_sec_parms4 rfs4x_cbsec_none = {
+	.cb_secflavor = AUTH_NONE
+};
 
 typedef union {
 	/* Both members have the same size */
@@ -82,6 +90,21 @@ sessid_mkkey(rfs4_entry_t entry)
 	return (&sp->sn_sessid);
 }
 
+static bool_t
+sessid_clientid_compare(rfs4_entry_t entry, void *key)
+{
+	rfs4_session_t	*sp = (rfs4_session_t *)entry;
+	clientid4	*idp = (clientid4 *)key;
+
+	return (*idp == sp->sn_clnt->rc_clientid);
+}
+
+static void *
+sessid_clientid_mkkey(rfs4_entry_t entry)
+{
+	return (&(((rfs4_session_t *)entry)->sn_clnt->rc_clientid));
+}
+
 void
 rfs4x_session_rele(rfs4_session_t *sp)
 {
@@ -103,6 +126,19 @@ rfs4x_findsession_by_id(sessionid4 sessid)
 
 	sp = (rfs4_session_t *)rfs4_dbsearch(nsrv4->rfs4_session_idx,
 	    sessid, &create, NULL, RFS4_DBS_VALID);
+
+	return (sp);
+}
+
+rfs4_session_t *
+rfs4x_findsession_by_clid(clientid4 clid)
+{
+	rfs4_session_t	*sp;
+	bool_t		create = FALSE;
+	nfs4_srv_t *nsrv4 = nfs4_get_srv();
+
+	sp = (rfs4_session_t *)rfs4_dbsearch(nsrv4->rfs4_session_clid_idx,
+	    &clid, &create, NULL, RFS4_DBS_VALID);
 
 	return (sp);
 }
@@ -181,9 +217,24 @@ rfs4x_destroysession(rfs4_session_t *sp, unsigned useref)
 	 * all outstanding operations.
 	 */
 	rfs4_dbe_lock(sp->sn_dbe);
-	if (rfs4_dbe_refcnt(sp->sn_dbe) > useref)
+	if (rfs4_dbe_refcnt(sp->sn_dbe) > useref) {
 		status = NFS4ERR_DELAY;
-	else
+	} else if (SN_CB_CHAN_EST(sp)) {
+		sess_channel_t	*bcp = SNTOBC(sp);
+		sess_bcsd_t	*bsdp;
+
+		rw_enter(&bcp->cn_lock, RW_READER);
+		bsdp = CTOBSD(bcp);
+		ASSERT(bsdp != NULL);
+		status = slot_cb_status(bsdp->bsd_stok);
+
+		mutex_enter(&bsdp->bsd_lock);
+		bsdp->bsd_stat = status;
+		mutex_exit(&bsdp->bsd_lock);
+
+		rw_exit(&bcp->cn_lock);
+	}
+	if (status == NFS4_OK)
 		rfs4_dbe_invalidate(sp->sn_dbe);
 	rfs4_dbe_unlock(sp->sn_dbe);
 
@@ -205,7 +256,8 @@ rfs4x_client_session_remove(rfs4_client_t *cp)
 	 */
 	rfs4_dbe_lock(cp->rc_dbe);
 	while ((sp = list_head(&cp->rc_sessions)) != NULL) {
-		list_remove(&cp->rc_sessions, sp);
+		if (list_link_active(&sp->sn_node))
+			list_remove(&cp->rc_sessions, sp);
 
 		rfs4_dbe_invalidate(sp->sn_dbe);
 	}
@@ -213,7 +265,7 @@ rfs4x_client_session_remove(rfs4_client_t *cp)
 }
 
 /*
- * RFC5661 Section 18.36.3
+ * RFC8881 Section 18.36.3
  * Definitions for ca_maxrequestsize:
  *   The maximum size of a COMPOUND or CB_COMPOUND request that will be sent.
  */
@@ -245,37 +297,67 @@ rfs4x_client_session_remove(rfs4_client_t *cp)
 #define	NFS4_SLOT_CACHED_SIZE	2048
 
 nfsstat4
-sess_chan_limits(sess_channel_t *scp)
+sess_chan_limits(rfs4_session_t *sp)
 {
-	if (scp->cn_attrs.ca_maxrequests > rfs4_max_slots) {
-		scp->cn_attrs.ca_maxrequests = rfs4_max_slots;
+	if (sp->cn_attrs.ca_maxrequests > rfs4_max_slots) {
+		sp->cn_attrs.ca_maxrequests = rfs4_max_slots;
 	}
 
-	if (scp->cn_back_attrs.ca_maxrequests > rfs4_back_max_slots)
-		scp->cn_back_attrs.ca_maxrequests = rfs4_back_max_slots;
+	if (sp->cn_back_attrs.ca_maxrequests < 1 ||
+	    sp->cn_back_attrs.ca_maxrequests > rfs4_back_max_slots) {
+		/*
+		 * RFC 5661 doesn't specify what error should be return,
+		 * only says that requested ca_maxrequests for back
+		 * channel can not be changed.
+		 * Linux accepts whatever number client sends for back channel
+		 * check_backchannel_attrs() in linux source.
+		 * But since we do a mem alloc on this number
+		 * we cannot accept a arbit large number.
+		 */
+		return (NFS4ERR_INVAL);
+	}
 
-	if (scp->cn_attrs.ca_maxoperations > NFS4_COMPOUND_LIMIT)
-		scp->cn_attrs.ca_maxoperations = NFS4_COMPOUND_LIMIT;
-
-	/* maxreqsize, maxrespsize */
-	if (scp->cn_attrs.ca_maxrequestsize < NFS4_MIN_COMPOUND_REQSZ)
+	if (sp->cn_attrs.ca_maxrequestsize < NFS4_MIN_COMPOUND_REQSZ)
 		return (NFS4ERR_TOOSMALL);
 
-	if (scp->cn_attrs.ca_maxresponsesize < NFS4_MIN_COMPOUND_RESPSZ)
+	if (sp->cn_back_attrs.ca_maxrequestsize < NFS4_MIN_CB_COMPOUND_REQSZ)
 		return (NFS4ERR_TOOSMALL);
 
-	if (scp->cn_back_attrs.ca_maxrequestsize < NFS4_MIN_CB_COMPOUND_REQSZ)
+	if (sp->cn_attrs.ca_maxoperations > NFS4_COMPOUND_LIMIT)
+		sp->cn_attrs.ca_maxoperations = NFS4_COMPOUND_LIMIT;
+
+	if (sp->cn_back_attrs.ca_maxoperations < 2)
 		return (NFS4ERR_TOOSMALL);
 
-	if (scp->cn_back_attrs.ca_maxresponsesize < NFS4_MIN_CB_COMPOUND_RESPSZ)
+	/*
+	 * Lower limit should be set to smallest sane COMPOUND. Even
+	 * though a singleton SEQUENCE op is the very smallest COMPOUND,
+	 * it's also quite boring. For all practical purposes, the lower
+	 * limit for creating a sess is limited to:
+	 *
+	 *		[SEQUENCE + PUTROOTFH + GETFH]
+	 *
+	 *	 Can't limit READ's to a specific threshold, otherwise
+	 *	 we artificially limit the clients to perform reads of
+	 *	 AT LEAST that granularity, which is WRONG !!! Same goes
+	 *	 for READDIR's and GETATTR's.
+	 */
+	if (sp->cn_attrs.ca_maxresponsesize < (sizeof (SEQUENCE4res) +
+	    sizeof (PUTROOTFH4res) + sizeof (GETFH4res)))
+		return (NFS4ERR_TOOSMALL);
+
+	if (sp->cn_attrs.ca_maxresponsesize < NFS4_MIN_COMPOUND_RESPSZ)
+		return (NFS4ERR_TOOSMALL);
+
+	if (sp->cn_back_attrs.ca_maxresponsesize < NFS4_MIN_CB_COMPOUND_RESPSZ)
 		return (NFS4ERR_TOOSMALL);
 
 	/* maxresp_cached */
-	scp->cn_attrs.ca_maxresponsesize_cached =
-	    MIN(scp->cn_attrs.ca_maxresponsesize_cached,
+	sp->cn_attrs.ca_maxresponsesize_cached =
+	    MIN(sp->cn_attrs.ca_maxresponsesize_cached,
 	    NFS4_SLOT_CACHED_SIZE + NFS4_MIN_HDR_SEQSZ);
 
-	scp->cn_back_attrs.ca_maxresponsesize_cached = 0;
+	sp->cn_back_attrs.ca_maxresponsesize_cached = 0;
 
 	return (NFS4_OK);
 }
@@ -332,6 +414,25 @@ nfs4x_csa_flags_valid(uint32_t flags)
 	return (TRUE);
 }
 
+/*
+ * Delegation CB race detection support
+ */
+void
+rfs41_deleg_rs_hold(rfs4_deleg_state_t *dsp)
+{
+	atomic_inc_32(&dsp->rds_rs.refcnt);
+}
+
+void
+rfs41_deleg_rs_rele(rfs4_deleg_state_t *dsp)
+{
+	ASSERT(dsp->rds_rs.refcnt > 0);
+	if (atomic_add_32_nv(&dsp->rds_rs.refcnt, -1) == 0) {
+		bzero(dsp->rds_rs.sessid, sizeof (sessionid4));
+		dsp->rds_rs.seqid = dsp->rds_rs.slotno = 0;
+	}
+}
+
 sess_channel_t *
 rfs41_create_session_channel(channel_dir_from_server4 dir)
 {
@@ -349,7 +450,7 @@ rfs41_create_session_channel(channel_dir_from_server4 dir)
 	case CDFS4_BACK:
 		/* BackChan Specific Data */
 		bp = (sess_bcsd_t *)kmem_zalloc(sizeof (sess_bcsd_t), KM_SLEEP);
-		rw_init(&bp->bsd_rwlock, NULL, RW_DEFAULT, NULL);
+		mutex_init(&bp->bsd_lock, NULL, MUTEX_DEFAULT, NULL);
 		cp->cn_csd = (sess_bcsd_t *)bp;
 		break;
 	}
@@ -357,28 +458,57 @@ rfs41_create_session_channel(channel_dir_from_server4 dir)
 }
 
 void
-rfs41_destroy_session_channel(rfs4_session_t *sp)
+rfs41_destroy_back_channel(sess_channel_t *bcp)
+{
+	sess_bcsd_t	*bsdp;
+
+	ASSERT(bcp != NULL);
+
+	bsdp = CTOBSD(bcp);
+	ASSERT(bsdp != NULL);
+	mutex_destroy(&bsdp->bsd_lock);
+	kmem_free(bsdp, sizeof (sess_bcsd_t));
+
+	rw_destroy(&bcp->cn_lock);
+	kmem_free(bcp, sizeof (sess_channel_t));
+}
+
+void
+rfs4x_destroy_session_channel(rfs4_session_t *sp, channel_dir_from_server4 dir)
 {
 	sess_channel_t	*cp;
-	sess_bcsd_t	*bp;
 
-	if (sp->sn_back != NULL) {
-		/* only one channel for both direction for now */
+	if (sp == NULL)
+		return;
+	if (dir == CDFS4_FORE && sp->sn_fore == NULL)
+		return;
+	if (dir == CDFS4_BACK && sp->sn_back == NULL)
+		return;
+
+	if (sp->sn_bdrpc) {
 		ASSERT(sp->sn_fore == sp->sn_back);
-
-		cp = sp->sn_back;
-		bp = (sess_bcsd_t *)cp->cn_csd;
-		rw_destroy(&bp->bsd_rwlock);
-		kmem_free(bp, sizeof (sess_bcsd_t));
-	} else {
-		cp = sp->sn_fore;
+		sp->sn_fore = NULL;
+		goto back;
 	}
 
-	rw_destroy(&cp->cn_lock);
-	kmem_free(cp, sizeof (sess_channel_t));
+	if (dir == CDFS4_FORE || dir == CDFS4_BOTH) {
+		if (sp->sn_fore == NULL)
+			return;
+		cp = sp->sn_fore;
 
-	sp->sn_back = NULL;
-	sp->sn_fore = NULL;
+		rw_destroy(&cp->cn_lock);
+		kmem_free(cp, sizeof (sess_channel_t));
+		sp->sn_fore = NULL;
+	}
+
+	if (dir == CDFS4_BACK || dir == CDFS4_BOTH) {
+back:
+		if (sp->sn_back == NULL)
+			return;
+		cp = sp->sn_back;
+		rfs41_destroy_back_channel(cp);
+		sp->sn_back = NULL;
+	}
 }
 
 static bool_t
@@ -391,6 +521,12 @@ rfs4_session_create(rfs4_entry_t u_entry, void *arg)
 	bool_t			 bdrpc = FALSE;
 	channel_dir_from_server4 dir;
 	nfsstat4		 sle;
+	rpcprog_t		 prog;
+	SVCMASTERXPRT		*mxprt;
+	struct svc_req		*req;
+	sess_bcsd_t		*bsdp;
+	callback_sec_parms4	*secp = NULL;
+
 	nfs4_srv_t *nsrv4 = nfs4_get_srv();
 
 	ASSERT(sp != NULL);
@@ -402,6 +538,8 @@ rfs4_session_create(rfs4_entry_t u_entry, void *arg)
 	 */
 	sp->sn_clnt = (rfs4_client_t *)ap->cs_client;
 	rfs4_dbe_hold(sp->sn_clnt->rc_dbe);
+	req = (struct svc_req *)ap->cs_req;
+	mxprt = (SVCMASTERXPRT *)req->rq_xprt->xp_master;
 
 	/*
 	 * Handcrafting the session id
@@ -432,6 +570,33 @@ rfs4_session_create(rfs4_entry_t u_entry, void *arg)
 		sp->sn_csflags &= ~CREATE_SESSION4_FLAG_CONN_RDMA;
 
 	/*
+	 * Initialize backchannel security
+	 */
+	sp->sn_bc.progno = ap->cs_aotw.csa_cb_program;
+	sp->sn_bc.cr = crget();
+
+	if (ap->cs_aotw.csa_sec_parms.csa_sec_parms_len == 0) {
+		secp = (callback_sec_parms4 *)&rfs4x_cbsec_none;
+	} else if (ap->cs_aotw.csa_sec_parms.csa_sec_parms_val != NULL) {
+		secp = ap->cs_aotw.csa_sec_parms.csa_sec_parms_val;
+	} else {
+		cmn_err(CE_WARN, "Invalid backchannel security.");
+		ap->cs_error = NFS4ERR_INVAL;
+		goto err;
+	}
+
+	if (!rfs4x_cbsec_valid(secp)) {
+		cmn_err(CE_WARN, "Unsupported backchannel security.");
+		ap->cs_error = NFS4ERR_INVAL;
+		goto err;
+	}
+	sp->sn_bc.secprms.csa_sec_parms_len = 1;
+	sp->sn_bc.secprms.csa_sec_parms_val = (callback_sec_parms4 *)
+	    kmem_zalloc(sizeof (callback_sec_parms4), KM_SLEEP);
+	rfs4x_cbsec_init(sp->sn_bc.secprms.csa_sec_parms_val,
+	    secp);
+
+	/*
 	 * Initialize some overall sessions values
 	 */
 	sp->sn_bc.progno = ap->cs_aotw.csa_cb_program;
@@ -445,11 +610,32 @@ rfs4_session_create(rfs4_entry_t u_entry, void *arg)
 	 * let's try to accomodate the request.
 	 */
 	DTRACE_PROBE1(csa__flags, uint32_t, ap->cs_aotw.csa_flags);
+	bdrpc = ap->cs_aotw.csa_flags & CREATE_SESSION4_FLAG_CONN_BACK_CHAN;
+	if (bdrpc) {
+		SVCCB_ARGS cbargs;
+		prog = sp->sn_bc.progno;
+		cbargs.xprt = mxprt;
+		cbargs.prog = prog;
+		cbargs.vers = NFS_CB;
+		cbargs.family = sp->sn_clnt->rc_addr.ss_family;
+		cbargs.tag = (void *)sp->sn_sessid;
+
+		if (SVC_CTL(req->rq_xprt, SVCCTL_SET_CBCONN, (void *)&cbargs)) {
+			/*
+			 * Couldn't create a bi-dir RPC connection. Reset
+			 * bdrpc so that the session's channel flags are
+			 * set appropriately and the client knows it needs
+			 * to do the BIND_CONN_TO_SESSION dance in order
+			 * to establish a callback path.
+			 */
+			bdrpc = 0;
+		}
+	}
 
 	/*
 	 * Session's channel flags depending on bdrpc
-	 * TODO: Add backchannel handling, i.e. when bdrpc is TRUE
 	 */
+	sp->sn_bdrpc = bdrpc;
 	dir = bdrpc ? (CDFS4_FORE | CDFS4_BACK) : CDFS4_FORE;
 	ocp = rfs41_create_session_channel(dir);
 	ocp->cn_dir = dir;
@@ -460,9 +646,9 @@ rfs4_session_create(rfs4_entry_t u_entry, void *arg)
 	 * purposes. Channel attribute enforcement is done as part of
 	 * COMPOUND processing.
 	 */
-	ocp->cn_attrs = ap->cs_aotw.csa_fore_chan_attrs;
-	ocp->cn_back_attrs = ap->cs_aotw.csa_back_chan_attrs;
-	sle = sess_chan_limits(ocp);
+	sp->cn_attrs = ap->cs_aotw.csa_fore_chan_attrs;
+	sp->cn_back_attrs = ap->cs_aotw.csa_back_chan_attrs;
+	sle = sess_chan_limits(sp);
 	if (sle != NFS4_OK) {
 		ap->cs_error = sle;
 		goto err_free_chan;
@@ -478,9 +664,16 @@ rfs4_session_create(rfs4_entry_t u_entry, void *arg)
 	 * No need for locks/synchronization at this time,
 	 * since we're barely creating the session.
 	 */
-	if (bdrpc) {
-		/* Need to be implemented */
-		VERIFY(0);
+	if (sp->sn_bdrpc) {
+		/*
+		 * bcsd got built as part of the channel's construction.
+		 */
+		bsdp = CTOBSD(ocp);
+		ASSERT(bsdp != NULL);
+		slot_table_create(&bsdp->bsd_stok,
+		    sp->cn_back_attrs.ca_maxrequests);
+		sp->sn_csflags |= CREATE_SESSION4_FLAG_CONN_BACK_CHAN;
+		sp->sn_back = ocp;
 	} else {
 		sp->sn_csflags &= ~CREATE_SESSION4_FLAG_CONN_BACK_CHAN;
 		sp->sn_back = NULL;
@@ -492,12 +685,12 @@ rfs4_session_create(rfs4_entry_t u_entry, void *arg)
 	 * NFS4ERR_SEQ_MISORDERED. Note that we zero out the entries
 	 * by virtue of the z-alloc.
 	 */
-	sp->sn_slots = slots_alloc(ocp->cn_attrs.ca_maxrequests);
+	sp->sn_slots = slots_alloc(sp->cn_attrs.ca_maxrequests);
 
 	return (TRUE);
 
 err_free_chan:
-	rfs41_destroy_session_channel(sp);
+	rfs4x_destroy_session_channel(sp, CDFS4_BOTH);
 err:
 	rfs4_dbe_rele(sp->sn_clnt->rc_dbe);
 	return (FALSE);
@@ -509,24 +702,29 @@ rfs4_session_destroy(rfs4_entry_t u_entry)
 	rfs4_session_t	*sp = (rfs4_session_t *)u_entry;
 	sess_bcsd_t	*bsdp;
 
-	if (SN_CB_CHAN_EST(sp) && (bsdp = sp->sn_back->cn_csd) != NULL) {
-		slots_free(bsdp->bsd_slots,
-		    sp->sn_back->cn_back_attrs.ca_maxrequests);
-		bsdp->bsd_slots = NULL;
+	if (SN_CB_CHAN_EST(sp) && (bsdp = CTOBSD(sp->sn_back)) != NULL) {
+		slot_table_destroy(bsdp->bsd_stok);
+		bsdp->bsd_stok = NULL;
+		rfs4x_cb_chflush(sp);
 	}
+
+	/*
+	 * Nuke back channel security data.
+	 */
+	rfs4x_cbsec_fini(sp);
 
 	/*
 	 * Nuke slot replay cache for this session
 	 */
 	if (sp->sn_slots) {
-		slots_free(sp->sn_slots, sp->sn_fore->cn_attrs.ca_maxrequests);
+		slots_free(sp->sn_slots, sp->cn_attrs.ca_maxrequests);
 		sp->sn_slots = NULL;
 	}
 
 	/*
 	 * Remove the fore and back channels.
 	 */
-	rfs41_destroy_session_channel(sp);
+	rfs4x_destroy_session_channel(sp, CDFS4_BOTH);
 
 	client_remove_session(sp->sn_clnt, sp);
 
@@ -551,12 +749,16 @@ void
 rfs4x_state_init_locked(nfs4_srv_t *nsrv4)
 {
 	nsrv4->rfs4_session_tab = rfs4_table_create(nsrv4->nfs4_server_state,
-	    "Session", 5 * rfs4_lease_time, 1, rfs4_session_create,
+	    "Session", 5 * rfs4_lease_time, 2, rfs4_session_create,
 	    rfs4_session_destroy, rfs4_session_expiry, sizeof (rfs4_session_t),
 	    RFS4_TABSIZE, RFS4_MAXTABSZ/8, -1);
 
 	nsrv4->rfs4_session_idx = rfs4_index_create(nsrv4->rfs4_session_tab,
 	    "session_idx", sessid_hash, sessid_compare, sessid_mkkey, TRUE);
+
+	nsrv4->rfs4_session_clid_idx = rfs4_index_create(
+	    nsrv4->rfs4_session_tab, "session_clid_idx", clientid_hash,
+	    sessid_clientid_compare, sessid_clientid_mkkey, FALSE);
 }
 
 void

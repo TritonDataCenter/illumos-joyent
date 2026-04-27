@@ -13,6 +13,7 @@
  * Copyright 2015 OmniTI Computer Consulting, Inc. All rights reserved.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2021 Oxide Computer Company
+ * Copyright 2026 RackTop Systems, Inc.
  */
 
 #include "i40e_sw.h"
@@ -1278,6 +1279,8 @@ i40e_stats_trqpair_init(i40e_trqpair_t *itrq)
 	kstat_named_init(&tsp->itxs_num_unblocked, "tx_num_unblocked",
 	    KSTAT_DATA_UINT64);
 	tsp->itxs_num_unblocked.value.ui64 = 0;
+	kstat_named_init(&tsp->itxs_bad_mss, "tx_bad_mss", KSTAT_DATA_UINT64);
+	tsp->itxs_bad_mss.value.ui64 = 0;
 
 
 	kstat_named_init(&rsp->irxs_bytes, "rx_bytes",

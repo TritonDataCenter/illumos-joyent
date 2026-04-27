@@ -85,7 +85,8 @@ static int _checkhost(char *rhost, char *lhost, int len);
 static char *domain;
 #endif
 
-int rcmd(char **ahost, unsigned short rport, const char *locuser,
+int
+rcmd(char **ahost, unsigned short rport, const char *locuser,
     const char *remuser, const char *cmd, int *fd2p)
 {
 	int rcmd_ret;
@@ -95,7 +96,8 @@ int rcmd(char **ahost, unsigned short rport, const char *locuser,
 	return (rcmd_ret);
 }
 
-int rcmd_af(char **ahost, unsigned short rport, const char *locuser,
+int
+rcmd_af(char **ahost, unsigned short rport, const char *locuser,
     const char *remuser, const char *cmd, int *fd2p, int af)
 {
 	int s, timo = 1;
@@ -269,10 +271,10 @@ int rcmd_af(char **ahost, unsigned short rport, const char *locuser,
 		return (-1);
 	}
 	lport = 0;
-	if (fd2p == 0) {
+	if (fd2p == NULL) {
 		(void) write(s, "", 1);
 	} else {
-		int s2 = rresvport_af(&lport, res->ai_family), s3;
+		int s2 = rresvport_af(&lport, res->ai_family), s3 = -1;
 
 		len = (socklen_t)sizeof (faddr);
 
@@ -314,9 +316,9 @@ int rcmd_af(char **ahost, unsigned short rport, const char *locuser,
 					perror("accept");
 					lport = 0;
 					goto bad;
-				}
-				else
+				} else {
 					break;
+				}
 			}
 		}
 		if (selret == -1) {
@@ -417,8 +419,8 @@ bad:
 static int
 _rresvport_addr(int *alport, struct sockaddr_storage *addr)
 {
-	struct sockaddr_in *sin;
-	struct sockaddr_in6 *sin6;
+	struct sockaddr_in *sin = NULL;
+	struct sockaddr_in6 *sin6 = NULL;
 	int s;
 	socklen_t len;
 	int on = 1;
@@ -449,7 +451,7 @@ _rresvport_addr(int *alport, struct sockaddr_storage *addr)
 
 	/* Try to bind() to the given port first. */
 	if (*alport != 0) {
-		if (addr->ss_family == AF_INET) {
+		if (sin != NULL) {
 			sin->sin_port = htons((ushort_t)*alport);
 		} else {
 			sin6->sin6_port = htons((ushort_t)*alport);
@@ -609,14 +611,14 @@ ruserok(const char *rhost, int superuser, const char *ruser, const char *luser)
 		return (-1);
 
 	(void) setegid(pwd->pw_gid);
-	initgroups(pwd->pw_name, pwd->pw_gid);
+	(void) initgroups(pwd->pw_name, pwd->pw_gid);
 	(void) seteuid(pwd->pw_uid);
 	if ((hostf = fopen(pbuf, "rF")) == NULL) {
 		if (gid != (gid_t)-1)
 			(void) setegid(gid);
 		if (uid != (uid_t)-1)
 			(void) seteuid(uid);
-		setgroups(ngroups, grouplist);
+		(void) setgroups(ngroups, grouplist);
 		return (-1);
 	}
 	(void) fstat64(fileno(hostf), &sbuf);
@@ -626,7 +628,7 @@ ruserok(const char *rhost, int superuser, const char *ruser, const char *luser)
 			(void) setegid(gid);
 		if (uid != (uid_t)-1)
 			(void) seteuid(uid);
-		setgroups(ngroups, grouplist);
+		(void) setgroups(ngroups, grouplist);
 		return (-1);
 	}
 
@@ -636,7 +638,7 @@ ruserok(const char *rhost, int superuser, const char *ruser, const char *luser)
 			(void) setegid(gid);
 		if (uid != (uid_t)-1)
 			(void) seteuid(uid);
-		setgroups(ngroups, grouplist);
+		(void) setgroups(ngroups, grouplist);
 		return (0);
 	}
 
@@ -645,7 +647,7 @@ ruserok(const char *rhost, int superuser, const char *ruser, const char *luser)
 		(void) setegid(gid);
 	if (uid != (uid_t)-1)
 		(void) seteuid(uid);
-	setgroups(ngroups, grouplist);
+	(void) setgroups(ngroups, grouplist);
 	return (-1);
 }
 
@@ -655,7 +657,7 @@ _validuser(FILE *hostf, char *rhost, const char *luser,
 {
 	char *user;
 	char ahost[BUFSIZ];
-	char *uchost = (char *)NULL;
+	char *uchost = NULL;
 	int hostmatch, usermatch;
 	char *p;
 
@@ -666,7 +668,7 @@ _validuser(FILE *hostf, char *rhost, const char *luser,
 #endif /* NIS */
 
 	while (fgets(ahost, (int)sizeof (ahost), hostf)) {
-		uchost = (char *)NULL;
+		uchost = NULL;
 		hostmatch = usermatch = 0;
 		p = ahost;
 		/*
@@ -689,13 +691,13 @@ _validuser(FILE *hostf, char *rhost, const char *luser,
 			 *	the host name field.
 			 */
 			if (isupper(*p)) {
-				if (uchost == (char *)NULL)
+				if (uchost == NULL)
 					uchost = strdup(ahost);
 				*p = tolower(*p);
 			}
 			p++;
 		}
-		if (*p != '\0' && uchost != (char *)NULL)
+		if (*p != '\0' && uchost != NULL)
 			uchost[p - ahost] = '\0';
 		if (*p == ' ' || *p == '\t') {
 			*p++ = '\0';
@@ -708,18 +710,19 @@ _validuser(FILE *hostf, char *rhost, const char *luser,
 		} else
 			user = p;
 		*p = '\0';
-		if (ahost[0] == '+' && ahost[1] == 0)
+		if (ahost[0] == '+' && ahost[1] == 0) {
 			hostmatch = 1;
 #ifdef NIS
-		else if (ahost[0] == '+' && ahost[1] == '@')
-			if (uchost != (char *)NULL)
+		} else if (ahost[0] == '+' && ahost[1] == '@') {
+			if (uchost != NULL) {
 				hostmatch = innetgr(uchost + 2, rhost,
 				    NULL, domain);
-			else
+			} else {
 				hostmatch = innetgr(ahost + 2, rhost,
 				    NULL, domain);
-		else if (ahost[0] == '-' && ahost[1] == '@') {
-			if (uchost != (char *)NULL) {
+			}
+		} else if (ahost[0] == '-' && ahost[1] == '@') {
+			if (uchost != NULL) {
 				if (innetgr(uchost + 2, rhost, NULL, domain))
 					break;
 			} else {
@@ -731,17 +734,18 @@ _validuser(FILE *hostf, char *rhost, const char *luser,
 		else if (ahost[0] == '-') {
 			if (_checkhost(rhost, ahost+1, baselen))
 				break;
-		}
-		else
+		} else {
 			hostmatch = _checkhost(rhost, ahost, baselen);
+		}
+
 		if (user[0]) {
-			if (user[0] == '+' && user[1] == 0)
+			if (user[0] == '+' && user[1] == 0) {
 				usermatch = 1;
 #ifdef NIS
-			else if (user[0] == '+' && user[1] == '@')
+			} else if (user[0] == '+' && user[1] == '@') {
 				usermatch = innetgr(user+2, NULL,
 				    ruser, domain);
-			else if (user[0] == '-' && user[1] == '@') {
+			} else if (user[0] == '-' && user[1] == '@') {
 				if (hostmatch &&
 				    innetgr(user+2, NULL, ruser, domain))
 					break;
@@ -750,19 +754,23 @@ _validuser(FILE *hostf, char *rhost, const char *luser,
 			else if (user[0] == '-') {
 				if (hostmatch && (strcmp(user+1, ruser) == 0))
 					break;
-			}
-			else
+			} else {
 				usermatch = (strcmp(user, ruser) == 0);
-		}
-		else
+			}
+		} else {
 			usermatch = (strcmp(ruser, luser) == 0);
-		if (uchost != (char *)NULL)
+		}
+
+		if (uchost != NULL) {
 			free(uchost);
+			uchost = NULL;
+		}
+
 		if (hostmatch && usermatch)
 			return (0);
 	}
 
-	if (uchost != (char *)NULL)
+	if (uchost != NULL)
 		free(uchost);
 	return (-1);
 }

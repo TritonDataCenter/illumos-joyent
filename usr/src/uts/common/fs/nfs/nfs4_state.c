@@ -183,6 +183,7 @@ deep_open_copy(OPEN4res *dres, OPEN4res *sres)
 
 	switch (sres->delegation.delegation_type) {
 	case OPEN_DELEGATE_NONE:
+	case OPEN_DELEGATE_NONE_EXT:
 		return;
 	case OPEN_DELEGATE_READ:
 		sacep = &sres->delegation.open_delegation4_u.read.permissions;
@@ -208,6 +209,7 @@ deep_open_free(OPEN4res *res)
 
 	switch (res->delegation.delegation_type) {
 	case OPEN_DELEGATE_NONE:
+	case OPEN_DELEGATE_NONE_EXT:
 		return;
 	case OPEN_DELEGATE_READ:
 		acep = &res->delegation.open_delegation4_u.read.permissions;
@@ -343,9 +345,6 @@ static void rfs4_dss_remove_cpleaf(rfs4_client_t *);
 static void rfs4_dss_remove_leaf(rfs4_servinst_t *, char *, char *);
 static void rfs4_client_destroy(rfs4_entry_t);
 static bool_t rfs4_client_expiry(rfs4_entry_t);
-static uint32_t clientid_hash(void *);
-static bool_t clientid_compare(rfs4_entry_t, void *);
-static void *clientid_mkkey(rfs4_entry_t);
 static uint32_t nfsclnt_hash(void *);
 static bool_t nfsclnt_compare(rfs4_entry_t, void *);
 static void *nfsclnt_mkkey(rfs4_entry_t);
@@ -407,6 +406,10 @@ static bool_t deleg_state_compare(rfs4_entry_t, void *);
 static void *deleg_state_mkkey(rfs4_entry_t);
 
 static int rfs4_ss_enabled = 0;
+
+uint32_t clientid_hash(void *);
+bool_t clientid_compare(rfs4_entry_t, void *);
+void *clientid_mkkey(rfs4_entry_t);
 
 void
 rfs4_ss_pnfree(rfs4_ss_pn_t *ss_pn)
@@ -1650,7 +1653,7 @@ typedef union {
 	verifier4	confirm_verf;
 } scid_confirm_verf;
 
-static uint32_t
+uint32_t
 clientid_hash(void *key)
 {
 	cid *idp = key;
@@ -1658,7 +1661,7 @@ clientid_hash(void *key)
 	return (idp->impl_id.c_id);
 }
 
-static bool_t
+bool_t
 clientid_compare(rfs4_entry_t entry, void *key)
 {
 	rfs4_client_t *cp = (rfs4_client_t *)entry;
@@ -1667,7 +1670,7 @@ clientid_compare(rfs4_entry_t entry, void *key)
 	return (*idp == cp->rc_clientid);
 }
 
-static void *
+void *
 clientid_mkkey(rfs4_entry_t entry)
 {
 	rfs4_client_t *cp = (rfs4_client_t *)entry;
@@ -3108,6 +3111,14 @@ rfs4_deleg_state_expiry(rfs4_entry_t u_entry)
 	if (rfs4_dbe_is_invalid(dsp->rds_dbe))
 		return (TRUE);
 
+	/*
+	 * Revoked delegations are live protocol objects awaiting FREE_STATEID.
+	 * Don't let the reaper collect them; FREE_STATEID or client close will
+	 * invalidate them explicitly.
+	 */
+	if (dsp->rds_revoked)
+		return (FALSE);
+
 	if (dsp->rds_dtype == OPEN_DELEGATE_NONE)
 		return (TRUE);
 
@@ -3138,6 +3149,7 @@ rfs4_deleg_state_create(rfs4_entry_t u_entry, void *argp)
 
 	dsp->rds_time_granted = gethrestime_sec();	/* observability */
 	dsp->rds_time_revoked = 0;
+	dsp->rds_revoked = FALSE;
 
 	list_link_init(&dsp->rds_node);
 
@@ -3151,6 +3163,21 @@ rfs4_deleg_state_destroy(rfs4_entry_t u_entry)
 
 	/* return delegation if necessary */
 	rfs4_return_deleg(dsp, FALSE);
+
+	/*
+	 * If the delegation was revoked but FREE_STATEID was never called
+	 * (e.g. client crash), decr. the client rc_deleg_revoked count now.
+	 *
+	 * This is working on the last ref. of this delegation, so
+	 * there's no need to rfs4_dbe_lock/unlock the dsp->rds_dbe
+	 */
+	if (dsp->rds_revoked) {
+		dsp->rds_revoked = FALSE;
+		rfs4_dbe_lock(dsp->rds_client->rc_dbe);
+		if (dsp->rds_client->rc_deleg_revoked > 0)
+			dsp->rds_client->rc_deleg_revoked--;
+		rfs4_dbe_unlock(dsp->rds_client->rc_dbe);
+	}
 
 	/* Were done with the file */
 	rfs4_file_rele(dsp->rds_finfo);
@@ -3632,8 +3659,12 @@ rfs4_check_lo_stateid_seqid(rfs4_lo_state_t *lsp, stateid4 *stateid,
 	return (NFS4_CHECK_STATEID_OKAY);
 }
 
+/*
+ * Use rfs4_get_deleg_any() to retrieve the delegation even
+ * if it has been revoked.  For FREE_STATEID
+ */
 nfsstat4
-rfs4_get_deleg_state(stateid4 *stateid, rfs4_deleg_state_t **dspp)
+rfs4_get_deleg_any(stateid4 *stateid, rfs4_deleg_state_t **dspp)
 {
 	stateid_t *id = (stateid_t *)stateid;
 	rfs4_deleg_state_t *dsp;
@@ -3645,8 +3676,29 @@ rfs4_get_deleg_state(stateid4 *stateid, rfs4_deleg_state_t **dspp)
 		return (NFS4ERR_STALE_STATEID);
 
 	dsp = rfs4_finddelegstate(id);
-	if (dsp == NULL) {
+	if (dsp == NULL)
 		return (what_stateid_error(id, DELEGID));
+
+	*dspp = dsp;
+	return (NFS4_OK);
+}
+
+nfsstat4
+rfs4_get_deleg_state(stateid4 *stateid, rfs4_deleg_state_t **dspp)
+{
+	nfsstat4 status;
+	rfs4_deleg_state_t *dsp;
+
+	*dspp = NULL;
+
+	status = rfs4_get_deleg_any(stateid, &dsp);
+	if (status != NFS4_OK) {
+		return (status);
+	}
+
+	if (dsp->rds_revoked) {
+		rfs4_deleg_state_rele(dsp);
+		return (NFS4ERR_DELEG_REVOKED);
 	}
 
 	if (rfs4_lease_expired(dsp->rds_client)) {
@@ -3655,7 +3707,6 @@ rfs4_get_deleg_state(stateid4 *stateid, rfs4_deleg_state_t **dspp)
 	}
 
 	*dspp = dsp;
-
 	return (NFS4_OK);
 }
 
@@ -3686,7 +3737,7 @@ rfs4_get_lo_state(stateid4 *stateid, rfs4_lo_state_t **lspp, bool_t lock_fp)
 	return (NFS4_OK);
 }
 
-static nfsstat4
+nfsstat4
 rfs4_get_all_state(stateid4 *sid, rfs4_state_t **spp,
     rfs4_deleg_state_t **dspp, rfs4_lo_state_t **lspp)
 {

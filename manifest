@@ -3868,6 +3868,7 @@ f usr/include/rpc/rpc_com.h 0644 root bin
 f usr/include/rpc/rpc_msg.h 0644 root bin
 f usr/include/rpc/rpc_rdma.h 0644 root bin
 f usr/include/rpc/rpc_sztypes.h 0644 root bin
+f usr/include/rpc/rpc_tags.h 0644 root bin
 f usr/include/rpc/rpcb_clnt.h 0644 root bin
 f usr/include/rpc/rpcb_prot.h 0644 root bin
 f usr/include/rpc/rpcb_prot.x 0644 root bin
@@ -6140,6 +6141,21 @@ d usr/lib/fm/topo 0755 root bin
 d usr/lib/fm/topo/maps 0755 root bin
 f usr/lib/fm/topo/maps/xfp-hc-topology.xml 0444 root bin
 d usr/lib/fm/topo/plugins 0755 root bin
+s usr/lib/fm/topo/plugins/64=amd64
+d usr/lib/fm/topo/plugins/amd64 0755 root bin
+f usr/lib/fm/topo/plugins/amd64/dimm.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/disk.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/fac_prov_ahci.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/fac_prov_ipmi.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/fac_prov_libhp.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/fac_prov_mptsas.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/ipmi.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/nic.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/ses.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/smbios.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/ufm.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/usb.so 0555 root bin
+f usr/lib/fm/topo/plugins/amd64/xfp.so 0555 root bin
 f usr/lib/fm/topo/plugins/dimm.so 0555 root bin
 f usr/lib/fm/topo/plugins/disk.so 0555 root bin
 f usr/lib/fm/topo/plugins/fac_prov_ahci.so 0555 root bin
@@ -10926,6 +10942,14 @@ f usr/platform/i86pc/lib/fm/topo/maps/i86pc-hc-topology.xml 0444 root sys
 f usr/platform/i86pc/lib/fm/topo/maps/i86pc-legacy-hc-topology.xml 0444 root sys
 f usr/platform/i86pc/lib/fm/topo/maps/psu-hc-topology.xml 0444 root sys
 d usr/platform/i86pc/lib/fm/topo/plugins 0755 root sys
+s usr/platform/i86pc/lib/fm/topo/plugins/64=amd64
+d usr/platform/i86pc/lib/fm/topo/plugins/amd64 0755 root sys
+f usr/platform/i86pc/lib/fm/topo/plugins/amd64/chip.so 0555 root sys
+f usr/platform/i86pc/lib/fm/topo/plugins/amd64/chipset.so 0555 root sys
+f usr/platform/i86pc/lib/fm/topo/plugins/amd64/hostbridge.so 0555 root sys
+f usr/platform/i86pc/lib/fm/topo/plugins/amd64/pcibus.so 0555 root sys
+f usr/platform/i86pc/lib/fm/topo/plugins/amd64/x86pi.so 0555 root sys
+f usr/platform/i86pc/lib/fm/topo/plugins/amd64/zen.so 0555 root sys
 f usr/platform/i86pc/lib/fm/topo/plugins/chip.so 0555 root sys
 f usr/platform/i86pc/lib/fm/topo/plugins/chipset.so 0555 root sys
 f usr/platform/i86pc/lib/fm/topo/plugins/hostbridge.so 0555 root sys

@@ -746,7 +746,7 @@ tem_save_state(void)
 	 * We already have in environment:
 	 * tem.inverse, tem.inverse_screen
 	 * tem.fg_color, tem.bg_color.
-	 * So we only need to add the position of the cursor.
+	 * Add the cursor data.
 	 */
 
 	if (active != NULL) {
@@ -754,6 +754,14 @@ tem_save_state(void)
 		setenv("tem.cursor.col", buf, 1);
 		snprintf(buf, sizeof (buf), "%d", active->tvs_c_cursor.row);
 		setenv("tem.cursor.row", buf, 1);
+		snprintf(buf, sizeof (buf), "%d", active->tvs_c_cursor.col *
+		    tems.ts_font.vf_width + tems.ts_p_offset.x);
+		setenv("tem.cursor.origin.x", buf, 1);
+		snprintf(buf, sizeof (buf), "%d", active->tvs_c_cursor.row *
+		    tems.ts_font.vf_height + tems.ts_p_offset.y);
+		setenv("tem.cursor.origin.y", buf, 1);
+		if (!active->tvs_cursor_hidden)
+			setenv("tem.cursor.visible", "YES", 1);
 	}
 }
 

@@ -1136,7 +1136,7 @@ NFS_OBJS +=	nfs_client.o	nfs_common.o	nfs_dump.o \
 		nfs4_callback.o	nfs4_recovery.o nfs4_client_secinfo.o \
 		nfs4_client_debug.o	nfs_stats.o \
 		nfs4_acl.o	nfs4_stub_vnops.o	nfs_cmd.o \
-		nfs4x_xdr.o
+		nfs4x_xdr.o	nfs4x_slrc.o
 
 NFSSRV_OBJS +=	nfs_server.o	nfs_srv.o	nfs3_srv.o \
 		nfs_acl_srv.o	nfs_auth.o	nfs_auth_xdr.o \
@@ -1558,7 +1558,7 @@ RPCMOD_OBJS +=	rpcmod.o	clnt_cots.o	clnt_clts.o \
 		rpc_prot.o	rpc_sztypes.o	rpc_subr.o	rpcb_prot.o \
 		svc.o		svc_clts.o	svc_gen.o	svc_cots.o \
 		rpcsys.o	xdr_sizeof.o	clnt_rdma.o	svc_rdma.o \
-		xdr_rdma.o	rdma_subr.o	xdrrdma_sizeof.o
+		xdr_rdma.o	rdma_subr.o	xdrrdma_sizeof.o rpc_tags.o
 
 KLMMOD_OBJS +=	klmmod.o \
 		nlm_impl.o \

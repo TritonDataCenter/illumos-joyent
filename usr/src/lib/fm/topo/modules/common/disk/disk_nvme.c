@@ -157,15 +157,15 @@ disk_nvme_make_ns_serial(topo_mod_t *mod, nvme_ns_info_t *ns_info, char *buf,
 	int ret;
 
 	if (nvme_ns_info_nguid(ns_info, nguid)) {
-		ret = snprintf(buf, buflen, "%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X"
-		    "%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X",
+		ret = snprintf(buf, buflen, "%02X%02X%02X%02X%02X%02X"
+		    "%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
 		    nguid[0], nguid[1], nguid[2], nguid[3], nguid[4],
 		    nguid[5], nguid[6], nguid[7], nguid[8], nguid[9],
 		    nguid[10], nguid[11], nguid[12], nguid[13], nguid[14],
 		    nguid[15]);
 	} else if (nvme_ns_info_eui64(ns_info, eui64)) {
 		ret = snprintf(buf, buflen,
-		    "%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X%0.2X",
+		    "%02X%02X%02X%02X%02X%02X%02X%02X",
 		    eui64[0], eui64[1], eui64[2], eui64[3], eui64[4],
 		    eui64[5], eui64[6], eui64[7]);
 	} else {

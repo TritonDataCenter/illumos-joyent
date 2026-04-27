@@ -71,6 +71,7 @@
 #include <libcmdutils.h>
 #include <libgen.h>
 #include <attr.h>
+#include "msgs.h"
 
 static int	rflag;
 static int	fflag;
@@ -436,16 +437,15 @@ chmodr(char *dir, char *path,  mode_t mode, mode_t umsk, sec_args_t *secp,
 	return (ecode ? 1 : 0);
 }
 
-/* PRINTFLIKE3 */
 void
 errmsg(int severity, int code, char *format, ...)
 {
 	va_list ap;
 	static char *msg[] = {
-	"",
-	"ERROR",
-	"WARNING",
-	""
+	    "",
+	    "ERROR",
+	    "WARNING",
+	    ""
 	};
 
 	va_start(ap, format);

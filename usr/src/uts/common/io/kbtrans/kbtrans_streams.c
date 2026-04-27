@@ -384,10 +384,10 @@ kbtrans_streams_fini(struct kbtrans *upper)
 	cv_destroy(&upper->progressbar_key_abort_cv);
 	mutex_destroy(&upper->progressbar_key_abort_lock);
 
-	kmem_free(upper, sizeof (struct kbtrans));
-
 	DPRINTF(PRINT_L1, PRINT_MASK_CLOSE, (upper, "kbtrans_streams_fini "
 	    "exiting"));
+
+	kmem_free(upper, sizeof (struct kbtrans));
 	return (0);
 }
 

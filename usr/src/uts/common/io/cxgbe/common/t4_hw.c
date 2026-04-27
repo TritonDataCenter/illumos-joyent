@@ -449,7 +449,7 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 	u32 ctl_reg = PF_REG(mbox, A_CIM_PF_MAILBOX_CTRL);
 	u32 ctl;
 	__be64 cmd_rpl[MBOX_LEN/8];
-	struct t4_mbox_list entry;
+	t4_mbox_waiter_t entry;
 	u32 pcie_fw;
 
 	if ((size & 15) || size > MBOX_LEN)
@@ -469,7 +469,7 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 	 * wait [for a while] till we're at the front [or bail out with an
 	 * EBUSY] ...
 	 */
-	t4_mbox_list_add(adap, &entry);
+	t4_mbox_waiter_add(adap, &entry);
 
 	for (i = 0; ; i++) {
 		/*
@@ -481,28 +481,15 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 		 */
 		pcie_fw = t4_read_reg(adap, A_PCIE_FW);
 		if (i > 4*timeout || (pcie_fw & F_PCIE_FW_ERR)) {
-			t4_mbox_list_del(adap, &entry);
+			t4_mbox_waiter_remove(adap, &entry);
 			t4_report_fw_error(adap);
 			ret = (pcie_fw & F_PCIE_FW_ERR) ? -ENXIO : -EBUSY;
 			T4_RECORD_MBOX(adap, cmd, size, ret, 0);
 			return ret;
 		}
 
-		/*
-		 * If we're at the head, break out and start the mailbox
-		 * protocol.
-		 */
-		if (t4_mbox_list_first_entry(adap) == &entry)
+		if (t4_mbox_wait_owner(adap, MBOX_CMD_DELAY, sleep_ok)) {
 			break;
-
-		/*
-		 * Delay for a bit before checking again ...
-		 */
-		if (sleep_ok) {
-			usleep_range(MIN_MBOX_CMD_DELAY, MBOX_CMD_DELAY);
-		} else {
-			T4_OS_TOUCH_NMI_WATCHDOG();
-			udelay(MBOX_CMD_DELAY);
 		}
 	}
 #ifdef T4_OS_LOG_MBOX_CMDS
@@ -524,7 +511,7 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 	 * mailbox atomic access list and report the error to our caller.
 	 */
 	if (v != X_MBOWNER_PL) {
-		t4_mbox_list_del(adap, &entry);
+		t4_mbox_waiter_remove(adap, &entry);
 		t4_report_fw_error(adap);
 		ret = (v == X_MBOWNER_FW) ? -EBUSY : -ETIMEDOUT;
 		T4_RECORD_MBOX(adap, cmd, size, access, ret);
@@ -597,7 +584,7 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 			 */
 			get_mbox_rpl(adap, cmd_rpl, size/8, data_reg);
 			t4_write_reg(adap, ctl_reg, V_MBOWNER(X_MBOWNER_NONE));
-			t4_mbox_list_del(adap, &entry);
+			t4_mbox_waiter_remove(adap, &entry);
 
 			T4_RECORD_MBOX(adap, cmd_rpl, size, access, i + 1);
 
@@ -625,7 +612,7 @@ int t4_wr_mbox_meat_timeout(struct adapter *adap, int mbox, const void *cmd,
 	 * the error and also check to see if the firmware reported any
 	 * errors ...
 	 */
-	t4_mbox_list_del(adap, &entry);
+	t4_mbox_waiter_remove(adap, &entry);
 
 	ret = (pcie_fw & F_PCIE_FW_ERR) ? -ENXIO : -ETIMEDOUT;
 	T4_RECORD_MBOX(adap, cmd, size, access, ret);
@@ -9099,7 +9086,7 @@ int t4_link_set_autoneg(struct port_info *pi, u8 autoneg,
 	return 0;
 }
 
-int t4_link_set_pause(struct port_info *pi, cc_pause_t pause,
+void t4_link_set_pause(struct port_info *pi, cc_pause_t pause,
 		      fw_port_cap32_t *new_caps)
 {
 	struct link_config *lc = &pi->link_cfg;
@@ -9128,7 +9115,6 @@ int t4_link_set_pause(struct port_info *pi, cc_pause_t pause,
 		caps |= FW_PORT_CAP32_FORCE_PAUSE;
 
 	*new_caps = caps;
-	return 0;
 }
 
 #define T4_LINK_FEC_MASK V_FW_PORT_CAP32_FEC(M_FW_PORT_CAP32_FEC)

@@ -250,6 +250,7 @@ static void	rfs4_op_setclientid_confirm(nfs_argop4 *, nfs_resop4 *,
 static void	rfs4_op_secinfo(nfs_argop4 *, nfs_resop4 *, struct svc_req *,
 		    struct compound_state *);
 static void	rfs4_op_secinfo_free(nfs_resop4 *);
+static void	rfs4_op_test_stateid_free(nfs_resop4 *);
 
 void rfs4x_op_exchange_id(nfs_argop4 *argop, nfs_resop4 *resop,
     struct svc_req *req, struct compound_state *cs);
@@ -276,6 +277,10 @@ void rfs4x_op_bind_conn_to_session(nfs_argop4 *argop, nfs_resop4 *resop,
 void rfs4x_op_secinfo_noname(nfs_argop4 *argop, nfs_resop4 *resop,
     struct svc_req *req, compound_state_t *cs);
 void rfs4x_op_free_stateid(nfs_argop4 *argop, nfs_resop4 *resop,
+    struct svc_req *req, compound_state_t *cs);
+void rfs4x_op_backchannel_ctl(nfs_argop4 *argop, nfs_resop4 *resop,
+    struct svc_req *req, compound_state_t *cs);
+void rfs4x_op_test_stateid(nfs_argop4 *argop, nfs_resop4 *resop,
     struct svc_req *req, compound_state_t *cs);
 
 static nfsstat4 check_open_access(uint32_t, struct compound_state *,
@@ -449,7 +454,7 @@ static struct rfsv4disp rfsv4disptab[] = {
 	 */
 
 	/* OP_BACKCHANNEL_CTL = 40 */
-	{rfs4_op_notsup,  nullfree,  0},
+	{rfs4x_op_backchannel_ctl,  nullfree,  0},
 
 	/*  OP_BIND_CONN_TO_SESSION = 41 */
 	{rfs4x_op_bind_conn_to_session,  nullfree,  0},
@@ -494,7 +499,7 @@ static struct rfsv4disp rfsv4disptab[] = {
 	{rfs4_op_notsup,  nullfree,  0},
 
 	/* OP_TEST_STATEID = 55 */
-	{rfs4_op_notsup,  nullfree,  0},
+	{rfs4x_op_test_stateid, rfs4_op_test_stateid_free,  0},
 
 	/* OP_WANT_DELEGATION = 56 */
 	{rfs4_op_notsup,  nullfree,  0},
@@ -1118,19 +1123,27 @@ rfs4_servinst(rfs4_client_t *cp)
 	return (cp->rc_server_instance);
 }
 
-/* ARGSUSED */
+/*
+ * rfs4_cbcheck: verify callback path to nfs40 client is up
+ * called via nfs_serv_instance.deleg_cbcheck
+ */
+rfs4_cbstate_t
+rfs4_cbcheck(rfs4_state_t *sp)
+{
+	return (sp->rs_owner->ro_client->rc_cbinfo.cb_state);
+}
+
 static void
-nullfree(caddr_t resop)
+nullfree(caddr_t resop __unused)
 {
 }
 
 /*
  * This is a fall-through for invalid or not implemented (yet) ops
  */
-/* ARGSUSED */
 static void
-rfs4_op_inval(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
-    struct compound_state *cs)
+rfs4_op_inval(nfs_argop4 *argop __unused, nfs_resop4 *resop,
+    struct svc_req *req __unused, struct compound_state *cs)
 {
 	*cs->statusp = *((nfsstat4 *)&(resop)->nfs_resop4_u) = NFS4ERR_INVAL;
 }
@@ -1542,6 +1555,21 @@ rfs4_op_secinfo_free(nfs_resop4 *resop)
 	kmem_free(resok_val, count * sizeof (secinfo4));
 	resp->SECINFO4resok_len = 0;
 	resp->SECINFO4resok_val = NULL;
+}
+
+static void
+rfs4_op_test_stateid_free(nfs_resop4 *resop)
+{
+	TEST_STATEID4res	*resp = &resop->nfs_resop4_u.optest_stateid;
+	TEST_STATEID4resok	*rok  = &resp->TEST_STATEID4res_u.tsr_resok4;
+
+	if (resp->tsr_status == NFS4_OK) {
+		uint_t    len = rok->tsr_status_codes.tsr_status_codes_len;
+		nfsstat4 *val = rok->tsr_status_codes.tsr_status_codes_val;
+		if (len > 0 && val != NULL) {
+			kmem_free(val, len * sizeof (nfsstat4));
+		}
+	}
 }
 
 /* ARGSUSED */
@@ -2571,6 +2599,33 @@ do_rfs4_op_getattr(bitmap4 breq, fattr4 *fattrp,
 				    NFS4ATTR_GETIT, sargp, na);
 			}
 			break;
+		}
+	}
+
+	/*
+	 * If CHANGE or SIZE were requested and the file has a write delegation,
+	 * the holder (C1) is authoritative for those attributes
+	 * (RFC 7530 §10.4.3, RFC 5661 §20.1).  Compute direct pointers into
+	 * the ntov array so rfs4_cb_getattr() can overwrite them in place.
+	 * On any failure the VOP_GETATTR-derived values remain.
+	 * Note: this call may block on a network round-trip.
+	 */
+	if (breq & (FATTR4_CHANGE_MASK | FATTR4_SIZE_MASK)) {
+		rfs4_deleg_state_t	*dsp;
+
+		if (rfs4_find_write_deleg(sargp->cs->vp, &dsp)) {
+			fattr4_change	*change_p = NULL;
+			fattr4_size	*size_p = NULL;
+			int		j;
+
+			for (j = 0; j < ntov.attrcnt; j++) {
+				if (ntov.amap[j] == FATTR4_CHANGE)
+					change_p = &ntov.na[j].change;
+				if (ntov.amap[j] == FATTR4_SIZE)
+					size_p = &ntov.na[j].size;
+			}
+			rfs4_cb_getattr(dsp, change_p, size_p);
+			rfs4_deleg_state_rele(dsp);
 		}
 	}
 
@@ -7029,14 +7084,12 @@ close_expired_state(rfs4_entry_t u_entry)
 	rfs4_dbe_invalidate(sp->rs_dbe);
 }
 
-/*ARGSUSED*/
 static void
-rfs4_do_open(struct compound_state *cs, struct svc_req *req,
-    rfs4_openowner_t *oo, delegreq_t deleg,
+rfs4_do_open(struct compound_state *cs, struct svc_req *req __unused,
+    rfs4_openowner_t *oo, delegreq_t dreq,
     uint32_t access, uint32_t deny,
-    OPEN4res *resp, int deleg_cur)
+    OPEN4res *resp, int deleg_cur, bool_t has_session, bool_t is_reclaim)
 {
-	/* XXX Currently not using req  */
 	rfs4_state_t *sp;
 	rfs4_file_t *fp;
 	bool_t screate = TRUE;
@@ -7255,13 +7308,13 @@ again:
 	fp->rf_share_access |= access;
 
 	/*
-	 * Check for delegation here. if the deleg argument is not
-	 * DELEG_ANY, then this is a reclaim from a client and
-	 * we must honor the delegation requested. If necessary we can
-	 * set the recall flag.
+	 * Check for delegation here. For CLAIM_PREVIOUS reclaim opens,
+	 * is_reclaim=TRUE so rfs4_grant_delegation() will skip callback
+	 * and policy checks, and grant with recall=TRUE on vnode conflict
+	 * as required by RFC 7530 §16.16.3 / RFC 5661 §18.16.3.
 	 */
 
-	dsp = rfs4_grant_delegation(deleg, sp, &recall);
+	dsp = rfs4_grant_delegation(dreq, sp, &recall, is_reclaim);
 
 	cs->deleg = (fp->rf_dinfo.rd_dtype == OPEN_DELEGATE_WRITE);
 
@@ -7274,7 +7327,50 @@ again:
 
 	if (dsp) {
 		rfs4_set_deleg_response(dsp, &resp->delegation, NULL, recall);
+		if (has_session) {
+			rfs4x_rs_record(cs, dsp);
+		}
 		rfs4_deleg_state_rele(dsp);
+	} else if (has_session && dreq != DELEG_DISABLE) {
+		/*
+		 * RFC 5661 §18.16.3: when the client sent WANT flags and no
+		 * delegation was granted, respond with OPEN_DELEGATE_NONE_EXT
+		 * and an appropriate ond_why code.
+		 */
+		open_delegation4 *delegation = &resp->delegation;
+		why_no_delegation4 why;
+
+		switch (dreq) {
+		case DELEG_WANT_NONE:
+			why = WND4_NOT_WANTED;
+			break;
+		case DELEG_WANT_CANCEL:
+			why = WND4_CANCELLED;
+			break;
+		case DELEG_WANT_READ:
+		case DELEG_WANT_WRITE:
+		case DELEG_WANT_ANY:
+			why = WND4_CONTENTION;
+			break;
+		default:	/* DELEG_WANT_NO_PREF */
+			why = WND4_RESOURCE;
+			break;
+		}
+		delegation->delegation_type = OPEN_DELEGATE_NONE_EXT;
+		delegation->open_delegation4_u.od_whynone.ond_why = why;
+	} else {
+		/*
+		 * No delegation granted and no extended response needed.
+		 * Two cases reach here:
+		 * - v4.0 client (!has_session): OPEN_DELEGATE_NONE_EXT does
+		 *   not exist in RFC 7530; plain OPEN_DELEGATE_NONE is
+		 *   correct.
+		 * - Session client with DELEG_DISABLE: the server suppressed
+		 *   delegation as a policy decision (e.g. CLAIM_DELEGATE_CUR,
+		 *   unconfirmed open owner), not in response to a client hint,
+		 *   so no ond_why explanation is expected.
+		 */
+		resp->delegation.delegation_type = OPEN_DELEGATE_NONE;
 	}
 
 	rfs4_file_rele(fp);
@@ -7283,23 +7379,40 @@ again:
 	resp->status = NFS4_OK;
 }
 
-/*ARGSUSED*/
 static void
 rfs4_do_openfh(struct compound_state *cs, struct svc_req *req, OPEN4args *args,
     rfs4_openowner_t *oo, OPEN4res *resp)
 {
+	bool_t has_session;
+	delegreq_t dreq;
+
 	/* cs->vp and cs->fh have been updated by putfh. */
-	rfs4_do_open(cs, req, oo, DELEG_ANY,
-	    (args->share_access & 0xff), args->share_deny, resp, 0);
+	has_session = rfs4_has_session(cs);
+	if (!has_session) {
+		/*
+		 * Non-session (v4.0) client: suppress delegation if the
+		 * open owner is unconfirmed (server policy), otherwise
+		 * no preference. Using DELEG_DISABLE to indicate this
+		 * is a server decision, where DELEG_WANT_NONE would
+		 * indicate the client request.
+		 */
+		dreq = oo->ro_need_confirm ? DELEG_DISABLE : DELEG_WANT_NO_PREF;
+	} else {
+		dreq = nfs4x_share_to_delegreq(args->deleg_want);
+	}
+	rfs4_do_open(cs, req, oo, dreq,
+	    (args->share_access & 0xff), args->share_deny, resp, 0,
+	    rfs4_has_session(cs), B_FALSE);
 }
 
-/*ARGSUSED*/
 static void
 rfs4_do_opennull(struct compound_state *cs, struct svc_req *req,
     OPEN4args *args, rfs4_openowner_t *oo, OPEN4res *resp)
 {
 	change_info4 *cinfo = &resp->cinfo;
 	bitmap4 *attrset = &resp->attrset;
+	bool_t has_session;
+	delegreq_t dreq;
 
 	if (args->opentype == OPEN4_NOCREATE)
 		resp->status = rfs4_lookupfile(&args->claim.open_claim4_u.file,
@@ -7318,9 +7431,23 @@ rfs4_do_opennull(struct compound_state *cs, struct svc_req *req,
 
 		/* cs->vp cs->fh now reference the desired file */
 
-		rfs4_do_open(cs, req, oo,
-		    oo->ro_need_confirm ? DELEG_NONE : DELEG_ANY,
-		    args->share_access, args->share_deny, resp, 0);
+		has_session = rfs4_has_session(cs);
+		if (!has_session) {
+			/*
+			 * Non-session (v4.0) client: suppress delegation
+			 * if the open owner is unconfirmed (server policy),
+			 * otherwise no preference.  DELEG_DISABLE rather than
+			 * DELEG_WANT_NONE because this is a server decision,
+			 * not based on the client request.
+			 */
+			dreq = oo->ro_need_confirm ? DELEG_DISABLE :
+			    DELEG_WANT_NO_PREF;
+		} else {
+			dreq = nfs4x_share_to_delegreq(args->deleg_want);
+		}
+		rfs4_do_open(cs, req, oo, dreq,
+		    args->share_access,
+		    args->share_deny, resp, 0, has_session, B_FALSE);
 
 		/*
 		 * If rfs4_createfile set attrset, we must
@@ -7337,7 +7464,17 @@ rfs4_do_opennull(struct compound_state *cs, struct svc_req *req,
 		rfs4_enable_delegation();
 }
 
-/*ARGSUSED*/
+/*
+ * Handle OPEN with CLAIM_PREVIOUS (RFC 7530 §16.16.3 / RFC 5661 §18.16.3).
+ *
+ * The delegate_type field describes what delegation the client held before
+ * the server restarted.  When it is READ or WRITE, the server must re-grant
+ * that delegation; is_reclaim=TRUE causes rfs4_grant_delegation() to skip
+ * the normal cb/recall/policy checks and set recall=TRUE on vnode conflict.
+ * When delegate_type is OPEN_DELEGATE_NONE the client held no prior
+ * delegation; DELEG_WANT_NONE causes rfs4_grant_delegation() to exit early
+ * and no delegation is offered.
+ */
 static void
 rfs4_do_openprev(struct compound_state *cs, struct svc_req *req,
     OPEN4args *args, rfs4_openowner_t *oo, OPEN4res *resp)
@@ -7345,6 +7482,8 @@ rfs4_do_openprev(struct compound_state *cs, struct svc_req *req,
 	change_info4 *cinfo = &resp->cinfo;
 	vattr_t va;
 	vtype_t v_type = cs->vp->v_type;
+	open_delegation_type4 dt;
+	delegreq_t dreq;
 	int error = 0;
 
 	/* Verify that we have a regular file */
@@ -7388,11 +7527,40 @@ rfs4_do_openprev(struct compound_state *cs, struct svc_req *req,
 	cinfo->after = 0;
 	cinfo->atomic = FALSE;
 
-	rfs4_do_open(cs, req, oo,
-	    NFS4_DELEG4TYPE2REQTYPE(args->claim.open_claim4_u.delegate_type),
-	    args->share_access, args->share_deny, resp, 0);
+	/*
+	 * See above re. delegation and is_reclaim = B_TRUE
+	 */
+	dt = args->claim.open_claim4_u.delegate_type;
+	switch (dt) {
+	case OPEN_DELEGATE_READ:
+		dreq = DELEG_WANT_READ;
+		break;
+	case OPEN_DELEGATE_WRITE:
+		dreq = DELEG_WANT_WRITE;
+		break;
+	default:
+		dreq = DELEG_WANT_NONE;
+		break;
+	}
+	rfs4_do_open(cs, req, oo, dreq,
+	    args->share_access, args->share_deny, resp, 0,
+	    rfs4_has_session(cs), B_TRUE);
 }
 
+/*
+ * Handle OPEN with CLAIM_DELEGATE_CUR (RFC 7530 §16.16.3).
+ *
+ * This claim type is used when the client already holds a delegation on the
+ * file and needs to obtain a formal open stateid — most commonly in response
+ * to a CB_RECALL, where the client must establish an open before it can
+ * return the delegation.  The client presents its current delegation stateid
+ * as proof of access.
+ *
+ * Because the client is in the process of converting delegation-based access
+ * to open-stateid-based access (and the delegation is expected to be returned
+ * afterward), we pass DELEG_DISABLE to rfs4_do_open().  Granting a new
+ * delegation here would be circular and is not expected by the client.
+ */
 static void
 rfs4_do_opendelcur(struct compound_state *cs, struct svc_req *req,
     OPEN4args *args, rfs4_openowner_t *oo, OPEN4res *resp)
@@ -7424,11 +7592,6 @@ rfs4_do_opendelcur(struct compound_state *cs, struct svc_req *req,
 
 	ASSERT(dsp->rds_finfo->rf_dinfo.rd_dtype != OPEN_DELEGATE_NONE);
 
-	/*
-	 * New lock owner, create state. Since this was probably called
-	 * in response to a CB_RECALL we set deleg to DELEG_NONE
-	 */
-
 	ASSERT(cs->vp != NULL);
 	VN_RELE(cs->vp);
 	VN_HOLD(dsp->rds_finfo->rf_vp);
@@ -7444,11 +7607,11 @@ rfs4_do_opendelcur(struct compound_state *cs, struct svc_req *req,
 	/* Mark progress for delegation returns */
 	dsp->rds_finfo->rf_dinfo.rd_time_lastwrite = gethrestime_sec();
 	rfs4_deleg_state_rele(dsp);
-	rfs4_do_open(cs, req, oo, DELEG_NONE,
-	    args->share_access, args->share_deny, resp, 1);
+	rfs4_do_open(cs, req, oo, DELEG_DISABLE,
+	    args->share_access, args->share_deny, resp, 1,
+	    rfs4_has_session(cs), B_FALSE);
 }
 
-/*ARGSUSED*/
 static void
 rfs4_do_opendelprev(struct compound_state *cs, struct svc_req *req,
     OPEN4args *args, rfs4_openowner_t *oo, OPEN4res *resp)
@@ -8472,6 +8635,8 @@ retry:
 			res->SETCLIENTID4res_u.client_using.r_netid = netid;
 
 			rfs4_client_rele(cp_confirmed);
+			cp_confirmed = NULL;
+			goto out;
 		}
 
 		/*
@@ -8620,6 +8785,7 @@ rfs4_op_setclientid_confirm(nfs_argop4 *argop, nfs_resop4 *resop,
 
 	rfs4_dbe_lock(cp->rc_dbe);
 	cp->rc_need_confirm = FALSE;
+	cp->rc_minorversion = 0;	/* NFSv4.0 client */
 	if (cp->rc_cp_confirmed) {
 		cptoclose = cp->rc_cp_confirmed;
 		cptoclose->rc_ss_remove = 1;
@@ -8913,9 +9079,14 @@ lock_denied(LOCK4denied *dp, struct flock64 *flk)
 	lo = rfs4_findlockowner_by_pid(flk->l_pid);
 	if (lo != NULL) {
 		cp = lo->rl_client;
+		/*
+		 * Hold cp before releasing lo because cp is "borrowed"
+		 * from lo->rl_client and rfs4_lockowner_rele() might
+		 * destroy lo->rl_client before we can hold it.
+		 */
+		rfs4_dbe_hold(cp->rc_dbe);
 		if (rfs4_lease_expired(cp)) {
 			rfs4_lockowner_rele(lo);
-			rfs4_dbe_hold(cp->rc_dbe);
 			rfs4_client_close(cp);
 			return (NFS4ERR_EXPIRED);
 		}
@@ -8925,6 +9096,7 @@ lock_denied(LOCK4denied *dp, struct flock64 *flk)
 		bcopy(lo->rl_owner.owner_val, dp->owner.owner_val, len);
 		dp->owner.owner_len = len;
 		rfs4_lockowner_rele(lo);
+		rfs4_client_rele(cp);
 		goto finish;
 	}
 

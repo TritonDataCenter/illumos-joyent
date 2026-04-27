@@ -311,7 +311,7 @@ amd_lookup_by_mcid(topo_mod_t *mod, topo_instance_t id)
 	char path[64];
 	int fd, err;
 
-	(void) snprintf(path, sizeof (path), "/dev/mc/mc%d", id);
+	(void) snprintf(path, sizeof (path), "/dev/mc/mc%" PRIu64, id);
 	fd = open(path, O_RDONLY);
 
 	if (fd == -1) {
@@ -321,7 +321,7 @@ amd_lookup_by_mcid(topo_mod_t *mod, topo_instance_t id)
 		 * link.  So try again via /devices.
 		 */
 		(void) snprintf(path, sizeof (path),
-		    "/devices/pci@0,0/pci1022,1102@%x,2:mc-amd",
+		    "/devices/pci@0,0/pci1022,1102@%" PRIx64 ",2:mc-amd",
 		    MC_AMD_DEV_OFFSET + id);
 		fd = open(path, O_RDONLY);
 	}

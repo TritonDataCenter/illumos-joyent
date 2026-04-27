@@ -839,9 +839,11 @@ blowfish_common_init_ctx(blowfish_ctx_t *blowfish_ctx,
 		 * Initialize key schedule.
 		 * Key length is stored in the key.
 		 */
-		if ((rv = init_keysched(key, keysched)) != CRYPTO_SUCCESS)
+		rv = init_keysched(key, keysched);
+		if (rv != CRYPTO_SUCCESS) {
 			kmem_free(keysched, size);
-
+			return (rv);
+		}
 		blowfish_ctx->bc_flags |= PROVIDER_OWNS_KEY_SCHEDULE;
 		blowfish_ctx->bc_keysched_len = size;
 	} else {

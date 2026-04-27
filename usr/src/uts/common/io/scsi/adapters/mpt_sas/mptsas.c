@@ -27,6 +27,7 @@
  * Copyright (c) 2014, Tegile Systems Inc. All rights reserved.
  * Copyright 2023 Oxide Computer Company
  * Copyright 2023 Racktop Systems, Inc.
+ * Copyright 2026 Hans Rosenfeld
  */
 
 /*
@@ -3949,7 +3950,7 @@ get_dma_cookies:
 		cmd->cmd_flags |= CFLAG_DMAVALID;
 		ASSERT(cmd->cmd_cookiec > 0);
 
-		if (cmd->cmd_cookiec > MPTSAS_MAX_CMD_SEGS) {
+		if (cmd->cmd_cookiec > MPTSAS_MAX_DMA_SEGS) {
 			mptsas_log(mpt, CE_NOTE, "large cookiec received %d\n",
 			    cmd->cmd_cookiec);
 			bioerror(bp, EINVAL);

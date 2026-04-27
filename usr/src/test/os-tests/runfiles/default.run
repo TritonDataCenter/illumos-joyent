@@ -14,7 +14,7 @@
 # Copyright 2020 Joyent, Inc.
 # Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
-# Copyright 2025 Oxide Computer Company
+# Copyright 2026 Oxide Computer Company
 # Copyright 2022 MNX Cloud, Inc.
 #
 
@@ -266,3 +266,7 @@ tests = ['stream_ktest', 'ktest_ktest']
 user = root
 pre = comm_page_pre
 tests = ['comm_page_ktest']
+
+[/opt/os-tests/tests/libsocket]
+tests = [ 'getifaddrs_dl.32', 'getifaddrs_dl.64', 'inet6_opt.32',
+    'inet6_opt.64', 'nametoindex.32', 'nametoindex.64' ]

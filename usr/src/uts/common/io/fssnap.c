@@ -235,7 +235,7 @@ extern struct mod_ops mod_driverops;
 
 static struct modldrv md = {
 	&mod_driverops, /* Type of module. This is a driver */
-	"snapshot driver", 	/* Name of the module */
+	"snapshot driver",	/* Name of the module */
 	&snap_ops,
 };
 
@@ -1005,7 +1005,7 @@ snap_prop_op(dev_t dev, dev_info_t *dip, ddi_prop_op_t prop_op,
  */
 static int
 snap_ioctl(dev_t dev, int cmd, intptr_t arg, int mode, cred_t *credp,
-int *rvalp)
+    int *rvalp)
 {
 	minor_t	minor;
 	int error = 0;
@@ -1071,7 +1071,7 @@ int *rvalp)
 		snapshot_id_t		*sidnextp = NULL;
 		struct file		*fp = NULL;
 		struct vnode		*vp = NULL;
-		struct vfs 		*vfsp = NULL;
+		struct vfs		*vfsp = NULL;
 		vfsops_t		*vfsops = EIO_vfsops;
 
 		if (ddi_copyin((void *)arg, &fc, sizeof (fc), mode))
@@ -2031,7 +2031,7 @@ fssnap_delete_impl(void *snapshot_id)
 	 * sidp is guaranteed to be valid if sidpp is valid because
 	 * the snapshot list is append-only.
 	 */
-	if (sidpp == NULL) {
+	if (sidpp == NULL || *sidpp == NULL) {
 		return (-1);
 	}
 
@@ -2039,14 +2039,6 @@ fssnap_delete_impl(void *snapshot_id)
 	rw_enter(&sidp->sid_rwlock, RW_WRITER);
 
 	ASSERT(RW_WRITE_HELD(&sidp->sid_rwlock));
-
-	/*
-	 * double check that the snapshot is still valid for THIS file system
-	 */
-	if (*sidpp == NULL) {
-		rw_exit(&sidp->sid_rwlock);
-		return (-1);
-	}
 
 	/*
 	 * Now we know the snapshot is still valid and will not go away

@@ -10,20 +10,11 @@
 #
 
 #
-# Copyright 2019 Joyent, Inc.
+# Copyright 2026 Oxide Computer Company
 #
 
-MODULE = chipset
-ARCH = i86pc
-CLASS = arch
-SHAREDDIR = ../../common/shared/
+include $(SRC)/Makefile.master
 
-MODULESRCS = chipset.c topo_sensor.c
+SUBDIRS = $(MACH) $(MACH64)
 
-include ../../Makefile.plugin
-
-CPPFLAGS += -I$(SHAREDDIR)
-
-%.o: $(SHAREDDIR)/%.c
-	$(COMPILE.c) -o $@ $<
-	$(CTFCONVERT_O)
+include ../../../../Makefile.subdirs
