@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2019, Joyent, Inc.
- * Copyright 2024 RackTop Systems, Inc.
+ * Copyright 2026 RackTop Systems, Inc.
  */
 
 /*

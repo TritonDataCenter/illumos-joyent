@@ -530,6 +530,13 @@ typedef struct ice_nvm {
 	uint32_t in_size;
 } ice_nvm_t;
 
+typedef struct ice_pkg_ver {
+	uint8_t	ipv_major;
+	uint8_t ipv_minor;
+	uint8_t ipv_update;
+	uint8_t ipv_draft;
+} ice_pkg_ver_t;
+
 /*
  * The task structure represents asynchronous work that we need to do based on
  * events that come in. This is meant to be a centralized way to handle issues
@@ -586,6 +593,16 @@ typedef enum ice_state {
 	ICE_ERROR =		(1 << 2),
 } ice_state_t;
 
+typedef enum ice_mac {
+	ICE_MAC_UNKNOWN,
+	ICE_MAC_VF,
+	ICE_MAC_E810,
+	ICE_MAC_E830,
+	ICE_MAC_GENERIC,
+	ICE_MAC_GENERIC_3K,
+	ICE_MAC_GENERIC_3K_E825,
+} ice_mac_t;
+
 /*
  * This structure is the primary per-physical function state.
  */
@@ -633,6 +650,7 @@ typedef struct ice {
 	/*
 	 * Device information
 	 */
+	ice_mac_t		ice_mac_type;
 	ice_fw_info_t		ice_fwinfo;
 	ice_nvm_t		ice_nvm;
 	uint_t			ice_nfunc_caps;
@@ -641,6 +659,8 @@ typedef struct ice {
 	ice_capability_t	*ice_dev_caps;
 	size_t			ice_pba_len;
 	uint8_t			*ice_pba;
+
+	ice_pkg_ver_t		ice_pkg_version;
 
 	uint_t			ice_max_vsis;
 	uint_t			ice_max_mtu;
@@ -793,6 +813,8 @@ ice_is_running(const ice_t *ice)
 	return (true);
 }
 
+extern void ice_set_mac(ice_t *);
+
 /*
  * General functions
  */
@@ -864,6 +886,9 @@ extern boolean_t ice_cmd_release_nvm(ice_t *);
 extern boolean_t ice_cmd_nvm_read(ice_t *, uint16_t, uint32_t, uint16_t *,
     uint16_t *, boolean_t);
 
+extern bool ice_cmd_acquire_global_lock(ice_t *, bool);
+extern bool ice_cmd_release_global_lock(ice_t *);
+
 extern boolean_t ice_cmd_get_caps(ice_t *, boolean_t, uint_t *,
     ice_capability_t **);
 extern boolean_t ice_cmd_mac_read(ice_t *, uint8_t *);
@@ -895,6 +920,8 @@ extern boolean_t ice_cmd_get_default_scheduler(ice_t *, void *, size_t,
 extern bool ice_cmd_add_txq_grp(ice_t *, ice_vsi_t *, ice_hw_txq_context_t *);
 extern bool ice_cmd_switch_rules(ice_t *, ice_cq_opcode_t, uint16_t,
     ice_sw_rule_t *);
+extern bool ice_cmd_download_pkg(ice_t *, const void *, size_t, bool);
+
 
 
 extern int ice_add_mac(ice_t *, uint_t, const uint8_t *, uint16_t *);

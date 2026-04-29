@@ -17,7 +17,7 @@
 # Copyright 2018 Nexenta Systems, Inc.
 # Copyright 2023 Peter Tribble
 # Copyright 2025 Oxide Computer Company
-# Copyright 2023 RackTop Systems, Inc.
+# Copyright 2023-2026 RackTop Systems, Inc.
 #
 
 include		$(SRC)/Makefile.master
@@ -75,6 +75,7 @@ _MANFILES=	aac.4d		\
 		ibdm.4d		\
 		ibdma.4d	\
 		ibtl.4d		\
+		ice.4d		\
 		ieee1394.4d	\
 		igb.4d		\
 		igc.4d		\

@@ -11,6 +11,7 @@
 
 #
 # Copyright 2019, Joyent, Inc.
+# Copyright 2026 RackTop Systems, Inc.
 #
 
 UTSBASE = ../..
@@ -19,6 +20,11 @@ MODULE		= ice
 OBJECTS		= $(ICE_OBJS:%=$(OBJS_DIR)/%)
 ROOTMODULE	= $(ROOT_DRV_DIR)/$(MODULE)
 CONF_SRCDIR	= $(UTSBASE)/common/io/ice
+
+FWDIR		= $(UTSBASE)/common/io/ice
+DDP_VERSION	= 1.3.41.0
+DDP_FILE	= ice-$(DDP_VERSION).pkg
+ROOTFIRMWARE	= $(DDP_FILE:%=$(ROOT_FIRMWARE_DIR)/$(MODULE)/%)
 
 include $(UTSBASE)/intel/Makefile.intel
 
@@ -39,7 +45,14 @@ clean:		$(CLEAN_DEPS)
 
 clobber:	$(CLOBBER_DEPS)
 
-install:	$(INSTALL_DEPS)
+install:	$(INSTALL_DEPS) $(ROOTFIRMWARE)
+
+$(ROOT_FIRMARE_DIR)/$(MODULE)/ice.pkg := INSLINKTARGET = $(DDP_FILE)
 
 include $(UTSBASE)/Makefile.mapfile
 include $(UTSBASE)/intel/Makefile.targ
+
+$(ROOT_FIRMWARE_DIR)/$(MODULE)/%: FRC
+	$(INS.symlink)
+
+FRC:

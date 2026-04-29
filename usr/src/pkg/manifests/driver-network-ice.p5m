@@ -1,0 +1,89 @@
+#
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+
+#
+# Copyright 2026 RackTop Systems, Inc.
+#
+
+<include global_zone_only_component>
+set name=pkg.fmri value=pkg:/driver/network/ice@$(PKGVERS)
+set name=pkg.summary value="Intel E810 Ethernet Driver"
+set name=pkg.description value="Intel E810 Ethernet Driver"
+set name=info.classification \
+    value=org.opensolaris.category.2008:Drivers/Networking
+set name=variant.arch value=i386
+dir  path=kernel group=sys
+dir  path=kernel/drv group=sys
+dir  path=kernel/drv/$(ARCH64) group=sys
+file path=kernel/drv/$(ARCH64)/ice group=sys
+file path=kernel/drv/ice.conf group=sys
+dir  path=kernel/firmware/ice/ice-1.3.41.0.pkg group=sys
+link path=kernel/firmware/ice/ice.pkg target=ice-1.3.41.0.pkg
+dir  path=usr/share/man
+dir  path=usr/share/man/man4d
+file path=usr/share/man/man4d/ice.4d
+driver name=ice perms="* 0666 root sys" clone_perms="ice 0666 root sys" \
+    alias=pciex8086,000e \
+    alias=pciex8086,000f \
+    alias=pciex8086,0010 \
+    alias=pciex8086,0011 \
+    alias=pciex8086,0012 \
+    alias=pciex8086,02e9 \
+    alias=pciex8086,02ea \
+    alias=pciex8086,1248 \
+    alias=pciex8086,1249 \
+    alias=pciex8086,124a \
+    alias=pciex8086,124c \
+    alias=pciex8086,124d \
+    alias=pciex8086,124e \
+    alias=pciex8086,124f \
+    alias=pciex8086,1261 \
+    alias=pciex8086,1262 \
+    alias=pciex8086,1263 \
+    alias=pciex8086,1265 \
+    alias=pciex8086,1266 \
+    alias=pciex8086,1267 \
+    alias=pciex8086,12d1 \
+    alias=pciex8086,12d2 \
+    alias=pciex8086,12d3 \
+    alias=pciex8086,12d5 \
+    alias=pciex8086,12d8 \
+    alias=pciex8086,12da \
+    alias=pciex8086,12dc \
+    alias=pciex8086,12dd \
+    alias=pciex8086,12de \
+    alias=pciex8086,151d \
+    alias=pciex8086,1591 \
+    alias=pciex8086,1592 \
+    alias=pciex8086,1593 \
+    alias=pciex8086,1599 \
+    alias=pciex8086,159a \
+    alias=pciex8086,159b \
+    alias=pciex8086,1888 \
+    alias=pciex8086,188a \
+    alias=pciex8086,188b \
+    alias=pciex8086,188c \
+    alias=pciex8086,188d \
+    alias=pciex8086,188e \
+    alias=pciex8086,1890 \
+    alias=pciex8086,1891 \
+    alias=pciex8086,1892 \
+    alias=pciex8086,1893 \
+    alias=pciex8086,1894 \
+    alias=pciex8086,1897 \
+    alias=pciex8086,1898 \
+    alias=pciex8086,1899 \
+    alias=pciex8086,189a \
+    alias=pciex8086,579c \
+    alias=pciex8086,579d \
+    alias=pciex8086,579e \
+    alias=pciex8086,579f
+license lic_CDDL license=lic_CDDL

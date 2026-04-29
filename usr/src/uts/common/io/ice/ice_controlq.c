@@ -53,6 +53,62 @@ CTASSERT(ICE_REG_PC_FW_ATQLEN_ATQENABLE == ICE_REG_PC_FW_ARQLEN_ATQENABLE);
 clock_t icq_controlq_delay = 10000;	/* 10ms in us */
 uint_t icq_controlq_count = 100;
 
+int
+ice_controlq_err_to_errno(ice_cq_errno_t cq_err)
+{
+	switch (cq_err) {
+	case ICE_CQ_SUCCESS:
+		return (0);
+	case ICE_CQ_EPERM:
+		return (EPERM);
+	case ICE_CQ_ENOENT:
+		return (ENOENT);
+	case ICE_CQ_ESRCH:
+		return (ESRCH);
+	case ICE_CQ_EINTR:
+		return (EINTR);
+	case ICE_CQ_EIO:
+		return (EIO);
+	case ICE_CQ_ENXIO:
+		return (ENXIO);
+	case ICE_CQ_E2BIG:
+		return (E2BIG);
+	case ICE_CQ_EAGAIN:
+		return (EAGAIN);
+	case ICE_CQ_ENOMEM:
+		return (ENOMEM);
+	case ICE_CQ_EACCESS:
+		return (EACCES);
+	case ICE_CQ_EFAULT:
+		return (EFAULT);
+	case ICE_CQ_EBUSY:
+		return (EBUSY);
+	case ICE_CQ_EEXIST:
+		return (EEXIST);
+	case ICE_CQ_EINVAL:
+		return (EINVAL);
+	case ICE_CQ_ENOTTY:
+		return (ENOTTY);
+	case ICE_CQ_ENOSPC:
+		return (ENOSPC);
+	case ICE_CQ_ERANGE:
+		return (ERANGE);
+	case ICE_CQ_EFLUSHED:
+	case ICE_CQ_BAD_ADDR:
+	case ICE_CQ_EMODE:
+		/* TODO */
+		return (EIO);
+	case ICE_CQ_EFBIG:
+		return (EFBIG);
+	case ICE_CQ_ESBCOMP:
+	case ICE_CQ_EACCES_BMCU:
+		/* TODO */
+		return (EIO);
+	default:
+		return (EIO);
+	}
+}
+
 static uint_t
 ice_controlq_incr(ice_controlq_t *cqp, uint_t val)
 {
@@ -719,13 +775,31 @@ ice_cmd_release_nvm(ice_t *ice)
 	return (B_TRUE);
 }
 
+static ice_cq_cmd_request_resource_t *
+ice_cmd_init_acq_res(ice_cq_desc_t *desc, uint16_t res, bool write, uint32_t to)
+{
+	ice_cq_cmd_request_resource_t *rsrc;
+
+	ice_cmd_direct_init(desc, ICE_CQ_OP_REQUEST_RESOURCE);
+	rsrc = &desc->icqd_command.icc_request_resource;
+	rsrc->iccrr_res_id = LE_16(res);
+	if (write) {
+		rsrc->iccrr_acc_type = LE_16(ICE_CQ_ACCESS_WRITE);
+	} else {
+		rsrc->iccrr_acc_type = LE_16(ICE_CQ_ACCESS_READ);
+	}
+	rsrc->iccrr_timeout = LE_32(to);
+	rsrc->iccrr_res_number = 0;
+
+	return (rsrc);
+}
+
 boolean_t
 ice_cmd_acquire_nvm(ice_t *ice, boolean_t write)
 {
 	ice_cq_desc_t desc;
 	ice_cq_errno_t err;
 	uint8_t hw;
-	ice_cq_cmd_request_resource_t *rsrc;
 
 #ifdef	DEBUG
 	mutex_enter(&ice->ice_nvm.in_lock);
@@ -733,17 +807,8 @@ ice_cmd_acquire_nvm(ice_t *ice, boolean_t write)
 	mutex_exit(&ice->ice_nvm.in_lock);
 #endif
 
-	ice_cmd_direct_init(&desc, ICE_CQ_OP_REQUEST_RESOURCE);
-	rsrc = &desc.icqd_command.icc_request_resource;
-	rsrc->iccrr_res_id = LE_16(ICE_CQ_RESOURCE_NVM);
-	if (write) {
-		rsrc->iccrr_acc_type = LE_16(ICE_CQ_ACCESS_WRITE);
-		rsrc->iccrr_timeout = LE_32(ICE_CQ_TIMEOUT_NVM_WRITE);
-	} else {
-		rsrc->iccrr_acc_type = LE_16(ICE_CQ_ACCESS_READ);
-		rsrc->iccrr_timeout = LE_32(ICE_CQ_TIMEOUT_NVM_READ);
-	}
-	rsrc->iccrr_res_number = 0;
+	(void) ice_cmd_init_acq_res(&desc, ICE_CQ_RESOURCE_NVM, write,
+	    write ? ICE_CQ_TIMEOUT_NVM_WRITE : ICE_CQ_TIMEOUT_NVM_READ);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
@@ -824,6 +889,59 @@ ice_cmd_nvm_read(ice_t *ice, uint16_t module, uint32_t offset, uint16_t *lenp,
 	*lenp = LE_16(desc.icqd_data_len);
 
 	return (B_TRUE);
+}
+
+bool
+ice_cmd_acquire_global_lock(ice_t *ice, bool write)
+{
+	ice_cq_desc_t			desc;
+	ice_cq_errno_t			err;
+	uint8_t				hw;
+
+	/* TODO: add state to track if we have the glovbal lock or not */
+
+	(void) ice_cmd_init_acq_res(&desc, ICE_CQ_RESOURCE_GLOBAL_CONFIG,
+	    write, ICE_CQ_TIMEOUT_GLOBAL_CONFIG);
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
+		return (false);
+	}
+
+	if (!ice_cmd_result(&desc, &err, &hw)) {
+		ice_error(ice, "Acquire global config lock command failed "
+		    "with: 0x%x (fw private: %x)", err, hw);
+		return (false);
+	}
+
+	return (true);
+}
+
+bool
+ice_cmd_release_global_lock(ice_t *ice)
+{
+	ice_cq_desc_t			desc;
+	ice_cq_errno_t			err;
+	uint8_t				hw;
+	ice_cq_cmd_request_resource_t	*rsrc;
+
+	ice_cmd_direct_init(&desc, ICE_CQ_OP_RELEASE_RESOURCE);
+	rsrc = &desc.icqd_command.icc_request_resource;
+	rsrc->iccrr_res_id = LE_16(ICE_CQ_RESOURCE_GLOBAL_CONFIG);
+	rsrc->iccrr_res_number = 0;
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
+	    ICE_CMD_COPY_NONE)) {
+		return (false);
+	}
+
+	if (!ice_cmd_result(&desc, &err, &hw)) {
+		ice_error(ice, "global config lock release resource command "
+		    "failed with: 0x%x (fw private: %x)", err, hw);
+		return (false);
+	}
+
+	return (true);
 }
 
 /*
@@ -1508,6 +1626,69 @@ ice_cmd_switch_rules(ice_t *ice, ice_cq_opcode_t op, uint16_t nrules,
 	 */
 	if (!ice_cmd_result(&desc, &err, &code)) {
 		ice_error(ice, "failed switch %s operation: %d", err);
+		return (false);
+	}
+
+	return (true);
+}
+
+bool
+ice_cmd_get_package_info_list(ice_t *ice, void *buf, size_t bufsz)
+{
+	ice_cq_desc_t	desc;
+	ice_cq_errno_t	err;
+	uint8_t		hw;
+
+	/*
+	 * The command expects the buffer size to be 4096 bytes. For
+	 * conveinence, we allow the buffer to be larger. However at most
+	 * the first 4096 bytes will be written to buf.
+	 */
+	if (bufsz < ICE_CQ_GET_PKG_INFO_BUF_SZ) {
+		return (false);
+	}
+
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_GET_PKG_INFO,
+	    ICE_CQ_GET_PKG_INFO_BUF_SZ, B_FALSE);
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
+	    ICE_CMD_COPY_FROM_DEV)) {
+		return (false);
+	}
+
+	if (!ice_cmd_result(&desc, &err, &hw)) {
+		ice_error(ice, "failed to get package info list from device: "
+		    "0x%x (fw private: %x)", err, hw);
+		return (false);
+	}
+
+	return (true);
+}
+
+bool
+ice_cmd_download_pkg(ice_t *ice, const void *pkg, size_t len, bool last)
+{
+	ice_cq_cmd_download_pkg_t	*pkgp;
+	ice_cq_desc_t			desc;
+	ice_cq_errno_t			err;
+	uint8_t				hw;
+
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DOWNLOAD_PKG, len, B_TRUE);
+	pkgp = &desc.icqd_command.icc_download_pkg;
+
+	if (last) {
+		pkgp->iccdp_flags = 0x1;
+	}
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, (void *)pkg,
+	    ICE_CMD_COPY_FROM_DEV)) {
+		return (false);
+	}
+
+	if (!ice_cmd_result(&desc, &err, &hw)) {
+		/* TODO should grab the error info and offset to display */
+		ice_error(ice, "failed to download package to device: 0x%x "
+		    "(fw private: %x)", err, hw);
 		return (false);
 	}
 

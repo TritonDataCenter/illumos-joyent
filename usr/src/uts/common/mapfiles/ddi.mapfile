@@ -213,6 +213,10 @@ SYMBOL_SCOPE {
 	drv_usectohz			{ FLAGS = EXTERN };
 	drv_usecwait			{ FLAGS = EXTERN };
 	ffs				{ FLAGS = EXTERN };
+	firmware_close			{ FLAGS = EXTERN };
+	firmware_get_size		{ FLAGS = EXTERN };
+	firmware_open			{ FLAGS = EXTERN };
+	firmware_read			{ FLAGS = EXTERN };
 	fm_ena_generate			{ FLAGS = EXTERN };
 	freeb				{ FLAGS = EXTERN };
 	freemsg				{ FLAGS = EXTERN };

@@ -115,6 +115,12 @@ typedef enum ice_cq_opcode {
 	ICE_CQ_OP_MOVE_TXQ = 0xC32,
 	ICE_CQ_OP_ADD_RDMA_TQSET = 0xC33,
 	ICE_CQ_OP_MOVE_RDMA_TQSET = 0xC34,
+	/*
+	 * Package Commands
+	 */
+	ICE_CQ_OP_DOWNLOAD_PKG = 0xC40,
+	ICE_CQ_OP_GET_PKG_INFO = 0xC43,
+
 } ice_cq_opcode_t;
 
 /*
@@ -435,6 +441,13 @@ typedef struct ice_cq_cmd_add_switch_rule {
 	uint32_t	iccasr_data_low;
 } ice_cq_cmd_add_switch_rule_t;
 
+typedef struct ice_cq_cmd_download_pkg {
+	uint8_t		iccdp_flags;
+	uint8_t		iccdp_resv[7];
+	uint32_t	iccdp_data_high;
+	uint32_t	iccdp_data_low;
+} ice_cq_cmd_download_pkg_t;
+
 /*
  * This is a generic structure of a command that may be used.
  */
@@ -468,6 +481,7 @@ typedef union ice_cq_cmd {
 	ice_cq_cmd_add_txq_t icc_add_txq;
 	ice_cq_cmd_txq_disable_flow_t icc_txq_disable_flow;
 	ice_cq_cmd_add_switch_rule_t icc_add_switch_rule;
+	ice_cq_cmd_download_pkg_t icc_download_pkg;
 } ice_cq_cmd_t;
 
 /*
@@ -558,6 +572,12 @@ typedef struct ice_cq_desc {
 #define	ICE_CQ_ERR_CODE_MASK		0x00ff
 #define	ICE_CQ_ERR_CODE_FW_MASK		0xff00
 #define	ICE_CQ_ERR_CODE_FW_SHIFT	8
+
+/*
+ * The get package info list command (per 7.11.9.4) requires a 4k buffer
+ * for the response.
+ */
+#define	ICE_CQ_GET_PKG_INFO_BUF_SZ	4096
 
 #ifdef __cplusplus
 }
