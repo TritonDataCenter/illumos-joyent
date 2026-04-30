@@ -24,6 +24,8 @@
  * Copyright 2022 Tintri by DDN, Inc. All rights reserved.
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <devfsadm.h>
@@ -314,7 +316,7 @@ static int
 disk_callback_sas(di_minor_t minor, di_node_t node)
 {
 	char disk[DISK_SUBPATH_MAX];
-	int lun64_found = 0;
+	boolean_t lun64_found = B_FALSE;
 	scsi_lun64_t lun64, sl;
 	scsi_lun_t lun;
 	int64_t *lun64p;
@@ -327,14 +329,18 @@ disk_callback_sas(di_minor_t minor, di_node_t node)
 	if (di_prop_lookup_int64(DDI_DEV_T_ANY, node,
 	    SCSI_ADDR_PROP_LUN64, &lun64p) > 0) {
 		if (*lun64p != SCSI_LUN64_ILLEGAL) {
-			lun64_found = 1;
+			lun64_found = B_TRUE;
 			lun64 = (uint64_t)*lun64p;
 		}
 	}
-	if ((!lun64_found) && (di_prop_lookup_ints(DDI_DEV_T_ANY, node,
-	    SCSI_ADDR_PROP_LUN, &intp) > 0)) {
+	if (!lun64_found && di_prop_lookup_ints(DDI_DEV_T_ANY, node,
+	    SCSI_ADDR_PROP_LUN, &intp) > 0) {
+		lun64_found = B_TRUE;
 		lun64 = (uint64_t)*intp;
 	}
+
+	if (!lun64_found)
+		return (DEVFSADM_CONTINUE);
 
 	lun = scsi_lun64_to_lun(lun64);
 

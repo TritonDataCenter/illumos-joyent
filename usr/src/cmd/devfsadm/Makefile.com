@@ -22,6 +22,7 @@
 # Use is subject to license terms.
 #
 # Copyright 2019, Joyent, Inc.
+# Copyright 2026 Oxide Computer Company
 
 # This target builds both a command (daemon) and various shared objects.  This
 # isn't a typical target, and the inclusion of both library and command
@@ -91,13 +92,6 @@ COMPAT_LINKS = disks tapes ports audlinks devlinks drvconfig
 CPPFLAGS +=	-D_POSIX_PTHREAD_SEMANTICS -D_REENTRANT \
 		-I$(COMMON) -I$(UTSBASE)/common -I$(MODLOADDIR)
 CFLAGS += $(CCVERBOSE) $(C_PICFLAGS)
-
-CERRWARN += $(CNOWARN_UNINIT)
-CERRWARN += -_gcc=-Wno-char-subscripts
-CERRWARN += -_gcc=-Wno-parentheses
-
-# not linted
-SMATCH=off
 
 # Define the dependencies required by devfsadm and all shared objects.
 LDLIBS +=		-ldevinfo

@@ -37,6 +37,7 @@
  * Use is subject to license terms.
  *
  * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2021-2025 RackTop Systems, Inc.
  */
 
 #ifndef _NETSMB_DEV_H_
@@ -124,9 +125,10 @@
 #define	SMB2_DIALECT_0210	0x0210
 #define	SMB2_DIALECT_0300	0x0300
 #define	SMB2_DIALECT_0302	0x0302
+#define	SMB2_DIALECT_0311	0x0311
 
 /* Maximum supported dialect (for ssn_maxver) */
-#define	SMB2_DIALECT_MAX	SMB2_DIALECT_0302
+#define	SMB2_DIALECT_MAX	SMB2_DIALECT_0311
 
 /*
  * Option flags in smbioc_oshare.ioc_opt

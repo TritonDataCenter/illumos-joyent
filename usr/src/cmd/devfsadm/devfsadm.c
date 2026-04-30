@@ -24,6 +24,7 @@
  * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 1998, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2019, Joyent, Inc.
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -599,7 +600,7 @@ parse_args(int argc, char *argv[])
 		    getopt(argc, argv, "a:bc:dfi:m:np:R:r:suvV:x")) != EOF) {
 			switch (opt) {
 			case 'a':
-				ap = calloc(sizeof (struct aliases), 1);
+				ap = calloc(1, sizeof (struct aliases));
 				ap->a_name = dequote(optarg);
 				len = strlen(ap->a_name) + 1;
 				if (len > MAXMODCONFNAME) {
@@ -656,16 +657,16 @@ parse_args(int argc, char *argv[])
 				 */
 				root_dir = s_strdup(optarg);
 				if (zone_pathcheck(root_dir) !=
-				    DEVFSADM_SUCCESS)
-				devfsadm_exit(devfsadm_copy());
-				/*NOTREACHED*/
+				    DEVFSADM_SUCCESS) {
+					devfsadm_exit(devfsadm_copy());
+				}
 				break;
 			case 'r':
 				devices_dir = s_strdup(optarg);
 				if (zone_pathcheck(devices_dir) !=
-				    DEVFSADM_SUCCESS)
+				    DEVFSADM_SUCCESS) {
 					devfsadm_exit(1);
-					/*NOTREACHED*/
+				}
 				break;
 			case 's':
 				/*
@@ -5204,7 +5205,6 @@ get_enum_cache(devfsadm_enumerate_t rules[], int nrules)
 			vprint(RSRV_MID, "parsing rule RE: %s\n", path_left);
 			ret = enumerate_parse(entry->er_file, path_left,
 			    setp, rules, i);
-			free(path_left);
 			if (ret == 1) {
 				/*
 				 * We found the reserved ID for this entry.
@@ -5213,8 +5213,10 @@ get_enum_cache(devfsadm_enumerate_t rules[], int nrules)
 				 */
 				vprint(RSRV_MID, "found rsv ID: rstring: %s "
 				    "rule RE: %s\n", entry->er_file, path_left);
+				free(path_left);
 				break;
 			}
+			free(path_left);
 		}
 	}
 
@@ -5316,7 +5318,8 @@ new_id(numeral_t *numeral, int type, char *min)
 
 	if (type == LETTER) {
 
-		char letter[26], i;
+		char letter[26];
+		int i;
 
 		if (numeral == NULL) {
 			return (s_strdup(min));
@@ -5441,10 +5444,10 @@ enumerate_parse(char *rsvstr, char *path_left, numeral_set_t *setp,
 			path_left++;
 		}
 
-		if (slash1 = strchr(path_left, '/')) {
+		if ((slash1 = strchr(path_left, '/')) != NULL) {
 			*slash1 = '\0';
 		}
-		if (slash2 = strchr(rsvstr, '/')) {
+		if ((slash2 = strchr(rsvstr, '/')) != NULL) {
 			*slash2 = '\0';
 		}
 
@@ -5537,7 +5540,7 @@ enumerate_recurse(char *current_dir, char *path_left, numeral_set_t *setp,
 		path_left++;
 	}
 
-	if (slash = strchr(path_left, '/')) {
+	if ((slash = strchr(path_left, '/')) != NULL) {
 		*slash = '\0';
 	}
 
@@ -6217,9 +6220,9 @@ read_devlinktab_file(void)
 		i = strlen(line);
 		if (line[i-1] == NEWLINE) {
 			line[i-1] = '\0';
-		} else if (i == sizeof (line-1)) {
+		} else if (i == sizeof (line) - 1) {
 			err_print(LINE_TOO_LONG, devlinktab_line,
-			    devlinktab_file, sizeof (line)-1);
+			    devlinktab_file, sizeof (line) - 1);
 			while (((i = getc(fp)) != '\n') && (i != EOF))
 				;
 			continue;
@@ -6501,6 +6504,7 @@ create_link_list(char *link)
 					error_str =
 					    "multiple counters not permitted";
 					free(link_list);
+					link_list = NULL;
 				} else {
 					counter_found = TRUE;
 					link_list->type = COUNTER;
@@ -6512,6 +6516,7 @@ create_link_list(char *link)
 			default:
 				error = TRUE;
 				free(link_list);
+				link_list = NULL;
 				error_str = "unrecognized escape sequence";
 				break;
 			}
@@ -6521,6 +6526,7 @@ create_link_list(char *link)
 					    "followed by a digit\n";
 					error = TRUE;
 					free(link_list);
+					link_list = NULL;
 				} else {
 					link_list->arg =
 					    (int)strtoul(link, &link, 10);
@@ -7381,7 +7387,7 @@ read_logindevperm_file(void)
 	static int cached = FALSE;
 	static struct stat cached_sb;
 	struct stat current_sb;
-	struct login_dev *ldev;
+	struct login_dev *ldev = NULL;
 	FILE *fp;
 	char line[MAX_LDEV_LINE];
 	int ln, perm, rv;
@@ -7414,6 +7420,7 @@ read_logindevperm_file(void)
 				list = next;
 			}
 			free(ldev);
+			ldev = NULL;
 		}
 	} else {
 		cached = TRUE;
@@ -7494,12 +7501,12 @@ read_logindevperm_file(void)
 		}
 
 		drv = strtok_r(NULL, LDEV_DRVLIST_DELIMS, &lasts);
-		if (drv) {
+		if (drv != NULL && ldev != NULL) {
 			if (strcmp(drv, LDEV_DRVLIST_NAME) == 0) {
 
 				drv = strtok_r(NULL, LDEV_DRV_DELIMS, &lasts);
 
-				while (drv) {
+				while (drv != NULL) {
 					vprint(FILES_MID,
 					    "logindevperm driver=%s\n", drv);
 
@@ -7583,7 +7590,7 @@ read_driver_aliases_file(void)
 {
 
 	driver_alias_t *save;
-	driver_alias_t *lst_tail;
+	driver_alias_t *lst_tail = NULL;
 	driver_alias_t *ap;
 	static int cached = FALSE;
 	FILE *afd;
@@ -8523,8 +8530,7 @@ nfphash_destroy(void)
 	item_t	*ip;
 
 	for (i = 0; i < NFP_HASH_SZ; i++) {
-		/*LINTED*/
-		while (ip = nfp_hash[i]) {
+		while ((ip = nfp_hash[i]) != NULL) {
 			nfp_hash[i] = ip->i_next;
 			free(ip->i_key);
 			free(ip);

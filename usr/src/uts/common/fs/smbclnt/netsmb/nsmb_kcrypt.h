@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2017-2021 Tintri by DDN, Inc. All rights reserved.
- * Copyright 2022-2024 RackTop Systems, Inc.
+ * Copyright 2022-2025 RackTop Systems, Inc.
  */
 
 #ifndef _NSMB_KCRYPT_H_
@@ -42,12 +42,13 @@
 extern "C" {
 #endif
 
+#define	AES128_KEY_LENGTH	16	/* AES128 key length in bytes */
+#define	AES256_KEY_LENGTH	32	/* AES256 key length in bytes */
 #define	MD5_DIGEST_LENGTH	16	/* MD5 digest length in bytes */
 #define	SHA256_DIGEST_LENGTH	32	/* SHA256 digest length in bytes */
 #define	SHA512_DIGEST_LENGTH	64	/* SHA512 digest length in bytes */
 #define	SMB2_SIG_SIZE		16
 #define	SMB2_KEYLEN		16	/* SMB2/3 Signing Key length */
-#define	SMB3_KEYLEN		16	/* Only AES128 for now */
 
 #define	SMB3_AES_CCM_NONCE_SIZE	11
 #define	SMB3_AES_GCM_NONCE_SIZE	12
@@ -121,6 +122,11 @@ int nsmb_cmac_init(smb_sign_ctx_t *, smb_crypto_mech_t *, uint8_t *, size_t);
 int nsmb_cmac_update(smb_sign_ctx_t, uint8_t *, size_t);
 int nsmb_cmac_final(smb_sign_ctx_t, uint8_t *);
 
+int nsmb_sha512_getmech(smb_crypto_mech_t *mech);
+int nsmb_sha512_init(smb_sign_ctx_t *ctxp, smb_crypto_mech_t *mech);
+int nsmb_sha512_update(smb_sign_ctx_t ctx, uint8_t *buf, size_t len);
+int nsmb_sha512_final(smb_sign_ctx_t ctx, uint8_t *digest);
+
 int nsmb_kdf(uint8_t *outbuf, uint32_t outbuf_len,
     uint8_t *key, size_t key_len,
     uint8_t *label, size_t label_len,
@@ -132,15 +138,13 @@ void nsmb_crypto_init_ccm_param(smb_enc_ctx_t *,
     uint8_t *, size_t, uint8_t *, size_t, size_t);
 void nsmb_crypto_init_gcm_param(smb_enc_ctx_t *,
     uint8_t *, size_t, uint8_t *, size_t);
+void nsmb_enc_ctx_done(smb_enc_ctx_t *);
 
 int nsmb_encrypt_init(smb_enc_ctx_t *, uint8_t *, size_t);
 int nsmb_encrypt_mblks(smb_enc_ctx_t *, mblk_t *, size_t);
-int nsmb_encrypt_uio(smb_enc_ctx_t *, uio_t *, uio_t *);
-void nsmb_enc_ctx_done(smb_enc_ctx_t *);
 
 int nsmb_decrypt_init(smb_enc_ctx_t *, uint8_t *, size_t);
 int nsmb_decrypt_mblks(smb_enc_ctx_t *, mblk_t *, size_t);
-int nsmb_decrypt_uio(smb_enc_ctx_t *, uio_t *, uio_t *);
 
 #ifdef	__cplusplus
 }

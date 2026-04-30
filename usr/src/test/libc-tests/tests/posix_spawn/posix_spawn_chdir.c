@@ -10,7 +10,7 @@
  */
 
 /*
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -35,11 +35,13 @@
 #include <libgen.h>
 #include <inttypes.h>
 
+#include "posix_spawn_common.h"
+
 /*
  * This isn't const so we can refer to it in the argv arrays.
  */
 static char *spawn_pwd = "/usr/bin/pwd";
-static char spawn_getsid[PATH_MAX];
+static char spawn_child[PATH_MAX];
 
 /*
  * This is an arbitrary fd that we believe will be okay to use in fchdir tests
@@ -151,55 +153,6 @@ static const spawn_flags_test_t spawn_flags_tests[] = {
 	}
 };
 
-/*
- * Add standard actions to capture stdout but nothing else.
- */
-static void
-posix_spawn_setup_fds(posix_spawn_file_actions_t *acts, int pipes[2])
-{
-	int ret;
-
-	if (pipe2(pipes, O_NONBLOCK) != 0) {
-		err(EXIT_FAILURE, "INTERNAL TEST FAILURE: failed to create a "
-		    "pipe");
-	}
-
-	VERIFY3S(pipes[0], >, STDERR_FILENO);
-	VERIFY3S(pipes[1], >, STDERR_FILENO);
-
-	if ((ret = posix_spawn_file_actions_init(acts)) != 0) {
-		errc(EXIT_FAILURE, ret, "INTERNAL TEST FAILURE: failed to "
-		    "initialize posix_spawn file actions");
-	}
-
-	if ((ret = posix_spawn_file_actions_addopen(acts, STDIN_FILENO,
-	    "/dev/null", O_RDONLY, 0)) != 0) {
-		errc(EXIT_FAILURE, ret, "INTERNAL TEST FAILURE: failed to add "
-		    "/dev/null open action");
-	}
-
-	if ((ret = posix_spawn_file_actions_adddup2(acts, STDIN_FILENO,
-	    STDERR_FILENO)) != 0) {
-		errc(EXIT_FAILURE, ret, "INTERNAL TEST FAILURE: failed to add "
-		    "stderr dup action");
-	}
-
-	if ((ret = posix_spawn_file_actions_adddup2(acts, pipes[1],
-	    STDOUT_FILENO)) != 0) {
-		errc(EXIT_FAILURE, ret, "INTERNAL TEST FAILURE: failed to add "
-		    "stdout dup action");
-	}
-
-	if ((ret = posix_spawn_file_actions_addclose(acts, pipes[0])) != 0) {
-		errc(EXIT_FAILURE, ret, "INTERNAL TEST FAILURE: failed to add "
-		    "pipes[0] close action");
-	}
-
-	if ((ret = posix_spawn_file_actions_addclose(acts, pipes[1])) != 0) {
-		errc(EXIT_FAILURE, ret, "INTERNAL TEST FAILURE: failed to add "
-		    "pipes[1] close action");
-	}
-}
 
 static bool
 posix_spawn_test_one_dir(const spawn_dir_test_t *test, int pipes[2],
@@ -301,7 +254,7 @@ posix_spawn_test_one_chdir(const spawn_dir_test_t *test)
 	 * pwd. While we could use /proc to try and do this, we prefer this
 	 * mechanism.
 	 */
-	posix_spawn_setup_fds(&acts, pipes);
+	posix_spawn_pipe_setup(&acts, pipes);
 
 	for (size_t i = 0; i < ARRAY_SIZE(test->sdt_dirs); i++) {
 		if (test->sdt_dirs[i] == NULL)
@@ -337,7 +290,7 @@ posix_spawn_test_one_fchdir(const spawn_dir_test_t *test)
 	 * pwd. While we could use /proc to try and do this, we prefer this
 	 * mechanism.
 	 */
-	posix_spawn_setup_fds(&acts, pipes);
+	posix_spawn_pipe_setup(&acts, pipes);
 
 	/*
 	 * For the fchdir tests we go in a loop over these directories opening
@@ -461,7 +414,7 @@ posix_spawn_test_bad_fchdir(void)
 	 * pwd. While we could use /proc to try and do this, we prefer this
 	 * mechanism.
 	 */
-	posix_spawn_setup_fds(&acts, pipes);
+	posix_spawn_pipe_setup(&acts, pipes);
 
 	ret = posix_spawn_file_actions_addclose(&acts, SPAWN_FD);
 	if (ret != 0) {
@@ -491,18 +444,18 @@ posix_spawn_test_one_flags(const spawn_flags_test_t *test)
 {
 	int ret, pipes[2];
 	bool bret = true;
-	char *const argv[2] = { spawn_getsid, NULL };
+	char *const argv[3] = { spawn_child, "sidpgid", NULL };
 	char *const envp[1] = { NULL };
-	pid_t buf[2];
+	spawn_sidpgid_result_t res;
 	posix_spawn_file_actions_t acts;
 	posix_spawnattr_t attr;
 	short flags;
 	pid_t pid, exp_sid, exp_pgid;
 	siginfo_t sig;
-	ssize_t buf_len;
+	ssize_t n;
 	const char *sid_desc, *pgid_desc;
 
-	posix_spawn_setup_fds(&acts, pipes);
+	posix_spawn_pipe_setup(&acts, pipes);
 
 	if ((ret = posix_spawnattr_init(&attr)) != 0) {
 		errc(EXIT_FAILURE, ret, "INTERNAL TEST FAILURE: failed to "
@@ -524,7 +477,7 @@ posix_spawn_test_one_flags(const spawn_flags_test_t *test)
 		bret = false;
 	}
 
-	ret = posix_spawn(&pid, spawn_getsid, &acts, &attr, argv, envp);
+	ret = posix_spawn(&pid, spawn_child, &acts, &attr, argv, envp);
 	if (ret != test->sft_ret) {
 		if (test->sft_ret == 0) {
 			warnx("TEST FAILED: %s posix_spawn() failed with %s, "
@@ -567,19 +520,13 @@ posix_spawn_test_one_flags(const spawn_flags_test_t *test)
 	}
 
 	/*
-	 * The getsid.64 process writes as binary data the results of getsid(2)
-	 * and getpgid(2) to our pipe. We should be able to read all of this in
-	 * one swoop.
+	 * The child writes the results of getsid(2) and getpgid(2) as binary
+	 * data to our pipe. We should be able to read all of this in one swoop.
 	 */
-	buf_len = read(pipes[0], buf, sizeof (buf));
-	if (buf_len < 0) {
-		warn("TEST FAILED: %s: failed to read IDs from pipe",
-		    test->sft_desc);
-		bret = false;
-		goto out;
-	} else if (buf_len == 0) {
-		warn("TEST FAILED: %s: got zero byte read from pipe?!",
-		    test->sft_desc);
+	n = read(pipes[0], &res, sizeof (res));
+	if (n != sizeof (res)) {
+		warnx("TEST FAILED: %s: short read from pipe (%zd)",
+		    test->sft_desc, n);
 		bret = false;
 		goto out;
 	}
@@ -611,17 +558,17 @@ posix_spawn_test_one_flags(const spawn_flags_test_t *test)
 		pgid_desc = "test's PGID";
 	}
 
-	if (buf[0] != exp_sid) {
+	if (res.sspr_sid != exp_sid) {
 		warnx("TEST FAILED: %s: session ID mismatch: expected 0x%"
 		    _PRIxID " (%s), found 0x%" _PRIxID, test->sft_desc, exp_sid,
-		    sid_desc, buf[0]);
+		    sid_desc, res.sspr_sid);
 		bret = false;
 	}
 
-	if (buf[1] != exp_pgid) {
+	if (res.sspr_pgid != exp_pgid) {
 		warnx("TEST FAILED: %s: process group ID mismatch: expected "
 		    "0x%" _PRIxID " (%s), found 0x%" _PRIxID, test->sft_desc,
-		    exp_pgid, pgid_desc, buf[1]);
+		    exp_pgid, pgid_desc, res.sspr_pgid);
 		bret = false;
 	}
 
@@ -637,37 +584,11 @@ out:
 	return (bret);
 }
 
-/*
- * Set up paths that are dependent on where our binary is found.
- */
-static void
-posix_spawn_test_paths(void)
-{
-	ssize_t ret;
-	char origin[PATH_MAX];
-
-	ret = readlink("/proc/self/path/a.out", origin, PATH_MAX - 1);
-	if (ret < 0) {
-		err(EXIT_FAILURE, "INTERNAL TEST FAILURE: failed to read "
-		    "a.out path");
-	}
-
-	origin[ret] = '\0';
-	if (snprintf(spawn_getsid, sizeof (spawn_getsid), "%s/getsid.64",
-	    dirname(origin)) >= sizeof (spawn_getsid)) {
-		errx(EXIT_FAILURE, "INTERNAL TEST FAILURE: failed to assemble "
-		    "getsid.64 path");
-	}
-
-	if (access(spawn_getsid, X_OK) != 0) {
-		err(EXIT_FAILURE, "INTERNAL TEST FAILURE: failed to access %s",
-		    spawn_getsid);
-	}
-}
 
 int
 main(void)
 {
+	const char *helpers[] = { POSIX_SPAWN_CHILD_HELPERS };
 	int ret = EXIT_SUCCESS;
 
 	/*
@@ -678,8 +599,6 @@ main(void)
 		err(EXIT_FAILURE, "INTERNAL TEST ERROR: failed to cd into "
 		    "/var/tmp");
 	}
-
-	posix_spawn_test_paths();
 
 	for (size_t i = 0; i < ARRAY_SIZE(spawn_dir_tests); i++) {
 		if (!posix_spawn_test_one_chdir(&spawn_dir_tests[i]))
@@ -697,9 +616,15 @@ main(void)
 		ret = EXIT_FAILURE;
 	}
 
-	for (size_t i = 0; i < ARRAY_SIZE(spawn_flags_tests); i++) {
-		if (!posix_spawn_test_one_flags(&spawn_flags_tests[i]))
-			ret = EXIT_FAILURE;
+	for (size_t h = 0; h < ARRAY_SIZE(helpers); h++) {
+		posix_spawn_find_helper(spawn_child, sizeof (spawn_child),
+		    helpers[h]);
+		(void) printf("--- child helper: %s ---\n", helpers[h]);
+
+		for (size_t i = 0; i < ARRAY_SIZE(spawn_flags_tests); i++) {
+			if (!posix_spawn_test_one_flags(&spawn_flags_tests[i]))
+				ret = EXIT_FAILURE;
+		}
 	}
 
 	if (ret == EXIT_SUCCESS) {

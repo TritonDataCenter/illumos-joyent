@@ -15,7 +15,7 @@
 # Copyright 2019 Joyent, Inc.
 # Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2023 Bill Sommerfeld <sommerfeld@alum.mit.edu>
-# Copyright 2025 Oxide Computer Company
+# Copyright 2026 Oxide Computer Company
 #
 
 [DEFAULT]
@@ -141,8 +141,24 @@ timeout = 600
 [/opt/libc-tests/tests/mutex_attr.64]
 [/opt/libc-tests/tests/posix_memalign.32]
 [/opt/libc-tests/tests/posix_memalign.64]
-[/opt/libc-tests/tests/posix_spawn.32]
-[/opt/libc-tests/tests/posix_spawn.64]
+[/opt/libc-tests/tests/posix_spawn]
+tests = [
+	'posix_spawn_attr.32',
+	'posix_spawn_attr.64',
+	'posix_spawn_chdir.32',
+	'posix_spawn_chdir.64',
+	'posix_spawn_fileactions.32',
+	'posix_spawn_fileactions.64',
+	'posix_spawn_path.32',
+	'posix_spawn_path.64',
+	'posix_spawn_pipe_np.32',
+	'posix_spawn_pipe_np.64'
+	]
+
+[/opt/libc-tests/tests/posix_spawn/posix_spawn_priv.32]
+user = root
+[/opt/libc-tests/tests/posix_spawn/posix_spawn_priv.64]
+user = root
 [/opt/libc-tests/tests/printf-15294.32]
 [/opt/libc-tests/tests/printf-15294.64]
 [/opt/libc-tests/tests/printf-6961.64]

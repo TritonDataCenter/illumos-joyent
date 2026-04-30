@@ -35,6 +35,7 @@
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2021-2025 RackTop Systems, Inc.
  */
 
 #include <sys/param.h>
@@ -1417,6 +1418,7 @@ smb_cf_minauth_from_str(char *str)
  */
 static struct nv
 smbver_table[] = {
+	{ "3.11",	SMB2_DIALECT_0311 },
 	{ "3.02",	SMB2_DIALECT_0302 },
 	{ "3.0",	SMB2_DIALECT_0300 },
 	{ "2.1",	SMB2_DIALECT_0210 },

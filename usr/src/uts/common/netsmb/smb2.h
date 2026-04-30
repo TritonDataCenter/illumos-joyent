@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2025 RackTop Systems, Inc.
  */
 
 #ifndef _NETSMB_SMB2_H
@@ -143,6 +144,33 @@ typedef enum {
 #define	SMB2_CAP_PERSISTENT_HANDLES	0x00000010
 #define	SMB2_CAP_DIRECTORY_LEASING	0x00000020
 #define	SMB2_CAP_ENCRYPTION		0x00000040
+
+/*
+ * SMB3.1.1 Negotiate Context pre-authentication hash
+ * there's only the one.
+ */
+#define	SMB3_HASH_SHA512	1
+
+/*
+ * SMB3.1.1 Negotiate Context encryption ciphers
+ */
+#define	SMB3_CIPHER_NONE	0
+#define	SMB3_CIPHER_AES128_CCM	1
+#define	SMB3_CIPHER_AES128_GCM	2
+#define	SMB3_CIPHER_AES256_CCM	3
+#define	SMB3_CIPHER_AES256_GCM	4
+
+/*
+ * SMB3.1.1 Negotiate Context signing algorithms
+ */
+#define	SMB3_SIGN_SHA256_HMAC	0	/* 2.x */
+#define	SMB3_SIGN_AES128_CMAC	1	/* 3.0 */
+#define	SMB3_SIGN_AES128_GMAC	2	/* 3.1.1 */
+
+
+/*
+ * SMB2 Session Setup [MS-SMB2 2.2.5]
+ */
 
 /* SMB2 session flags */
 #define	SMB2_SESSION_FLAG_IS_GUEST	0x0001

@@ -11,7 +11,7 @@
 
 /*
  * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
- * Copyright 2022-2024 RackTop Systems, Inc.
+ * Copyright 2022-2025 RackTop Systems, Inc.
  */
 
 /*
@@ -92,7 +92,7 @@ nsmb_md5_update(smb_sign_ctx_t ctx, void *buf, size_t len)
 	data.cd_raw.iov_base = buf;
 	data.cd_raw.iov_len = len;
 
-	rv = crypto_digest_update(ctx, &data, 0);
+	rv = crypto_digest_update(ctx, &data, NULL);
 
 	if (rv != CRYPTO_SUCCESS) {
 		crypto_cancel_ctx(ctx);
@@ -117,7 +117,7 @@ nsmb_md5_final(smb_sign_ctx_t ctx, uint8_t *digest16)
 	out.cd_raw.iov_len = MD5_DIGEST_LENGTH;
 	out.cd_raw.iov_base = (void *)digest16;
 
-	rv = crypto_digest_final(ctx, &out, 0);
+	rv = crypto_digest_final(ctx, &out, NULL);
 
 	return (rv == CRYPTO_SUCCESS ? 0 : -1);
 }
@@ -312,6 +312,74 @@ nsmb_cmac_final(smb_sign_ctx_t ctx, uint8_t *digest16)
 	out.cd_raw.iov_base = (void *)digest16;
 
 	rv = crypto_mac_final(ctx, &out, 0);
+
+	return (rv == CRYPTO_SUCCESS ? 0 : -1);
+}
+
+/*
+ * SMB 3.1.1 preauth integrity helpers:
+ * (getmech, init, update, final)
+ */
+int
+nsmb_sha512_getmech(smb_crypto_mech_t *mech)
+{
+	return (find_mech(mech, SUN_CKM_SHA512));
+}
+
+/*
+ * Start the KCF session, load the key
+ */
+int
+nsmb_sha512_init(smb_sign_ctx_t *ctxp, smb_crypto_mech_t *mech)
+{
+	int rv;
+
+	rv = crypto_digest_init(mech, ctxp, NULL);
+
+	return (rv == CRYPTO_SUCCESS ? 0 : -1);
+}
+
+/*
+ * Digest one segment
+ */
+int
+nsmb_sha512_update(smb_sign_ctx_t ctx, uint8_t *buf, size_t len)
+{
+	crypto_data_t data;
+	int rv;
+
+	bzero(&data, sizeof (data));
+	data.cd_format = CRYPTO_DATA_RAW;
+	data.cd_length = len;
+	data.cd_raw.iov_base = (caddr_t)buf;
+	data.cd_raw.iov_len = len;
+
+	rv = crypto_digest_update(ctx, &data, NULL);
+
+	if (rv != CRYPTO_SUCCESS) {
+		crypto_cancel_ctx(ctx);
+		return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * Get the final digest.
+ */
+int
+nsmb_sha512_final(smb_sign_ctx_t ctx, uint8_t *digest)
+{
+	crypto_data_t out;
+	int rv;
+
+	bzero(&out, sizeof (out));
+	out.cd_format = CRYPTO_DATA_RAW;
+	out.cd_length = SHA512_DIGEST_LENGTH;
+	out.cd_raw.iov_len = SHA512_DIGEST_LENGTH;
+	out.cd_raw.iov_base = (caddr_t)digest;
+
+	rv = crypto_digest_final(ctx, &out, NULL);
 
 	return (rv == CRYPTO_SUCCESS ? 0 : -1);
 }

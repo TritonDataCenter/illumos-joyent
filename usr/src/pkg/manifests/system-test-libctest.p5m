@@ -16,7 +16,7 @@
 # Copyright 2018 Joyent, Inc.
 # Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2023 Bill Sommerfeld <sommerfeld@alum.mit.edu>
-# Copyright 2025 Oxide Computer Company
+# Copyright 2026 Oxide Computer Company
 #
 
 set name=pkg.fmri value=pkg:/system/test/libctest@$(PKGVERS)
@@ -116,7 +116,6 @@ file path=opt/libc-tests/tests/fpround_test.$(ARCH) mode=0555
 file path=opt/libc-tests/tests/fpround_test.$(ARCH64) mode=0555
 file path=opt/libc-tests/tests/getlocname.32 mode=0555
 file path=opt/libc-tests/tests/getlocname.64 mode=0555
-file path=opt/libc-tests/tests/getsid.64 mode=0555
 dir  path=opt/libc-tests/tests/i18n
 file path=opt/libc-tests/tests/i18n/bindtextdomain_test mode=0555
 file path=opt/libc-tests/tests/i18n/bindtextdomain_test.$(ARCH) mode=0555
@@ -141,8 +140,22 @@ file path=opt/libc-tests/tests/nl_langinfo_test.$(ARCH) mode=0555
 file path=opt/libc-tests/tests/nl_langinfo_test.$(ARCH64) mode=0555
 file path=opt/libc-tests/tests/posix_memalign.32 mode=0555
 file path=opt/libc-tests/tests/posix_memalign.64 mode=0555
-file path=opt/libc-tests/tests/posix_spawn.32 mode=0555
-file path=opt/libc-tests/tests/posix_spawn.64 mode=0555
+dir  path=opt/libc-tests/tests/posix_spawn
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_attr.32 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_attr.64 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_chdir.32 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_chdir.64 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_child.32 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_child.64 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_fileactions.32 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_fileactions.64 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_noshebang mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_path.32 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_path.64 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_pipe_np.32 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_pipe_np.64 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_priv.32 mode=0555
+file path=opt/libc-tests/tests/posix_spawn/posix_spawn_priv.64 mode=0555
 file path=opt/libc-tests/tests/printf-15294.32 mode=0555
 file path=opt/libc-tests/tests/printf-15294.64 mode=0555
 file path=opt/libc-tests/tests/printf-6961.64 mode=0555

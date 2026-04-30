@@ -22,6 +22,8 @@
  * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <devfsadm.h>
@@ -82,7 +84,7 @@ sgen_callback(di_minor_t minor, di_node_t node)
 		scsi_lun64_t sl;
 		scsi_lun_t lun;
 		int64_t lun64;
-		int64_t *lun64p;
+		int64_t *lun64p = NULL;
 		int *intp;
 		uchar_t addr_method;
 
@@ -94,6 +96,8 @@ sgen_callback(di_minor_t minor, di_node_t node)
 		} else if (di_prop_lookup_ints(DDI_DEV_T_ANY, node,
 		    SCSI_ADDR_PROP_LUN, &intp) > 0) {
 			lun64 = (uint64_t)*intp;
+		} else {
+			goto done;
 		}
 
 		lun = scsi_lun64_to_lun(lun64);

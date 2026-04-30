@@ -363,7 +363,7 @@ smb_vc_free(struct smb_connobj *cp)
 	ASSERT(vcp->iod_rqlist.tqh_first == NULL);
 
 	if ((vcp->vc_sopt.sv2_capabilities & SMB2_CAP_ENCRYPTION) != 0)
-		nsmb_crypt_free_mech(vcp);
+		nsmb_crypt_fini_mech(vcp);
 
 	if (vcp->vc_tdata != NULL)
 		SMB_TRAN_DONE(vcp);

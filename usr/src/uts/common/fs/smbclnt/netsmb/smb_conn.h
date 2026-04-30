@@ -241,12 +241,19 @@ typedef struct smb_vc {
 	uint32_t	vc2_lease_key;		/* lease key gen */
 
 	/* SMB3+ fields */
-	smb_crypto_mech_t *vc3_crypt_mech;
+	smb_crypto_mech_t vc3_preauthmech;
+	smb_crypto_mech_t vc3_crypt_mech;
 
-	uint8_t		vc3_encrypt_key[SMB3_KEYLEN];
+	uint16_t	vc3_enc_cipherid;
+	uint16_t	vc3_preauth_hashid;
+	uint8_t		vc3_preauth_hashval[SHA512_DIGEST_LENGTH];
+	uint_t		vc3_preauth_hashfails;
+
+	/* Encrypt/decrypt keys can be 128 bit or 256 bit */
+	uint8_t		vc3_encrypt_key[AES256_KEY_LENGTH];
 	uint32_t	vc3_encrypt_key_len;
 
-	uint8_t		vc3_decrypt_key[SMB3_KEYLEN];
+	uint8_t		vc3_decrypt_key[AES256_KEY_LENGTH];
 	uint32_t	vc3_decrypt_key_len;
 
 	/* SMB 3 Nonce used for encryption */

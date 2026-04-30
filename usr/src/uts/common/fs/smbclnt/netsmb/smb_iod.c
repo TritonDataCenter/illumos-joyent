@@ -38,7 +38,7 @@
  *
  * Portions Copyright (C) 2001 - 2013 Apple Inc. All rights reserved.
  * Copyright 2019 Nexenta Systems, Inc.  All rights reserved.
- * Copyright 2024 RackTop Systems, Inc.
+ * Copyright 2021-2025 RackTop Systems, Inc.
  */
 
 #ifdef DEBUG
@@ -335,6 +335,21 @@ smb2_iod_sendrq(struct smb_rq *rqp)
 	 * requests after the top one, do those too.
 	 */
 	smb2_rq_fillhdr(rqp);
+
+	/*
+	 * For SMB2 negotiate and SMB2 session setup,
+	 * update the pre-authentication hash.
+	 */
+	if (rqp->sr2_command <= SMB2_SESSION_SETUP &&
+	    vcp->vc_maxver >= SMB2_DIALECT_0311) {
+		if (nsmb_preauth_calc(vcp, rqp->sr_rq.mb_top,
+		    vcp->vc3_preauth_hashval, vcp->vc3_preauth_hashval) != 0) {
+			SMBSDEBUG("(CMD: %d) preauth hash calc. failed",
+			    rqp->sr2_command);
+			vcp->vc3_preauth_hashfails++;
+		}
+	}
+
 	if (!encrypt && (rqp->sr2_rqflags & SMB2_FLAGS_SIGNED) != 0) {
 		smb2_rq_sign(rqp);
 	}

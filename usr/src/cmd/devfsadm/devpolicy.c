@@ -22,6 +22,8 @@
 /*
  * Copyright 2003 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <stdio.h>
@@ -137,7 +139,7 @@ loadprivs(const char *infile)
 
 		if (modctl(MODALLOCPRIV, line) != 0) {
 			(void) err_print("modctl(MODALLOCPRIV, %s): %s\n",
-				line, strerror(errno));
+			    line, strerror(errno));
 			res = -1;
 		}
 	}
@@ -173,7 +175,7 @@ loadpolicy(const char *infile)
 			mem = realloc(mem, nalloc * devplcysys_sz);
 			if (mem == NULL) {
 				err_print(MALLOC_FAILED,
-					nalloc * devplcysys_sz);
+				    nalloc * devplcysys_sz);
 				return (-1);
 			}
 
@@ -242,10 +244,10 @@ loadpolicy(const char *infile)
 			}
 		}
 
-		while (tok = strtok(NULL, "\n\t ")) {
+		while ((tok = strtok(NULL, "\n\t ")) != NULL) {
 			if (parse_plcy_token(tok, dp)) {
 				err_print(BAD_ENTRY, fep->startline,
-					fep->orgentry);
+				    fep->orgentry);
 				return (-1);
 			}
 		}

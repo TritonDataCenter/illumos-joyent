@@ -22,7 +22,7 @@
 /*
  * Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018 Nexenta Systems, Inc.  All rights reserved.
- * Copyright 2024 RackTop Systems, Inc.
+ * Copyright 2024-2025 RackTop Systems, Inc.
  */
 
 /*
@@ -42,6 +42,7 @@
 #include <sys/cmn_err.h>
 #include <sys/stream.h>
 #include <sys/strsun.h>
+#include <sys/sysmacros.h>
 #include <sys/sdt.h>
 
 #include <netsmb/nsmb_kcrypt.h>
@@ -104,11 +105,13 @@ smb2_sign_init(smb_vc_t *vcp)
 	 * For SMB2, the signing key is just the first 16 bytes
 	 * of the session key (truncated or padded with zeros).
 	 * For SMB3, the signing key is a "KDF" hash of the
-	 * session key.   [MS-SMB2] 3.2.5.3.1
+	 * session key, but note that only the first 16 bytes
+	 * of the session key is used.   [MS-SMB2] 3.2.5.3.1
 	 */
 	vcp->vc_mackeylen = SMB2_SIG_LEN;
 	vcp->vc_mackey = kmem_zalloc(vcp->vc_mackeylen, KM_SLEEP);
 	if (SMB_DIALECT(vcp) < SMB2_DIALECT_0300) {
+		/* SMB 2.x */
 		copysize = vcp->vc_ssnkeylen;
 		if (copysize > vcp->vc_mackeylen)
 			copysize = vcp->vc_mackeylen;
@@ -116,12 +119,23 @@ smb2_sign_init(smb_vc_t *vcp)
 
 		vcp->vc_sign_ops = &smb2_sign_ops;
 	} else {
-		rc = nsmb_kdf(vcp->vc_mackey, SMB3_KEYLEN,
-		    vcp->vc_ssnkey, vcp->vc_ssnkeylen,
-		    (uint8_t *)"SMB2AESCMAC", 12,
-		    (uint8_t *)"SmbSign", 8);
-		if (rc != 0)
-			return (EAUTH);
+		/* SMB 3.x and later. */
+		uint32_t ssnkey_len = MIN(vcp->vc_ssnkeylen, SMB2_KEYLEN);
+		if (SMB_DIALECT(vcp) >= SMB2_DIALECT_0311) {
+			if (nsmb_kdf(vcp->vc_mackey, vcp->vc_mackeylen,
+			    vcp->vc_ssnkey, ssnkey_len,
+			    (uint8_t *)"SMBSigningKey", 14,
+			    vcp->vc3_preauth_hashval,
+			    SHA512_DIGEST_LENGTH) != 0)
+				return (EAUTH);
+		} else {
+			if (nsmb_kdf(vcp->vc_mackey, vcp->vc_mackeylen,
+			    vcp->vc_ssnkey, ssnkey_len,
+			    (uint8_t *)"SMB2AESCMAC", 12,
+			    (uint8_t *)"SmbSign", 8) != 0)
+				return (EAUTH);
+		}
+
 		vcp->vc_sign_ops = &smb3_sign_ops;
 	}
 
