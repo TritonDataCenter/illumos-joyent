@@ -22,8 +22,6 @@
 #
 # CDDL HEADER END
 #
-#ident	"%Z%%M%	%I%	%E% SMI"
-#
 # This file generates three different C files:
 #
 #	<sys/priv_const.h>
@@ -243,7 +241,7 @@ END	{
 		    "	priv_impl_info_t	impl_info;\n" \
 		    "	priv_info_t		settype;\n" \
 		    "	int			nsets;\n" \
-		    "	const char		sets[" setbytes "];\n" \
+		    "	const char		sets[" setbytes "] __nonstring;\n" \
 		    "	priv_info_t		privtype;\n" \
 		    "	int			nprivs;\n" \
 		    "	char			privs[" maxprivbytes "];\n" \
@@ -344,7 +342,7 @@ END	{
 		print "extern struct priv_info_names *priv_ninfo;" > privhfile
 
 		print "\n/* Privileges */" > privhfile
-		 
+
 		for (i = 0; i < npriv; i++)
 			print pdef[i] sprintf("%3d", i) > privhfile
 

@@ -96,16 +96,15 @@ CERRWARN += -_gcc=-Wno-address
 # It seems, we get false positives with following three files.
 # Since this is third party source, silencing this warning seems to be
 # reasonable path to take.
-pics/path/pathpath.o := CERRWARN += -_gcc10=-Wno-return-local-addr
-pics/path/pathpath.o := CERRWARN += -_gcc14=-Wno-return-local-addr
-pics/path/pathkey.o := CERRWARN += -_gcc10=-Wno-return-local-addr
-pics/path/pathkey.o := CERRWARN += -_gcc14=-Wno-return-local-addr
-pics/path/pathprobe.o := CERRWARN += -_gcc10=-Wno-return-local-addr
-pics/path/pathprobe.o := CERRWARN += -_gcc14=-Wno-return-local-addr
+pics/path/pathpath.o := CERRWARN += -_gcc=-Wno-return-local-addr
+pics/path/pathkey.o := CERRWARN += -_gcc=-Wno-return-local-addr
+pics/path/pathprobe.o := CERRWARN += -_gcc=-Wno-return-local-addr
 
 # The code layout after macro expansion is upsetting gcc 14, silence it.
 pics/sfio/sfdisc.o := CERRWARN += -_gcc14=-Wno-misleading-indentation
+pics/sfio/sfdisc.o := CERRWARN += -_gcc15=-Wno-misleading-indentation
 pics/sfio/sfstack.o := CERRWARN += -_gcc14=-Wno-misleading-indentation
+pics/sfio/sfstack.o := CERRWARN += -_gcc15=-Wno-misleading-indentation
 
 pics/port/astconf.o := CERRWARN += -_gcc=-Wno-unused-label
 

@@ -110,7 +110,8 @@ typedef struct _RuneRange {
 } _RuneRange;
 
 typedef struct _RuneLocale {
-	char		__magic[8];	/* Magic saying what version we are */
+	/* Magic saying what version we are */
+	char		__magic[8] __nonstring;
 	char		__encoding[32];	/* ASCII name of encoding */
 
 	unsigned int	__runetype[_CACHED_RUNES];

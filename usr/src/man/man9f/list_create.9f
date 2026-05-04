@@ -1,7 +1,7 @@
 .\"
 .\"
 .\" Copyright (c) 2009, Sun Microsystems Inc. All Rights Reserved.
-.\" Copyright 2022 Oxide Computer Company
+.\" Copyright 2026 Oxide Computer Company
 .\"
 .\" The contents of this file are subject to the terms of the
 .\" Common Development and Distribution License (the "License").
@@ -18,7 +18,7 @@
 .\" fields enclosed by brackets "[]" replaced with your own identifying
 .\" information: Portions Copyright [yyyy] [name of copyright owner]
 .\"
-.Dd January 16, 2022
+.Dd April 19, 2026
 .Dt LIST_CREATE 9F
 .Os
 .Sh NAME
@@ -242,15 +242,15 @@ then the functions will return
 .Dv NULL .
 This is useful for iterating over a list with the following pattern:
 .Bd -literal -offset indent
-list_t list_t;
+list_t list;
 \&...
-for (foo_t *foo = list_head(&list_t); foo != NULL;
-    foo = list_next(&list_t, foo)) {
+for (foo_t *foo = list_head(&list); foo != NULL;
+    foo = list_next(&list, foo)) {
 	/* Process each entry of the list */
 }
 
-for (foo_t *foo = list_tail(&list_t); foo != NULL;
-    foo = list_prev(&list_t, foo)) {
+for (foo_t *foo = list_tail(&list); foo != NULL;
+    foo = list_prev(&list, foo)) {
 	/* Same thing, but in reverse */
 }
 .Ed
@@ -299,5 +299,59 @@ node must not be linked on any list.
 Upon completion the
 .Fa lold
 node will be left unlinked from any list.
+.Sh CONTEXT
+All functions may be called from
+.Sy user ,
+.Sy kernel ,
+or
+.Sy interrupt
+context.
+.Sh EXAMPLES
+.Sy Example 1
+Removing a single item from a list safely
+.Pp
+Calling
+.Fn list_remove
+mutates a list and means that using a traditional for loop like in the
+discussion of
+.Fn list_next
+above may not be safe.
+Instead, use the following pattern:
+.Bd -literal -offset indent
+list_t list;
+item_t *item, *next;
+
+\&...
+
+for (item = list_head(&list), next = NULL; item != NULL;
+    item = next) {
+        next = list_next(&list, item);
+
+        if (condition) {
+                list_remove(&list, item);
+                free_item(item);
+        }
+}
+.Ed
+.Pp
+.Sy Example 2
+Removing and freeing all items from a list
+.Pp
+Before destroying a
+.Ft list_t ,
+one must ensure that it is empty.
+This example shows how to remove all items from a list and clean them up.
+.Bd -literal -offset indent
+list_t list;
+item_t *item;
+
+\&...
+
+while ((item = list_remove_head(&list)) != NULL) {
+	free_item(item);
+}
+
+list_destroy(&list);
+.Ed
 .Sh INTERFACE STABILITY
 .Sy Committed

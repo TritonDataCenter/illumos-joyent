@@ -32,7 +32,7 @@ extern "C" {
 #endif
 
 #define	EMLXS_CFG_STR_SIZE	32
-#define	EMLXS_CFG_HELP_SIZE	80
+#define	EMLXS_CFG_HELP_SIZE	81
 
 typedef struct emlxs_config
 {
@@ -107,16 +107,16 @@ typedef enum emlxs_cfg_parm
 	CFG_NPIV_DELAY,		/* enable-npiv-delay (hidden) */
 
 #ifdef DHCHAP_SUPPORT
-	CFG_AUTH_ENABLE, 	/* enable-auth */
+	CFG_AUTH_ENABLE,	/* enable-auth */
 	CFG_AUTH_E2E,		/* auth-e2e */
 	CFG_AUTH_NPIV,		/* auth-npiv (hidden) */
-	CFG_AUTH_TMO,    	/* auth-tmo (hidden) */
-	CFG_AUTH_MODE,   	/* auth-mode (hidden) */
-	CFG_AUTH_BIDIR, 	/* auth-bidir (hidden) */
-	CFG_AUTH_TYPE,   	/* auth-type (hidden) */
-	CFG_AUTH_HASH,   	/* auth-hash (hidden) */
-	CFG_AUTH_GROUP,  	/* auth-group (hidden) */
-	CFG_AUTH_INTERVAL,  	/* auth-interval (hidden) */
+	CFG_AUTH_TMO,		/* auth-tmo (hidden) */
+	CFG_AUTH_MODE,		/* auth-mode (hidden) */
+	CFG_AUTH_BIDIR,		/* auth-bidir (hidden) */
+	CFG_AUTH_TYPE,		/* auth-type (hidden) */
+	CFG_AUTH_HASH,		/* auth-hash (hidden) */
+	CFG_AUTH_GROUP,		/* auth-group (hidden) */
+	CFG_AUTH_INTERVAL,	/* auth-interval (hidden) */
 #endif	/* DHCHAP_SUPPORT */
 
 #ifdef SFCT_SUPPORT
@@ -258,7 +258,7 @@ emlxs_config_t  emlxs_cfg[] = {
 	{"num-nodes",
 		0, 4096, 0, 0,
 		PARM_DYNAMIC_RESET,
-	"Number of remote FC nodes the driver will support. "
+	"Number of remote FC nodes the driver will support."
 		"[0=no_limit, else must be >2]"},
 
 	/* CFG_CR_DELAY */

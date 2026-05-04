@@ -1413,6 +1413,9 @@ again:
 		(void) strlcpy(zonename, zs_property_string(prop),
 		    sizeof (zonename));
 
+		if (zonestat_match_zonename(zonename) == 0)
+			continue;
+
 		cused = zs_resource_used_zone_uint64(z, ZS_RESOURCE_CPU);
 		mused = zs_resource_used_zone_uint64(z, ZS_RESOURCE_RAM_RSS);
 		vused = zs_resource_used_zone_uint64(z, ZS_RESOURCE_VM);

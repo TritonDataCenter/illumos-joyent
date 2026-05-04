@@ -76,7 +76,7 @@ static catalog_item_t catalog[] = {
 	{ EXD_GROUP_TASK_INTERVAL,	"group-task-interval" },
 
 	{ EXD_PROC_PID,			"pid" },
-	{ EXD_PROC_ANCPID, 		"ppid" },
+	{ EXD_PROC_ANCPID,		"ppid" },
 	{ EXD_PROC_UID,			"uid" },
 	{ EXD_PROC_GID,			"gid" },
 	{ EXD_PROC_TASKID,		"taskid" },
@@ -244,7 +244,7 @@ disp_embedded_group(ea_object_t *eo, int indent)
 static void
 disp_obj(ea_object_t *o, int indent)
 {
-	char objname[30] = "                              ";
+	char objname[30] __nonstring = "                              ";
 	int eol = 1;
 
 	if (indent > MAX_DEPTH) {

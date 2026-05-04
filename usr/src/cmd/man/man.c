@@ -1615,7 +1615,7 @@ free_dupnode(struct dupnode *dnp)
 void
 print_manpath(struct man_node *manp)
 {
-	char	colon[2] = "\0\0";
+	char	colon[2] = { '\0', '\0' };
 	char	**secp;
 
 	for (; manp != NULL; manp = manp->next) {

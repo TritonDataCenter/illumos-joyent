@@ -59,8 +59,8 @@ typedef unsigned int u_int;
   a = PLUS(a,b); d = ROTATE(XOR(d,a), 8); \
   c = PLUS(c,d); b = ROTATE(XOR(b,c), 7);
 
-static const char sigma[16] = "expand 32-byte k";
-static const char tau[16] = "expand 16-byte k";
+static const char sigma[16] __nonstring = "expand 32-byte k";
+static const char tau[16] __nonstring = "expand 16-byte k";
 
 void
 chacha_keysetup(chacha_ctx_t *x, const u8 *k, u32 kbits, u32 ivbits __unused)

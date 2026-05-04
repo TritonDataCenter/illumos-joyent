@@ -44,535 +44,546 @@
 .\" Copyright (c) 2001, The IEEE and The Open Group.  All Rights Reserved.
 .\" Copyright (c) 2007, Sun Microsystems, Inc.  All Rights Reserved.
 .\" Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+.\" Copyright 2026 Oxide Computer Company
 .\"
-.TH MUTEX_INIT 3C "Sep 7, 2015"
-.SH NAME
-mutex_init, mutex_lock, mutex_trylock, mutex_unlock, mutex_consistent,
-mutex_destroy \- mutual exclusion locks
-.SH SYNOPSIS
-.LP
-.nf
-cc -mt [ \fIflag\fR... ] \fIfile\fR... [ \fIlibrary\fR... ]
-#include <thread.h>
-#include <synch.h>
-
-\fBint\fR \fBmutex_init\fR(\fBmutex_t *\fR\fImp\fR, \fBint\fR \fItype\fR, \fBvoid *\fR\fIarg\fR);
-.fi
-
-.LP
-.nf
-\fBint\fR \fBmutex_lock\fR(\fBmutex_t *\fR\fImp\fR);
-.fi
-
-.LP
-.nf
-\fBint\fR \fBmutex_trylock\fR(\fBmutex_t *\fR\fImp\fR);
-.fi
-
-.LP
-.nf
-\fBint\fR \fBmutex_unlock\fR(\fBmutex_t *\fR\fImp\fR);
-.fi
-
-.LP
-.nf
-\fBint\fR \fBmutex_consistent\fR(\fBmutex_t *\fR\fImp\fR);
-.fi
-
-.LP
-.nf
-\fBint\fR \fBmutex_destroy\fR(\fBmutex_t *\fR\fImp\fR);
-.fi
-
-.SH DESCRIPTION
-.LP
-Mutual exclusion locks (mutexes) prevent multiple threads from simultaneously
-executing critical sections of code that access shared data (that is, mutexes
-are used to serialize the execution of threads). All mutexes must be global. A
-successful call for a mutex lock by way of  \fBmutex_lock()\fR will cause
-another thread that is also trying to lock the same mutex to block until the
-owner thread unlocks it by way of  \fBmutex_unlock()\fR. Threads within the
-same process or within other processes can share mutexes.
-.sp
-.LP
-Mutexes can synchronize threads within the same process or in other  processes.
+.Dd April 19, 2026
+.Dt MUTEX_INIT 3C
+.Os
+.Sh NAME
+.Nm mutex_init ,
+.Nm mutex_lock ,
+.Nm mutex_trylock ,
+.Nm mutex_unlock ,
+.Nm mutex_enter ,
+.Nm mutex_exit ,
+.Nm mutex_consistent ,
+.Nm mutex_destroy
+.Nd mutual exclusion locks
+.Sh LIBRARY
+.Lb libc
+.Sh SYNOPSIS
+.In thread.h
+.In synch.h
+.Ft int
+.Fo mutex_init
+.Fa "mutex_t *mp"
+.Fa "int type"
+.Fa "void *arg"
+.Fc
+.Ft int
+.Fo mutex_lock
+.Fa "mutex_t *mp"
+.Fc
+.Ft int
+.Fo mutex_trylock
+.Fa "mutex_t *mp"
+.Fc
+.Ft int
+.Fo mutex_unlock
+.Fa "mutex_t *mp"
+.Fc
+.Ft void
+.Fo mutex_enter
+.Fa "mutex_t *mp"
+.Fc
+.Ft void
+.Fo mutex_exit
+.Fa "mutex_t *mp"
+.Fc
+.Ft int
+.Fo mutex_consistent
+.Fa "mutex_t *mp"
+.Fc
+.Ft int
+.Fo mutex_destroy
+.Fa "mutex_t *mp"
+.Fc
+.Sh DESCRIPTION
+Mutual exclusion locks
+.Pq mutexes
+prevent multiple threads from simultaneously executing critical sections of code
+that access shared data
+.Pq that is, mutexes are used to serialize the execution of threads .
+All mutexes must be global.
+A successful call for a mutex lock by way of
+.Fn mutex_lock
+will cause another thread that is also trying to lock the same mutex to block
+until the owner thread unlocks it by way of
+.Fn mutex_unlock .
+Threads within the same process or within other processes can share mutexes.
+.Pp
+Mutexes can synchronize threads within the same process or in other processes.
 Mutexes can be used to synchronize threads between processes if the mutexes are
-allocated in writable memory and shared among the cooperating processes (see
-\fBmmap\fR(2)), and have been initialized for this task.
-.SS "Initialize"
-.LP
-Mutexes are either intra-process or inter-process, depending  upon the argument
-passed implicitly or explicitly  to the initialization of that mutex. A
-statically allocated mutex does not need to be explicitly  initialized; by
-default, a statically allocated mutex is initialized  with all zeros and its
+allocated in writable memory and shared among the cooperating processes
+.Po
+see
+.Xr mmap 2
+.Pc ,
+and have been initialized for this task.
+.Ss "Initialize"
+Mutexes are either intra-process or inter-process, depending upon the argument
+passed implicitly or explicitly to the initialization of that mutex.
+A statically allocated mutex does not need to be explicitly initialized; by
+default, a statically allocated mutex is initialized with all zeros and its
 scope is set to be within the calling process.
-.sp
-.LP
-For inter-process synchronization, a mutex needs to be allocated  in memory
-shared between these processes. Since the memory for such a mutex must be
-allocated dynamically,  the mutex needs to be explicitly initialized using
-\fBmutex_init()\fR.
-.sp
-.LP
-The  \fBmutex_init()\fR function initializes the mutex referenced by \fImp\fR
-with the type specified by  \fItype\fR. Upon successful initialization the
-state of the mutex becomes initialized and unlocked. Only the attribute type
-\fBLOCK_PRIO_PROTECT\fR uses \fIarg\fR. The \fItype\fR argument must be one of
-the following:
-.sp
-.ne 2
-.na
-\fB\fBUSYNC_THREAD\fR\fR
-.ad
-.sp .6
-.RS 4n
+.Pp
+For inter-process synchronization, a mutex needs to be allocated in memory
+shared between these processes.
+Since the memory for such a mutex must be allocated dynamically, the mutex needs
+to be explicitly initialized using
+.Fn mutex_init .
+.Pp
+The
+.Fn mutex_init
+function initializes the mutex referenced by
+.Fa mp
+with the type specified by
+.Fa type .
+Upon successful initialization the state of the mutex becomes initialized and
+unlocked.
+Only the attribute type
+.Dv LOCK_PRIO_PROTECT
+uses
+.Fa arg .
+The
+.Fa type
+argument must be one of the following:
+.Bl -tag -width Dv
+.It Dv USYNC_THREAD
 The mutex can synchronize threads only in this process.
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBUSYNC_PROCESS\fR\fR
-.ad
-.sp .6
-.RS 4n
-The mutex can synchronize threads in this process and other processes. The
-object initialized with this attribute must be allocated in memory shared
-between processes, either in System V shared memory (see  \fBshmop\fR(2)) or in
-memory mapped to a file (see  \fBmmap\fR(2)). If the object is not allocated in
-such shared memory, it will not be shared between processes.
-.RE
-
-.sp
-.LP
-The \fItype\fR argument can be augmented by the bitwise-inclusive-\fBOR\fR of
-zero or more of the following flags:
-.sp
-.ne 2
-.na
-\fB\fBLOCK_ROBUST\fR\fR
-.ad
-.sp .6
-.RS 4n
-The mutex can synchronize threads robustly. At the time of thread or process
-death, either by calling \fBthr_exit()\fR or \fBexit()\fR or due to process
-abnormal termination, the lock is unlocked if is held by the thread or process.
+.It Dv USYNC_PROCESS
+The mutex can synchronize threads in this process and other processes.
+The object initialized with this attribute must be allocated in memory shared
+between processes, either in System V shared memory
+.Po
+see
+.Xr shmop 2
+.Pc
+or in memory mapped to a file
+.Po
+see
+.Xr mmap 2
+.Pc .
+If the object is not allocated in such shared memory, it will not be shared
+between processes.
+.El
+.Pp
+The
+.Fa type
+argument can be augmented by the bitwise-inclusive-OR of zero or more of the
+following flags:
+.Bl -tag -width Dv
+.It Dv LOCK_ROBUST
+The mutex can synchronize threads robustly.
+At the time of thread or process death, either by calling
+.Xr thr_exit 3C
+or
+.Xr exit 2
+or due to process abnormal termination, the lock is unlocked if is held by the
+thread or process.
 The next owner of the mutex will acquire it with an error return of
-\fBEOWNERDEAD\fR. The application must always check the return value from
-\fBmutex_lock()\fR for a mutex of this type. The new owner of this mutex should
-then attempt to make the state protected by the mutex consistent, since this
-state could have been left inconsistent when the last owner died. If the new
-owner is able to make the state consistent, it should call
-\fBmutex_consistent()\fR to restore the state of the mutex and then unlock the
-mutex. All subsequent calls to \fBmutex_lock()\fR will then behave normally.
-Only the new owner can make the mutex consistent. If for any reason the new
-owner is not able to make the state consistent, it should not call
-\fBmutex_consistent()\fR but should simply unlock the mutex. All waiting
-processes will be awakened and all subsequent calls to \fBmutex_lock()\fR will
-fail in acquiring the mutex with an error value of \fBENOTRECOVERABLE\fR. If
-the thread or process that acquired the lock with \fBEOWNERDEAD\fR terminates
-without unlocking the mutex, the next owner will acquire the lock with an error
-value of \fBEOWNERDEAD\fR.
-.sp
+.Er EOWNERDEAD .
+The application must always check the return value from
+.Fn mutex_lock
+for a mutex of this type.
+The new owner of this mutex should then attempt to make the state protected by
+the mutex consistent, since this state could have been left inconsistent when
+the last owner died.
+If the new owner is able to make the state consistent, it should call
+.Fn mutex_consistent
+to restore the state of the mutex and then unlock the mutex.
+All subsequent calls to
+.Fn mutex_lock
+will then behave normally.
+Only the new owner can make the mutex consistent.
+If for any reason the new owner is not able to make the state consistent, it
+should not call
+.Fn mutex_consistent
+but should simply unlock the mutex.
+All waiting processes will be awakened and all subsequent calls to
+.Fn mutex_lock
+will fail in acquiring the mutex with an error value of
+.Er ENOTRECOVERABLE .
+If the thread or process that acquired the lock with
+.Er EOWNERDEAD
+terminates without unlocking the mutex, the next owner will acquire the lock
+with an error value of
+.Er EOWNERDEAD .
+.Pp
 The memory for the object to be initialized with this attribute must be zeroed
-before initialization. Any thread or process interested in the robust lock can
-call \fBmutex_init()\fR to potentially initialize it, provided that all such
-callers of \fBmutex_init()\fR specify the same set of attribute flags. In this
-situation, if  \fBmutex_init()\fR is called on a previously initialized robust
-mutex, \fBmutex_init()\fR will not reinitialize the mutex and will return the
-error value \fBEBUSY\fR.
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBLOCK_RECURSIVE\fR\fR
-.ad
-.sp .6
-.RS 4n
+before initialization.
+Any thread or process interested in the robust lock can call
+.Fn mutex_init
+to potentially initialize it, provided that all such callers of
+.Fn mutex_init
+specify the same set of attribute flags.
+In this situation, if
+.Fn mutex_init
+is called on a previously initialized robust mutex,
+.Fn mutex_init
+will not reinitialize the mutex and will return the error value
+.Er EBUSY .
+.It Dv LOCK_RECURSIVE
 A thread attempting to relock this mutex without first unlocking it will
-succeed in locking the mutex. The mutex must be unlocked as many times as it is
-locked.
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBLOCK_ERRORCHECK\fR\fR
-.ad
-.sp .6
-.RS 4n
-Unless \fBLOCK_RECURSIVE\fR is also set, a thread attempting to relock this
-mutex without first unlocking it will return with an error rather than
-deadlocking itself.  A thread attempting to unlock this mutex without first
-owning it will return with an error.
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBLOCK_PRIO_INHERIT\fR\fR
-.ad
-.sp .6
-.RS 4n
+succeed in locking the mutex.
+The mutex must be unlocked as many times as it is locked.
+.It Dv LOCK_ERRORCHECK
+Unless
+.Dv LOCK_RECURSIVE
+is also set, a thread attempting to relock this mutex without first unlocking it
+will return with an error rather than deadlocking itself.
+A thread attempting to unlock this mutex without first owning it will return
+with an error.
+.It Dv LOCK_PRIO_INHERIT
 When a thread is blocking higher priority threads because of owning one or more
-mutexes with the \fBLOCK_PRIO_INHERIT\fR attribute, it executes at the higher
-of its priority or the priority of the highest priority thread waiting on any
-of the mutexes owned by this thread and initialized with this attribute.
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBLOCK_PRIO_PROTECT\fR\fR
-.ad
-.sp .6
-.RS 4n
+mutexes with the
+.Dv LOCK_PRIO_INHERIT
+attribute, it executes at the higher of its priority or the priority of the
+highest priority thread waiting on any of the mutexes owned by this thread and
+initialized with this attribute.
+.It Dv LOCK_PRIO_PROTECT
 When a thread owns one or more mutexes initialized with the
-\fBLOCK_PRIO_PROTECT\fR attribute, it executes at the higher of its priority or
-the highest of the priority ceilings of all the mutexes owned by this thread
-and initialized with this attribute, regardless of whether other threads are
-blocked on any of these mutexes.  When this attribute is specified, \fIarg\fR
-must point to an \fBint\fR containing the priority ceiling.
-.RE
-
-.sp
-.LP
-See \fBpthread_mutexattr_getrobust\fR(3C) for more information about robust
-mutexes. The \fBLOCK_ROBUST\fR attribute is the same as the POSIX
-\fBPTHREAD_MUTEX_ROBUST\fR attribute.
-.sp
-.LP
-See \fBpthread_mutexattr_settype\fR(3C) for more information on recursive and
-error checking mutex types. The combination (\fBLOCK_RECURSIVE\fR |
-\fBLOCK_ERRORCHECK\fR) is the same as the POSIX \fBPTHREAD_MUTEX_RECURSIVE\fR
-type. By itself, \fBLOCK_ERRORCHECK\fR is the same as the \fBPOSIX
-PTHREAD_MUTEX_ERRORCHECK\fR type.
-.sp
-.LP
-The \fBLOCK_PRIO_INHERIT\fR attribute is the same as the POSIX
-\fBPTHREAD_PRIO_INHERIT\fR attribute. The \fBLOCK_PRIO_PROTECT\fR attribute is
-the same as the POSIX \fBPTHREAD_PRIO_PROTECT\fR attribute. See
-.BR pthread_mutexattr_getprotocol (3C),
-\fBpthread_mutexattr_getprioceiling\fR(3C), and
-\fBpthread_mutex_getprioceiling\fR(3C) for a full discussion. The
-\fBLOCK_PRIO_INHERIT\fR and \fBLOCK_PRIO_PROTECT\fR attributes are mutually
-exclusive. Specifying both of these attributes causes \fBmutex_init()\fR to
-fail with \fBEINVAL\fR.
-.sp
-.LP
-Initializing mutexes can also be accomplished  by allocating in zeroed memory
-(default), in which case a \fItype\fR of \fBUSYNC_THREAD\fR is assumed. In
-general, the following rules apply to mutex initialization:
-.RS +4
-.TP
-.ie t \(bu
-.el o
+.Dv LOCK_PRIO_PROTECT
+attribute, it executes at the higher of its priority or the highest of the
+priority ceilings of all the mutexes owned by this thread and initialized with
+this attribute, regardless of whether other threads are blocked on any of these
+mutexes.
+When this attribute is specified,
+.Fa arg
+must point to an
+.Ft int
+containing the priority ceiling.
+.El
+.Pp
+See
+.Xr pthread_mutexattr_getrobust 3C
+for more information about robust mutexes.
+The
+.Dv LOCK_ROBUST
+attribute is the same as the POSIX
+.Dv PTHREAD_MUTEX_ROBUST
+attribute.
+.Pp
+See
+.Xr pthread_mutexattr_settype 3C
+for more information on recursive and error checking mutex types.
+The combination
+.Po
+.Dv LOCK_RECURSIVE
+|
+.Dv LOCK_ERRORCHECK
+.Pc
+is the same as the POSIX
+.Dv PTHREAD_MUTEX_RECURSIVE
+type.
+By itself,
+.Dv LOCK_ERRORCHECK
+is the same as the POSIX
+.Dv PTHREAD_MUTEX_ERRORCHECK
+type.
+.Pp
+The
+.Dv LOCK_PRIO_INHERIT
+attribute is the same as the POSIX
+.Dv PTHREAD_PRIO_INHERIT
+attribute.
+The
+.Dv LOCK_PRIO_PROTECT
+attribute is the same as the POSIX
+.Dv PTHREAD_PRIO_PROTECT
+attribute.
+See
+.Xr pthread_mutexattr_getprotocol 3C ,
+.Xr pthread_mutexattr_getprioceiling 3C ,
+and
+.Xr pthread_mutex_getprioceiling 3C
+for a full discussion.
+The
+.Dv LOCK_PRIO_INHERIT
+and
+.Dv LOCK_PRIO_PROTECT
+attributes are mutually exclusive.
+Specifying both of these attributes causes
+.Fn mutex_init
+to
+fail with
+.Er EINVAL .
+.Pp
+Initializing mutexes can also be accomplished by allocating in zeroed memory
+.Pq default ,
+in which case a
+.Fa type
+of
+.Dv USYNC_THREAD
+is assumed.
+In general, the following rules apply to mutex initialization:
+.Bl -bullet
+.It
 The same mutex must not be simultaneously initialized by multiple threads.
-.RE
-.RS +4
-.TP
-.ie t \(bu
-.el o
+.It
 A mutex lock must not be reinitialized while in use by other threads.
-.RE
-.sp
-.LP
-These rules do not apply to \fBLOCK_ROBUST\fR mutexes. See the description for
-\fBLOCK_ROBUST\fR above. If default mutex attributes are used, the macro
-\fBDEFAULTMUTEX\fR can be used to initialize mutexes that are statically
-allocated.
-.sp
-.LP
-Default mutex initialization (intra-process):
-.sp
-.in +2
-.nf
+.El
+.Pp
+These rules do not apply to
+.Dv LOCK_ROBUST
+mutexes.
+See the description for
+.Dv LOCK_ROBUST
+above.
+If default mutex attributes are used, the macro
+.Dv DEFAULTMUTEX
+can be used to initialize mutexes that are statically allocated.
+.Pp
+Default mutex initialization
+.Pq intra-process :
+.Bd -literal -offset indent
 mutex_t mp;
 mutex_init(&mp, USYNC_THREAD, NULL);
-.fi
-.in -2
-
-.sp
-.LP
+.Ed
+.Pp
 or
-.sp
-.in +2
-.nf
-mutex_t  mp  =  DEFAULTMUTEX;
-.fi
-.in -2
-
-.sp
-.LP
-Customized mutex initialization (inter-process):
-.sp
-.in +2
-.nf
+.Bd -literal -offset indent
+mutex_t mp = DEFAULTMUTEX;
+.Ed
+.Pp
+Customized mutex initialization
+.Pq inter-process :
+.Bd -literal -offset indent
 mutex_init(&mp, USYNC_PROCESS, NULL);
-.fi
-.in -2
-
-.sp
-.LP
-Customized mutex initialization (inter-process robust):
-.sp
-.in +2
-.nf
+.Ed
+.Pp
+Customized mutex initialization
+.Pq inter-process robust :
+.Bd -literal -offset indent
 mutex_init(&mp, USYNC_PROCESS | LOCK_ROBUST, NULL);
-.fi
-.in -2
-
-.sp
-.LP
+.Ed
+.Pp
 Statically allocated mutexes can also be initialized with macros specifying
-\fBLOCK_RECURSIVE\fR and/or \fBLOCK_ERRORCHECK\fR:
-.sp
-.ne 2
-.na
-\fB\fBmutex_t mp = RECURSIVEMUTEX;\fR\fR
-.ad
-.sp .6
-.RS 4n
-Same as (\fBUSYNC_THREAD\fR | \fBLOCK_RECURSIVE\fR)
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBmutex_t mp = ERRORCHECKMUTEX;\fR\fR
-.ad
-.sp .6
-.RS 4n
-Same as (\fBUSYNC_THREAD\fR | \fBLOCK_ERRORCHECK\fR)
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBmutex_t mp = RECURSIVE_ERRORCHECKMUTEX;\fR\fR
-.ad
-.sp .6
-.RS 4n
-Same as (\fBUSYNC_THREAD\fR | \fBLOCK_RECURSIVE\fR | \fBLOCK_ERRORCHECK\fR)
-.RE
-
-.SS "Lock and Unlock"
-.LP
-A critical section of code is enclosed by  a the call to lock the mutex and the
+.Dv LOCK_RECURSIVE
+and/or
+.Dv LOCK_ERRORCHECK :
+.Bd -literal -offset indent
+mutex_t mp = RECURSIVEMUTEX;
+.Ed
+.Pp
+Same as
+.Po
+.Dv USYNC_THREAD
+|
+.Dv LOCK_RECURSIVE
+.Pc
+.Bd -literal -offset indent
+mutex_t mp = ERRORCHECKMUTEX;
+.Ed
+.Pp
+Same as
+.Po
+.Dv USYNC_THREAD
+|
+.Dv LOCK_ERRORCHECK
+.Pc
+.Bd -literal -offset indent
+mutex_t mp = RECURSIVE_ERRORCHECKMUTEX;
+.Ed
+.Pp
+Same as
+.Po
+.Dv USYNC_THREAD
+|
+.Dv LOCK_RECURSIVE
+|
+.Dv LOCK_ERRORCHECK
+.Pc
+.Pp
+When working in an intra-process context, it is always recommended to use error
+checking mutexes and use the mutex lock and unlock variants
+.Fn mutex_enter
+and
+.Fn mutex_exit .
+These simplify the error checking conditions and will terminate a process on any
+cases an error would have been returned, similar to the operation of the
+kernel's
+.Xr mutex_enter 9F
+and
+.Xr mutex_exit 9F .
+.Ss "Lock and Unlock"
+A critical section of code is enclosed by the call to lock the mutex and the
 call to unlock the mutex to protect it from simultaneous access by multiple
-threads. Only one thread at a time may possess mutually exclusive access to
-the critical section of code that is enclosed by the mutex-locking call and the
-mutex-unlocking call, whether the mutex's scope  is intra-process or
-inter-process. A thread calling to lock the mutex either gets exclusive  access
-to the code starting from the successful locking until its call to unlock the
-mutex, or it waits until the mutex is unlocked by the thread that locked it.
-.sp
-.LP
-Mutexes have ownership, unlike semaphores. Although any thread, within the
-scope of a mutex, can get an unlocked mutex and lock access to the same
-critical section of code, only the thread that locked a mutex should unlock it.
-.sp
-.LP
+threads.
+Only one thread at a time may possess mutually exclusive access to the critical
+section of code that is enclosed by the mutex-locking call and the
+mutex-unlocking call, whether the mutex's scope is intra-process or
+inter-process.
+A thread calling to lock the mutex either gets exclusive access to the code
+starting from the successful locking until its call to unlock the mutex, or it
+waits until the mutex is unlocked by the thread that locked it.
+.Pp
+Mutexes have ownership, unlike semaphores.
+Although any thread, within the scope of a mutex, can get an unlocked mutex and
+lock access to the same critical section of code, only the thread that locked a
+mutex should unlock it.
+.Pp
 If a thread waiting for a mutex receives a signal, upon return from the signal
 handler, the thread resumes waiting for the mutex as if there was no interrupt.
-A mutex protects code, not data; therefore, strongly bind a mutex  with the
-data by putting both within the same structure, or at least within the same
+A mutex protects code, not data; therefore, strongly bind a mutex  with the data
+by putting both within the same structure, or at least within the same
 procedure.
-.sp
-.LP
-A call to \fBmutex_lock()\fR locks the mutex object referenced by \fImp\fR. If
-the mutex is already locked, the calling thread blocks until the mutex is
-freed; this will return with the mutex object referenced by \fImp\fR in the
-locked state with the calling thread as its owner. If the current owner of a
-mutex tries to relock the mutex, it will result in deadlock.
-.sp
-.LP
-The \fBmutex_trylock()\fR function is the same as \fBmutex_lock()\fR,
-respectively, except that if the mutex object referenced by \fImp\fR is locked
-(by any thread, including the current thread), the call returns immediately
-with an error.
-.sp
-.LP
-The \fBmutex_unlock()\fR function are called by the owner of the mutex object
-referenced by \fImp\fR to release it. The mutex must be locked and the calling
-thread must be the one that last locked the mutex (the owner). If there are
-threads blocked on the mutex object referenced by \fImp\fR when
-\fBmutex_unlock()\fR is called, the \fImp\fR is freed, and the scheduling
-policy will determine which thread gets the mutex. If the calling thread is not
-the owner of the lock, no error status is returned, and the behavior of the
-program is undefined.
-.SS "Destroy"
-.LP
-The \fBmutex_destroy()\fR function destroys the mutex object referenced by
-\fImp\fR. The mutex object becomes uninitialized. The space used by the
-destroyed mutex variable is not freed. It needs to be explicitly reclaimed.
-.SH RETURN VALUES
-.LP
-If successful, these functions return \fB0\fR. Otherwise, an error number is
-returned.
-.SH ERRORS
-.LP
-The \fBmutex_init()\fR function will fail if:
-.sp
-.ne 2
-.na
-\fB\fBEINVAL\fR\fR
-.ad
-.RS 10n
-The value specified by \fItype\fR is invalid, or the \fBLOCK_PRIO_INHERIT\fR
-and \fBLOCK_PRIO_PROTECT\fR attributes are both specified.
-.RE
-
-.sp
-.LP
-The \fBmutex_init()\fR function will fail for  \fBLOCK_ROBUST\fR type mutex if:
-.sp
-.ne 2
-.na
-\fB\fBEBUSY\fR\fR
-.ad
-.RS 10n
-The mutex pointed to by  \fImp\fR was previously initialized and has not yet
-been destroyed.
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBEINVAL\fR\fR
-.ad
-.RS 10n
-The mutex pointed to by \fImp\fR was previously initialized with a different
-set of attribute flags.
-.RE
-
-.sp
-.LP
-The \fBmutex_trylock()\fR function will fail if:
-.sp
-.ne 2
-.na
-\fB\fBEBUSY\fR\fR
-.ad
-.RS 9n
-The mutex pointed to by \fImp\fR is already locked.
-.RE
-
-.sp
-.LP
-The \fBmutex_lock()\fR and \fBmutex_trylock()\fR functions will fail for a
-\fBLOCK_RECURSIVE\fR mutex if:
-.sp
-.ne 2
-.na
-\fB\fBEAGAIN\fR\fR
-.ad
-.RS 10n
-The mutex could not be acquired because the maximum number of recursive locks
-for the mutex has been reached.
-.RE
-
-.sp
-.LP
-The \fBmutex_lock()\fR function will fail for a \fBLOCK_ERRORCHECK\fR and
-non-\fBLOCK_RECURSIVE\fR mutex if:
-.sp
-.ne 2
-.na
-\fB\fBEDEADLK\fR\fR
-.ad
-.RS 11n
-The caller already owns the mutex.
-.RE
-
-.sp
-.LP
-The \fBmutex_lock()\fR function may fail for a non-\fBLOCK_ERRORCHECK\fR and
-non-\fBLOCK_RECURSIVE\fR mutex if:
-.sp
-.ne 2
-.na
-\fB\fBEDEADLK\fR\fR
-.ad
-.RS 11n
-The caller already owns the mutex.
-.RE
-
-.sp
-.LP
-The \fBmutex_unlock()\fR function will fail for a \fBLOCK_ERRORCHECK\fR mutex
-if:
-.sp
-.ne 2
-.na
-\fB\fBEPERM\fR\fR
-.ad
-.RS 9n
-The caller does not own the mutex.
-.RE
-
-.sp
-.LP
-The \fBmutex_lock()\fR or \fBmutex_trylock()\fR functions will fail for
-\fBLOCK_ROBUST\fR type mutex if:
-.sp
-.ne 2
-.na
-\fB\fBEOWNERDEAD\fR\fR
-.ad
-.RS 19n
-The last owner of this mutex died while holding the mutex. This mutex is now
-owned by the caller. The caller must now attempt to make the state protected by
-the mutex consistent. If it is able to clean up the state, then it should
-restore the state of the mutex by calling \fBmutex_consistent()\fR and unlock
-the mutex. Subsequent calls to \fBmutex_lock()\fR will behave normally, as
-before. If the caller is not able to clean up the state,
-\fBmutex_consistent()\fR should not be called but the mutex should be unlocked.
-Subsequent calls to \fBmutex_lock()\fR will fail to acquire the mutex,
-returning with the error value \fBENOTRECOVERABLE\fR. If the owner who acquired
-the lock with  \fBEOWNERDEAD\fR dies, the next owner will acquire the lock with
-\fBEOWNERDEAD\fR.
-.RE
-
-.sp
-.ne 2
-.na
-\fB\fBENOTRECOVERABLE\fR\fR
-.ad
-.RS 19n
-The mutex trying to be acquired was protecting the state that has been left
-unrecoverable when the mutex's last owner could not make the state protected by
-the mutex consistent. The mutex has not been acquired. This condition occurs
-when the lock was previously acquired with \fBEOWNERDEAD\fR and the owner was
-not able to clean up the state and unlocked the mutex without calling
-\fBmutex_consistent()\fR.
-.RE
-
-.sp
-.LP
-The \fBmutex_consistent()\fR function will fail if:
-.sp
-.ne 2
-.na
-\fB\fBEINVAL\fR\fR
-.ad
-.RS 10n
-The caller does not own the mutex or the mutex is not a \fBLOCK_ROBUST\fR mutex
-having an inconsistent state (\fBEOWNERDEAD\fR).
-.RE
-
-.SH EXAMPLES
-.SS "Single Gate"
-.LP
+.Pp
+A call to
+.Fn mutex_lock
+locks the mutex object referenced by
+.Fa mp .
+If the mutex is already locked, the calling thread blocks until the mutex is
+freed; this will return with the mutex object referenced by
+.Fa mp
+in the locked state with the calling thread as its owner.
+If the current owner of a mutex tries to relock the mutex, it will result in
+deadlock.
+.Pp
+The
+.Fn mutex_trylock
+function is the same as
+.Fn mutex_lock ,
+except that if the mutex object referenced by
+.Fa mp
+is locked
+.Pq by any thread, including the current thread ,
+the call returns immediately with an error.
+.Pp
+The
+.Fn mutex_unlock
+function is called by the owner of the mutex object referenced by
+.Fa mp
+to release it.
+The mutex must be locked and the calling thread must be the one that last locked
+the mutex
+.Pq the owner .
+If there are threads blocked on the mutex object referenced by
+.Fa mp
+when
+.Fn mutex_unlock
+is called, the
+.Fa mp
+is freed, and the scheduling policy will determine which thread gets the mutex.
+If the calling thread is not the owner of the lock, no error status is returned,
+and the behavior of the program is undefined.
+.Pp
+The
+.Fn mutex_enter
+function is a variant of the
+.Fn mutex_lock
+function that returns void, meaning that it will perform all error checking and
+if any of the traditional mutex error conditions occur then the process will be
+terminated as though
+.Xr upanic 2
+or similar was called.
+All of the conditions of error checking mutexes are checked including trying
+to lock an uninitialized mutex, recursively locking a mutex that is not a
+recursive type, etc.
+The
+.Fn mutex_enter
+function is only suitable for
+.Dv USYNC_THREAD
+.Pq intra-process
+locks and the lock must have been initialized with the
+.Dv LOCK_ERRORCHECK
+attribute
+.Po
+or the
+.Dv ERRORCHECKMUTEX
+static initializer
+.Pc .
+If
+.Fa mp
+was not initialized as an error-checking mutex then that is treated as a fatal
+error when using
+.Fn mutex_enter .
+.Pp
+The
+.Fn mutex_exit
+function is a variant of the
+.Fn mutex_unlock
+function that returns void, meaning that it will perform all error checking and
+if any of the traditional mutex error conditions occur then the process will be
+terminated as though
+.Xr upanic 2
+or similar was called.
+All of the conditions of error checking mutexes are checked including trying to
+unlock a mutex that is not currently locked or where the calling thread is not
+the owner.
+The
+.Fn mutex_exit
+function is only suitable for
+.Dv USYNC_THREAD
+.Pq intra-process
+locks and the lock must have been initialized with the
+.Dv LOCK_ERRORCHECK
+attribute
+.Po
+or the
+.Dv ERRORCHECKMUTEX
+static initializer
+.Pc .
+If
+.Fa mp
+was not initialized as an error-checking mutex then that is treated as a fatal
+error when using
+.Fn mutex_exit .
+.Pp
+The
+.Fn mutex_enter
+and
+.Fn mutex_exit
+functions are modeled after the kernel's
+.Xr mutex_enter 9F
+and
+.Xr mutex_exit 9F
+functions.
+Using
+.Fn mutex_enter
+and
+.Fn mutex_exit
+is recommended over
+.Fn mutex_lock
+and
+.Fn mutex_unlock
+as most applications do not properly check or handle error conditions and
+terminating a process that has encountered programmer error is generally
+preferable to just sitting there deadlocked waiting for an administrator to
+determine that this has happened and kill the process.
+When these conditions are encountered, a core file will be generated subject to
+the
+.Xr coreadm 8
+settings.
+.Ss "Destroy"
+The
+.Fn mutex_destroy
+function destroys the mutex object referenced by
+.Fa mp .
+The mutex object becomes uninitialized.
+The space used by the destroyed mutex variable is not freed.
+It needs to be explicitly reclaimed.
+.Sh RETURN VALUES
+Upon successful completion, the
+.Fn mutex_init ,
+.Fn mutex_lock ,
+.Fn mutex_trylock ,
+.Fn mutex_unlock ,
+.Fn mutex_consistent ,
+and
+.Fn mutex_destroy
+functions return
+.Sy 0 .
+Otherwise, an error number is returned.
+.Sh EXAMPLES
+.Ss "Single Gate"
 The following example uses one global mutex as a gate-keeper to permit each
 thread exclusive sequential access to the code within the user-defined
-function "change_global_data." This type of synchronization will protect the
-state of shared data,  but it also prohibits parallelism.
-.sp
-.in +2
-.nf
-/* cc thisfile.c -lthread */
+function "change_global_data".
+This type of synchronization will protect the state of shared data, but it also
+prohibits parallelism.
+.Bd -literal -offset 2n
+/* gcc thisfile.c */
 #define _REENTRANT
 #include <stdio.h>
 #include <thread.h>
@@ -596,18 +607,14 @@ void * change_global_data(void *null){
        mutex_unlock(&Global_mutex);
        return NULL;
 }
-.fi
-.in -2
-
-.SS "Multiple Instruction Single Data"
-.LP
+.Ed
+.Ss "Multiple Instruction Single Data"
 The previous example, the mutex, the code it owns, and the data it protects was
-enclosed in one function. The next example uses C++ features to accommodate
-many functions that use just one mutex to protect one data:
-.sp
-.in +2
-.nf
-/* CC thisfile.c -lthread   use C++ to compile*/
+enclosed in one function.
+The next example uses C++ features to accommodate many functions that use just
+one mutex to protect one data:
+.Bd -literal -offset 2n
+/* g++ thisfile.c use C++ to compile*/
 
 #define _REENTRANT
 #include <stdlib.h>
@@ -631,14 +638,14 @@ int Mutected::Global_data = 0;
 mutex_t Mutected::Global_mutex;
 
 int Mutected::add_to_global_data()  {
-       mutex_lock(&Global_mutex);	
+       mutex_lock(&Global_mutex);
        Global_data++;
-       mutex_unlock(&Global_mutex);	
+       mutex_unlock(&Global_mutex);
        return Global_data;
 }
 
 int Mutected::subtract_from_global_data()   {
-       mutex_lock(&Global_mutex);	
+       mutex_lock(&Global_mutex);
        Global_data--;
        mutex_unlock(&Global_mutex);
        return Global_data;
@@ -656,26 +663,27 @@ main(int argc,char * argv[])  {
 void * change_global_data(void *)	{
        static int switcher = 0;
        if ((switcher++ % 3) == 0)   /* one-in-three threads subtracts */
-               cout << Mutected::subtract_from_global_data() << endl;	
+               cout << Mutected::subtract_from_global_data() << endl;
        else
-               cout << Mutected::add_to_global_data() << endl;		
+               cout << Mutected::add_to_global_data() << endl;
        return NULL;
 }
-.fi
-.in -2
-
-.SS "Interprocess Locking"
-.LP
-A mutex can protect data that is shared among processes. The mutex would need
-to be initialized as  \fBUSYNC_PROCESS\fR. One process initializes the
-process-shared mutex and writes it to a file to be  mapped into memory by all
-cooperating processes (see \fBmmap\fR(2)). Afterwards, other independent
-processes can run the same program (whether concurrently or not) and share
-mutex-protected data.
-.sp
-.in +2
-.nf
-/* cc thisfile.c -lthread */
+.Ed
+.Ss "Interprocess Locking"
+A mutex can protect data that is shared among processes.
+The mutex would need to be initialized as
+.Dv USYNC_PROCESS .
+One process initializes the process-shared mutex and writes it to a file to be
+mapped into memory by all cooperating processes
+.Po
+see
+.Xr mmap 2
+.Pc .
+Afterwards, other independent processes can run the same program
+.Pq whether concurrently or not
+and share mutex-protected data.
+.Bd -literal -offset 2n
+/* gcc thisfile.c */
 /* To execute, run the command line "a.out 0 &; a.out 1" */
 
 #define _REENTRANT
@@ -773,25 +781,26 @@ void test_argv(char argv1[])   {
     exit(NULL);
     }
 }
-.fi
-.in -2
-
-.SS "Solaris Interprocess Robust Locking"
-.LP
-A mutex can protect data that is shared among processes robustly. The mutex
-would need to be initialized as \fBUSYNC_PROCESS\fR | \fBLOCK_ROBUST\fR. One
-process initializes the robust process-shared mutex and writes it to a file to
-be mapped into memory by all cooperating processes (see \fBmmap\fR(2)).
-Afterwards, other independent processes can run the same program (whether
-concurrently or not) and share mutex-protected data.
-.sp
-.LP
-The following example shows how to use a \fBUSYNC_PROCESS\fR |
-\fBLOCK_ROBUST\fR type mutex.
-.sp
-.in +2
-.nf
-/* cc thisfile.c -lthread */
+.Ed
+.Ss "Interprocess Robust Locking"
+A mutex can protect data that is shared among processes robustly.
+The mutex would need to be initialized as
+.Dv USYNC_PROCESS | LOCK_ROBUST .
+One process initializes the robust process-shared mutex and writes it to a file
+to be mapped into memory by all cooperating processes
+.Po
+see
+.Xr mmap 2
+.Pc .
+Afterwards, other independent processes can run the same program
+.Pq whether concurrently or not
+and share mutex-protected data.
+.Pp
+The following example shows how to use a
+.Dv USYNC_PROCESS | LOCK_ROBUST
+type mutex.
+.Bd -literal -offset 2n
+/* gcc thisfile.c */
  /* To execute, run the command line "a.out & a.out 1" */
  #include <sys/types.h>
  #include <sys/mman.h>
@@ -875,15 +884,10 @@ void create_shared_memory() {
        buffer->Interprocess_data = 0;
        return (1);
  }
-.fi
-.in -2
-
-.SS "Dynamically Allocated Mutexes"
-.LP
+.Ed
+.Ss "Dynamically Allocated Mutexes"
 The following example allocates and frees memory in which a mutex is embedded.
-.sp
-.in +2
-.nf
+.Bd -literal -offset 2n
 struct record {
         int field1;
         int field2;
@@ -892,113 +896,257 @@ struct record {
 r = malloc(sizeof(struct record));
 mutex_init(&r->m, USYNC_THREAD, NULL);
 /*
-  * The fields in this record are accessed concurrently
-  * by acquiring the embedded lock.
-  */
-.fi
-.in -2
-
-.sp
-.LP
+ * The fields in this record are accessed concurrently
+ * by acquiring the embedded lock.
+ */
+.Ed
+.Pp
 The thread execution in this example is as follows:
-.sp
-.in +2
-.nf
-\fIThread 1 executes:\fR                 \fIThread 2 executes:\fR
+.Bd -literal -offset 2n
+Thread 1 executes:                 Thread 2 executes:
 
 \&...                                ...
 mutex_lock(&r->m);                 mutex_lock(&r->m);
 r->field1++;                       localvar = r->field1;
 mutex_unlock(&r->m);               mutex_unlock(&r->m);
 \&...                                ...
-.fi
-.in -2
-
-.sp
-.LP
-Later, when a thread decides to free the memory pointed to by  \fIr\fR, the
-thread  should call  \fBmutex_destroy\fR(\|) on the mutexes in this memory.
-.sp
-.LP
-In the following example, the main thread can do a  \fBthr_join\fR(\|) on both
-of the above threads. If there are no other threads using the memory in
-\fIr\fR, the main thread can now safely free \fIr\fR:
-.sp
-.in +2
-.nf
+.Ed
+.Pp
+Later, when a thread decides to free the memory pointed to by
+.Fa r ,
+the thread should call
+.Fn mutex_destroy
+on the mutexes in this memory.
+.Pp
+In the following example, the main thread can do a
+.Xr thr_join 3C
+on both of the above threads.
+If there are no other threads using the memory in
+.Fa r ,
+the main thread can now safely free
+.Fa r :
+.Bd -literal -offset 2n
 for (i = 0; i < 2; i++)
        thr_join(0, 0, 0);
 mutex_destroy(&r->m);   /* first destroy mutex */
 free(r);                /* then free memory */
-.fi
-.in -2
-
-.sp
-.LP
+.Ed
+.Pp
 If the mutex is not destroyed, the program could have memory leaks.
-.SH ATTRIBUTES
-.LP
-See \fBattributes\fR(7) for descriptions of the following attributes:
-.sp
-
-.sp
-.TS
-box;
-c | c
-l | l .
-ATTRIBUTE TYPE	ATTRIBUTE VALUE
-_
-Interface Stability	Stable
-_
-MT-Level	MT-Safe
-.TE
-
-.SH SEE ALSO
-.LP
-.BR mmap (2),
-.BR shmop (2),
-.BR pthread_mutex_getprioceiling (3C),
-.BR pthread_mutex_init (3C),
-.BR pthread_mutexattr_getprioceiling (3C),
-.BR pthread_mutexattr_getprotocol (3C),
-.BR pthread_mutexattr_getrobust (3C),
-.BR pthread_mutexattr_gettype (3C),
-.BR attributes (7),
-.BR mutex (7),
-.BR standards (7)
-.SH NOTES
-.LP
-Previous releases of Solaris provided the \fBUSYNC_PROCESS_ROBUST\fR mutex
-type. This type is now deprecated but is still supported for source and binary
-compatibility. When passed to \fBmutex_init()\fR, it is transformed into
-(\fBUSYNC_PROCESS\fR | \fBLOCK_ROBUST\fR). The former method for restoring a
-\fBUSYNC_PROCESS_ROBUST\fR mutex to a consistent state was to reinitialize it
-by calling \fBmutex_init()\fR. This method is still supported for source and
-binary compatibility, but the proper method is to call
-\fBmutex_consistent()\fR.
-.sp
-.LP
-The \fBUSYNC_PROCESS_ROBUST\fR type permitted an alternate error value,
-\fBELOCKUNMAPPED\fR, to be returned by \fBmutex_lock()\fR if the process
-containing a locked robust mutex unmapped the memory containing the mutex or
-performed one of the \fBexec\fR(2) functions. The \fBELOCKUNMAPPED\fR error
-value implies all of the consequences of the \fBEOWNERDEAD\fR error value and
-as such is just a synonym for \fBEOWNERDEAD\fR. For full source and binary
-compatibility, the \fBELOCKUNMAPPED\fR error value is still returned from
-\fBmutex_lock()\fR in these circumstances, but only if the mutex was
-initialized with the \fBUSYNC_PROCESS_ROBUST\fR type. Otherwise,
-\fBEOWNERDEAD\fR is returned in these circumstances.
-.sp
-.LP
-The \fBmutex_lock()\fR, \fBmutex_unlock()\fR, and \fBmutex_trylock()\fR
-functions do not validate the mutex type. An uninitialized mutex or a mutex
-with an invalid type does not return \fBEINVAL\fR. Interfaces for mutexes with
-an invalid type have unspecified behavior.
-.sp
-.LP
-Uninitialized mutexes that are allocated locally could contain junk data. Such
-mutexes need to be initialized using \fBmutex_init()\fR.
-.sp
-.LP
+.Sh ERRORS
+The
+.Fn mutex_init
+function will fail if:
+.Bl -tag -width Er
+.It Er EINVAL
+The value specified by
+.Fa type
+is invalid, or the
+.Dv LOCK_PRIO_INHERIT
+and
+.Dv LOCK_PRIO_PROTECT
+attributes are both specified.
+.El
+.Pp
+The
+.Fn mutex_init
+function will fail for
+.Dv LOCK_ROBUST
+type mutex if:
+.Bl -tag -width Er
+.It Er EBUSY
+The mutex pointed to by
+.Fa mp
+was previously initialized and has not yet been destroyed.
+.It Er EINVAL
+The mutex pointed to by
+.Fa mp
+was previously initialized with a different set of attribute flags.
+.El
+.Pp
+The
+.Fn mutex_trylock
+function will fail if:
+.Bl -tag -width Er
+.It Er EBUSY
+The mutex pointed to by
+.Fa mp
+is already locked.
+.El
+.Pp
+The
+.Fn mutex_lock
+and
+.Fn mutex_trylock
+functions will fail for a
+.Dv LOCK_RECURSIVE
+mutex if:
+.Bl -tag -width Er
+.It Er EAGAIN
+The mutex could not be acquired because the maximum number of recursive locks
+for the mutex has been reached.
+.El
+.Pp
+The
+.Fn mutex_lock
+function will fail for a
+.Dv LOCK_ERRORCHECK
+and
+.No non- Ns Dv LOCK_RECURSIVE
+mutex if:
+.Bl -tag -width Er
+.It Er EDEADLK
+The caller already owns the mutex.
+.El
+.Pp
+The
+.Fn mutex_lock
+function may fail for a
+.No non- Ns Dv LOCK_ERRORCHECK
+and
+.No non- Ns Dv LOCK_RECURSIVE
+mutex if:
+.Bl -tag -width Er
+.It Er EDEADLK
+The caller already owns the mutex.
+.El
+.Pp
+The
+.Fn mutex_unlock
+function will fail for a
+.Dv LOCK_ERRORCHECK
+mutex if:
+.Bl -tag -width Er
+.It Er EPERM
+The caller does not own the mutex.
+.El
+.Pp
+The
+.Fn mutex_lock
+or
+.Fn mutex_trylock
+functions will fail for
+.Dv LOCK_ROBUST
+type mutex if:
+.Bl -tag -width Er
+.It Er EOWNERDEAD
+The last owner of this mutex died while holding the mutex.
+This mutex is now owned by the caller.
+The caller must now attempt to make the state protected by the mutex consistent.
+If it is able to clean up the state, then it should restore the state of the
+mutex by calling
+.Fn mutex_consistent
+and unlock the mutex.
+Subsequent calls to
+.Fn mutex_lock
+will behave normally, as before.
+If the caller is not able to clean up the state,
+.Fn mutex_consistent
+should not be called but the mutex should be unlocked.
+Subsequent calls to
+.Fn mutex_lock
+will fail to acquire the mutex, returning with the error value
+.Er ENOTRECOVERABLE .
+If the owner who acquired the lock with
+.Er EOWNERDEAD
+dies, the next owner will acquire the lock with
+.Er EOWNERDEAD .
+.It Er ENOTRECOVERABLE
+The mutex trying to be acquired was protecting the state that has been left
+unrecoverable when the mutex's last owner could not make the state protected by
+the mutex consistent.
+The mutex has not been acquired.
+This condition occurs when the lock was previously acquired with
+.Er EOWNERDEAD
+and the owner was not able to clean up the state and unlocked the mutex without
+calling
+.Fn mutex_consistent .
+.El
+.Pp
+The
+.Fn mutex_consistent
+function will fail if:
+.Bl -tag -width Er
+.It Er EINVAL
+The caller does not own the mutex or the mutex is not a
+.Dv LOCK_ROBUST
+mutex having an inconsistent state
+.Pq Dv EOWNERDEAD .
+.El
+.Sh INTERFACE STABILITY
+.Sy Committed
+.Sh MT-Level
+.Sy MT-Safe
+.Sh SEE ALSO
+.Xr mmap 2 ,
+.Xr shmop 2 ,
+.Xr pthread_mutex_getprioceiling 3C ,
+.Xr pthread_mutex_init 3C ,
+.Xr pthread_mutexattr_getprioceiling 3C ,
+.Xr pthread_mutexattr_getprotocol 3C ,
+.Xr pthread_mutexattr_getrobust 3C ,
+.Xr pthread_mutexattr_gettype 3C ,
+.Xr attributes 7 ,
+.Xr mutex 7 ,
+.Xr standards 7
+.Sh NOTES
+Previous releases of Solaris provided the
+.Dv USYNC_PROCESS_ROBUST
+mutex type.
+This type is now deprecated but is still supported for source and binary
+compatibility.
+When passed to
+.Fn mutex_init ,
+it is transformed into
+.Pq Dv USYNC_PROCESS | LOCK_ROBUST .
+The former method for restoring a
+.Dv USYNC_PROCESS_ROBUST
+mutex to a consistent state was to reinitialize it by calling
+.Fn mutex_init .
+This method is still supported for source and binary compatibility, but the
+proper method is to call
+.Fn mutex_consistent .
+.Pp
+The
+.Dv USYNC_PROCESS_ROBUST
+type permitted an alternate error value,
+.Er ELOCKUNMAPPED ,
+to be returned by
+.Fn mutex_lock
+if the process containing a locked robust mutex unmapped the memory containing
+the mutex or performed one of the
+.Xr exec 2
+functions.
+The
+.Er ELOCKUNMAPPED
+error value implies all of the consequences of the
+.Er EOWNERDEAD
+error value and as such is just a synonym for
+.Er EOWNERDEAD .
+For full source and binary compatibility, the
+.Er ELOCKUNMAPPED
+error value is still returned from
+.Fn mutex_lock
+in these circumstances, but only if the mutex was initialized with the
+.Dv USYNC_PROCESS_ROBUST
+type.
+Otherwise,
+.Er EOWNERDEAD
+is returned in these circumstances.
+.Pp
+The
+.Fn mutex_lock ,
+.Fn mutex_unlock ,
+and
+.Fn mutex_trylock
+functions do not validate the mutex type.
+An uninitialized mutex or a mutex with an invalid type does not return
+.Er EINVAL .
+Interfaces for mutexes with an invalid type have unspecified behavior.
+.Pp
+Uninitialized mutexes that are allocated locally could contain junk data.
+Such mutexes need to be initialized using
+.Fn mutex_init .
+.Pp
 By default, if multiple threads are waiting for a mutex, the order of
 acquisition is undefined.

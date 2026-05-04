@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2026 Oxide Computer Company
  */
 
 #ifndef _THREADS_H
@@ -41,7 +42,15 @@ extern "C" {
 #endif	/* __STDC_VERSION__ - 0 >= 201112L */
 #endif	/* !defined(_NORETURN_KYWD) */
 
+/*
+ * thread_local is a C++11 keyword and so it must not be defined in an
+ * environment that is C++11 or newer. We define it for non-_STRICT_SYMBOLS
+ * environments prior to C++11 to give them a chance, though not all C++
+ * compilers declare this.
+ */
+#if !defined(__cplusplus) || __cplusplus < 201103L
 #define	thread_local	_Thread_local
+#endif	/* !__cplusplus || __cplusplus < 2021103L */
 #define	ONCE_FLAG_INIT	PTHREAD_ONCE_INIT
 #define	TSS_DTOR_ITERATIONS	PTHREAD_DESTRUCTOR_ITERATIONS
 

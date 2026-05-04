@@ -3,7 +3,7 @@
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH SCF_PROPERTY_CREATE 3SCF "Oct 28, 2008"
+.TH SCF_PROPERTY_CREATE 3SCF "Apr 19, 2026"
 .SH NAME
 scf_property_create, scf_property_handle, scf_property_destroy,
 scf_property_get_name, scf_property_type, scf_property_is_type,
@@ -11,7 +11,6 @@ scf_type_to_string, scf_string_to_type, scf_property_get_value,
 scf_pg_get_property \- create and manipulate property handles in the Service
 Configuration Facility
 .SH SYNOPSIS
-.LP
 .nf
 cc [ \fIflag\fR\&.\|.\|. ] \fIfile\fR\&.\|.\|. \fB-lscf\fR [ \fIlibrary\fR\&.\|.\|. ]
 #include <libscf.h>
@@ -21,7 +20,7 @@ cc [ \fIflag\fR\&.\|.\|. ] \fIfile\fR\&.\|.\|. \fB-lscf\fR [ \fIlibrary\fR\&.\|.
 
 .LP
 .nf
-\fBscf_handle_t *\fR\fBscf_property_handle\fR(\fBscf_property_t *\fR\fIprop\fR);
+\fBscf_handle_t *\fR\fBscf_property_handle\fR(\fBconst scf_property_t *\fR\fIprop\fR);
 .fi
 
 .LP
@@ -65,13 +64,11 @@ cc [ \fIflag\fR\&.\|.\|. ] \fIfile\fR\&.\|.\|. \fB-lscf\fR [ \fIlibrary\fR\&.\|.
 
 .LP
 .nf
-\fBint\fR \fBscf_pg_get_property\fR(\fBconst scf_property_t *\fR\fIpg\fR,
+\fBint\fR \fBscf_pg_get_property\fR(\fBconst scf_propertygroup_t *\fR\fIpg\fR,
      \fBconst char *\fR\fIname\fR, \fBscf_property_t *\fR\fIprop\fR);
 .fi
 
 .SH DESCRIPTION
-.sp
-.LP
 Properties are named sets of values of one type. They are grouped into property
 groups (see \fBscf_pg_create\fR(3SCF)) that are updated atomically using
 transactions (see \fBscf_transaction_create\fR(3SCF)).
@@ -117,8 +114,6 @@ values associated with a property, see \fBscf_iter_property_values\fR(3SCF).
 The \fBscf_pg_get_property()\fR function sets \fIprop\fR to the property
 specified by \fIname\fR in the property group specified by \fIpg\fR.
 .SH RETURN VALUES
-.sp
-.LP
 Upon successful completion, \fBscf_property_create()\fR returns a new
 \fBscf_property_t\fR. Otherwise, it returns \fINULL\fR.
 .sp
@@ -140,8 +135,6 @@ type supplied.
 Upon successful completion, \fBscf_string_to_type()\fR returns the
 \fBscf_type_t\fR definition of the string supplied
 .SH ERRORS
-.sp
-.LP
 The \fBscf_property_create()\fR function will fail if:
 .sp
 .ne 2
@@ -401,8 +394,6 @@ The value could not be read due to access restrictions.
 .LP
 The \fBscf_error\fR(3SCF) function can be used to retrieve the error value.
 .SH ATTRIBUTES
-.sp
-.LP
 See \fBattributes\fR(7) for descriptions of the following attributes:
 .sp
 
@@ -419,8 +410,6 @@ MT-Level	Safe
 .TE
 
 .SH SEE ALSO
-.sp
-.LP
 .BR libscf (3LIB),
 .BR scf_error (3SCF),
 .BR scf_handle_decode_fmri (3SCF),

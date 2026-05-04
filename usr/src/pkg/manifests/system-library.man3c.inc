@@ -751,6 +751,8 @@ link path=usr/share/man/man3c/munlock.3c target=mlock.3c
 link path=usr/share/man/man3c/munlockall.3c target=mlockall.3c
 link path=usr/share/man/man3c/mutex_consistent.3c target=mutex_init.3c
 link path=usr/share/man/man3c/mutex_destroy.3c target=mutex_init.3c
+link path=usr/share/man/man3c/mutex_enter.3c target=mutex_init.3c
+link path=usr/share/man/man3c/mutex_exit.3c target=mutex_init.3c
 file path=usr/share/man/man3c/mutex_init.3c
 link path=usr/share/man/man3c/mutex_lock.3c target=mutex_init.3c
 link path=usr/share/man/man3c/mutex_trylock.3c target=mutex_init.3c

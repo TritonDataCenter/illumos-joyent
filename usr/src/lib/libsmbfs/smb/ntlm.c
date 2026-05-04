@@ -79,7 +79,7 @@
 int
 ntlm_compute_lm_hash(uchar_t *hash, const char *pass)
 {
-	static const uchar_t M8[8] = "KGS!@#$%";
+	static const uchar_t M8[8] __nonstring = "KGS!@#$%";
 	uchar_t P14[14 + 1];
 	int err;
 	char *ucpw;
@@ -184,8 +184,8 @@ ntlm_v1_session_key(uchar_t *ssn_key, const uchar_t *nt_hash)
  */
 int
 ntlm_put_v1_responses(struct smb_ctx *ctx,
-	struct mbdata *lm_mbp, struct mbdata *nt_mbp,
-	uchar_t *ssn_key)
+    struct mbdata *lm_mbp, struct mbdata *nt_mbp,
+    uchar_t *ssn_key)
 {
 	uchar_t *lmresp, *ntresp;
 	int err;
@@ -246,8 +246,8 @@ ntlm_put_v1_responses(struct smb_ctx *ctx,
  */
 int
 ntlm_put_v1x_responses(struct smb_ctx *ctx,
-	struct mbdata *lm_mbp, struct mbdata *nt_mbp,
-	uchar_t *ssn_key)
+    struct mbdata *lm_mbp, struct mbdata *nt_mbp,
+    uchar_t *ssn_key)
 {
 	MD5_CTX context;
 	uchar_t challenges[2 * NTLM_CHAL_SZ];
@@ -462,8 +462,8 @@ ntlm_v2_resp_hash(uchar_t *rhash,
  */
 static void
 ntlm_v2_session_key(uchar_t *ssn_key,
-	const uchar_t *v2hash,
-	const uchar_t *ntresp)
+    const uchar_t *v2hash,
+    const uchar_t *ntresp)
 {
 
 	/* session key uses only 1st 16 bytes of ntresp */
@@ -479,8 +479,8 @@ ntlm_v2_session_key(uchar_t *ssn_key,
  */
 int
 ntlm_put_v2_responses(struct smb_ctx *ctx, struct mbdata *ti_mbp,
-	struct mbdata *lm_mbp, struct mbdata *nt_mbp,
-	uchar_t *ssn_key)
+    struct mbdata *lm_mbp, struct mbdata *nt_mbp,
+    uchar_t *ssn_key)
 {
 	uchar_t *lmresp, *ntresp;
 	int err;
@@ -596,7 +596,7 @@ smb_put_blob_name(struct mbdata *mbp, char *name, int type)
  */
 int
 ntlm_build_target_info(struct smb_ctx *ctx, struct mbuf *names,
-	struct mbdata *mbp)
+    struct mbdata *mbp)
 {
 	struct timeval now;
 	uint64_t nt_time;
@@ -659,7 +659,7 @@ out:
  */
 void
 ntlm2_kxkey(struct smb_ctx *ctx, struct mbdata *lm_mbp,
-	uchar_t *ssn_key, uchar_t *kxkey)
+    uchar_t *ssn_key, uchar_t *kxkey)
 {
 	uchar_t data[NTLM_HASH_SZ];
 	uchar_t *p = mtod(lm_mbp->mb_top, uchar_t *);

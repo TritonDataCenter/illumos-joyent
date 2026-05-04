@@ -31,7 +31,7 @@
 
 #include "mac_ktest_common.h"
 
-static const char snoop_magic[8] = "snoop\0\0\0";
+static const char snoop_magic[8] __nonstring = "snoop\0\0\0";
 static const uint_t snoop_acceptable_vers = 2;
 
 pkt_cap_iter_t *

@@ -1,20 +1,19 @@
 '\" te
 .\" Copyright (c) 2008, Sun Microsystems, Inc.  All Rights Reserved.
+.\" Copyright 2026 Oxide Computer Company
 .\" The contents of this file are subject to the terms of the Common Development and Distribution License (the "License").  You may not use this file except in compliance with the License.
 .\" You can obtain a copy of the license at usr/src/OPENSOLARIS.LICENSE or http://www.opensolaris.org/os/licensing.  See the License for the specific language governing permissions and limitations under the License.
 .\" When distributing Covered Code, include this CDDL HEADER in each file and include the License file at usr/src/OPENSOLARIS.LICENSE.  If applicable, add the following below this CDDL HEADER, with the fields enclosed by brackets "[]" replaced with your own identifying information: Portions Copyright [yyyy] [name of copyright owner]
-.TH LIBNVPAIR 3LIB "Mar 13, 2016"
+.TH LIBNVPAIR 3LIB "Apr 19, 2026"
 .SH NAME
 libnvpair \- name-value pair library
 .SH SYNOPSIS
-.LP
 .nf
 cc [ \fIflag\fR... ] \fIfile\fR... \fB-lnvpair\fR [ \fIlibrary\fR... ]
 #include <\fBlibnvpair.h\fR>
 .fi
 
 .SH DESCRIPTION
-.LP
 The \fBlibnvpair\fR library exports a set of functions for managing name-value
 pairs.
 .sp
@@ -95,8 +94,20 @@ Pack an \fBnvlist_t\fR into a contiguous buffer.
 .el o
 Expand a packed nvlist into a searchable \fBnvlist_t\fR.
 .RE
-.SH INTERFACES
 .LP
+When items are retrieved from a list, the memory associated with them is owned
+by the \fBnvlist_t\fR itself and therefore their lifetimes are tied together.
+Calling \fBnvlist_free\fR(3NVPAIR) will free that data, after which any pointers
+obtained by having called an nvlist lookup function must not be used.
+.LP
+Conversely, when adding items to an \fBnvlist_t\fR they are copied into the list
+and therefore it is up to the caller to free any memory for the original object.
+For example, if you allocate memory for a \fBchar *\fR and add it to a
+\fBnvlist_t\fR with \fBnvlist_add_string\fR(3NVPAIR), when the \fBnvlist_t\fR is
+freed with \fBnvlist_free\fR(3NVPAIR) the originally allocated \fBchar *\fR will
+not be freed along with it. See \fBnvlist_add_nvlist\fR(3NVPAIR) for more
+information.
+.SH INTERFACES
 The shared object \fBlibnvpair.so.1\fR provides the public interfaces defined
 below. See \fBIntro\fR(3) for additional information on shared object
 interfaces.
@@ -120,7 +131,7 @@ l l .
 \fBnvlist_add_uint16_array\fR	\fBnvlist_add_uint32\fR
 \fBnvlist_add_uint32_array\fR	\fBnvlist_add_uint64\fR
 \fBnvlist_add_uint64_array\fR	\fBnvlist_alloc\fR
-\fBnvlist_dup\fR	\fBnvpair_empty\fR
+\fBnvlist_dup\fR	\fBnvlist_empty\fR
 \fBnvlist_exists\fR
 \fBnvlist_free\fR	\fBnvlist_lookup_boolean\fR
 \fBnvlist_lookup_boolean_value\fR	\fBnvlist_lookup_boolean_array\fR
@@ -157,7 +168,7 @@ l l .
 \fBnvpair_value_uint32\fR	\fBnvpair_value_uint32_array\fR
 \fBnvpair_value_uint64\fR	\fBnvpair_value_uint64_array\fR
 \fBnv_alloc_init\fR	\fBnv_alloc_fini\fR
-\fBnv_alloc_reset\fR	
+\fBnv_alloc_reset\fR
 .TE
 
 .SH FILES
@@ -179,7 +190,6 @@ shared object
 .RE
 
 .SH ATTRIBUTES
-.LP
 See \fBattributes\fR(7) for description of the following attributes:
 .sp
 
@@ -196,6 +206,5 @@ MT-Level	MT-Safe
 .TE
 
 .SH SEE ALSO
-.LP
 .BR Intro (3),
 .BR attributes (7)

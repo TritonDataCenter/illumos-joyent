@@ -518,7 +518,7 @@ vcpu_cpuid_cleanup(vcpu_cpuid_config_t *cfg)
 	}
 }
 
-static const char bhyve_id[12] = "bhyve bhyve ";
+static const char bhyve_id[12] __nonstring = "bhyve bhyve ";
 
 /*
  * Force exposition of the invariant TSC capability, regardless of whether the

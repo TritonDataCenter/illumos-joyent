@@ -515,8 +515,9 @@ ChapMSv2Success(cstate, msresp, authchall, rhostname, secret, secret_len)
     char *rhostname, *secret;
     int secret_len;
 {
-    static const u_char Magic1[39] = "Magic server to client signing constant";
-    static const u_char Magic2[41] =
+    static const u_char Magic1[39] __nonstring =
+	"Magic server to client signing constant";
+    static const u_char Magic2[41] __nonstring =
 	"Pad to make it do more than one iteration";
 #if defined(__NetBSD__) || defined(HAVE_LIBMD)
     /* NetBSD uses the libc md4 routines that take bytes instead of bits */

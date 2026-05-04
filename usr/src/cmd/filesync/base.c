@@ -39,7 +39,6 @@
  *		write_baseline
  *		(static) bw_header, bw_base, bw_file, showtype
  */
-#ident	"%W%	%E% SMI"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -88,7 +87,8 @@ static long gettype(int);
  */
 struct base *
 add_base(const char *src, const char *dst)
-{	struct base *bp, **bpp;
+{
+	struct base *bp, **bpp;
 
 	/* first see if we already have it */
 	for (bpp = &bases; (bp = *bpp) != 0; bpp = &bp->b_next) {
@@ -100,7 +100,7 @@ add_base(const char *src, const char *dst)
 
 		if (opt_debug & DBG_BASE)
 			fprintf(stderr, "BASE: FOUND base=%d, src=%s, dst=%s\n",
-				bp->b_ident, src, dst);
+			    bp->b_ident, src, dst);
 		return (bp);
 	}
 
@@ -131,7 +131,7 @@ add_base(const char *src, const char *dst)
 
 	if (opt_debug & DBG_BASE)
 		fprintf(stderr, "BASE: ADDED base=%d, src=%s, dst=%s\n",
-			bp->b_ident, src, dst);
+		    bp->b_ident, src, dst);
 
 	return (bp);
 }
@@ -160,7 +160,7 @@ add_base(const char *src, const char *dst)
  *	order.  If we keep a guess pointer to the last file we added/found,
  *	there is a better than even chance that this one should be
  *	added immediately onto the end of it ... and in so doing we
- * 	can save ourselves the trouble of searching the lists most
+ *	can save ourselves the trouble of searching the lists most
  *	of the time.
  *
  *	this win would be even better if the FTW traversal was sorted,
@@ -169,7 +169,8 @@ add_base(const char *src, const char *dst)
  */
 static struct file *
 add_file_to_list(struct file **pp, const char *name)
-{	struct file *fp, *new;
+{
+	struct file *fp, *new;
 	int rslt;
 
 	static struct file **last_list;
@@ -228,12 +229,12 @@ makeit:
 	 *	pp points at where our pointer should go
 	 *	fp points at the node after ours
 	 */
-	new = (struct file *) malloc(sizeof (*new));
+	new = malloc(sizeof (*new));
 	if (new == 0)
 		nomem("file structure");
 
 	/* initialize the new node	*/
-	memset((void *) new, 0, sizeof (struct file));
+	memset(new, 0, sizeof (struct file));
 	new->f_name = strdup(name);
 	new->f_flags = F_NEW;
 
@@ -262,7 +263,8 @@ gotit:	/* remember this as our next guess pointer	*/
  */
 struct file *
 add_file_to_base(struct base *bp, const char *name)
-{	struct file *fp;
+{
+	struct file *fp;
 
 	fp = add_file_to_list(&bp->b_files, name);
 	fp->f_base = bp;
@@ -270,8 +272,8 @@ add_file_to_base(struct base *bp, const char *name)
 
 	if (opt_debug & DBG_LIST)
 		fprintf(stderr, "LIST: base=%d, %s file=%s\n",
-			bp->b_ident, (fp->f_flags&F_NEW) ? "NEW" : "FOUND",
-			name);
+		    bp->b_ident, (fp->f_flags&F_NEW) ? "NEW" : "FOUND",
+		    name);
 
 	return (fp);
 }
@@ -292,7 +294,8 @@ add_file_to_base(struct base *bp, const char *name)
  */
 struct file *
 add_file_to_dir(struct file *dp, const char *name)
-{	struct file *fp;
+{
+	struct file *fp;
 
 	fp = add_file_to_list(&dp->f_files, name);
 	fp->f_base = dp->f_base;
@@ -300,8 +303,8 @@ add_file_to_dir(struct file *dp, const char *name)
 
 	if (opt_debug & DBG_LIST)
 		fprintf(stderr, "LIST: dir=%s, %s file=%s\n",
-			dp->f_name, (fp->f_flags&F_NEW) ? "NEW" : "FOUND",
-			name);
+		    dp->f_name, (fp->f_flags&F_NEW) ? "NEW" : "FOUND",
+		    name);
 
 	return (fp);
 }
@@ -321,7 +324,8 @@ add_file_to_dir(struct file *dp, const char *name)
  */
 errmask_t
 read_baseline(char *name)
-{	FILE *file;
+{
+	FILE *file;
 	errmask_t errs = 0;
 
 	char *s;
@@ -343,8 +347,7 @@ read_baseline(char *name)
 
 	file = fopen(name, "r");
 	if (file == NULL) {
-		fprintf(stderr, gettext(ERR_open), gettext(TXT_base),
-			name);
+		fprintf(stderr, gettext(ERR_open), gettext(TXT_base), name);
 		return (ERR_FILES);
 	}
 	lex_linenum = 0;
@@ -377,7 +380,7 @@ read_baseline(char *name)
 
 			if (major != BASE_MAJOR || minor > BASE_MINOR) {
 				fprintf(stderr, gettext(ERR_badver),
-					major, minor, gettext(TXT_base), name);
+				    major, minor, gettext(TXT_base), name);
 				errs |= ERR_FILES;
 			}
 			s1 = 0;
@@ -486,7 +489,7 @@ read_baseline(char *name)
 			if (s == 0 || *s == 0)
 				goto bad;
 			ll = strtoull(s, 0, 0);
-			fp->f_s_inum = (ino_t) ll;
+			fp->f_s_inum = (ino_t)ll;
 
 			s = lex(0);	/* source major	*/
 			field = "source major";
@@ -521,7 +524,7 @@ read_baseline(char *name)
 			if (s == 0 || *s == 0)
 				goto bad;
 			ll = strtoull(s, 0, 0);
-			fp->f_d_inum = (ino_t) ll;
+			fp->f_d_inum = (ino_t)ll;
 
 			s = lex(0);	/* dest major	*/
 			field = "destination major";
@@ -571,7 +574,7 @@ read_baseline(char *name)
 				if (s == 0 || *s == 0)
 					goto bad;
 				ll = strtoul(s, 0, 0);
-				ip->f_size = (off_t) ll;	/* size	*/
+				ip->f_size = (off_t)ll;	/* size	*/
 			}
 
 			/*
@@ -583,8 +586,8 @@ read_baseline(char *name)
 			if (s && *s) {
 				l = strtoul(s, 0, 0);
 				ip->f_numacls = l;
-				ip->f_acls = (aclent_t *) malloc(ip->f_numacls *
-						sizeof (aclent_t));
+				ip->f_acls = malloc(ip->f_numacls *
+				    sizeof (aclent_t));
 				if (ip->f_acls == 0)
 					nomem("Access Control List");
 			}
@@ -639,7 +642,7 @@ read_baseline(char *name)
 
 	bad:	/* log the error and continue processing to find others	*/
 		fprintf(stderr, gettext(ERR_badinput), lex_linenum,
-			field, name);
+		    field, name);
 		errs |= ERR_FILES;
 	}
 
@@ -662,7 +665,8 @@ read_baseline(char *name)
  */
 errmask_t
 write_baseline(char *name)
-{	FILE *newfile;
+{
+	FILE *newfile;
 	errmask_t errs = 0;
 	struct base *bp;
 	char tmpname[ MAX_PATH ];
@@ -681,7 +685,7 @@ write_baseline(char *name)
 	newfile = fopen(tmpname, "w+");
 	if (newfile == NULL) {
 		fprintf(stderr, gettext(ERR_creat), gettext(TXT_base),
-				tmpname);
+		    tmpname);
 		return (ERR_FILES);
 	}
 
@@ -691,13 +695,13 @@ write_baseline(char *name)
 
 	if (ferror(newfile)) {
 		fprintf(stderr, gettext(ERR_write), gettext(TXT_base),
-			tmpname);
+		    tmpname);
 		errs |= ERR_FILES;
 	}
 
 	if (fclose(newfile)) {
 		fprintf(stderr, gettext(ERR_fclose), gettext(TXT_base),
-			tmpname);
+		    tmpname);
 		errs |= ERR_FILES;
 	}
 
@@ -705,7 +709,7 @@ write_baseline(char *name)
 	if (errs == 0)
 		if (rename(tmpname, name) != 0) {
 			fprintf(stderr, gettext(ERR_rename),
-				gettext(TXT_base), tmpname, name);
+			    gettext(TXT_base), tmpname, name);
 			errs |= ERR_FILES;
 		}
 
@@ -729,7 +733,8 @@ write_baseline(char *name)
  */
 static errmask_t
 bw_header(FILE *file)
-{	time_t now;
+{
+	time_t now;
 	struct tm *local;
 
 	/* figure out what time it is	*/
@@ -739,7 +744,7 @@ bw_header(FILE *file)
 	fprintf(file, "%s %d.%d\n", BASE_TAG, BASE_MAJOR, BASE_MINOR);
 	fprintf(file, "#\n");
 	fprintf(file, "# filesync baseline, last written by %s, %s",
-		cuserid((char *) 0), asctime(local));
+	    cuserid(NULL), asctime(local));
 	fprintf(file, "#\n");
 
 	return (0);
@@ -762,7 +767,8 @@ bw_header(FILE *file)
  */
 static errmask_t
 bw_base(FILE *file, struct base *bp)
-{	struct file *fp;
+{
+	struct file *fp;
 	errmask_t errs = 0;
 
 	/* see if this base is to be dropped from baseline	*/
@@ -805,7 +811,8 @@ bw_base(FILE *file, struct base *bp)
  */
 static errmask_t
 bw_file(FILE *file, struct file *fp, int depth)
-{	struct file *cp;
+{
+	struct file *cp;
 	int i;
 	errmask_t errs = 0;
 	long long ll;		/* intermediate for 64 bit file support	*/
@@ -827,35 +834,35 @@ bw_file(FILE *file, struct file *fp, int depth)
 		fp->f_info[OPT_SRC].f_ino	= fp->f_s_inum;
 		fp->f_info[OPT_SRC].f_nlink	= fp->f_s_nlink;
 		fp->f_info[OPT_SRC].f_d_maj	= fp->f_s_maj;
-		fp->f_info[OPT_SRC].f_d_min 	= fp->f_s_min;
+		fp->f_info[OPT_SRC].f_d_min	= fp->f_s_min;
 		fp->f_info[OPT_SRC].f_modtime	= fp->f_s_modtime;
 		fp->f_info[OPT_DST].f_ino	= fp->f_d_inum;
 		fp->f_info[OPT_DST].f_nlink	= fp->f_d_nlink;
 		fp->f_info[OPT_DST].f_d_maj	= fp->f_d_maj;
 		fp->f_info[OPT_DST].f_d_min	= fp->f_d_min;
-		fp->f_info[OPT_DST].f_modtime 	= fp->f_d_modtime;
+		fp->f_info[OPT_DST].f_modtime	= fp->f_d_modtime;
 	}
 
 	/* write out the entry for this file		*/
 	fprintf(file, "FILE %d %c %-20s 0%04o", depth, showtype(ip->f_type),
-		noblanks(fp->f_name), ip->f_mode);
+	    noblanks(fp->f_name), ip->f_mode);
 	fprintf(file, " %6ld %6ld", ip->f_uid, ip->f_gid);
 
 	ll = fp->f_info[OPT_SRC].f_ino;
 	fprintf(file, "\t%6lld %4ld %4ld %4d 0x%08lx",
-			ll,
-			fp->f_info[OPT_SRC].f_d_maj,
-			fp->f_info[OPT_SRC].f_d_min,
-			fp->f_info[OPT_SRC].f_nlink,
-			fp->f_info[OPT_SRC].f_modtime);
+	    ll,
+	    fp->f_info[OPT_SRC].f_d_maj,
+	    fp->f_info[OPT_SRC].f_d_min,
+	    fp->f_info[OPT_SRC].f_nlink,
+	    fp->f_info[OPT_SRC].f_modtime);
 
 	ll = fp->f_info[OPT_DST].f_ino;
 	fprintf(file, "\t%6lld %4ld %4ld %4d 0x%08lx",
-			ll,
-			fp->f_info[OPT_DST].f_d_maj,
-			fp->f_info[OPT_DST].f_d_min,
-			fp->f_info[OPT_DST].f_nlink,
-			fp->f_info[OPT_DST].f_modtime);
+	    ll,
+	    fp->f_info[OPT_DST].f_d_maj,
+	    fp->f_info[OPT_DST].f_d_min,
+	    fp->f_info[OPT_DST].f_nlink,
+	    fp->f_info[OPT_DST].f_modtime);
 
 	/* last fields are file type specific	*/
 	if (S_ISBLK(ip->f_type) || S_ISCHR(ip->f_type))
@@ -873,7 +880,7 @@ bw_file(FILE *file, struct file *fp, int depth)
 	/* if this file has ACLs, we have to write them out too	*/
 	for (i = 0; i < ip->f_numacls; i++)
 		fprintf(file, "ACL %d %d %ld %o\n", i, ip->f_acls[i].a_type,
-			ip->f_acls[i].a_id, ip->f_acls[i].a_perm);
+		    ip->f_acls[i].a_id, ip->f_acls[i].a_perm);
 
 	/* then enumerate all of the children (if any)	*/
 	for (cp = fp->f_files; cp; cp = cp->f_next)
@@ -894,7 +901,7 @@ bw_file(FILE *file, struct file *fp, int depth)
  *	mode word -> character
  *	character -> mode word
  */
-static char types[16] = "-PC?DNB?F?S?s???";
+static char types[16] __nonstring = "-PC?DNB?F?S?s???";
 
 static char showtype(int mode)
 {
@@ -902,7 +909,8 @@ static char showtype(int mode)
 }
 
 static long gettype(int code)
-{	int i;
+{
+	int i;
 
 	for (i = 0; i < 16; i++)
 		if (types[i] == code)

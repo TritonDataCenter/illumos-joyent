@@ -92,7 +92,7 @@ function genlists(outfile, v_index, v_errs, v_num) {
 	print "};\n" >outfile
 
 	print "/* This is one long string */" >outfile
-	printf "const char %s[%d] =\n", v_errs, k >outfile
+	printf "const char %s[%d] __nonstring =\n", v_errs, k >outfile
 	for (j = 0; j <= max; ++j)
 		printf "\t\"%s\\0\"\n", astr[j] >outfile
 	print ";\n" >outfile

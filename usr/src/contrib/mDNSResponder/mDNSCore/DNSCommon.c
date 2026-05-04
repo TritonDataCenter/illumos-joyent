@@ -861,7 +861,7 @@ mDNSexport mDNSu8 *ConstructServiceName(domainname *const fqdn,
                 const mDNSu8 *s2 = s1 + 1 + s1[0];
                 if (s2[0] && s2[0] < 0x40 && s2[1+s2[0]] == 0)  // and we have three and only three labels
                 {
-                    static const mDNSu8 SubTypeLabel[5] = mDNSSubTypeLabel;
+                    static const mDNSu8 SubTypeLabel[5] __nonstring = mDNSSubTypeLabel;
                     src = s0;                                   // Copy the first label
                     len = *src;
                     for (i=0; i <= len;                      i++) *dst++ = *src++;

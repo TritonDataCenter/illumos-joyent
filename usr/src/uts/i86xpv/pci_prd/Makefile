@@ -46,6 +46,7 @@ ALL_BUILDS	= $(ALL_BUILDSONLY64)
 DEF_BUILDS	= $(DEF_BUILDSONLY64)
 
 $(OBJS_DIR)/pci_prd_i86pc.o := CFLAGS += -_gcc14=--param=min-pagesize=0
+$(OBJS_DIR)/pci_prd_i86pc.o := CFLAGS += -_gcc15=--param=min-pagesize=0
 
 #
 #	Default build targets.

@@ -46,7 +46,7 @@
  *      state := ExpandKey(state, 0, password)
  * 4. ctext := "OrpheanBeholderScryDoubt"
  * 5. REPEAT 64:
- * 	ctext := Encrypt_ECB (state, ctext);
+ *	ctext := Encrypt_ECB (state, ctext);
  * 6. RETURN Concatenate (salt, ctext);
  *
  */
@@ -187,17 +187,16 @@ bcrypt_gensalt(uint8_t log_rounds)
  *  i.e. $2$04$iwouldntknowwhattosayetKdJ6iFtacBqJdKe6aW7ou
  */
 
-char   *
-bcrypt(key, salt)
-	const char   *key;
-	const char   *salt;
+char *
+bcrypt(const char *key, const char *salt)
 {
 	blf_ctx state;
 	uint32_t rounds, i, k;
 	uint16_t j;
 	size_t key_len;
 	uint8_t salt_len, logr, minor;
-	uint8_t ciphertext[4 * BCRYPT_BLOCKS] = "OrpheanBeholderScryDoubt";
+	uint8_t ciphertext[4 * BCRYPT_BLOCKS] __nonstring =
+	    "OrpheanBeholderScryDoubt";
 	uint8_t csalt[BCRYPT_MAXSALT];
 	uint32_t cdata[BCRYPT_BLOCKS];
 	char arounds[3];
@@ -213,12 +212,12 @@ bcrypt(key, salt)
 	/* Check for minor versions */
 	if (salt[1] != '$') {
 		switch (salt[1]) {
-		    case 'a': /* 'ab' should not yield the same as 'abab' */
-		    case 'b': /* cap input length at 72 bytes */
+		case 'a': /* 'ab' should not yield the same as 'abab' */
+		case 'b': /* cap input length at 72 bytes */
 			minor = salt[1];
 			salt++;
 			break;
-		    default:
+		default:
 			return (error);
 		}
 	} else
