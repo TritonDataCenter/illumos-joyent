@@ -58,6 +58,9 @@
 #include "config.h"
 #include "debug.h"
 #include "pci_emul.h"
+#ifdef BHYVE_SNAPSHOT
+#include "snapshot.h"
+#endif
 #include "ahci.h"
 #include "block_if.h"
 
@@ -2634,6 +2637,145 @@ open_fail:
 	return (ret);
 }
 
+#ifdef BHYVE_SNAPSHOT
+static int
+pci_ahci_snapshot(struct vm_snapshot_meta *meta)
+{
+	int i, ret;
+	void *bctx;
+	struct pci_devinst *pi;
+	struct pci_ahci_softc *sc;
+	struct ahci_port *port;
+
+	pi = meta->dev_data;
+	sc = pi->pi_arg;
+
+	/* TODO: add mtx lock/unlock */
+
+	SNAPSHOT_VAR_OR_LEAVE(sc->ports, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->cap, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->ghc, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->is, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->pi, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->vs, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->ccc_ctl, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->ccc_pts, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->em_loc, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->em_ctl, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->cap2, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->bohc, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->lintr, meta, ret, done);
+
+	for (i = 0; i < MAX_PORTS; i++) {
+		port = &sc->port[i];
+
+		if (meta->op == VM_SNAPSHOT_SAVE)
+			bctx = port->bctx;
+
+		SNAPSHOT_VAR_OR_LEAVE(bctx, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->port, meta, ret, done);
+
+		/* Mostly for restore; save is ensured by the lines above. */
+		if (((bctx == NULL) && (port->bctx != NULL)) ||
+		    ((bctx != NULL) && (port->bctx == NULL))) {
+			EPRINTLN("%s: ports not matching", __func__);
+			ret = EINVAL;
+			goto done;
+		}
+
+		if (port->bctx == NULL)
+			continue;
+
+		if (port->port != i) {
+			EPRINTLN("%s: ports not matching: "
+			    "actual: %d expected: %d", __func__, port->port, i);
+			ret = EINVAL;
+			goto done;
+		}
+
+		SNAPSHOT_GUEST2HOST_ADDR_OR_LEAVE(pi->pi_vmctx, port->cmd_lst,
+		    AHCI_CL_SIZE * AHCI_MAX_SLOTS, false, meta, ret, done);
+		SNAPSHOT_GUEST2HOST_ADDR_OR_LEAVE(pi->pi_vmctx, port->rfis, 256,
+		    false, meta, ret, done);
+
+		SNAPSHOT_VAR_OR_LEAVE(port->ata_ident, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->atapi, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->reset, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->waitforclear, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->mult_sectors, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->xfermode, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->err_cfis, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->sense_key, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->asc, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->ccs, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->pending, meta, ret, done);
+
+		SNAPSHOT_VAR_OR_LEAVE(port->clb, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->clbu, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->fb, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->fbu, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->ie, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->cmd, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->unused0, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->tfd, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->sig, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->ssts, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->sctl, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->serr, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->sact, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->ci, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->sntf, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->fbs, meta, ret, done);
+		SNAPSHOT_VAR_OR_LEAVE(port->ioqsz, meta, ret, done);
+
+		assert(TAILQ_EMPTY(&port->iobhd));
+	}
+
+done:
+	return (ret);
+}
+
+static int
+pci_ahci_pause(struct pci_devinst *pi)
+{
+	struct pci_ahci_softc *sc;
+	struct blockif_ctxt *bctxt;
+	int i;
+
+	sc = pi->pi_arg;
+
+	for (i = 0; i < MAX_PORTS; i++) {
+		bctxt = sc->port[i].bctx;
+		if (bctxt == NULL)
+			continue;
+
+		blockif_pause(bctxt);
+	}
+
+	return (0);
+}
+
+static int
+pci_ahci_resume(struct pci_devinst *pi)
+{
+	struct pci_ahci_softc *sc;
+	struct blockif_ctxt *bctxt;
+	int i;
+
+	sc = pi->pi_arg;
+
+	for (i = 0; i < MAX_PORTS; i++) {
+		bctxt = sc->port[i].bctx;
+		if (bctxt == NULL)
+			continue;
+
+		blockif_resume(bctxt);
+	}
+
+	return (0);
+}
+#endif	/* BHYVE_SNAPSHOT */
+
 /*
  * Use separate emulation names to distinguish drive and atapi devices
  */
@@ -2643,6 +2785,11 @@ static const struct pci_devemu pci_de_ahci = {
 	.pe_legacy_config = pci_ahci_legacy_config,
 	.pe_barwrite =	pci_ahci_write,
 	.pe_barread =	pci_ahci_read,
+#ifdef BHYVE_SNAPSHOT
+	.pe_snapshot =	pci_ahci_snapshot,
+	.pe_pause =	pci_ahci_pause,
+	.pe_resume =	pci_ahci_resume,
+#endif
 };
 PCI_EMUL_SET(pci_de_ahci);
 
