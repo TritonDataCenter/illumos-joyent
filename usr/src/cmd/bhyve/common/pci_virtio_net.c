@@ -47,6 +47,9 @@
 #include <sys/select.h>
 #include <sys/uio.h>
 #include <sys/ioctl.h>
+#ifdef BHYVE_SNAPSHOT
+#include <sys/vmm_snapshot.h>
+#endif
 #include <net/ethernet.h>
 #include <net/if.h> /* IFNAMSIZ */
 #include <sys/sysmacros.h>
@@ -141,6 +144,11 @@ static void pci_vtnet_reset(void *);
 static int pci_vtnet_cfgread(void *, int, int, uint32_t *);
 static int pci_vtnet_cfgwrite(void *, int, int, uint32_t);
 static void pci_vtnet_neg_features(void *, uint64_t *);
+#ifdef BHYVE_SNAPSHOT
+static void pci_vtnet_pause(void *);
+static void pci_vtnet_resume(void *);
+static int pci_vtnet_snapshot(void *, struct vm_snapshot_meta *);
+#endif
 
 static virtio_capstr_t vtnet_caps[] = {
 	{ VIRTIO_NET_F_CSUM,		"VIRTIO_NET_F_CSUM" },
@@ -177,6 +185,11 @@ static struct virtio_consts vtnet_vi_consts = {
 	.vc_hv_caps_modern =	VTNET_S_HOSTCAPS_MODERN,
 	.vc_capstr =		vtnet_caps,
 	.vc_ncapstr =		ARRAY_SIZE(vtnet_caps),
+#ifdef BHYVE_SNAPSHOT
+	.vc_pause =		pci_vtnet_pause,
+	.vc_resume =		pci_vtnet_resume,
+	.vc_snapshot =		pci_vtnet_snapshot,
+#endif
 };
 
 static void
@@ -804,6 +817,73 @@ pci_vtnet_neg_features(void *vsc, uint64_t *negotiated_features)
 	pthread_mutex_unlock(&sc->rx_mtx);
 }
 
+#ifdef BHYVE_SNAPSHOT
+static void
+pci_vtnet_pause(void *vsc)
+{
+	struct pci_vtnet_softc *sc = vsc;
+
+	DPRINTF(("vtnet: device pause requested !\n"));
+
+	/* Acquire the RX lock to block RX processing. */
+	pthread_mutex_lock(&sc->rx_mtx);
+
+	/* Wait for the transmit thread to finish its processing. */
+	pthread_mutex_lock(&sc->tx_mtx);
+	while (sc->tx_in_progress) {
+		pthread_mutex_unlock(&sc->tx_mtx);
+		usleep(10000);
+		pthread_mutex_lock(&sc->tx_mtx);
+	}
+}
+
+static void
+pci_vtnet_resume(void *vsc)
+{
+	struct pci_vtnet_softc *sc = vsc;
+
+	DPRINTF(("vtnet: device resume requested !\n"));
+
+	pthread_mutex_unlock(&sc->tx_mtx);
+	/* The RX lock should have been acquired in vtnet_pause. */
+	pthread_mutex_unlock(&sc->rx_mtx);
+}
+
+static int
+pci_vtnet_snapshot(void *vsc, struct vm_snapshot_meta *meta)
+{
+	int ret;
+	struct pci_vtnet_softc *sc = vsc;
+
+	DPRINTF(("vtnet: device snapshot requested !\n"));
+
+	/*
+	 * Queues and consts should have been saved by the more generic
+	 * vi_pci_snapshot function. We need to save only our features and
+	 * config.
+	 */
+
+	SNAPSHOT_VAR_OR_LEAVE(sc->vsc_features, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->features_negotiated, meta, ret, done);
+
+	/* Force reapply negotiated features at restore time */
+	if (meta->op == VM_SNAPSHOT_RESTORE &&
+	    sc->features_negotiated) {
+		pci_vtnet_neg_features(sc, &sc->vsc_features);
+		netbe_rx_enable(sc->vsc_be);
+	}
+
+	SNAPSHOT_VAR_OR_LEAVE(sc->vsc_config, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->rx_merge, meta, ret, done);
+
+	SNAPSHOT_VAR_OR_LEAVE(sc->vhdrlen, meta, ret, done);
+	SNAPSHOT_VAR_OR_LEAVE(sc->be_vhdrlen, meta, ret, done);
+
+done:
+	return (ret);
+}
+#endif
+
 static const struct pci_devemu pci_de_vnet = {
 	.pe_emu = 	"virtio-net",
 	.pe_init =	pci_vtnet_init,
@@ -812,5 +892,10 @@ static const struct pci_devemu pci_de_vnet = {
 	.pe_cfgread =	vi_pci_cfgread,
 	.pe_barwrite =	vi_pci_write,
 	.pe_barread =	vi_pci_read,
+#ifdef BHYVE_SNAPSHOT
+	.pe_snapshot =	vi_pci_snapshot,
+	.pe_pause =	vi_pci_pause,
+	.pe_resume =	vi_pci_resume,
+#endif
 };
 PCI_EMUL_SET(pci_de_vnet);
