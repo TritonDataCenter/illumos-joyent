@@ -23,6 +23,10 @@
  * inside the zone, exec it instead of the platform's bhyve.  This lets a
  * zone image ship an alternate bhyve (or a wrapper that performs additional
  * setup, e.g. starting swtpm) without requiring a platform image rebuild.
+ * A present-but-invalid BHYVE_ZONE_PATH (non-regular, missing exec bit,
+ * too short to classify, etc.) is fatal: zhyve exits rather than silently
+ * falling back to the platform bhyve, so operator misconfiguration is
+ * visible in the zone boot log.
  */
 
 #include <assert.h>
@@ -121,8 +125,8 @@ config_core_dumps()
 
 /*
  * If BHYVE_ZONE_PATH exists, exec it in place of the platform bhyve.
- * Returns only when BHYVE_ZONE_PATH does not exist; every other path
- * either exits or execs.
+ * Returns only when BHYVE_ZONE_PATH does not exist; every other failure
+ * exits without falling back to the platform bhyve.
  *
  * Symlinks are intentionally followed at open time so an operator can
  * swap candidates by repointing the link.
@@ -131,9 +135,12 @@ config_core_dumps()
  * concurrent rename, unlink, or symlink swap cannot change what runs.
  * #!-scripts must be exec'd by name because the kernel hands the path
  * to the interpreter, which reopens it; we resolve the fd via
- * /proc/self/path/<fd> for that case and fail closed if resolution
- * fails or would truncate.  The operator is responsible for restricting
- * write access to BHYVE_ZONE_PATH and any symlink target.
+ * /proc/self/path/<fd> to obtain a name to pass to execv, and a small
+ * swap window between readlink and execv remains for the script case.
+ * Any failure to read /proc/self/path/<fd> (error or truncation) is
+ * fatal on both branches: we always want a resolved path for logging,
+ * and the script branch needs it for execv.  The operator is responsible
+ * for restricting write access to BHYVE_ZONE_PATH and any symlink target.
  */
 static void
 try_bhyve_override(char **argv)
@@ -166,9 +173,9 @@ try_bhyve_override(char **argv)
 		    BHYVE_ZONE_PATH);
 		exit(EXIT_FAILURE);
 	}
-	if ((st.st_mode & (S_IXUSR|S_IXGRP|S_IXOTH)) == 0) {
+	if ((st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) == 0) {
 		(void) fprintf(stderr, "%s: not executable (mode 0%o)\n",
-		    BHYVE_ZONE_PATH, (unsigned)(st.st_mode & 07777));
+		    BHYVE_ZONE_PATH, (unsigned int)(st.st_mode & 07777));
 		exit(EXIT_FAILURE);
 	}
 
@@ -180,41 +187,35 @@ try_bhyve_override(char **argv)
 	}
 	if (slen < (ssize_t)sizeof (shebang)) {
 		(void) fprintf(stderr, "%s: too short to classify "
-		    "(file < 2 bytes)\n", BHYVE_ZONE_PATH);
+		    "(%zd byte(s), need 2)\n", BHYVE_ZONE_PATH, slen);
 		exit(EXIT_FAILURE);
 	}
-	is_script = (shebang[0] == '#' && shebang[1] == '!');
+	is_script = (shebang[0] == '#' && shebang[1] == '!') ?
+	    B_TRUE : B_FALSE;
 
 	/*
-	 * `resolved` doubles as the script exec target and a log label.
-	 * Leave it empty if we have nothing trustworthy to print; the
-	 * banner below treats empty as "show the literal path only".
+	 * `resolved` is both the script exec target and the log label.
+	 * readlink failure or truncation is fatal on both branches.
 	 */
 	(void) snprintf(procpath, sizeof (procpath),
 	    "/proc/self/path/%d", fd);
 	rlen = readlink(procpath, resolved, sizeof (resolved) - 1);
 	if (rlen < 0) {
-		if (is_script) {
-			(void) fprintf(stderr,
-			    "cannot resolve %s via %s: %s; "
-			    "refusing to exec script\n",
-			    BHYVE_ZONE_PATH, procpath, strerror(errno));
-			exit(EXIT_FAILURE);
-		}
-		(void) fprintf(stderr,
-		    "warning: readlink(%s) failed: %s; "
-		    "proceeding with fexecve\n", procpath, strerror(errno));
-		resolved[0] = '\0';
-	} else if ((size_t)rlen >= sizeof (resolved) - 1) {
+		(void) fprintf(stderr, "readlink(%s) failed: %s; "
+		    "refusing to exec %s\n",
+		    procpath, strerror(errno), BHYVE_ZONE_PATH);
+		exit(EXIT_FAILURE);
+	}
+	if ((size_t)rlen >= sizeof (resolved) - 1) {
 		(void) fprintf(stderr,
 		    "readlink(%s) result truncated at %zd bytes; "
-		    "refusing to exec\n", procpath, rlen);
+		    "refusing to exec %s\n",
+		    procpath, rlen, BHYVE_ZONE_PATH);
 		exit(EXIT_FAILURE);
-	} else {
-		resolved[rlen] = '\0';
 	}
+	resolved[rlen] = '\0';
 
-	if (resolved[0] != '\0' && strcmp(resolved, BHYVE_ZONE_PATH) != 0) {
+	if (strcmp(resolved, BHYVE_ZONE_PATH) != 0) {
 		(void) printf("Using bhyve override at %s -> %s\n",
 		    BHYVE_ZONE_PATH, resolved);
 	} else {
