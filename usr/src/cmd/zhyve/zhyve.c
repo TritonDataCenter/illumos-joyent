@@ -190,8 +190,7 @@ try_bhyve_override(char **argv)
 		    "(%zd byte(s), need 2)\n", BHYVE_ZONE_PATH, slen);
 		exit(EXIT_FAILURE);
 	}
-	is_script = (shebang[0] == '#' && shebang[1] == '!') ?
-	    B_TRUE : B_FALSE;
+	is_script = (shebang[0] == '#' && shebang[1] == '!');
 
 	/*
 	 * `resolved` is both the script exec target and the log label.
