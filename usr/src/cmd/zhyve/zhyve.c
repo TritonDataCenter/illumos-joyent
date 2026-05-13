@@ -216,11 +216,11 @@ try_bhyve_override(char **argv)
 	resolved[rlen] = '\0';
 
 	if (strcmp(resolved, BHYVE_ZONE_PATH) != 0) {
-		(void) printf("Using bhyve override at %s -> %s\n",
+		(void) fprintf(stderr, "Using bhyve override at %s -> %s\n",
 		    BHYVE_ZONE_PATH, resolved);
 	} else {
-		(void) printf("Using bhyve override at %s\n",
-		    BHYVE_ZONE_PATH);
+		(void) fprintf(stderr, "Using bhyve override at %s\n",
+		    resolved);
 	}
 
 	if (is_script) {
@@ -230,7 +230,7 @@ try_bhyve_override(char **argv)
 	} else {
 		(void) fexecve(fd, argv, environ);
 		(void) fprintf(stderr, "fexecve(%s) failed: %s\n",
-		    BHYVE_ZONE_PATH, strerror(errno));
+		    resolved, strerror(errno));
 	}
 	exit(EXIT_FAILURE);
 }
