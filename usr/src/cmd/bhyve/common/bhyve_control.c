@@ -428,6 +428,7 @@ json_get_string(const char *line, const char *key, char *buf, size_t cap)
 	return (0);
 }
 
+#ifdef BHYVE_SNAPSHOT
 /* ---------------------------------------------------------------- */
 /* Snapshot helpers						    */
 /* ---------------------------------------------------------------- */
@@ -742,13 +743,14 @@ parse_and_apply_stream(uint8_t *stream, size_t len)
 	}
 	return (0);
 }
+#endif	/* BHYVE_SNAPSHOT */
 
 /* ---------------------------------------------------------------- */
 /* Command handlers						    */
 /* ---------------------------------------------------------------- */
 
-static void
-cmd_status(int fd)
+static int
+cmd_status(int fd, const char *line __unused)
 {
 	const char *name = vm_get_name(ctl.ctx);
 	size_t lowmem = vm_get_lowmem_size(ctl.ctx);
@@ -757,8 +759,10 @@ cmd_status(int fd)
 	    "{\"status\":\"ok\",\"name\":\"%s\",\"ncpus\":%d,"
 	    "\"lowmem\":%zu,\"highmem\":%zu}",
 	    name != NULL ? name : "", ctl.ncpus, lowmem, highmem);
+	return (0);
 }
 
+#ifdef BHYVE_SNAPSHOT
 /*
  * Apply `op` to every PCI device in pci_next() order.  Returns 0 if
  * every callback returned 0, otherwise the last non-zero return (we
@@ -795,8 +799,8 @@ hibernate_all_devices(void)
 	return (err2 != 0 ? err2 : err1);
 }
 
-static void
-cmd_pause(int fd)
+static int
+cmd_pause(int fd, const char *line __unused)
 {
 	/*
 	 * Order matters: pause vCPUs FIRST, then devices.  If we pause
@@ -808,33 +812,35 @@ cmd_pause(int fd)
 	 */
 	if (vm_pause_instance(ctl.ctx) != 0) {
 		send_error(fd, strerror(errno));
-		return;
+		return (0);
 	}
 	int e = for_each_pci(pci_pause);
 	if (e != 0) {
 		send_error(fd, strerror(e));
-		return;
+		return (0);
 	}
 	send_ok(fd);
+	return (0);
 }
 
-static void
-cmd_resume(int fd)
+static int
+cmd_resume(int fd, const char *line __unused)
 {
 	if (vm_resume_instance(ctl.ctx) != 0) {
 		send_error(fd, strerror(errno));
-		return;
+		return (0);
 	}
 	int e = for_each_pci(pci_resume);
 	if (e != 0) {
 		send_error(fd, strerror(e));
-		return;
+		return (0);
 	}
 	send_ok(fd);
+	return (0);
 }
 
-static void
-cmd_export_state(int fd)
+static int
+cmd_export_state(int fd, const char *line __unused)
 {
 	uint8_t *stream = NULL;
 	size_t len = 0;
@@ -842,11 +848,19 @@ cmd_export_state(int fd)
 	if (ret != 0) {
 		send_error(fd, strerror(ret));
 		free(stream);
-		return;
+		return (ret);
 	}
 	send_json(fd, "{\"status\":\"ok\",\"blob_len\":%zu}", len);
 	(void) write_full(fd, stream, len);
 	free(stream);
+
+	/*
+	 * export-state writes a large binary blob after
+	 * the JSON response.  Close after the blob ships
+	 * rather than trying to multiplex another command
+	 * on top.
+	 */
+	return (1);
 }
 
 /*
@@ -1033,31 +1047,31 @@ import_signal_done(int fd)
 	send_ok(fd);
 }
 
-static void
+static int
 cmd_import_state(int fd, const char *line)
 {
 	size_t blob_len = 0;
 	uint8_t *stream = NULL;
 
 	if (import_check_preconditions(fd, line, &blob_len) != 0)
-		return;
+		return (1);
 	if (import_read_blob(fd, blob_len, &stream) != 0)
-		return;
+		return (1);
 
 	import_pause();
 
 	if (import_wake_devices(fd) != 0) {
 		free(stream);
-		return;
+		return (1);
 	}
 
 	int apply_ret = import_apply_stream(fd, stream, blob_len);
 	free(stream);
 	if (apply_ret != 0)
-		return;
+		return (1);
 
 	if (import_restore_bars(fd) != 0)
-		return;
+		return (1);
 
 	import_activate_vcpus();
 
@@ -1072,15 +1086,55 @@ cmd_import_state(int fd, const char *line)
 		 * instead so it can abort the migration.
 		 */
 		send_error(fd, strerror(resume_ret));
-		return;
+		return (1);
 	}
 
 	import_signal_done(fd);
+	/*
+	 * import-state reads a large binary blob after
+	 * the JSON response.  Close after the blob consumes
+	 * rather than trying to multiplex another command
+	 * on top.
+	 */
+	return (1);
 }
+#endif
 
 /* ---------------------------------------------------------------- */
 /* Connection + listener					    */
 /* ---------------------------------------------------------------- */
+
+typedef struct ctrl_command {
+	const char	*name;
+	int		(*func)(int, const char *);
+} ctrl_command_t;
+
+static ctrl_command_t command_table[] = {
+	{ "status",		cmd_status },
+#ifdef BHYVE_SNAPSHOT
+	{ "pause",		cmd_pause },
+	{ "resume",		cmd_resume },
+	{ "export-state",	cmd_export_state },
+	{ "import-state",	cmd_import_state },
+#endif
+};
+
+static bool
+find_command_idx(char *command, size_t *idx)
+{
+	size_t i;
+
+	for (i = 0; i < nitems(command_table); i++) {
+		if (command_table[i].name == NULL)
+			continue;
+
+		if (strcmp(command, command_table[i].name) == 0) {
+			*idx = i;
+			return (true);
+		}
+	}
+	return (false);
+}
 
 static void
 handle_connection(int fd)
@@ -1099,6 +1153,7 @@ handle_connection(int fd)
 	 * with any other key whose literal appears in a peer payload.
 	 */
 	for (;;) {
+		size_t idx;
 		ssize_t n = read_line(fd, line, sizeof (line));
 		if (n <= 0)
 			return;
@@ -1108,24 +1163,10 @@ handle_connection(int fd)
 			continue;
 		}
 
-		if (strcmp(cmd, "status") == 0) {
-			cmd_status(fd);
-		} else if (strcmp(cmd, "pause") == 0) {
-			cmd_pause(fd);
-		} else if (strcmp(cmd, "resume") == 0) {
-			cmd_resume(fd);
-		} else if (strcmp(cmd, "export-state") == 0) {
-			cmd_export_state(fd);
-			/*
-			 * export-state writes a large binary blob after
-			 * the JSON response.  Close after the blob ships
-			 * rather than trying to multiplex another command
-			 * on top.
-			 */
-			return;
-		} else if (strcmp(cmd, "import-state") == 0) {
-			cmd_import_state(fd, line);
-			return;	/* same rationale; binary payload consumed */
+		if (find_command_idx(cmd, &idx)) {
+			int ret = command_table[idx].func(fd, line);
+			if (ret != 0)
+				return;
 		} else {
 			send_error(fd, "unknown command");
 		}
