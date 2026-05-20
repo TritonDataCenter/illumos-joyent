@@ -31,7 +31,6 @@ CONF_SRCDIR	= $(UTSBASE)/common/io
 #
 include $(UTSBASE)/intel/Makefile.intel
 
-CERRWARN	+= -_gcc=-Wno-parentheses
 LDFLAGS		+= -Nfs/specfs
 
 #

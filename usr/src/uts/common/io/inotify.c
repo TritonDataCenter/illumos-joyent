@@ -12,6 +12,7 @@
 /*
  * Copyright 2020 Joyent, Inc.
  * Copyright (c) 2015 The MathWorks, Inc.  All rights reserved.
+ * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*
@@ -49,13 +50,17 @@
 #include <sys/sysmacros.h>
 #include <sys/cyclic.h>
 #include <sys/filio.h>
+#include <sys/ccompile.h>
+#include <sys/atomic.h>
 
 struct inotify_state;
 struct inotify_kevent;
+struct inotify_vp;
 
 typedef struct inotify_watch inotify_watch_t;
 typedef struct inotify_state inotify_state_t;
 typedef struct inotify_kevent inotify_kevent_t;
+typedef struct inotify_vp inotify_vp_t;
 
 struct inotify_watch {
 	kmutex_t inw_lock;			/* lock protecting ref count */
@@ -76,6 +81,24 @@ struct inotify_watch {
 	list_node_t inw_orphan;			/* orphan list */
 	cred_t *inw_cred;			/* cred, if orphaned */
 	inotify_state_t *inw_state;		/* corresponding state */
+	list_node_t inw_fem;			/* link in vnode container */
+};
+
+/*
+ * Per-vnode container that holds all of the inotify watches installed on a
+ * given vnode. We install a single FEM layer per vnode and store a pointer to
+ * one of these in fn_available; the FEM hooks iterate the watch list rather
+ * than relying on recursive FEM stack descent (which would otherwise consume
+ * kernel stack proportional to the number of watches, allowing an unprivileged
+ * user to panic the kernel).
+ */
+struct inotify_vp {
+	avl_node_t ivp_avl;			/* link in inotify_vps tree */
+	vnode_t *ivp_vp;			/* watched vnode */
+	kmutex_t ivp_lock;			/* protects ivp_[n]watches */
+	list_t ivp_watches;			/* watches on this vnode */
+	int ivp_nwatches;			/* count of watches in list */
+	volatile uint_t ivp_refcnt;		/* FEM-held references */
 };
 
 struct inotify_kevent {
@@ -122,22 +145,58 @@ static fem_t		*inotify_femp;		/* FEM pointer */
 static vmem_t		*inotify_minor;		/* minor number arena */
 static void		*inotify_softstate;	/* softstate pointer */
 static inotify_state_t	*inotify_state;		/* global list if state */
+static avl_tree_t	inotify_vps;		/* per-vnode containers */
 
 static void inotify_watch_event(inotify_watch_t *, uint64_t, char *);
 static void inotify_watch_insert(inotify_watch_t *, vnode_t *, char *);
 static void inotify_watch_delete(inotify_watch_t *, uint32_t);
 static void inotify_watch_remove(inotify_state_t *state,
 	inotify_watch_t *watch);
+static void inotify_watch_hold(inotify_watch_t *);
+static void inotify_watch_release(inotify_watch_t *);
+static inotify_watch_t **inotify_vp_snapshot(inotify_vp_t *, inotify_watch_t **,
+    uint_t, uint_t *, uint_t *);
+static void inotify_vp_snapshot_free(inotify_watch_t **, uint_t,
+    inotify_watch_t **);
+
+/*
+ * Number of watches we can snapshot without resorting to kmem_alloc. The
+ * overwhelmingly common case is a single watch per vnode.
+ */
+#define	INOTIFY_VP_FASTSZ	8
+
+/*
+ * Fire an event on every watch installed on a vnode container, holding a
+ * reference on each across the despatch so concurrent removal cannot free
+ * the watch out from under us. If 'cvp' is not NULL, insert a watch on
+ * the supplied vnode prior to the event being fired.
+ */
+static void
+inotify_vp_event(inotify_vp_t *ivp, vnode_t *cvp, uint64_t mask, char *name)
+{
+	inotify_watch_t *fast[INOTIFY_VP_FASTSZ];
+	inotify_watch_t **watches;
+	uint_t i, n, sz;
+
+	watches = inotify_vp_snapshot(ivp, fast, INOTIFY_VP_FASTSZ, &sz, &n);
+	for (i = 0; i < n; i++) {
+		if (cvp != NULL)
+			inotify_watch_insert(watches[i], cvp, name);
+		inotify_watch_event(watches[i], mask, name);
+		inotify_watch_release(watches[i]);
+	}
+	inotify_vp_snapshot_free(watches, sz, fast);
+}
 
 static int
 inotify_fop_close(femarg_t *vf, int flag, int count, offset_t offset,
     cred_t *cr, caller_context_t *ct)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval;
 
 	if ((rval = vnext_close(vf, flag, count, offset, cr, ct)) == 0) {
-		inotify_watch_event(watch, flag & FWRITE ?
+		inotify_vp_event(ivp, NULL, flag & FWRITE ?
 		    IN_CLOSE_WRITE : IN_CLOSE_NOWRITE, NULL);
 	}
 
@@ -149,13 +208,12 @@ inotify_fop_create(femarg_t *vf, char *name, vattr_t *vap, vcexcl_t excl,
     int mode, vnode_t **vpp, cred_t *cr, int flag, caller_context_t *ct,
     vsecattr_t *vsecp)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval;
 
 	if ((rval = vnext_create(vf, name, vap, excl, mode,
 	    vpp, cr, flag, ct, vsecp)) == 0) {
-		inotify_watch_insert(watch, *vpp, name);
-		inotify_watch_event(watch, IN_CREATE, name);
+		inotify_vp_event(ivp, *vpp, IN_CREATE, name);
 	}
 
 	return (rval);
@@ -165,12 +223,11 @@ static int
 inotify_fop_link(femarg_t *vf, vnode_t *svp, char *tnm, cred_t *cr,
     caller_context_t *ct, int flags)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval;
 
 	if ((rval = vnext_link(vf, svp, tnm, cr, ct, flags)) == 0) {
-		inotify_watch_insert(watch, svp, tnm);
-		inotify_watch_event(watch, IN_CREATE, tnm);
+		inotify_vp_event(ivp, svp, IN_CREATE, tnm);
 	}
 
 	return (rval);
@@ -180,13 +237,12 @@ static int
 inotify_fop_mkdir(femarg_t *vf, char *name, vattr_t *vap, vnode_t **vpp,
     cred_t *cr, caller_context_t *ct, int flags, vsecattr_t *vsecp)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval;
 
 	if ((rval = vnext_mkdir(vf, name, vap, vpp, cr,
 	    ct, flags, vsecp)) == 0) {
-		inotify_watch_insert(watch, *vpp, name);
-		inotify_watch_event(watch, IN_CREATE | IN_ISDIR, name);
+		inotify_vp_event(ivp, *vpp, IN_CREATE | IN_ISDIR, name);
 	}
 
 	return (rval);
@@ -195,11 +251,11 @@ inotify_fop_mkdir(femarg_t *vf, char *name, vattr_t *vap, vnode_t **vpp,
 static int
 inotify_fop_open(femarg_t *vf, int mode, cred_t *cr, caller_context_t *ct)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval;
 
 	if ((rval = vnext_open(vf, mode, cr, ct)) == 0)
-		inotify_watch_event(watch, IN_OPEN, NULL);
+		inotify_vp_event(ivp, NULL, IN_OPEN, NULL);
 
 	return (rval);
 }
@@ -208,9 +264,9 @@ static int
 inotify_fop_read(femarg_t *vf, struct uio *uiop, int ioflag, struct cred *cr,
     caller_context_t *ct)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval = vnext_read(vf, uiop, ioflag, cr, ct);
-	inotify_watch_event(watch, IN_ACCESS, NULL);
+	inotify_vp_event(ivp, NULL, IN_ACCESS, NULL);
 
 	return (rval);
 }
@@ -219,9 +275,9 @@ static int
 inotify_fop_readdir(femarg_t *vf, uio_t *uiop, cred_t *cr, int *eofp,
     caller_context_t *ct, int flags)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval = vnext_readdir(vf, uiop, cr, eofp, ct, flags);
-	inotify_watch_event(watch, IN_ACCESS | IN_ISDIR, NULL);
+	inotify_vp_event(ivp, NULL, IN_ACCESS | IN_ISDIR, NULL);
 
 	return (rval);
 }
@@ -230,11 +286,11 @@ int
 inotify_fop_remove(femarg_t *vf, char *nm, cred_t *cr, caller_context_t *ct,
     int flags)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval;
 
 	if ((rval = vnext_remove(vf, nm, cr, ct, flags)) == 0)
-		inotify_watch_event(watch, IN_DELETE, nm);
+		inotify_vp_event(ivp, NULL, IN_DELETE, nm);
 
 	return (rval);
 }
@@ -243,11 +299,11 @@ int
 inotify_fop_rmdir(femarg_t *vf, char *nm, vnode_t *cdir, cred_t *cr,
     caller_context_t *ct, int flags)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval;
 
 	if ((rval = vnext_rmdir(vf, nm, cdir, cr, ct, flags)) == 0)
-		inotify_watch_event(watch, IN_DELETE | IN_ISDIR, nm);
+		inotify_vp_event(ivp, NULL, IN_DELETE | IN_ISDIR, nm);
 
 	return (rval);
 }
@@ -256,11 +312,11 @@ static int
 inotify_fop_setattr(femarg_t *vf, vattr_t *vap, int flags, cred_t *cr,
     caller_context_t *ct)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval;
 
 	if ((rval = vnext_setattr(vf, vap, flags, cr, ct)) == 0)
-		inotify_watch_event(watch, IN_ATTRIB, NULL);
+		inotify_vp_event(ivp, NULL, IN_ATTRIB, NULL);
 
 	return (rval);
 }
@@ -269,9 +325,9 @@ static int
 inotify_fop_write(femarg_t *vf, struct uio *uiop, int ioflag, struct cred *cr,
     caller_context_t *ct)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
 	int rval = vnext_write(vf, uiop, ioflag, cr, ct);
-	inotify_watch_event(watch, IN_MODIFY, NULL);
+	inotify_vp_event(ivp, NULL, IN_MODIFY, NULL);
 
 	return (rval);
 }
@@ -280,86 +336,102 @@ static int
 inotify_fop_vnevent(femarg_t *vf, vnevent_t vnevent, vnode_t *dvp, char *name,
     caller_context_t *ct)
 {
-	inotify_watch_t *watch = vf->fa_fnode->fn_available;
+	inotify_vp_t *ivp = vf->fa_fnode->fn_available;
+	inotify_watch_t *fast[INOTIFY_VP_FASTSZ];
+	inotify_watch_t **watches;
+	uint_t i, n, sz;
 
-	switch (vnevent) {
-	case VE_RENAME_SRC:
-		inotify_watch_event(watch, IN_MOVE_SELF, NULL);
-		inotify_watch_delete(watch, IN_MOVE_SELF);
-		break;
-	case VE_REMOVE:
-		/*
-		 * Linux will apparently fire an IN_ATTRIB event when the link
-		 * count changes (including when it drops to 0 on a remove).
-		 * This is merely somewhat odd; what is amazing is that this
-		 * IN_ATTRIB event is not visible on an inotify watch on the
-		 * parent directory.  (IN_ATTRIB events are normally sent to
-		 * watches on the parent directory).  While it's hard to
-		 * believe that this constitutes desired semantics, ltp
-		 * unfortunately tests this case (if implicitly); in the name
-		 * of bug-for-bug compatibility, we fire IN_ATTRIB iff we are
-		 * explicitly watching the file that has been removed.
-		 */
-		if (watch->inw_parent == NULL)
+	watches = inotify_vp_snapshot(ivp, fast, INOTIFY_VP_FASTSZ, &sz, &n);
+	for (i = 0; i < n; i++) {
+		inotify_watch_t *watch = watches[i];
+
+		switch (vnevent) {
+		case VE_RENAME_SRC:
+			inotify_watch_event(watch, IN_MOVE_SELF, NULL);
+			inotify_watch_delete(watch, IN_MOVE_SELF);
+			break;
+		case VE_REMOVE:
+			/*
+			 * Linux will apparently fire an IN_ATTRIB event when
+			 * the link count changes (including when it drops to
+			 * 0 on a remove).  This is merely somewhat odd; what
+			 * is amazing is that this IN_ATTRIB event is not
+			 * visible on an inotify watch on the parent directory.
+			 * (IN_ATTRIB events are normally sent to watches on
+			 * the parent directory).  While it's hard to believe
+			 * that this constitutes desired semantics, ltp
+			 * unfortunately tests this case (if implicitly); in
+			 * the name of bug-for-bug compatibility, we fire
+			 * IN_ATTRIB iff we are explicitly watching the file
+			 * that has been removed.
+			 */
+			if (watch->inw_parent == NULL)
+				inotify_watch_event(watch, IN_ATTRIB, NULL);
+
+			/*FALLTHROUGH*/
+		case VE_RENAME_DEST:
+			inotify_watch_event(watch, IN_DELETE_SELF, NULL);
+			inotify_watch_delete(watch, IN_DELETE_SELF);
+			break;
+		case VE_RMDIR:
+			/*
+			 * It seems that IN_ISDIR should really be OR'd in here,
+			 * but Linux doesn't seem to do that in this case; for
+			 * the sake of bug-for-bug compatibility, we don't do
+			 * it either.
+			 */
+			inotify_watch_event(watch, IN_DELETE_SELF, NULL);
+			inotify_watch_delete(watch, IN_DELETE_SELF);
+			break;
+		case VE_CREATE:
+		case VE_TRUNCATE:
+		case VE_RESIZE:
+			inotify_watch_event(watch, IN_MODIFY | IN_ATTRIB, NULL);
+			break;
+		case VE_LINK:
 			inotify_watch_event(watch, IN_ATTRIB, NULL);
+			break;
+		case VE_RENAME_SRC_DIR:
+			inotify_watch_event(watch, IN_MOVED_FROM, name);
+			break;
+		case VE_RENAME_DEST_DIR: {
+			char *ename = name;
 
-		/*FALLTHROUGH*/
-	case VE_RENAME_DEST:
-		inotify_watch_event(watch, IN_DELETE_SELF, NULL);
-		inotify_watch_delete(watch, IN_DELETE_SELF);
-		break;
-	case VE_RMDIR:
-		/*
-		 * It seems that IN_ISDIR should really be OR'd in here, but
-		 * Linux doesn't seem to do that in this case; for the sake of
-		 * bug-for-bug compatibility, we don't do it either.
-		 */
-		inotify_watch_event(watch, IN_DELETE_SELF, NULL);
-		inotify_watch_delete(watch, IN_DELETE_SELF);
-		break;
-	case VE_CREATE:
-	case VE_TRUNCATE:
-	case VE_RESIZE:
-		inotify_watch_event(watch, IN_MODIFY | IN_ATTRIB, NULL);
-		break;
-	case VE_LINK:
-		inotify_watch_event(watch, IN_ATTRIB, NULL);
-		break;
-	case VE_RENAME_SRC_DIR:
-		inotify_watch_event(watch, IN_MOVED_FROM, name);
-		break;
-	case VE_RENAME_DEST_DIR:
-		if (name == NULL)
-			name = dvp->v_path;
+			if (ename == NULL)
+				ename = dvp->v_path;
 
-		inotify_watch_insert(watch, dvp, name);
-		inotify_watch_event(watch, IN_MOVED_TO, name);
-		break;
-	case VE_SUPPORT:
-	case VE_MOUNTEDOVER:
-	case VE_PRE_RENAME_SRC:
-	case VE_PRE_RENAME_DEST:
-	case VE_PRE_RENAME_DEST_DIR:
-		break;
+			inotify_watch_insert(watch, dvp, ename);
+			inotify_watch_event(watch, IN_MOVED_TO, ename);
+			break;
+		}
+		case VE_SUPPORT:
+		case VE_MOUNTEDOVER:
+		case VE_PRE_RENAME_SRC:
+		case VE_PRE_RENAME_DEST:
+		case VE_PRE_RENAME_DEST_DIR:
+			break;
+		}
+		inotify_watch_release(watch);
 	}
+	inotify_vp_snapshot_free(watches, sz, fast);
 
 	return (vnext_vnevent(vf, vnevent, dvp, name, ct));
 }
 
 const fs_operation_def_t inotify_vnodesrc_template[] = {
-	VOPNAME_CLOSE,		{ .femop_close = inotify_fop_close },
-	VOPNAME_CREATE,		{ .femop_create = inotify_fop_create },
-	VOPNAME_LINK,		{ .femop_link = inotify_fop_link },
-	VOPNAME_MKDIR,		{ .femop_mkdir = inotify_fop_mkdir },
-	VOPNAME_OPEN,		{ .femop_open = inotify_fop_open },
-	VOPNAME_READ,		{ .femop_read = inotify_fop_read },
-	VOPNAME_READDIR,	{ .femop_readdir = inotify_fop_readdir },
-	VOPNAME_REMOVE,		{ .femop_remove = inotify_fop_remove },
-	VOPNAME_RMDIR,		{ .femop_rmdir = inotify_fop_rmdir },
-	VOPNAME_SETATTR,	{ .femop_setattr = inotify_fop_setattr },
-	VOPNAME_WRITE,		{ .femop_write = inotify_fop_write },
-	VOPNAME_VNEVENT,	{ .femop_vnevent = inotify_fop_vnevent },
-	NULL, NULL
+	{ VOPNAME_CLOSE,	{ .femop_close = inotify_fop_close } },
+	{ VOPNAME_CREATE,	{ .femop_create = inotify_fop_create } },
+	{ VOPNAME_LINK,		{ .femop_link = inotify_fop_link } },
+	{ VOPNAME_MKDIR,	{ .femop_mkdir = inotify_fop_mkdir } },
+	{ VOPNAME_OPEN,		{ .femop_open = inotify_fop_open } },
+	{ VOPNAME_READ,		{ .femop_read = inotify_fop_read } },
+	{ VOPNAME_READDIR,	{ .femop_readdir = inotify_fop_readdir } },
+	{ VOPNAME_REMOVE,	{ .femop_remove = inotify_fop_remove } },
+	{ VOPNAME_RMDIR,	{ .femop_rmdir = inotify_fop_rmdir } },
+	{ VOPNAME_SETATTR,	{ .femop_setattr = inotify_fop_setattr } },
+	{ VOPNAME_WRITE,	{ .femop_write = inotify_fop_write } },
+	{ VOPNAME_VNEVENT,	{ .femop_vnevent = inotify_fop_vnevent } },
+	{ NULL,			{ NULL } }
 };
 
 static int
@@ -556,8 +628,107 @@ inotify_watch_destroy(inotify_watch_t *watch)
 }
 
 static int
+inotify_vp_cmp(const void *lp, const void *rp)
+{
+	const inotify_vp_t *lhs = lp, *rhs = rp;
+	uintptr_t lvp = (uintptr_t)lhs->ivp_vp, rvp = (uintptr_t)rhs->ivp_vp;
+
+	if (lvp < rvp)
+		return (-1);
+	if (lvp > rvp)
+		return (1);
+	return (0);
+}
+
+/*
+ * Lock-free refcount; safe because fem_install() and fem_uninstall() on the
+ * same vnode are serialised under inotify_lock, so a hold cannot race a
+ * release that would drop the count to zero.
+ */
+static void
+inotify_vp_hold(void *arg)
+{
+	inotify_vp_t *ivp = arg;
+
+	atomic_inc_uint(&ivp->ivp_refcnt);
+}
+
+static void
+inotify_vp_release(void *arg)
+{
+	inotify_vp_t *ivp = arg;
+
+	if (atomic_dec_uint_nv(&ivp->ivp_refcnt) != 0)
+		return;
+
+	VERIFY(list_is_empty(&ivp->ivp_watches));
+	list_destroy(&ivp->ivp_watches);
+	mutex_destroy(&ivp->ivp_lock);
+	kmem_free(ivp, sizeof (*ivp));
+}
+
+/*
+ * Snapshot the watches installed on a container, holding a reference on each.
+ * The caller iterates the returned array, calling inotify_watch_release() on
+ * each entry, then passes the array back to inotify_vp_snapshot_free().
+ *
+ * We snapshot rather than iterate-under-lock because inotify_watch_event()
+ * acquires the owning state's ins_lock and may recursively call
+ * inotify_watch_remove() -> inotify_fem_uninstall() (for IN_ONESHOT), which
+ * needs to re-acquire the container lock.
+ *
+ * Sizing is determined by a single read of ivp_nwatches. If more watches
+ * happen to be inserted between that read and the walk, they sit at the tail
+ * of the list and we skip them. Those watches were installed in a race with
+ * this in-flight VOP and would not be guaranteed to see the event under any
+ * interleaving.
+ */
+static inotify_watch_t **
+inotify_vp_snapshot(inotify_vp_t *ivp, inotify_watch_t **fast, uint_t fastsz,
+    uint_t *outsz, uint_t *outn)
+{
+	inotify_watch_t **watches;
+	inotify_watch_t *w;
+	uint_t sz, n;
+
+	mutex_enter(&ivp->ivp_lock);
+	sz = ivp->ivp_nwatches;
+	if (sz <= fastsz) {
+		watches = fast;
+		*outsz = fastsz;
+	} else {
+		mutex_exit(&ivp->ivp_lock);
+		watches = kmem_alloc(sz * sizeof (*watches), KM_SLEEP);
+		*outsz = sz;
+		mutex_enter(&ivp->ivp_lock);
+	}
+
+	n = 0;
+	for (w = list_head(&ivp->ivp_watches); w != NULL && n < sz;
+	    w = list_next(&ivp->ivp_watches, w)) {
+		inotify_watch_hold(w);
+		watches[n++] = w;
+	}
+	mutex_exit(&ivp->ivp_lock);
+
+	*outn = n;
+	return (watches);
+}
+
+static void
+inotify_vp_snapshot_free(inotify_watch_t **watches, uint_t sz,
+    inotify_watch_t **fast)
+{
+	if (watches != NULL && watches != fast)
+		kmem_free(watches, sz * sizeof (*watches));
+}
+
+static int
 inotify_fem_install(vnode_t *vp, inotify_watch_t *watch)
 {
+	inotify_vp_t *ivp, key = { .ivp_vp = vp };
+	int err;
+
 	/*
 	 * For vnodes that are devices (of type VCHR or VBLK), we silently
 	 * refuse to actually install any event monitor.  This is to avoid
@@ -573,21 +744,84 @@ inotify_fem_install(vnode_t *vp, inotify_watch_t *watch)
 	if (vp->v_type == VCHR || vp->v_type == VBLK)
 		return (0);
 
-	return (fem_install(vp, inotify_femp, watch, OPARGUNIQ,
-	    (void (*)(void *))inotify_watch_hold,
-	    (void (*)(void *))inotify_watch_release));
+	mutex_enter(&inotify_lock);
+	ivp = avl_find(&inotify_vps, &key, NULL);
+	if (ivp == NULL) {
+		/*
+		 * No existing container on this vnode, allocate one and push a
+		 * single FEM layer. All future watches on this vnode reuse the
+		 * same FEM layer, so the FEM stack depth on any vnode is
+		 * bounded by 1 regardless of how many watches are installed.
+		 */
+		ivp = kmem_zalloc(sizeof (*ivp), KM_SLEEP);
+		ivp->ivp_vp = vp;
+		mutex_init(&ivp->ivp_lock, NULL, MUTEX_DEFAULT, NULL);
+		list_create(&ivp->ivp_watches, sizeof (inotify_watch_t),
+		    offsetof(inotify_watch_t, inw_fem));
+
+		err = fem_install(vp, inotify_femp, ivp, OPUNIQ,
+		    inotify_vp_hold, inotify_vp_release);
+		if (err != 0) {
+			list_destroy(&ivp->ivp_watches);
+			mutex_destroy(&ivp->ivp_lock);
+			kmem_free(ivp, sizeof (*ivp));
+			mutex_exit(&inotify_lock);
+			return (err);
+		}
+
+		avl_add(&inotify_vps, ivp);
+	}
+
+	mutex_enter(&ivp->ivp_lock);
+	list_insert_tail(&ivp->ivp_watches, watch);
+	ivp->ivp_nwatches++;
+	mutex_exit(&ivp->ivp_lock);
+
+	mutex_exit(&inotify_lock);
+	return (0);
 }
 
 static int
 inotify_fem_uninstall(vnode_t *vp, inotify_watch_t *watch)
 {
+	inotify_vp_t *ivp, key = { .ivp_vp = vp };
+	boolean_t empty;
+	int err = 0;
+
 	/*
 	 * See inotify_fem_install(), above, for our rationale here.
 	 */
 	if (vp->v_type == VCHR || vp->v_type == VBLK)
 		return (0);
 
-	return (fem_uninstall(vp, inotify_femp, watch));
+	mutex_enter(&inotify_lock);
+	ivp = avl_find(&inotify_vps, &key, NULL);
+	VERIFY3P(ivp, !=, NULL);
+
+	mutex_enter(&ivp->ivp_lock);
+	list_remove(&ivp->ivp_watches, watch);
+	ivp->ivp_nwatches--;
+	empty = (list_is_empty(&ivp->ivp_watches) != 0);
+	mutex_exit(&ivp->ivp_lock);
+
+	if (empty) {
+		/*
+		 * We must remove the container from the tree before calling
+		 * fem_uninstall() so that a concurrent inotify_fem_install()
+		 * arriving for the same vnode can't find the old container
+		 * (which is about to be torn down) and would otherwise see
+		 * EBUSY from fem_install(OPUNIQ).
+		 */
+		avl_remove(&inotify_vps, ivp);
+		err = fem_uninstall(vp, inotify_femp, ivp);
+		/*
+		 * The container may have been freed synchronously by the
+		 * release callback if there were no in-flight FEM despatches.
+		 */
+	}
+	mutex_exit(&inotify_lock);
+
+	return (err);
 }
 
 /*
@@ -1094,9 +1328,8 @@ inotify_clean(void *arg)
 	mutex_exit(&state->ins_lock);
 }
 
-/*ARGSUSED*/
 static int
-inotify_open(dev_t *devp, int flag, int otyp, cred_t *cred_p)
+inotify_open(dev_t *devp, int flag __unused, int otyp __unused, cred_t *cred_p)
 {
 	inotify_state_t *state;
 	major_t major = getemajor(*devp);
@@ -1164,9 +1397,8 @@ inotify_open(dev_t *devp, int flag, int otyp, cred_t *cred_p)
 	return (0);
 }
 
-/*ARGSUSED*/
 static int
-inotify_read(dev_t dev, uio_t *uio, cred_t *cr)
+inotify_read(dev_t dev, uio_t *uio, cred_t *cr __unused)
 {
 	inotify_state_t *state;
 	inotify_kevent_t *event;
@@ -1253,9 +1485,9 @@ inotify_poll(dev_t dev, short events, int anyyet, short *reventsp,
 	return (0);
 }
 
-/*ARGSUSED*/
 static int
-inotify_ioctl(dev_t dev, int cmd, intptr_t arg, int md, cred_t *cr, int *rv)
+inotify_ioctl(dev_t dev, int cmd, intptr_t arg, int md __unused,
+    cred_t *cr __unused, int *rv)
 {
 	inotify_state_t *state;
 	minor_t minor = getminor(dev);
@@ -1327,9 +1559,9 @@ inotify_ioctl(dev_t dev, int cmd, intptr_t arg, int md, cred_t *cr, int *rv)
 	return (ENOTTY);
 }
 
-/*ARGSUSED*/
 static int
-inotify_close(dev_t dev, int flag, int otyp, cred_t *cred_p)
+inotify_close(dev_t dev, int flag __unused, int otyp __unused,
+    cred_t *cred_p __unused)
 {
 	inotify_state_t *state, **sp;
 	inotify_watch_t *watch, *zombies;
@@ -1404,9 +1636,8 @@ inotify_close(dev_t dev, int flag, int otyp, cred_t *cred_p)
 	return (0);
 }
 
-/*ARGSUSED*/
 static int
-inotify_attach(dev_info_t *devi, ddi_attach_cmd_t cmd)
+inotify_attach(dev_info_t *devi, ddi_attach_cmd_t cmd __unused)
 {
 	mutex_enter(&inotify_lock);
 
@@ -1441,14 +1672,16 @@ inotify_attach(dev_info_t *devi, ddi_attach_cmd_t cmd)
 	    UINT32_MAX - INOTIFYMNRN_CLONE, 1, NULL, NULL, NULL, 0,
 	    VM_SLEEP | VMC_IDENTIFIER);
 
+	avl_create(&inotify_vps, inotify_vp_cmp, sizeof (inotify_vp_t),
+	    offsetof(inotify_vp_t, ivp_avl));
+
 	mutex_exit(&inotify_lock);
 
 	return (DDI_SUCCESS);
 }
 
-/*ARGSUSED*/
 static int
-inotify_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
+inotify_detach(dev_info_t *dip, __unused ddi_detach_cmd_t cmd)
 {
 	switch (cmd) {
 	case DDI_DETACH:
@@ -1462,6 +1695,8 @@ inotify_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 	}
 
 	mutex_enter(&inotify_lock);
+	VERIFY(avl_is_empty(&inotify_vps));
+	avl_destroy(&inotify_vps);
 	fem_free(inotify_femp);
 	vmem_destroy(inotify_minor);
 
@@ -1474,9 +1709,9 @@ inotify_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 	return (DDI_SUCCESS);
 }
 
-/*ARGSUSED*/
 static int
-inotify_info(dev_info_t *dip, ddi_info_cmd_t infocmd, void *arg, void **result)
+inotify_info(dev_info_t *dip __unused, ddi_info_cmd_t infocmd,
+    void *arg __unused, void **result)
 {
 	int error;
 
@@ -1496,48 +1731,50 @@ inotify_info(dev_info_t *dip, ddi_info_cmd_t infocmd, void *arg, void **result)
 }
 
 static struct cb_ops inotify_cb_ops = {
-	inotify_open,		/* open */
-	inotify_close,		/* close */
-	nulldev,		/* strategy */
-	nulldev,		/* print */
-	nodev,			/* dump */
-	inotify_read,		/* read */
-	nodev,			/* write */
-	inotify_ioctl,		/* ioctl */
-	nodev,			/* devmap */
-	nodev,			/* mmap */
-	nodev,			/* segmap */
-	inotify_poll,		/* poll */
-	ddi_prop_op,		/* cb_prop_op */
-	0,			/* streamtab  */
-	D_NEW | D_MP		/* Driver compatibility flag */
+	.cb_open =		inotify_open,
+	.cb_close =		inotify_close,
+	.cb_strategy =		nulldev,
+	.cb_print =		nulldev,
+	.cb_dump =		nodev,
+	.cb_read =		inotify_read,
+	.cb_write =		nodev,
+	.cb_ioctl =		inotify_ioctl,
+	.cb_devmap =		nodev,
+	.cb_mmap =		nodev,
+	.cb_segmap =		nodev,
+	.cb_chpoll =		inotify_poll,
+	.cb_prop_op =		ddi_prop_op,
+	.cb_str =		NULL,
+	.cb_flag =		D_NEW | D_MP,
+	.cb_rev =		CB_REV,
+	.cb_aread =		nodev,
+	.cb_awrite =		nodev
 };
 
 static struct dev_ops inotify_ops = {
-	DEVO_REV,		/* devo_rev */
-	0,			/* refcnt */
-	inotify_info,		/* get_dev_info */
-	nulldev,		/* identify */
-	nulldev,		/* probe */
-	inotify_attach,		/* attach */
-	inotify_detach,		/* detach */
-	nodev,			/* reset */
-	&inotify_cb_ops,	/* driver operations */
-	NULL,			/* bus operations */
-	nodev,			/* dev power */
-	ddi_quiesce_not_needed,	/* quiesce */
+	.devo_rev =		DEVO_REV,
+	.devo_refcnt =		0,
+	.devo_getinfo =		inotify_info,
+	.devo_identify =	nulldev,
+	.devo_probe =		nulldev,
+	.devo_attach =		inotify_attach,
+	.devo_detach =		inotify_detach,
+	.devo_reset =		nodev,
+	.devo_cb_ops =		&inotify_cb_ops,
+	.devo_bus_ops =		NULL,
+	.devo_power =		NULL,
+	.devo_quiesce =		ddi_quiesce_not_needed
 };
 
 static struct modldrv modldrv = {
-	&mod_driverops,		/* module type (this is a pseudo driver) */
-	"inotify support",	/* name of module */
-	&inotify_ops,		/* driver ops */
+	.drv_modops =		&mod_driverops,
+	.drv_linkinfo =		"inotify support",
+	.drv_dev_ops =		&inotify_ops
 };
 
 static struct modlinkage modlinkage = {
-	MODREV_1,
-	(void *)&modldrv,
-	NULL
+	.ml_rev =		MODREV_1,
+	.ml_linkage =		{ (void *)&modldrv, NULL }
 };
 
 int
