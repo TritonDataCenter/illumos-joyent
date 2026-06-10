@@ -20,6 +20,19 @@
 
 #include "ice.h"
 
+/*
+ * The datasheet isn't clear how these are used by the driver other than
+ * it appears to be required to inform the NIC of the driver version.
+ * Since we're using both the datasheet and the FreeBSD ice driver as a
+ * guide (without porting the FreeBSD code), we match what it uses since
+ * they are known 'good' values.
+ */
+static uint8_t ice_ver_major = 1;
+static uint8_t ice_ver_minor = 43;
+static uint8_t ice_ver_patch = 3;
+static uint8_t ice_ver_rc = 0;
+static char ice_ver_str[] = "1.43.3-k";
+
 void
 ice_error(ice_t *ice, const char *fmt, ...)
 {
@@ -213,6 +226,22 @@ ice_firmware_check(ice_t *ice)
 	/* XXX Check if both are version 1? */
 
 	return (B_TRUE);
+}
+
+/*
+ * Sends the driver version to the NIC. 9.5.3 of the datasheet suggests this
+ * must be done after querying the NIC for its version.
+ */
+static bool
+ice_driver_version(ice_t *ice)
+{
+	if (!ice_cmd_driver_version(ice, ice_ver_major, ice_ver_minor,
+	    ice_ver_patch, ice_ver_rc, ice_ver_str)) {
+		ice_error(ice, "failed to inform NIC of driver version");
+		return (false);
+	}
+
+	return (true);
 }
 
 static boolean_t
@@ -1545,6 +1574,10 @@ ice_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 		goto err;
 	}
 
+	if (!ice_driver_version(ice)) {
+		goto err;
+	}
+
 	if (!ice_cmd_clear_pf_config(ice)) {
 		goto err;
 	}
@@ -1564,6 +1597,11 @@ ice_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	ice->ice_seq |= ICE_ATTACH_CAPS;
 
 	if (!ice_cmd_mac_read(ice, ice->ice_mac)) {
+		goto err;
+	}
+
+	/* XXX: It's a guess that this is a good spot to do this */
+	if (!ice_load_ddp(ice)) {
 		goto err;
 	}
 

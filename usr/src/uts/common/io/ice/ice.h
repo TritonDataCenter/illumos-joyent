@@ -338,6 +338,7 @@ typedef struct ice_tx_ctrl_block {
 	mblk_t			*itcb_mp;
 	ddi_dma_handle_t	itcb_dmah;
 	ddi_dma_handle_t	itcb_lso_dmah;
+	hrtime_t		itcb_tx_time;
 } ice_tx_ctrl_block_t;
 
 #define	ICE_TX_MAX_DESC		8
@@ -788,6 +789,20 @@ typedef struct ice {
 	uint_t			ice_n_rcbs;
 	uint_t			ice_rxbuf_onloan;
 
+	/*
+	 * We have two pools of buffers -- 'regular' sized buffers whose
+	 * size is capped at PAGESIZE (4096) bytes for TX and RX, and
+	 * another buffer for small packets (<= 512 bytes). Currently the
+	 * small packets are just used on TX, but could also be used for
+	 * headers on RX in the future. This is to help reduce the amount
+	 * of static kernel memory we use by having a pool that can be
+	 * shared by all rings.
+	 *
+	 * For diagnostic purposes, the ice_dma_buffer_ts are allocated as
+	 * an array, and then we use the pointer array (ice_dma_bufs,
+	 * ice_dma_small_bufs) for tracking allocated/freed for each
+	 * individual ice_dma_buffer_t.
+	 */
 	kmutex_t		ice_buf_lock;
 	ice_dma_buffer_t	*ice_bufs;
 	ice_dma_buffer_t	**ice_dma_bufs;
@@ -857,6 +872,10 @@ ice_dma_sync(ice_t *ice, ice_dma_buffer_t *dma, uint_t flags)
 	return (true);
 }
 
+extern int ice_load_ddp(ice_t *);
+extern void ice_buf_init(ice_t *);
+extern void ice_buf_fini(ice_t *);
+
 extern void ice_rx_start(ice_t *);
 extern void ice_rx_stop(ice_t *);
 extern void ice_tx_start(ice_t *);
@@ -868,32 +887,32 @@ extern void ice_tx_fini(void);
 /*
  * Control Queue related functions.
  */
-extern boolean_t ice_controlq_init(ice_t *);
+extern bool ice_controlq_init(ice_t *);
 extern void ice_controlq_fini(ice_t *);
 
 extern ice_work_task_t ice_controlq_rq_process(ice_t *);
 
-extern boolean_t ice_cmd_get_version(ice_t *, ice_fw_info_t *);
-extern boolean_t ice_cmd_queue_shutdown(ice_t *, boolean_t);
-extern boolean_t ice_cmd_clear_pf_config(ice_t *);
-extern boolean_t ice_cmd_clear_pxe(ice_t *);
+extern bool ice_cmd_get_version(ice_t *, ice_fw_info_t *);
+extern bool ice_cmd_driver_version(ice_t *, uint8_t, uint8_t, uint8_t, uint8_t,
+    const char *);
+extern bool ice_cmd_queue_shutdown(ice_t *, bool);
+extern bool ice_cmd_clear_pf_config(ice_t *);
+extern bool ice_cmd_clear_pxe(ice_t *);
 /*
  * The NVM commands should not be used directly and instead the ice_nvm.c
  * interfaces mentioned below should be used.
  */
-extern boolean_t ice_cmd_acquire_nvm(ice_t *, boolean_t);
-extern boolean_t ice_cmd_release_nvm(ice_t *);
-extern boolean_t ice_cmd_nvm_read(ice_t *, uint16_t, uint32_t, uint16_t *,
-    uint16_t *, boolean_t);
+extern bool ice_cmd_acquire_nvm(ice_t *, bool);
+extern bool ice_cmd_release_nvm(ice_t *);
+extern bool ice_cmd_nvm_read(ice_t *, uint16_t, uint32_t, uint16_t *,
+    uint16_t *, bool);
 
 extern bool ice_cmd_acquire_global_lock(ice_t *, bool);
 extern bool ice_cmd_release_global_lock(ice_t *);
 
-extern boolean_t ice_cmd_get_caps(ice_t *, boolean_t, uint_t *,
-    ice_capability_t **);
-extern boolean_t ice_cmd_mac_read(ice_t *, uint8_t *);
-extern boolean_t ice_cmd_get_phy_abilities(ice_t *, ice_phy_abilities_t *,
-    boolean_t);
+extern bool ice_cmd_get_caps(ice_t *, bool, uint_t *, ice_capability_t **);
+extern bool ice_cmd_mac_read(ice_t *, uint8_t *);
+extern bool ice_cmd_get_phy_abilities(ice_t *, ice_phy_abilities_t *, bool);
 
 typedef enum {
 	ICE_LSE_NO_CHANGE,
@@ -901,21 +920,20 @@ typedef enum {
 	ICE_LSE_DISABLE
 } ice_lse_t;
 
-extern boolean_t ice_cmd_get_link_status(ice_t *, ice_link_status_t *,
+extern bool ice_cmd_get_link_status(ice_t *, ice_link_status_t *,
     ice_lse_t);
-extern boolean_t ice_cmd_set_event_mask(ice_t *, uint16_t);
-extern boolean_t ice_cmd_setup_link(ice_t *, boolean_t);
-extern boolean_t ice_cmd_get_switch_config(ice_t *, void *, size_t, uint16_t,
+extern bool ice_cmd_set_event_mask(ice_t *, uint16_t);
+extern bool ice_cmd_setup_link(ice_t *, bool);
+extern bool ice_cmd_get_switch_config(ice_t *, void *, size_t, uint16_t,
     uint16_t *, uint16_t *);
 
-extern boolean_t ice_cmd_add_vsi(ice_t *, ice_vsi_t *);
-extern boolean_t ice_cmd_free_vsi(ice_t *, ice_vsi_t *, boolean_t);
+extern bool ice_cmd_add_vsi(ice_t *, ice_vsi_t *);
+extern bool ice_cmd_free_vsi(ice_t *, ice_vsi_t *, bool);
 
-extern boolean_t ice_cmd_set_rss_key(ice_t *, ice_vsi_t *, void *, uint_t);
-extern boolean_t ice_cmd_set_rss_lut(ice_t *, ice_vsi_t *, void *, uint_t);
+extern bool ice_cmd_set_rss_key(ice_t *, ice_vsi_t *, void *, uint_t);
+extern bool ice_cmd_set_rss_lut(ice_t *, ice_vsi_t *, void *, uint_t);
 
-extern boolean_t ice_cmd_get_default_scheduler(ice_t *, void *, size_t,
-    uint16_t *);
+extern bool ice_cmd_get_default_scheduler(ice_t *, void *, size_t, uint16_t *);
 
 extern bool ice_cmd_add_txq_grp(ice_t *, ice_vsi_t *, ice_hw_txq_context_t *);
 extern bool ice_cmd_switch_rules(ice_t *, ice_cq_opcode_t, uint16_t,

@@ -277,6 +277,8 @@ ice_tcb_free(ice_tx_ring_t *txr, ice_tx_ctrl_block_t *tcb)
 		tcb->itcb_mp = NULL;
 	}
 
+	tcb->itcb_tx_time = 0;
+
 	mutex_enter(&txr->itxr_tcb_lock);
 
 	ASSERT3U(txr->itxr_tcb_nfree, <, txr->itxr_size);
@@ -1259,10 +1261,13 @@ ice_ring_tx(void *arg, mblk_t *mp)
 		 * Move used tcbs in pkt onto the tcb ring. These will get
 		 * freed when we recycle.
 		 */
+		hrtime_t now = gethrtime();
 		for (uint_t i = 0; i < n; i++) {
 			txr->itxr_tcbs[tail] =
 			    (i < pkt->itxp_ntcb) ? pkt->itxp_tcbs[i] : NULL;
 			pkt->itxp_tcbs[i] = NULL;
+
+			txr->itxr_tcbs[tail]->itcb_tx_time = now;
 
 			tail = ice_tx_next(txr, tail, 1);
 		}
@@ -1544,25 +1549,6 @@ ice_ring_tx_stat(mac_ring_driver_t rh, uint_t stat, uint64_t *val)
 void
 ice_tx_start(ice_t *ice)
 {
-	ddi_dma_attr_t attr;
-	ddi_device_acc_attr_t acc;
-	size_t n_tcbs;
-	uint_t i;
-
-	ice_pkt_dma_attr(ice, &attr);
-	ice_dma_acc_attr(ice, &acc);
-
-	mutex_enter(&ice->ice_buf_lock);
-
-	n_tcbs = 0;
-	for (i = 0; i < ice->ice_itr_tx; i++) {
-		ice_tx_ring_t *txr = &ice->ice_txr[i];
-
-		n_tcbs += txr->itxr_size;
-	}
-
-
-
 }
 
 void

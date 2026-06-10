@@ -260,6 +260,7 @@ ice_m_stop(void *arg)
 
 	ice_tx_stop(ice);
 	ice_rx_stop(ice);
+	ice_buf_fini(ice);
 }
 
 static int
@@ -267,6 +268,8 @@ ice_m_start(void *arg)
 {
 	ice_t *ice = arg;
 	uint16_t mask;
+
+	ice_buf_init(ice);
 
 	ice_rx_start(ice);
 	ice_tx_start(ice);
@@ -628,7 +631,6 @@ ice_m_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 	 */
 	case MAC_PROP_ADV_100FDX_CAP:
 	case MAC_PROP_EN_100FDX_CAP:
-		break;
 
 	case MAC_PROP_ADV_1000FDX_CAP:
 	case MAC_PROP_EN_1000FDX_CAP:
@@ -653,7 +655,6 @@ ice_m_getprop(void *arg, const char *pr_name, mac_prop_id_t pr_num,
 
 	case MAC_PROP_ADV_100GFDX_CAP:
 	case MAC_PROP_EN_100GFDX_CAP:
-
 
 	default:
 		ret = ENOTSUP;

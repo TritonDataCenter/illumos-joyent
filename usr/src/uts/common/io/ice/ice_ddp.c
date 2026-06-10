@@ -83,6 +83,7 @@ typedef struct ice_pkg_global_metadata {
 	uint8_t		ipgm_reserved[4];
 	char		ipgm_name[32];
 } ice_pkg_global_metadata_t;
+CTASSERT(sizeof (ice_pkg_global_metadata_t) == 40);
 
 typedef struct ice_pkg_sign_hdr {
 	uint32_t	ipsh_id;
@@ -92,10 +93,31 @@ typedef struct ice_pkg_sign_hdr {
 	uint32_t	ipsh_sbuf_count;
 	uint32_t	ipsh_flags;
 	uint8_t		ipsh_reserved[40];
-	uint32_t	ipsh_buf_count;
 } ice_pkg_sign_hdr_t;
+CTASSERT(sizeof (ice_pkg_sign_hdr_t) == 64);
 #define	ICE_PKG_SIGN_FLAG_VALID		0x80000000
 #define	ICE_PKG_SIGN_FLAG_LAST		0x00000001
+
+/*
+ * The contents of the signing and config segments contains a number of headers
+ * followed by a 4 byte buffer count and then `count` fixed sized buffers
+ * of 4096 bytes. The name is unfortunately generic but we're matching
+ * what's in 7.11.5 of the datasheet.
+ */
+#define	ICE_PKG_BUF_LEN			4096
+typedef struct ice_pkg_buf_hdr {
+	uint16_t	ipbh_size;
+	uint16_t	ipbh_data_end;
+} ice_pkg_buf_hdr_t;
+CTASSERT(sizeof (ice_pkg_buf_hdr_t) == 4);
+
+typedef struct ice_pkg_sect {
+	uint32_t	ips_type;
+	uint16_t	ips_offset;
+	uint16_t	ips_size;
+} ice_pkg_sect_t;
+CTASSERT(sizeof (ice_pkg_sect_t) == 8);
+#define	ICE_PKG_SECT_METADATA	0x80000000
 
 /*
  * We care about two segments from the DDP file -- the configuration segment
@@ -116,12 +138,12 @@ static bool ice_ddp_get_cfg(ice_t *, firmware_handle_t, ice_seg_idx_t *,
     uint32_t, ice_pkg_data_t *);
 static bool ice_ddp_get_metadata(ice_t *, firmware_handle_t, ice_seg_idx_t *,
     uint32_t);
-static bool ice_ddp_get_cfg_segment(ice_t *, firmware_handle_t, uint_t,
-    uint32_t, uint32_t, ice_pkg_data_t *);
 static bool ice_ddp_download_cfg(ice_t *, ice_pkg_data_t *);
+
 static bool ice_ddp_check_id(ice_t *, const uint8_t **, uint32_t *);
 static bool ice_ddp_check_nvm(ice_t *, const uint8_t **, uint32_t *);
-
+static bool ice_ddp_download_pkgs(ice_t *, const void *, uint32_t, uint32_t,
+    bool);
 static void ice_ddp_free_data(ice_pkg_data_t *);
 
 /*
@@ -131,8 +153,6 @@ static void ice_ddp_free_data(ice_pkg_data_t *);
  * compare version with segment version major version must match, segment minor
  * >= NVM version
  *
- * Find a signing segment matching the type for the mac
- * 
  */
 int
 ice_load_ddp(ice_t *ice)
@@ -446,36 +466,11 @@ ice_ddp_get_metadata(ice_t *ice, firmware_handle_t fh, ice_seg_idx_t *idx,
 }
 
 static bool
-ice_ddp_get_cfg_segment(ice_t *ice, firmware_handle_t fh, uint_t idx,
-    uint32_t offset, uint32_t len, ice_pkg_data_t *dp)
-{
-	if (dp->ipd_config != NULL) {
-		ice_error(ice, "Duplicate DDP configuration segment at "
-		    "index %u", idx);
-		return (false);
-	}
-
-	dp->ipd_cfgidx = idx;
-	dp->ipd_config = kmem_zalloc(len, KM_SLEEP);
-	dp->ipd_cfglen = len;
-
-	if (firmware_read(fh, offset, dp->ipd_config, len) != 0) {
-		ice_error(ice, "Failed to read DDP configuration segment %u",
-		    idx);
-		kmem_free(dp->ipd_config, len);
-		dp->ipd_config = NULL;
-		dp->ipd_cfglen = 0;
-		return (false);
-	}
-
-	return (true);
-}
-
-static bool
 ice_ddp_download_cfg(ice_t *ice, ice_pkg_data_t *dp)
 {
 	const uint8_t	*p = dp->ipd_config;
 	uint32_t	len = dp->ipd_cfglen;
+	uint32_t	nbuf = 0;
 	uint32_t	start = 0;
 	uint32_t	count = 0;
 	bool		ret = false;
@@ -490,51 +485,43 @@ ice_ddp_download_cfg(ice_t *ice, ice_pkg_data_t *dp)
 		return (false);
 	}
 
-	count = LE_32(*(uint32_t *)p);
+	/*
+	 * Assume initially that we download all buffers in the segment.
+	 * However apparently if a signing segment is present, this may
+	 * mean we may only download a subset of the buffers in the
+	 * segment (given from the signing segment) which may adjust
+	 * the start and count values.
+	 */
+	nbuf = count = LE_32(*(uint32_t *)p);
 	p += sizeof (uint32_t);
 	len -= sizeof (uint32_t);
 
-	if (count * 4096 > len) {
+	if (nbuf * ICE_PKG_BUF_LEN > len) {
 		ice_error(ice, "DDP config segment buffer count (%u) exceeds "
-		    "remaining segment length (%u)", count, len);
-		return (false);
-	}
-
-	if (!ice_cmd_acquire_global_lock(ice, true)) {
+		    "remaining segment length (%u)", nbuf, len);
 		return (false);
 	}
 
 	if (dp->ipd_sign != NULL) {
 		ice_pkg_sign_hdr_t	*shdr = dp->ipd_sign;
-		void			*bufs = (shdr + 1);
-		uint32_t		flags = 0;
+		uint32_t		flags  = 0;
 
-		if (!ice_cmd_download_pkg(ice, bufs,
-		    LE_32(shdr->ipsh_buf_count), false)) {
-			ice_error(ice, "failed to download DDP signing "
-			    "segment");
-			goto done;
-		}
+		start = LE_IN32(&shdr->ipsh_sbuf_start);
+		count = LE_IN32(&shdr->ipsh_sbuf_count);
+		flags = LE_IN32(&shdr->ipsh_flags);
 
-		start = LE_32(shdr->ipsh_sbuf_start);
-		if (start > count) {
+		if (start > nbuf) {
 			ice_error(ice, "DDP signing segment start buffer (%u) "
-			    "is larger than config segment buffer count (%u)",
-			    start, count);
-			goto done;
-		}
-		if (start + LE_32(shdr->ipsh_sbuf_count) > count) {
-			ice_error(ice, "DDP signing segment count (%u starting "
-			    "at %u)) exceeds config segment buffer count (%u)",
-			    LE_32(shdr->ipsh_sbuf_count), start, count);
-			goto done;
+			    "is larger than segment buffer count (%u)",
+			    start, nbuf);
+			return (false);
 		}
 
-		count = LE_32(shdr->ipsh_sbuf_count);
-		flags = LE_32(shdr->ipsh_flags);
-
-		if (count == 0) {
-			goto done;
+		if (start + count > nbuf) {
+			ice_error(ice, "DDP signing segment count "
+			    "(%u start %u) overruns segment buffer count (%u)",
+			    count, start, nbuf);
+			return (false);
 		}
 
 		if ((flags & ICE_PKG_SIGN_FLAG_VALID) != 0) {
@@ -543,8 +530,26 @@ ice_ddp_download_cfg(ice_t *ice, ice_pkg_data_t *dp)
 		}
 	}
 
-	p += start * 4096;
-	if (!ice_cmd_download_pkg(ice, p, count, last)) {
+	if (!ice_cmd_acquire_global_lock(ice, true)) {
+		return (false);
+	}
+
+	if (dp->ipd_sign != NULL) {
+		ice_pkg_sign_hdr_t	*shdr = dp->ipd_sign;
+		const uint8_t		*bufs = (const uint8_t *)(shdr + 1);
+		uint32_t		sbcount = 0;
+
+		sbcount = LE_IN32(bufs);
+		bufs += sizeof (sbcount);
+
+		if (!ice_ddp_download_pkgs(ice, bufs, 0, sbcount, false)) {
+			ice_error(ice, "failed to download DDP signing "
+			    "segment");
+			goto done;
+		}
+	}
+
+	if (!ice_ddp_download_pkgs(ice, p, start, count, last)) {
 		ice_error(ice, "failed to download DDP config");
 		goto done;
 	}
@@ -557,6 +562,75 @@ done:
 	}
 
 	return (ret);
+}
+
+static bool
+is_last(const void *buf, uint32_t i, uint32_t n, bool set_last)
+{
+	ASSERT3U(i, <, n);
+
+	if (!set_last) {
+		return (false);
+	}
+
+	if (i + 1 == n) {
+		return (true);
+	}
+
+	const ice_pkg_buf_hdr_t *bhdr = buf;
+	const ice_pkg_sect_t	*sect = (const ice_pkg_sect_t *)(bhdr + 1);
+
+	if ((LE_IN32(&sect->ips_type) & ICE_PKG_SECT_METADATA) != 0) {
+		return (true);
+	}
+
+	return (false);
+}
+
+/*
+ * Download the packages in the given buffers starting with buffer
+ * `start` and continuing for `nbuf` buffers. Note that the caller
+ * should must validate that start and nbuf are valid within buf
+ */
+static bool
+ice_ddp_download_pkgs(ice_t *ice, const void *buf, uint32_t start,
+    uint32_t nbuf, bool set_last)
+{
+	const uint8_t		*p = buf;
+	const ice_pkg_buf_hdr_t	*bhdr;
+	const ice_pkg_sect_t	*sect;
+
+	p += ICE_PKG_BUF_LEN * start;
+	bhdr = (const ice_pkg_buf_hdr_t *)p;
+	sect = (const ice_pkg_sect_t *)(p + 1);
+
+	/*
+	 * The FreeBSD driver indicates that if the first section of the
+	 * first buf is a metadata section, we skip everything.
+	 */
+	if ((LE_IN32(&sect->ips_type) & ICE_PKG_SECT_METADATA) != 0) {
+		return (true);
+	}
+
+	for (uint32_t i = 0; i < nbuf; i++) {
+		/*
+		 * Also from the FreeBSD driver, if we encounter a
+		 * metadata section while downloading, that means we're
+		 * done, so check the 'next' section (if not the last one)
+		 * to see if this is the final section
+		 */
+		bool last = is_last(p + ICE_PKG_BUF_LEN, i, nbuf, set_last);
+
+		if (!ice_cmd_download_pkg(ice, p, ICE_PKG_BUF_LEN, last)) {
+			ice_error(ice, "failed to download package %u",
+			    start +i);
+			return (false);
+		}
+
+		p += ICE_PKG_BUF_LEN;
+	}
+
+	return (true);
 }
 
 static bool

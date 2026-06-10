@@ -162,13 +162,6 @@ ice_dma_ring_attr(ice_t *ice, ddi_dma_attr_t *attrp)
 void
 ice_pkt_dma_attr(ice_t *ice, ddi_dma_attr_t *attrp)
 {
-	/* TODO */
-	panic("todo!");
-}
-
-void
-ice_pkt_txbind_attr(ice_t *ice, ddi_dma_attr_t *attrp)
-{
 	attrp->dma_attr_version = DMA_ATTR_V0;
 
 	/*
@@ -189,17 +182,30 @@ ice_pkt_txbind_attr(ice_t *ice, ddi_dma_attr_t *attrp)
 	attrp->dma_attr_maxxfer = UINT32_MAX;
 	attrp->dma_attr_granular = 1;
 
-	/*
-	 * When doing non-LSO binding, we must limit the number of
-	 * cookies to 8 to match the DMA capabilities of the NIC.
-	 */
-	attrp->dma_attr_sgllen = ICE_TX_MAX_COOKIE;
+	/* We want 1 DMA cookie only for these buffers */
+	attrp->dma_attr_sgllen = 1;
 
 	if (DDI_FM_DMA_ERR_CAP(ice->ice_fm_caps)) {
 		attrp->dma_attr_flags =	DDI_DMA_FLAGERR;
 	} else {
 		attrp->dma_attr_flags = 0;
 	}
+}
+
+void
+ice_pkt_txbind_attr(ice_t *ice, ddi_dma_attr_t *attrp)
+{
+	/*
+	 * For bound memory, we can use up to ICE_TX_MAX_COOKIES for
+	 * a packet. It's the only difference from a regular DMA buffer.
+	 */
+	ice_pkt_dma_attr(ice, attrp);
+
+	/*
+	 * When doing non-LSO binding, we must limit the number of
+	 * cookies to 8 to match the DMA capabilities of the NIC.
+	 */
+	attrp->dma_attr_sgllen = ICE_TX_MAX_COOKIE;
 }
 
 void
@@ -317,7 +323,11 @@ ice_buf_alloc(ice_t *ice)
 		return (NULL);
 	}
 
-	buf = ice->ice_dma_bufs[ice->ice_buf_alloc++];
+	buf = ice->ice_dma_bufs[ice->ice_buf_alloc];
+
+	/* Set the slot to NULL for diagnostic purposes */
+	ice->ice_dma_bufs[ice->ice_buf_alloc] = NULL;
+	ice->ice_buf_alloc++;
 	mutex_exit(&ice->ice_buf_lock);
 
 	return (buf);
@@ -349,7 +359,11 @@ ice_small_buf_alloc(ice_t *ice)
 		return (NULL);
 	}
 
-	buf = ice->ice_dma_small_bufs[ice->ice_small_buf_alloc++];
+	buf = ice->ice_dma_small_bufs[ice->ice_small_buf_alloc];
+
+	/* Set the slot of NULL for diagnostic purposes */
+	ice->ice_dma_small_bufs[ice->ice_small_buf_alloc] = NULL;
+	ice->ice_small_buf_alloc++;
 	mutex_exit(&ice->ice_buf_lock);
 
 	return (buf);
@@ -374,8 +388,6 @@ ice_buf_init(ice_t *ice)
 	ddi_dma_attr_t attr;
 	ddi_device_acc_attr_t acc;
 
-	mutex_enter(&ice->ice_buf_lock);
-
 	ice_pkt_dma_attr(ice, &attr);
 	ice_dma_acc_attr(ice, &acc);
 
@@ -393,34 +405,36 @@ ice_buf_init(ice_t *ice)
 	/* Add for TX + margin for loanup */
 	n_buf += ice->ice_txr[0].itxr_size;
 
+	mutex_enter(&ice->ice_buf_lock);
+
 	ice->ice_dma_bufs = kmem_zalloc(n_buf * sizeof (ice_dma_buffer_t *),
 	    KM_SLEEP);
-
+	ice->ice_bufs = kmem_zalloc(n_buf * sizeof (ice_dma_buffer_t),
+	    KM_SLEEP);
 	for (i = 0; i < n_buf; i++) {
-		ice->ice_dma_bufs[i] = kmem_zalloc(sizeof (ice_dma_buffer_t),
-		   KM_SLEEP);
-
-		VERIFY(ice_dma_alloc(ice, ice->ice_dma_bufs[i], &attr, &acc,
+		VERIFY(ice_dma_alloc(ice, &ice->ice_bufs[i], &attr, &acc,
 		    true, ice->ice_buf_sz, true));
-
-		ice->ice_buf_alloc++;
+		ice->ice_dma_bufs[i] = &ice->ice_bufs[i];
 	}
 	ice->ice_buf_sz = ice->ice_buf_alloc = n_buf;
+	mutex_exit(&ice->ice_buf_lock);
+
+	mutex_enter(&ice->ice_small_buf_lock);
 
 	n_buf = ice->ice_rxr[0].irxr_size + ice->ice_txr[0].itxr_size;
 	ice->ice_dma_small_bufs =
 	    kmem_zalloc(n_buf * sizeof (ice_dma_buffer_t *), KM_SLEEP);
+	ice->ice_small_bufs = kmem_zalloc(n_buf * sizeof (ice_dma_buffer_t),
+	    KM_SLEEP);
 
 	for (i = 0; i < n_buf; i++) {
-		ice->ice_dma_small_bufs[i] =
-		    kmem_zalloc(sizeof (ice_dma_buffer_t), KM_SLEEP);
-
-		VERIFY(ice_dma_alloc(ice, ice->ice_dma_small_bufs[i], &attr,
+		VERIFY(ice_dma_alloc(ice, &ice->ice_small_bufs[i], &attr,
 		    &acc, true, ice->ice_small_buf_sz, true));
+		ice->ice_dma_small_bufs[i] = &ice->ice_small_bufs[i];
 	}
 	ice->ice_small_buf_sz = ice->ice_small_buf_alloc = n_buf;
 
-	mutex_exit(&ice->ice_buf_lock);
+	mutex_exit(&ice->ice_small_buf_lock);
 }
 
 void
@@ -432,7 +446,7 @@ ice_buf_fini(ice_t *ice)
 	 * XXX: we might need a CV for tracking on loan buffers so we can
 	 * wait until they're all returned.
 	 */
-	mutex_enter(&ice->ice_buf_lock);
+	mutex_enter(&ice->ice_small_buf_lock);
 
 	n_buf = ice->ice_small_buf_alloc;
 	for (i = ice->ice_small_buf_alloc; i > 0; i--) {
@@ -441,10 +455,15 @@ ice_buf_fini(ice_t *ice)
 		    sizeof (ice_dma_buffer_t));
 	}
 	kmem_free(ice->ice_dma_small_bufs, n_buf * sizeof (ice_dma_buffer_t *));
+	kmem_free(ice->ice_small_bufs, n_buf * sizeof (ice_dma_buffer_t));
 
 	ice->ice_small_bufs = NULL;
 	ice->ice_small_buf_alloc = 0;
 	ice->ice_small_buf_sz = 0;
+
+	mutex_exit(&ice->ice_small_buf_lock);
+
+	mutex_enter(&ice->ice_buf_lock);
 
 	n_buf = ice->ice_buf_alloc;
 	for (i = ice->ice_buf_alloc; i > 0; i--) {
@@ -452,8 +471,11 @@ ice_buf_fini(ice_t *ice)
 		kmem_free(ice->ice_dma_bufs[i], sizeof (ice_dma_buffer_t));
 	}
 	kmem_free(ice->ice_dma_bufs, n_buf * sizeof (ice_dma_buffer_t *));
+	kmem_free(ice->ice_bufs, n_buf * sizeof (ice_dma_buffer_t));
 
 	ice->ice_dma_bufs = NULL;
 	ice->ice_buf_alloc = 0;
 	ice->ice_buf_sz = 0;
+
+	mutex_exit(&ice->ice_buf_lock);
 }

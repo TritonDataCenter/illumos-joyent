@@ -184,6 +184,16 @@ typedef struct ice_cq_cmd_get_version {
 	uint8_t		iccgv_aq_patch;
 } ice_cq_cmd_get_version_t;
 
+typedef struct ice_cq_cmd_driver_version {
+	uint8_t		iccdv_major;
+	uint8_t		iccdv_minor;
+	uint8_t		iccdv_build;
+	uint8_t		iccdv_sub_build;
+	uint8_t		iccdv_reserved[3];
+	uint32_t	iccdv_data_high;
+	uint32_t	iccdv_data_low;
+} ice_cq_cmd_driver_version_t;
+
 /*
  * Shutdown Queue
  * Direct Command
@@ -462,6 +472,7 @@ typedef union ice_cq_cmd {
 	uint8_t icc_raw[16];
 	ice_cq_cmd_generic_t icc_generic;
 	ice_cq_cmd_get_version_t icc_get_version;
+	ice_cq_cmd_driver_version_t icc_driver_version;
 	ice_cq_cmd_queue_shutdown_t icc_queue_shutdown;
 	ice_cq_cmd_clear_pxe_t icc_clear_pxe;
 	ice_cq_cmd_request_resource_t icc_request_resource;

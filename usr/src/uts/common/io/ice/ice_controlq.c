@@ -136,7 +136,7 @@ ice_controlq_free(ice_controlq_t *cqp)
 	mutex_destroy(&cqp->icq_lock);
 }
 
-static boolean_t
+static bool
 ice_controlq_alloc(ice_t *ice, ice_controlq_t *cqp)
 {
 	size_t len;
@@ -153,11 +153,11 @@ ice_controlq_alloc(ice_t *ice, ice_controlq_t *cqp)
 	len = cqp->icq_nents * sizeof (ice_cq_desc_t);
 	ice_dma_acc_attr(ice, &acc);
 	ice_dma_transfer_controlq_attr(ice, &attr);
-	if (!ice_dma_alloc(ice, &cqp->icq_dma, &attr, &acc, B_TRUE, len,
-	    B_FALSE)) {
+	if (!ice_dma_alloc(ice, &cqp->icq_dma, &attr, &acc, true, len,
+	    false)) {
 		ice_controlq_free(cqp);
 		ice_error(ice, "!failed to allocate controlq ring");
-		return (B_FALSE);
+		return (false);
 	}
 
 	cqp->icq_desc = (ice_cq_desc_t *)cqp->icq_dma.idb_va;
@@ -167,20 +167,20 @@ ice_controlq_alloc(ice_t *ice, ice_controlq_t *cqp)
 		ice_error(ice, "!failed to allocate %lu bytes to track "
 		    "contorlq buffers");
 		ice_controlq_free(cqp);
-		return (B_FALSE);
+		return (false);
 	}
 
 	for (i = 0; i < cqp->icq_nents; i++) {
 		if (!ice_dma_alloc(ice, &cqp->icq_data_dma[i], &attr, &acc,
-		    B_TRUE, cqp->icq_bufsize, B_FALSE)) {
+		    true, cqp->icq_bufsize, false)) {
 			ice_error(ice, "!failed to allocate controlq buffer %u",
 			    i);
 			ice_controlq_free(cqp);
-			return (B_FALSE);
+			return (false);
 		}
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
 static void
@@ -308,7 +308,7 @@ ice_controlq_fini(ice_t *ice)
 	/*
 	 * Attempt to shutdown the queue. If we can't, drive on.
 	 */
-	if (!ice_cmd_queue_shutdown(ice, B_TRUE)) {
+	if (!ice_cmd_queue_shutdown(ice, true)) {
 		ice_error(ice, "!failed to shut down command queue, continuing "
 		    "with controlq teardown");
 	}
@@ -318,7 +318,7 @@ ice_controlq_fini(ice_t *ice)
 	ice_controlq_free(&ice->ice_asq);
 }
 
-boolean_t
+bool
 ice_controlq_init(ice_t *ice)
 {
 	uint_t i;
@@ -330,12 +330,12 @@ ice_controlq_init(ice_t *ice)
 	ice->ice_arq.icq_bufsize = ICE_CONTROLQ_BUFSIZE;
 
 	if (!ice_controlq_alloc(ice, &ice->ice_asq)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_controlq_alloc(ice, &ice->ice_arq)) {
 		ice_controlq_free(&ice->ice_asq);
-		return (B_FALSE);
+		return (false);
 	}
 
 	ice_controlq_pf_sq_regs(&ice->ice_asq);
@@ -358,10 +358,10 @@ ice_controlq_init(ice_t *ice)
 		 * attach.
 		 */
 		ice_controlq_fini(ice);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
 /*
@@ -444,7 +444,7 @@ ice_cmd_direct_init(ice_cq_desc_t *desc, ice_cq_opcode_t op)
 
 static void
 ice_cmd_indirect_init(ice_cq_desc_t *desc, ice_cq_opcode_t op, uint16_t len,
-    boolean_t fw_read_buf)
+    bool fw_read_buf)
 {
 	uint16_t flags;
 	bzero(desc, sizeof (ice_cq_desc_t));
@@ -472,11 +472,11 @@ typedef enum {
 
 /*
  * Submit a command to the send queue, bump the register that indicates that we
- * own it,
+* own it,
  * XXX Indirect commands are being punted on, we're not properly copying things
  * out.
  */
-static boolean_t
+static bool
 ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
     ice_cmd_copy_t copy)
 {
@@ -513,7 +513,7 @@ ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
 	if ((cqp->icq_flags & ICE_CONTROLQ_F_DEAD) != 0) {
 		cv_broadcast(&cqp->icq_cv);
 		mutex_exit(&cqp->icq_lock);
-		return (B_FALSE);
+		return (false);
 	}
 
 	cqp->icq_flags |= ICE_CONTROLQ_F_BUSY;
@@ -570,7 +570,7 @@ ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
 		cqp->icq_flags |= ICE_CONTROLQ_F_DEAD;
 		cv_signal(&cqp->icq_cv);
 		mutex_exit(&cqp->icq_lock);
-		return (B_FALSE);
+		return (false);
 	}
 
 	ICE_DMA_SYNC(&ice->ice_arq.icq_dma, DDI_DMA_SYNC_FORKERNEL);
@@ -585,7 +585,7 @@ ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
 		cqp->icq_flags |= ICE_CONTROLQ_F_DEAD;
 		cv_signal(&cqp->icq_cv);
 		mutex_exit(&cqp->icq_lock);
-		return (B_FALSE);
+		return (false);
 	}
 
 	bcopy(hwd, desc, sizeof (ice_cq_desc_t));
@@ -596,10 +596,10 @@ ice_cmd_submit(ice_t *ice, ice_controlq_t *cqp, ice_cq_desc_t *desc, void *buf,
 
 	cv_signal(&cqp->icq_cv);
 	mutex_exit(&cqp->icq_lock);
-	return (B_TRUE);
+	return (true);
 }
 
-static boolean_t
+static bool
 ice_cmd_result(ice_cq_desc_t *desc, ice_cq_errno_t *errp, uint8_t *hwcode)
 {
 	uint16_t ret = LE_16(desc->icqd_id_ret);
@@ -607,20 +607,20 @@ ice_cmd_result(ice_cq_desc_t *desc, ice_cq_errno_t *errp, uint8_t *hwcode)
 	if (ret == 0) {
 		*errp = ICE_CQ_SUCCESS;
 		*hwcode = 0;
-		return (B_TRUE);
+		return (true);
 	}
 
 	*errp = (ret & ICE_CQ_ERR_CODE_MASK);
 	*hwcode = ((ret & ICE_CQ_ERR_CODE_FW_MASK) >> ICE_CQ_ERR_CODE_FW_SHIFT);
 
-	return (B_FALSE);
+	return (false);
 }
 
 /*
  * Query the firmware for its version information and store that on the ice_t as
  * appropriate.
  */
-boolean_t
+bool
 ice_cmd_get_version(ice_t *ice, ice_fw_info_t *ifi)
 {
 	ice_cq_desc_t desc;
@@ -631,13 +631,13 @@ ice_cmd_get_version(ice_t *ice, ice_fw_info_t *ifi)
 	ice_cmd_direct_init(&desc, ICE_CQ_OP_GET_VER);
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "get version command failed with: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	gvp = &desc.icqd_command.icc_get_version;
@@ -653,11 +653,47 @@ ice_cmd_get_version(ice_t *ice, ice_fw_info_t *ifi)
 	ifi->ifi_rom_build = LE_32(gvp->iccgv_rom_build);
 	ifi->ifi_fw_build = LE_32(gvp->iccgv_fw_build);
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
-ice_cmd_queue_shutdown(ice_t *ice, boolean_t unload)
+bool
+ice_cmd_driver_version(ice_t *ice, uint8_t maj, uint8_t min, uint8_t patch,
+    uint8_t rc, const char *str)
+{
+	ice_cq_desc_t			desc;
+	ice_cq_errno_t			err;
+	ice_cq_cmd_driver_version_t	*dv;
+	size_t				slen = 0;
+	uint8_t				hw = 0;
+
+	if (str != NULL) {
+		slen = strlen(str);
+	}
+
+	dv = &desc.icqd_command.icc_driver_version;
+	dv->iccdv_major = maj;
+	dv->iccdv_minor = min;
+	dv->iccdv_build = patch;
+	dv->iccdv_sub_build = rc;
+	//iccdv_data_{high,low}
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DRIVER_VERSION, slen, true);
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, (void *)str,
+	   ICE_CMD_COPY_TO_DEV)) {
+		return (false);
+	}
+
+	if (!ice_cmd_result(&desc, &err, &hw)) {
+		ice_error(ice, "send driver version failed with: 0x%x "
+		    "(fw private: %x)", err, hw);
+		return (false);
+	}
+
+	return (true);
+}
+
+bool
+ice_cmd_queue_shutdown(ice_t *ice, bool unload)
 {
 	ice_cq_desc_t desc;
 	ice_cq_errno_t err;
@@ -672,19 +708,19 @@ ice_cmd_queue_shutdown(ice_t *ice, boolean_t unload)
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "queue shutdown command failed with: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_clear_pf_config(ice_t *ice)
 {
 	ice_cq_desc_t desc;
@@ -694,20 +730,20 @@ ice_cmd_clear_pf_config(ice_t *ice)
 	ice_cmd_direct_init(&desc, ICE_CQ_OP_CLEAR_PF_CONFIGURATION);
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "clear pf config command failed with: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 
 }
 
-boolean_t
+bool
 ice_cmd_clear_pxe(ice_t *ice)
 {
 	ice_cq_desc_t desc;
@@ -721,7 +757,7 @@ ice_cmd_clear_pxe(ice_t *ice)
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	/*
@@ -732,13 +768,13 @@ ice_cmd_clear_pxe(ice_t *ice)
 	if (!ice_cmd_result(&desc, &err, &hw) && err != ICE_CQ_EEXIST) {
 		ice_error(ice, "clear pxe command failed with: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_release_nvm(ice_t *ice)
 {
 	ice_cq_desc_t desc;
@@ -759,20 +795,20 @@ ice_cmd_release_nvm(ice_t *ice)
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "NVM release resource command failed with: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	mutex_enter(&ice->ice_nvm.in_lock);
 	ice->ice_nvm.in_flags &= ~ICE_NVM_LOCKED;
 	mutex_exit(&ice->ice_nvm.in_lock);
 
-	return (B_TRUE);
+	return (true);
 }
 
 static ice_cq_cmd_request_resource_t *
@@ -794,8 +830,8 @@ ice_cmd_init_acq_res(ice_cq_desc_t *desc, uint16_t res, bool write, uint32_t to)
 	return (rsrc);
 }
 
-boolean_t
-ice_cmd_acquire_nvm(ice_t *ice, boolean_t write)
+bool
+ice_cmd_acquire_nvm(ice_t *ice, bool write)
 {
 	ice_cq_desc_t desc;
 	ice_cq_errno_t err;
@@ -812,25 +848,25 @@ ice_cmd_acquire_nvm(ice_t *ice, boolean_t write)
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "NVM request resource command failed with: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	mutex_enter(&ice->ice_nvm.in_lock);
 	ice->ice_nvm.in_flags |= ICE_NVM_LOCKED;
 	mutex_exit(&ice->ice_nvm.in_lock);
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_nvm_read(ice_t *ice, uint16_t module, uint32_t offset, uint16_t *lenp,
-    uint16_t *outp, boolean_t last)
+    uint16_t *outp, bool last)
 {
 	ice_cq_desc_t desc;
 	uint32_t bpage, fpage;
@@ -854,17 +890,17 @@ ice_cmd_nvm_read(ice_t *ice, uint16_t module, uint32_t offset, uint16_t *lenp,
 	 */
 	if ((offset & 0xff000000) != 0 || len > nvm->in_sector) {
 		ice_error(ice, "invalid nvm read offset or length");
-		return (B_FALSE);
+		return (false);
 	}
 	bpage = offset & ~(nvm->in_sector - 1);
 	fpage = (offset + len) & ~(nvm->in_sector - 1);
 	if (bpage != fpage) {
 		ice_error(ice, "NVM read crosses pages, 0x%x, 0x%x",
 		    bpage, fpage);
-		return (B_FALSE);
+		return (false);
 	}
 
-	ice_cmd_indirect_init(&desc, ICE_CQ_OP_NVM_READ, len, B_FALSE);
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_NVM_READ, len, false);
 	read = &desc.icqd_command.icc_nvm_read;
 	read->iccnr_offset[0] = offset & 0xff;
 	read->iccnr_offset[1] = (offset >> 8) & 0xff;
@@ -877,18 +913,18 @@ ice_cmd_nvm_read(ice_t *ice, uint16_t module, uint32_t offset, uint16_t *lenp,
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, outp,
 	    ICE_CMD_COPY_FROM_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "failed to read %d bytes at off %x with: 0x%x "
 		    "(fw private: %x)", len, offset, err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	*lenp = LE_16(desc.icqd_data_len);
 
-	return (B_TRUE);
+	return (true);
 }
 
 bool
@@ -950,8 +986,8 @@ ice_cmd_release_global_lock(ice_t *ice)
  * second to get all of them. We guess a given number of caps, but throw that
  * out
  */
-boolean_t
-ice_cmd_get_caps(ice_t *ice, boolean_t device, uint_t *ncapsp,
+bool
+ice_cmd_get_caps(ice_t *ice, bool device, uint_t *ncapsp,
     ice_capability_t **capp)
 {
 	ice_cq_desc_t desc;
@@ -971,7 +1007,7 @@ ice_cmd_get_caps(ice_t *ice, boolean_t device, uint_t *ncapsp,
 	len = ncaps * sizeof (*cap);
 	cap = kmem_zalloc(sizeof (*cap) * ncaps, KM_SLEEP);
 
-	ice_cmd_indirect_init(&desc, op, len, B_FALSE);
+	ice_cmd_indirect_init(&desc, op, len, false);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, cap,
 	    ICE_CMD_COPY_FROM_DEV)) {
@@ -998,7 +1034,7 @@ ice_cmd_get_caps(ice_t *ice, boolean_t device, uint_t *ncapsp,
 	len = ncaps * sizeof (*cap);
 	cap = kmem_zalloc(len, KM_SLEEP);
 
-	ice_cmd_indirect_init(&desc, op, len, B_FALSE);
+	ice_cmd_indirect_init(&desc, op, len, false);
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, cap,
 	    ICE_CMD_COPY_FROM_DEV)) {
 		goto err;
@@ -1013,15 +1049,15 @@ ice_cmd_get_caps(ice_t *ice, boolean_t device, uint_t *ncapsp,
 	*ncapsp = ncaps;
 	*capp = cap;
 
-	return (B_TRUE);
+	return (true);
 err:
 	if (cap != NULL) {
 		kmem_free(cap, sizeof (*cap) * ncaps);
 	}
-	return (B_FALSE);
+	return (false);
 }
 
-boolean_t
+bool
 ice_cmd_mac_read(ice_t *ice, uint8_t *addr)
 {
 	uint8_t buf[ICE_CQ_MANAGE_MAC_READ_BUFSIZE];
@@ -1035,16 +1071,16 @@ ice_cmd_mac_read(ice_t *ice, uint8_t *addr)
 	bzero(buf, sizeof (buf));
 
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_MANAGE_MAC_READ, sizeof (buf),
-	    B_FALSE);
+	    false);
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
 	    ICE_CMD_COPY_FROM_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "failed to read MAC address: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	cmdp = &desc.icqd_command.icc_mac_read;
@@ -1053,7 +1089,7 @@ ice_cmd_mac_read(ice_t *ice, uint8_t *addr)
 	flags = LE_16(cmdp->iccmmr_flags);
 	if ((flags & ICE_CQ_MANAGE_MAC_READ_LAN_VALID) == 0) {
 		ice_error(ice, "failed to obtain a valid MAC address");
-		return (B_FALSE);
+		return (false);
 	}
 
 	/*
@@ -1083,17 +1119,17 @@ ice_cmd_mac_read(ice_t *ice, uint8_t *addr)
 
 			bcopy(macp->ihm_mac, addr, ETHERADDRL);
 
-			return (B_TRUE);
+			return (true);
 		}
 	}
 
 	ice_error(ice, "failed to find a valid MAC address");
-	return (B_FALSE);
+	return (false);
 }
 
-boolean_t
+bool
 ice_cmd_get_phy_abilities(ice_t *ice, ice_phy_abilities_t *datap,
-    boolean_t modules)
+    bool modules)
 {
 	ice_cq_desc_t desc;
 	ice_cq_cmd_get_phy_abilities_t *phy;
@@ -1102,7 +1138,7 @@ ice_cmd_get_phy_abilities(ice_t *ice, ice_phy_abilities_t *datap,
 	uint16_t flags;
 
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_GET_PHY_ABILITIES,
-	    sizeof (*datap), B_FALSE);
+	    sizeof (*datap), false);
 	phy = &desc.icqd_command.icc_phy_abilities;
 	flags = ICE_CQ_GET_PHY_ABILITIES_REPORT_MEDIA;
 	if (modules) {
@@ -1112,13 +1148,13 @@ ice_cmd_get_phy_abilities(ice_t *ice, ice_phy_abilities_t *datap,
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, datap,
 	    ICE_CMD_COPY_FROM_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "failed to read PHY abilities: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	/*
@@ -1127,10 +1163,10 @@ ice_cmd_get_phy_abilities(ice_t *ice, ice_phy_abilities_t *datap,
 	datap->ipa_eee = LE_16(datap->ipa_eee);
 	datap->ipa_eeer = LE_16(datap->ipa_eeer);
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_get_link_status(ice_t *ice, ice_link_status_t *linkp, ice_lse_t lse)
 {
 	ice_cq_desc_t desc;
@@ -1140,7 +1176,7 @@ ice_cmd_get_link_status(ice_t *ice, ice_link_status_t *linkp, ice_lse_t lse)
 	uint16_t flags;
 
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_GET_LINK_STATUS, sizeof (*linkp),
-	    B_FALSE);
+	    false);
 	status = &desc.icqd_command.icc_get_link_status;
 	switch (lse) {
 	case ICE_LSE_NO_CHANGE:
@@ -1153,28 +1189,28 @@ ice_cmd_get_link_status(ice_t *ice, ice_link_status_t *linkp, ice_lse_t lse)
 		flags = ICE_CQ_GET_LINK_STATUS_LSE_DISABLE;
 		break;
 	default:
-		return (B_FALSE);
+		return (false);
 	}
 	status->iccgls_flags = LE_16(flags);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, linkp,
 	    ICE_CMD_COPY_FROM_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "failed to get link status: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	linkp->ils_frame = LE_16(linkp->ils_frame);
 	linkp->ils_curspeed = LE_16(linkp->ils_curspeed);
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_set_event_mask(ice_t *ice, uint16_t mask)
 {
 	ice_cq_desc_t desc;
@@ -1188,20 +1224,20 @@ ice_cmd_set_event_mask(ice_t *ice, uint16_t mask)
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "set event mask command failed with: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
-ice_cmd_setup_link(ice_t *ice, boolean_t enable)
+bool
+ice_cmd_setup_link(ice_t *ice, bool enable)
 {
 	ice_cq_desc_t desc;
 	ice_cq_errno_t err;
@@ -1217,19 +1253,19 @@ ice_cmd_setup_link(ice_t *ice, boolean_t enable)
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "setup link command failed with: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_get_switch_config(ice_t *ice, void *buf, size_t bufsize, uint16_t first,
     uint16_t *neltsp, uint16_t *nexteltp)
 {
@@ -1246,19 +1282,19 @@ ice_cmd_get_switch_config(ice_t *ice, void *buf, size_t bufsize, uint16_t first,
 	 */
 	bufsize = MIN(bufsize, ICE_CQ_GET_SWITCH_CONFIG_BUF_MAX);
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_GET_SWITCH_CONFIG, bufsize,
-	    B_FALSE);
+	    false);
 	config = &desc.icqd_command.icc_get_switch_config;
 	config->iccgsc_next_elt = LE_16(first);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
 	    ICE_CMD_COPY_FROM_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "failed to get link status: 0x%x "
 		    "(fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	nelts = LE_16(config->iccgsc_nelts);
@@ -1266,7 +1302,7 @@ ice_cmd_get_switch_config(ice_t *ice, void *buf, size_t bufsize, uint16_t first,
 		ice_error(ice, "hardware told us we had more elements than we "
 		    "gave it buffer for, got %u switch elements, but the "
 		    "buffer was %lx bytes large", nelts, bufsize);
-		return (B_FALSE);
+		return (false);
 	}
 
 	*neltsp = nelts;
@@ -1279,11 +1315,11 @@ ice_cmd_get_switch_config(ice_t *ice, void *buf, size_t bufsize, uint16_t first,
 		swconf[i].isc_pfid = LE_16(swconf[i].isc_pfid);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
-ice_cmd_free_vsi(ice_t *ice, ice_vsi_t *vsi, boolean_t keep)
+bool
+ice_cmd_free_vsi(ice_t *ice, ice_vsi_t *vsi, bool keep)
 {
 	ice_cq_desc_t desc;
 	ice_cq_errno_t err;
@@ -1293,7 +1329,7 @@ ice_cmd_free_vsi(ice_t *ice, ice_vsi_t *vsi, boolean_t keep)
 	if ((vsi->ivsi_flags & ICE_VSI_F_ACTIVE) == 0) {
 		ice_error(ice, "asked to remove non-active VSI with ID %u",
 		    vsi->ivsi_id);
-		return (B_FALSE);
+		return (false);
 	}
 
 	ice_cmd_direct_init(&desc, ICE_CQ_OP_FREE_VSI);
@@ -1305,19 +1341,19 @@ ice_cmd_free_vsi(ice_t *ice, ice_vsi_t *vsi, boolean_t keep)
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, NULL,
 	    ICE_CMD_COPY_NONE)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "free vsi (%u) command failed with: 0x%x "
 		    "(fw private: %x)", vsi->ivsi_id, err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_add_vsi(ice_t *ice, ice_vsi_t *vsi)
 {
 	ice_cq_desc_t desc;
@@ -1331,16 +1367,16 @@ ice_cmd_add_vsi(ice_t *ice, ice_vsi_t *vsi)
 	    vsi->ivsi_id >= ICE_MAX_VSIS) {
 		ice_error(ice, "asked to remove VSI ID %u larger than maximum",
 		    vsi->ivsi_id);
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (vsi->ivsi_type != ICE_VSI_TYPE_PF) {
 		ice_error(ice, "asked to add support for a non-PF VSI");
-		return (B_FALSE);
+		return (false);
 	}
 
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_ADD_VSI,
-	    sizeof (vsi->ivsi_ctxt), B_TRUE);
+	    sizeof (vsi->ivsi_ctxt), true);
 	add = &desc.icqd_command.icc_add_vsi;
 	if ((vsi->ivsi_flags & ICE_VSI_F_POOL_ALLOC) == 0) {
 		add->iccav_vsi = LE_16(vsi->ivsi_id | ICE_CQ_VSI_VALID);
@@ -1361,23 +1397,23 @@ ice_cmd_add_vsi(ice_t *ice, ice_vsi_t *vsi)
 	default:
 		ice_error(ice, "invalid hardware VSI type: %u",
 		    vsi->ivsi_type);
-		return (B_FALSE);
+		return (false);
 	}
 	add->iccav_type = LE_16(hw_type);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, &vsi->ivsi_ctxt,
 	    ICE_CMD_COPY_TO_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "add vsi (%u) command failed with: 0x%x "
 		    "(fw private: %x)", vsi->ivsi_id, err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	if ((vsi->ivsi_flags & ICE_VSI_F_POOL_ALLOC) == 0) {
-		return (B_TRUE);
+		return (true);
 	}
 
 	/*
@@ -1388,10 +1424,10 @@ ice_cmd_add_vsi(ice_t *ice, ice_vsi_t *vsi)
 	reply = &desc.icqd_command.icc_add_vsi_reply;
 	vsi->ivsi_id = LE_16(reply->iccavr_vsi) & ICE_CQ_VSI_MASK;
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_set_rss_key(ice_t *ice, ice_vsi_t *vsi, void *buf, uint_t len)
 {
 	ice_cq_desc_t desc;
@@ -1402,34 +1438,34 @@ ice_cmd_set_rss_key(ice_t *ice, ice_vsi_t *vsi, void *buf, uint_t len)
 	if ((vsi->ivsi_flags & ICE_VSI_F_ACTIVE) == 0) {
 		ice_error(ice, "asked to set up RSS for an inactive VSI: %u",
 		    vsi->ivsi_id);
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (buf == NULL || len != ICE_RSS_KEY_LENGTH) {
 		ice_error(ice, "invalid key length or buffer passed to RSS "
 		    "set key: %p/%u", buf, len);
-		return (B_FALSE);
+		return (false);
 	}
 
-	ice_cmd_indirect_init(&desc, ICE_CQ_OP_SET_RSS_KEY, len, B_TRUE);
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_SET_RSS_KEY, len, true);
 	set_key = &desc.icqd_command.icc_set_rss_key;
 	set_key->iccsrk_vsi_id = LE_16(vsi->ivsi_id | ICE_CQ_VSI_VALID);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
 	    ICE_CMD_COPY_TO_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "set rss key (VSI %u) command failed with: 0x%x "
 		    "(fw private: %x)", vsi->ivsi_id, err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_set_rss_lut(ice_t *ice, ice_vsi_t *vsi, void *buf, uint_t len)
 {
 	ice_cq_desc_t desc;
@@ -1441,16 +1477,16 @@ ice_cmd_set_rss_lut(ice_t *ice, ice_vsi_t *vsi, void *buf, uint_t len)
 	if ((vsi->ivsi_flags & ICE_VSI_F_ACTIVE) == 0) {
 		ice_error(ice, "asked to set up RSS for an inactive VSI: %u",
 		    vsi->ivsi_id);
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (buf == NULL || len != ICE_RSS_LUT_SIZE_VSI) {
 		ice_error(ice, "invalid lut length or buffer passed to RSS "
 		    "set lut: %p/%u", buf, len);
-		return (B_FALSE);
+		return (false);
 	}
 
-	ice_cmd_indirect_init(&desc, ICE_CQ_OP_SET_RSS_KEY, len, B_TRUE);
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_SET_RSS_KEY, len, true);
 	lut = &desc.icqd_command.icc_set_rss_lut;
 	lut->iccsrl_vsi_id = LE_16(vsi->ivsi_id | ICE_CQ_VSI_VALID);
 
@@ -1464,19 +1500,19 @@ ice_cmd_set_rss_lut(ice_t *ice, ice_vsi_t *vsi, void *buf, uint_t len)
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
 	    ICE_CMD_COPY_TO_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "set rss lut (VSI %u) command failed with: 0x%x "
 		    "(fw private: %x)", vsi->ivsi_id, err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
-	return (B_TRUE);
+	return (true);
 }
 
-boolean_t
+bool
 ice_cmd_get_default_scheduler(ice_t *ice, void *buf, size_t len,
     uint16_t *nbranches)
 {
@@ -1488,27 +1524,27 @@ ice_cmd_get_default_scheduler(ice_t *ice, void *buf, size_t len,
 	if (len != ICE_CQ_QUERY_DEFAULT_SCHED_BUF_SIZE) {
 		ice_error(ice, "passed illegal buf size to get default "
 		    "scheduling command");
-		return (B_FALSE);
+		return (false);
 	}
 
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_QUERY_DEFAULT_SCHEDULER,
-	    len, B_FALSE);
+	    len, false);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
 	    ICE_CMD_COPY_FROM_DEV)) {
-		return (B_FALSE);
+		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "query default tx scheduler command failed "
 		    "with: 0x%x (fw private: %x)", err, hw);
-		return (B_FALSE);
+		return (false);
 	}
 
 	sched = &desc.icqd_command.icc_query_default_scheduler;
 	*nbranches = LE_16(sched->iccqds_nbranches);
 
-	return (B_TRUE);
+	return (true);
 }
 
 /*
@@ -1649,7 +1685,7 @@ ice_cmd_get_package_info_list(ice_t *ice, void *buf, size_t bufsz)
 	}
 
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_GET_PKG_INFO,
-	    ICE_CQ_GET_PKG_INFO_BUF_SZ, B_FALSE);
+	    ICE_CQ_GET_PKG_INFO_BUF_SZ, false);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
 	    ICE_CMD_COPY_FROM_DEV)) {
@@ -1673,7 +1709,7 @@ ice_cmd_download_pkg(ice_t *ice, const void *pkg, size_t len, bool last)
 	ice_cq_errno_t			err;
 	uint8_t				hw;
 
-	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DOWNLOAD_PKG, len, B_TRUE);
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DOWNLOAD_PKG, len, true);
 	pkgp = &desc.icqd_command.icc_download_pkg;
 
 	if (last) {
