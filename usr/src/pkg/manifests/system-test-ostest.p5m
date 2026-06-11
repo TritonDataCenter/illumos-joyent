@@ -17,6 +17,7 @@
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
 # Copyright 2026 Oxide Computer Company
 # Copyright 2022 MNX Cloud, Inc.
+# Copyright 2026 Edgecast Cloud LLC.
 #
 
 set name=pkg.fmri value=pkg:/system/test/ostest@$(PKGVERS)
@@ -311,6 +312,9 @@ file path=opt/os-tests/tests/tcpsig/tcpsig_fini mode=0555
 file path=opt/os-tests/tests/tcpsig/tcpsig_init mode=0555
 dir  path=opt/os-tests/tests/timer
 file path=opt/os-tests/tests/timer/timer_limit mode=0555
+dir  path=opt/os-tests/tests/tmpfs
+file path=opt/os-tests/tests/tmpfs/tmpfs_badmount
+file path=opt/os-tests/tests/tmpfs/tmpfs_enospc
 dir  path=opt/os-tests/tests/uccid
 file path=opt/os-tests/tests/uccid/atrparse mode=0555
 file path=opt/os-tests/tests/uccid/excl-badread mode=0555
