@@ -23,7 +23,7 @@
  * Copyright (c) 1988, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2018 Joyent, Inc.
  * Copyright 2020 Oxide Computer Company
- * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
@@ -1488,7 +1488,7 @@ freeproc(proc_t *p)
 
 	/* Clear any remaining brand data */
 	if (PROC_IS_BRANDED(p)) {
-		brand_clearbrand(p, B_FALSE);
+		brand_clearbrand(p, B_TRUE);
 	}
 
 

@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 1988, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2016, Joyent, Inc.
+ * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
@@ -707,7 +708,7 @@ fork_fail(proc_t *cp)
 	if (PTOU(curproc)->u_cwd)
 		refstr_rele(PTOU(curproc)->u_cwd);
 	if (PROC_IS_BRANDED(cp)) {
-		brand_clearbrand(cp, B_FALSE);
+		brand_clearbrand(cp, B_TRUE);
 	}
 }
 
@@ -1198,7 +1199,7 @@ getproc(proc_t **cpp, pid_t pid, uint_t flags)
 		 * With an LWP count of 0, this newly allocated process has no
 		 * reason to fail branding.
 		 */
-		VERIFY0(brand_setbrand(cp, B_FALSE));
+		VERIFY0(brand_setbrand(cp, B_TRUE));
 
 		BROP(pp)->b_copy_procdata(cp, pp);
 	}

@@ -313,7 +313,7 @@ brand_unregister_zone(struct brand *bp)
 }
 
 int
-brand_setbrand(proc_t *p, boolean_t lwps_ok)
+brand_setbrand(proc_t *p, boolean_t no_lwps)
 {
 	brand_t *bp = p->p_zone->zone_brand;
 	void *brand_data = NULL;
@@ -342,7 +342,12 @@ brand_setbrand(proc_t *p, boolean_t lwps_ok)
 	 * they are killed in the exec() success, or when the brand is cleared
 	 * after exec() failure.
 	 */
-	if (lwps_ok) {
+	if (no_lwps) {
+		/*
+		 * Processes branded during fork() should not have LWPs at all.
+		 */
+		VERIFY(p->p_tlist == NULL);
+	} else {
 		/*
 		 * We've been called from a exec() context tolerating the
 		 * existence of multiple LWPs during branding is necessary.
@@ -358,11 +363,6 @@ brand_setbrand(proc_t *p, boolean_t lwps_ok)
 				return (-1);
 			}
 		}
-	} else {
-		/*
-		 * Processes branded during fork() should not have LWPs at all.
-		 */
-		VERIFY(p->p_tlist == NULL);
 	}
 
 	if (bp->b_data_size > 0) {
@@ -380,7 +380,7 @@ brand_setbrand(proc_t *p, boolean_t lwps_ok)
 }
 
 void
-brand_clearbrand(proc_t *p, boolean_t lwps_ok)
+brand_clearbrand(proc_t *p, boolean_t no_lwps)
 {
 	brand_t *bp = p->p_zone->zone_brand;
 	void *brand_data;
@@ -390,31 +390,31 @@ brand_clearbrand(proc_t *p, boolean_t lwps_ok)
 	VERIFY(PROC_IS_BRANDED(p));
 
 	if (BROP(p)->b_clearbrand != NULL)
-		BROP(p)->b_clearbrand(p, lwps_ok);
+		BROP(p)->b_clearbrand(p, no_lwps);
 
 	mutex_enter(&p->p_lock);
 	p->p_brand = &native_brand;
 	brand_data = p->p_brand_data;
 	p->p_brand_data = NULL;
 
-	if (lwps_ok) {
+	if (no_lwps) {
+		/*
+		 * The brand is being cleared on a process with no LWPs of its
+		 * own running: the child of a failed fork, or a zombie being
+		 * reaped in freeproc().  At most one LWP may remain on the list.
+		 */
+		VERIFY(p->p_tlist == NULL || p->p_tlist == p->p_tlist->t_forw);
+	} else {
 		VERIFY(p == curproc);
 		/*
-		 * A process with multiple LWPs is being de-branded after
-		 * failing an exec.  The other LWPs were held as part of the
-		 * procedure, so they must be resumed now.
+		 * The brand is being cleared on curproc during exec.  If an
+		 * exec failed after the other LWPs were held, a process with
+		 * multiple LWPs is being de-branded and those LWPs must be
+		 * resumed now.
 		 */
 		if (p->p_tlist != NULL && p->p_tlist != p->p_tlist->t_forw) {
 			continuelwps(p);
 		}
-	} else {
-		/*
-		 * While clearing the brand, it's ok for one LWP to be present.
-		 * This happens when a native binary is executed inside a
-		 * branded zone, since the brand will be removed during the
-		 * course of a successful exec.
-		 */
-		VERIFY(p->p_tlist == NULL || p->p_tlist == p->p_tlist->t_forw);
 	}
 	mutex_exit(&p->p_lock);
 

@@ -22,6 +22,7 @@
  * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
  */
 
 /*
@@ -279,7 +280,7 @@ lx_clone_grp_enter(uint_t flags, proc_t *srcp, proc_t *dstp)
  * be de-branded).
  */
 void
-lx_clone_grp_exit(proc_t *p, boolean_t lwps_ok)
+lx_clone_grp_exit(proc_t *p, boolean_t no_lwps)
 {
 	int i;
 	lx_proc_data_t *plproc = ptolxproc(p);
@@ -288,7 +289,11 @@ lx_clone_grp_exit(proc_t *p, boolean_t lwps_ok)
 	ASSERT(!MUTEX_HELD(&p->p_lock));
 	ASSERT(plproc != NULL);
 
-	if (!lwps_ok)
+	/*
+	 * If the caller has told us the process has no running LWPs of its
+	 * own, the list must be down to at most one LWP.
+	 */
+	if (no_lwps)
 		VERIFY(p->p_lwpcnt <= 1);
 
 	cgps = plproc->l_clone_grps;
