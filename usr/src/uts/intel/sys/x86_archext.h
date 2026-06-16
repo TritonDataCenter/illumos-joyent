@@ -1841,8 +1841,6 @@ extern void cpuid_post_ucodeadm(void);
 extern void cpuid_get_addrsize(struct cpu *, uint_t *, uint_t *);
 extern uint_t cpuid_get_dtlb_nent(struct cpu *, size_t);
 
-extern uint64_t	cpuid_tsc_freq(struct cpu *);
-
 #if !defined(__xpv)
 extern uint32_t *cpuid_mwait_alloc(struct cpu *);
 extern void cpuid_mwait_free(struct cpu *);

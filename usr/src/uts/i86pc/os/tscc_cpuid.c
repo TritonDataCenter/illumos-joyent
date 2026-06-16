@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2026 RackTop Systems, Inc.
  */
 
 #include <sys/tsc.h>
@@ -18,22 +19,61 @@
 #include <sys/prom_debug.h>
 #include <sys/cpuvar.h>
 
+/* The core crystal clock frequency of Denverton SoC in Hz */
+#define	DENVERTON_CRYSTAL_HZ	25000000
+
+static uint32_t
+tsc_cpuid_maxleaf(void)
+{
+	struct cpuid_regs regs = { 0 };
+
+	return (__cpuid_insn(&regs));
+}
+
 static boolean_t
 tsc_calibrate_cpuid(uint64_t *freqp)
 {
-	uint64_t val;
+	struct cpuid_regs regs = { 0 };
+	uint64_t crystal;
 
 	PRM_POINT("Attempting to use CPUID instruction for TSC calibration...");
 
-	/*
-	 * If we have the TSC frequency from the CPU itself, use it.
-	 */
-	if ((val = cpuid_tsc_freq(CPU)) != 0) {
-		*freqp = val;
-		return (B_TRUE);
-	}
+	if (cpuid_getvendor(CPU) != X86_VENDOR_Intel)
+		return (B_FALSE);
 
-	return (B_FALSE);
+	/* The frequency, divisor, etc are (if present) in leaf 0x15 */
+	if (tsc_cpuid_maxleaf() < 0x15)
+		return (B_FALSE);
+
+	regs.cp_eax = 0x15;
+	__cpuid_insn(&regs);
+
+	crystal = regs.cp_ecx;
+
+	/*
+	 * Linux discovered that Denverton SoCs do not report their
+	 * core crystal clock value (ECX) in leaf 0x15. However the
+	 * value is both known and fixed for these chips, so we can utilize
+	 * that knowledge and still calculate the TSC frequency.
+	 */
+	if (crystal == 0 && cpuid_getmodel(CPU) == INTC_MODEL_DENVERTON)
+		crystal = DENVERTON_CRYSTAL_HZ;
+
+	/*
+	 * Not all CPU models report all three parameters. For those
+	 * that don't we fall back to other methods to calculate the
+	 * TSC frequency.
+	 */
+	if (crystal == 0 || regs.cp_eax == 0 || regs.cp_ebx == 0)
+		return (B_FALSE);
+
+	/*
+	 * Note the order to ensure the calculation is done as
+	 * 64-bit to avoid overflow.
+	 */
+	*freqp = crystal * regs.cp_ebx / regs.cp_eax;
+
+	return (B_TRUE);
 }
 
 static tsc_calibrate_t tsc_calibration_cpuid = {
