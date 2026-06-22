@@ -39,4 +39,6 @@ SUBDIRS = \
 	util-tests \
 	zfs-tests
 
+CHKSUBDIRS = $(SUBDIRS)
+
 include Makefile.com

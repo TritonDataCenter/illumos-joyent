@@ -69,6 +69,7 @@ scripts/bldenv.1onbld
 scripts/build_cscope
 scripts/cddlchk
 scripts/check_rtime
+scripts/check_test_runfiles
 scripts/check-gitignore
 scripts/checkpaths
 scripts/copyrightchk
