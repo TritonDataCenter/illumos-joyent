@@ -21,6 +21,7 @@
 /*
  * Copyright (c) 2006, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #include <sys/kmem.h>
@@ -641,20 +642,18 @@ brand_solaris_cmd(int cmd, uintptr_t arg1, uintptr_t arg2, uintptr_t arg3,
 void
 brand_solaris_copy_procdata(proc_t *child, proc_t *parent, struct brand *pbrand)
 {
-	brand_proc_data_t	*spd;
-
 	ASSERT(parent->p_brand == pbrand);
 	ASSERT(child->p_brand == pbrand);
 	ASSERT(parent->p_brand_data != NULL);
-	ASSERT(child->p_brand_data == NULL);
+	ASSERT(child->p_brand_data != NULL);
 
 	/*
-	 * Just duplicate all the proc data of the parent for the
-	 * child
+	 * Duplicate all the proc data of the parent for the child. The
+	 * child's brand data was already allocated by brand_setbrand()
+	 * since this brand declares a b_data_size.
 	 */
-	spd = kmem_alloc(sizeof (brand_proc_data_t), KM_SLEEP);
-	bcopy(parent->p_brand_data, spd, sizeof (brand_proc_data_t));
-	child->p_brand_data = spd;
+	bcopy(parent->p_brand_data, child->p_brand_data,
+	    sizeof (brand_proc_data_t));
 }
 
 static void
@@ -1179,22 +1178,24 @@ brand_solaris_proc_exit(struct proc *p, struct brand *pbrand)
 	ASSERT(p->p_brand == pbrand);
 	ASSERT(p->p_brand_data != NULL);
 
-	/* upon exit, free our proc brand data */
-	kmem_free(p->p_brand_data, sizeof (brand_proc_data_t));
-	p->p_brand_data = NULL;
+	/*
+	 * Nothing to do here. The proc brand data must remain in place
+	 * until the remaining LWP has been cleaned up via the b_freelwp
+	 * hook; it is then freed by brand_clearbrand() when the process
+	 * is reaped.
+	 */
 }
 
 void
 brand_solaris_setbrand(proc_t *p, struct brand *pbrand)
 {
+	ASSERT(MUTEX_HELD(&p->p_lock));
 	ASSERT(p->p_brand == pbrand);
-	ASSERT(p->p_brand_data == NULL);
 
 	/*
-	 * We should only be called from exec(), when we know the process
-	 * is single-threaded.
+	 * The proc brand data was allocated by brand_setbrand() before
+	 * this hook was called, whether branding is occurring as part of
+	 * fork() or exec().
 	 */
-	ASSERT(p->p_tlist == p->p_tlist->t_forw);
-
-	p->p_brand_data = kmem_zalloc(sizeof (brand_proc_data_t), KM_SLEEP);
+	ASSERT(p->p_brand_data != NULL);
 }
