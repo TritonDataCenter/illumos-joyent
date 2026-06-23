@@ -26,7 +26,7 @@
 
 /*
  * Copyright 2020 Joyent, Inc.
- * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2024 MNX Cloud, Inc.
  * Copyright 2025 Edgecast Cloud LLC.
  */
@@ -349,6 +349,13 @@ lx_proc_exit(proc_t *p)
 	lx_proc_data_t *lxpd;
 	proc_t *cp;
 
+	/*
+	 * This runs down the last LWP of the exiting process. That LWP is
+	 * still attached here (b_proc_exit fires before the final LWP is
+	 * detached) so the process still has an LWP of its own and no_lwps
+	 * is false. This matches the other single-LWP caller, the successful
+	 * native exec path through brand_clearbrand().
+	 */
 	lx_clone_grp_exit(p, B_FALSE);
 	/* Cleanup any outstanding aio contexts */
 	lx_io_cleanup(p);
@@ -577,9 +584,9 @@ lx_pagefault(proc_t *p, klwp_t *lwp, caddr_t addr, enum fault_type type,
 #endif
 
 static void
-lx_clearbrand(proc_t *p, boolean_t lwps_ok)
+lx_clearbrand(proc_t *p, boolean_t no_lwps)
 {
-	lx_clone_grp_exit(p, lwps_ok);
+	lx_clone_grp_exit(p, no_lwps);
 }
 
 /*

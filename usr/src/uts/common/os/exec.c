@@ -29,6 +29,7 @@
  * Copyright 2015 Garrett D'Amore <garrett@damore.org>
  * Copyright 2019 Joyent, Inc.
  * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
  */
 
 #include <sys/types.h>
@@ -409,7 +410,7 @@ exec_common(const char *fname, const char **argp, const char **envp,
 		 * Process branding may fail if multiple LWPs are present and
 		 * holdlwps() cannot complete successfully.
 		 */
-		error = brand_setbrand(p, B_TRUE);
+		error = brand_setbrand(p, B_FALSE);
 
 		if (error == 0 && BROP(p)->b_lwpdata_alloc != NULL) {
 			brand_data = BROP(p)->b_lwpdata_alloc(p);
@@ -436,7 +437,7 @@ exec_common(const char *fname, const char **argp, const char **envp,
 	    exec_file, p->p_cred, &brand_action)) != 0) {
 		if (brandme) {
 			BROP(p)->b_freelwp(lwp);
-			brand_clearbrand(p, B_TRUE);
+			brand_clearbrand(p, B_FALSE);
 		}
 		VN_RELE(vp);
 		if (dir != NULL)
