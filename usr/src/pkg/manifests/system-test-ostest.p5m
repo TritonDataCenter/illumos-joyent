@@ -315,6 +315,7 @@ file path=opt/os-tests/tests/timer/timer_limit mode=0555
 dir  path=opt/os-tests/tests/tmpfs
 file path=opt/os-tests/tests/tmpfs/tmpfs_badmount mode=0555
 file path=opt/os-tests/tests/tmpfs/tmpfs_enospc mode=0555
+file path=opt/os-tests/tests/tmpfs/tmpfs_full mode=0555
 dir  path=opt/os-tests/tests/uccid
 file path=opt/os-tests/tests/uccid/atrparse mode=0555
 file path=opt/os-tests/tests/uccid/excl-badread mode=0555
