@@ -128,9 +128,9 @@ particular signaling that a zone provision is done requires delaying a
 privilege drop until the creation of a file occurs.
 
 Also, due to SmartOS customer complaints, and our requirement to have the
-global zone communicat with HVM zones over the virtual serial port, the bhyve
-uart has a hard rate limit to prevent some guests from getting overwhelmed.
-See OS-8556 for more.
+global zone communicate with HVM zones over the virtual serial port, the
+bhyve uart has a hard rate limit to prevent some guests from getting
+overwhelmed.  See OS-8556 for more.
 
 ### lx_netlink socket
 
@@ -187,4 +187,49 @@ background is documented in OS-2115.
 ### libsmartsshd
 
 It supports a Triton Data Center feature: smartlogin.
+
+### vnd
+
+vnd was implemented to give KVM zones a performant virtual network
+interface.  Given KVM is being replaced with BHYVE in practice, this
+subsystem will not be upstreamed. There is a libvnd library, plus vndadm(8)
+and vndstat(8).
+
+### libzdoor
+
+Pairs with libsmartsshd to support smartlogin.
+
+### nsswitch
+
+Becuase of direct linkage with libresolv2_joy some of the dynamic-linking at
+runtime gets reduced.
+
+### SVP (SDC VXLAN Protocol)
+
+Is a resolver in varpd for Triton Data Center (nee SDC). It combines L2 and
+L3 resolution for Triton's Fabric Networks implementation. There is an
+excellent block comment documenting the protocol in libvarpd_svp.c.
+
+### column(1)
+
+Brought in from BSD, it was deemed important enough to be included in the
+platform image.
+
+### ptools
+
+See OS-7934 and OS-3513 for SmartOS additions to the illumos ptools,
+including service FMRIs and more process arguments.
+
+Multiple changes to proc(4FS) assist in these enhancements as well.
+
+### Zone-savvier resource controls
+
+Includes ZFS zone-IO throttling, and CPU bursting limits in zones, several
+pieces of the kernel are more zones-aware than illumos-gate, to prevent
+noisy-neighbor or even denial-of-service.
+
+### hyprlofs
+
+A fast name space virtual file system. It was developed for use in MANTA
+version 1's compute jobs.
 
