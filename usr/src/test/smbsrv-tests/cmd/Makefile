@@ -11,6 +11,7 @@
 
 #
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
+# Copyright 2026 Edgecast Cloud LLC.
 #
 
 include $(SRC)/Makefile.master
@@ -23,4 +24,5 @@ PYSUFFIX = $(PYTHON3_SUFFIX)
 ROOTOPTPKG = $(ROOT)/opt/smbsrv-tests
 TARGETDIR = $(ROOTOPTPKG)/bin
 
+include $(SRC)/test/Makefile.com
 include $(SRC)/test/smbsrv-tests/Makefile.com

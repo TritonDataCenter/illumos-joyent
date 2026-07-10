@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!@PYTHON@
 
 #
 # This file and its contents are supplied under the terms of the
@@ -18,11 +18,8 @@
 # Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2022 MNX Cloud, Inc.
 # Copyright 2026 Gordon W. Ross
+# Copyright 2026 Edgecast Cloud LLC.
 #
-
-# NOTE:  For SmartOS, the @PYTHON@ macro defaults to /opt/local, which is
-# not the case for the SmartOS global zone's pkgsrc installation (/opt/tools).
-# So use /usr/bin/env because the smartos-test script sets PATH appropriately.
 
 from __future__ import print_function
 import sys

@@ -11,7 +11,23 @@
 
 #
 # Copyright (c) 2012 by Delphix. All rights reserved.
+# Copyright 2026 Edgecast Cloud LLC.
 #
+
+#
+# NOTE: The @PYTHON@ macro's default is whatever is in the compilation
+# environment. On SmartOS, this is typically in /opt/local, the pkgsrc root.
+#
+# The problem which we must address here is that tests in SmartOS are entirely
+# under the control of the`smartos-test script, and that runs in the global
+# zone. As of OS-8403, the global zone pkgsrc root is assumed to be in
+# /opt/tools.
+#
+# We opt to use '/usr/bin/env python' because the smartos-test script sets PATH
+# appropriately, and is responsible for successful execution of anything here
+# in usr/src/test it runs.
+#
+PYSHEBANG=/usr/bin/env python
 
 all     :=      TARGET = all
 install :=      TARGET = install
