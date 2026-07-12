@@ -14,7 +14,7 @@
 #
 # Copyright 2020 Joyent, Inc.
 # Copyright 2025 MNX Cloud, Inc.
-# Copyright 2025 Edgecast Cloud LLC.
+# Copyright 2026 Edgecast Cloud LLC.
 #
 
 #
@@ -203,7 +203,7 @@ function shadow_fix {
 #
 function extract_remaining_test_bits {
     log_must tar -xzf $1 -C / \
-        opt kernel tests.manifest.gen tests.buildstamp
+        opt kernel lib tests.manifest.gen tests.buildstamp
 }
 
 # The pkgsrc packages we will install are now a single metapackage.
@@ -319,8 +319,13 @@ function nvme_test_check {
     # If we specify NVME_TEST_DEVICE, then run the non-destructive NVMe tests.
     if [[ -n "$NVME_TEST_DEVICE" ]]; then
 	log_testrunner nvme-tests /opt/nvme-tests/runfiles/non-destruct.run
+	if [[ -n "$NVME_DESTRUCTIVE" ]]; then
+	    log_testrunner nvme-tests /opt/nvme-tests/runfiles/destruct.run
+	else
+	    log "Skipping NVMe destructive tests"
+	fi
     else
-	log "Skipping NVMe non-destructive tests"
+	log "Skipping NVMe non-destructive & destructive tests"
     fi
 }
 
@@ -341,6 +346,15 @@ function os_tests_check {
     log_testrunner os-tests /opt/os-tests/runfiles/default.run
 }
 
+function i2c_tests_check {
+    # We need a driver supplied by the tests.
+    add_drv i2csim || driver_install_fail i2csim
+    # Import the i2csimd.xml SMF manifest.
+    svccfg import /lib/svc/manifest/system/i2csimd.xml
+    # OKAY, now we can run it!
+    log_testrunner i2c-tests /opt/i2c-tests/runfiles/default.run
+}
+
 #
 # By using log_test or log_testrunner, we accumulate the exit codes from each
 # test run to $RESULT.
@@ -353,13 +367,15 @@ function execute_tests {
     bhyve_test_check
     log_testrunner crypto-tests /opt/crypto-tests/runfiles/default.run
     log_testrunner elf-tests /opt/elf-tests/runfiles/default.run
+    i2c_tests_check
     log_testrunner libc-tests /opt/libc-tests/runfiles/default.run
-    log_testrunner libsec-tests /opt/libsec-tests/runfiles/default.run
     log_testrunner libproc-tests /opt/libproc-tests/runfiles/default.run
+    log_testrunner libsec-tests /opt/libsec-tests/runfiles/default.run
+    nvme_test_check
+    os_tests_check
+    log_testrunner tz-tests /opt/tz-tests/runfiles/default.run
     log_test vndtest /opt/vndtest/bin/vndtest -a
     log_testrunner util-tests /opt/util-tests/runfiles/default.run
-    os_tests_check
-    nvme_test_check
     zfs_test_check
 
     if [[ -n "$FAILED_TESTS" ]]; then

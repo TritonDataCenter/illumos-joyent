@@ -84,6 +84,8 @@ Notes on NVMe testing:
 NVMe is tested by unit tests and by non-destructive component tests.  The
 latter must specify NVME_TEST_DEVICE from nvme* names.  E.g. "nvme0".  If
 NVME_TEST_DEVICE is not set, the non-destructive component tests will not run.
+If you wish to also use destructive component tests, set NVME_DESTRUCTIVE to
+a non-empty value.
 
 Notes on ZFS testing:
 
