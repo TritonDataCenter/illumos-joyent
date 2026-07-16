@@ -602,7 +602,7 @@ ice_ddp_download_pkgs(ice_t *ice, const void *buf, uint32_t start,
 
 	p += ICE_PKG_BUF_LEN * start;
 	bhdr = (const ice_pkg_buf_hdr_t *)p;
-	sect = (const ice_pkg_sect_t *)(p + 1);
+	sect = (const ice_pkg_sect_t *)(bhdr + 1);
 
 	/*
 	 * The FreeBSD driver indicates that if the first section of the
