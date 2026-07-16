@@ -126,6 +126,7 @@ CTASSERT(sizeof (ice_pkg_sect_t) == 8);
  */
 typedef struct ice_pkg_data {
 	uint32_t	ipd_cfgidx;
+	uint32_t	ipd_signidx;
 	void		*ipd_config;	/* Config segment contents */
 	void		*ipd_sign;	/* Signing segment */
 	uint32_t	ipd_cfglen;
@@ -269,7 +270,7 @@ ice_ddp_get_segs(ice_t *ice, firmware_handle_t fh, ice_seg_idx_t **idxp,
 		uint64_t offset = LE_32(segs[i]);
 
 		if (offset + sizeof (ice_pkg_seg_hdr_t) > pkglen) {
-			ice_error(ice, "DDP segnebt %u offset (%lu) out of "
+			ice_error(ice, "DDP segment %u offset (%lu) out of "
 			    "range", i, offset);
 			kmem_free(segs, n * sizeof (uint32_t));
 			return (false);
@@ -370,6 +371,10 @@ ice_ddp_get_cfg(ice_t *ice, firmware_handle_t fh, ice_seg_idx_t *idx,
 			return (false);
 		}
 
+#ifdef DEBUG
+		dev_err(ice->ice_dip, CE_CONT, "?DDP data segment at index %u "
+		    "length %u bytes\n", dp->ipd_cfgidx, dp->ipd_cfglen);
+#endif
 		break;
 	}
 
@@ -419,8 +424,15 @@ ice_ddp_get_cfg(ice_t *ice, firmware_handle_t fh, ice_seg_idx_t *idx,
 			continue;
 		}
 
+		dp->ipd_signidx = i;
 		dp->ipd_sign = buf;
 		dp->ipd_signlen = idx[i].isi_length;
+
+#ifdef DEBUG
+		dev_err(ice->ice_dip, CE_CONT, "?DDP signing segment at index "
+		    "%u length %u\n", dp->ipd_signidx, dp->ipd_signlen);
+#endif
+
 		break;
 	}
 
@@ -653,7 +665,7 @@ ice_ddp_check_id(ice_t *ice, const uint8_t **hdrp, uint32_t *lenp)
 
 	if (n * 4 * sizeof (uint16_t) < len) {
 		ice_error(ice, "DDP configuration segment device ID count (%u)"
-		    "overflow", n);
+		    " overflow", n);
 		return (false);
 	}
 

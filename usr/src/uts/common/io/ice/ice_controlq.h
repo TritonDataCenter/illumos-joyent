@@ -151,7 +151,12 @@ typedef enum ice_cq_errno {
 	ICE_CQ_EMODE		= 21,
 	ICE_CQ_EFBIG		= 22,
 	ICE_CQ_ESBCOMP		= 23,
-	ICE_CQ_EACCES_BMCU	= 24
+	ICE_CQ_RC_ENOSEC	= 24,
+	ICE_CQ_RC_EBADSIG	= 25,
+	ICE_CQ_RC_ESVN		= 26,
+	ICE_CQ_RC_EBADMAN	= 27,
+	ICE_CQ_RC_EBADBUF	= 28,
+	ICE_CQ_EACCES_BMCU	= 29,
 } ice_cq_errno_t;
 
 /*

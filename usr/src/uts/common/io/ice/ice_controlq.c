@@ -53,6 +53,122 @@ CTASSERT(ICE_REG_PC_FW_ATQLEN_ATQENABLE == ICE_REG_PC_FW_ARQLEN_ATQENABLE);
 clock_t icq_controlq_delay = 10000;	/* 10ms in us */
 uint_t icq_controlq_count = 100;
 
+const char *
+ice_controlq_errstr(ice_cq_errno_t cq_err)
+{
+#define	ERRSTR(_x) case ICE_CQ_##_x: return (#_x)
+	switch (cq_err) {
+	ERRSTR(SUCCESS);
+	ERRSTR(EPERM);
+	ERRSTR(ENOENT);
+	ERRSTR(ESRCH);
+	ERRSTR(EINTR);
+	ERRSTR(EIO);
+	ERRSTR(ENXIO);
+	ERRSTR(E2BIG);
+	ERRSTR(EAGAIN);
+	ERRSTR(ENOMEM);
+	ERRSTR(EACCESS);
+	ERRSTR(EFAULT);
+	ERRSTR(EBUSY);
+	ERRSTR(EEXIST);
+	ERRSTR(EINVAL);
+	ERRSTR(ENOTTY);
+	ERRSTR(ENOSPC);
+	ERRSTR(ERANGE);
+	ERRSTR(EFLUSHED);
+	ERRSTR(BAD_ADDR);
+	ERRSTR(EMODE);
+	ERRSTR(EFBIG);
+	ERRSTR(ESBCOMP);
+	ERRSTR(RC_ENOSEC);
+	ERRSTR(RC_EBADSIG);
+	ERRSTR(RC_ESVN);
+	ERRSTR(RC_EBADMAN);
+	ERRSTR(RC_EBADBUF);
+	ERRSTR(EACCES_BMCU);
+	default:
+		return ("Unknown");
+	}
+#undef ERRSTR
+}
+
+/*
+ * The strings are mostly verbatim from Table 9-34. In a few instances
+ * (e.g. ICE_CQ_ENOMEM) is used to make clear the error is from the
+ * NIC and not the kernel.
+ */
+const char *
+ice_controlq_errmsg(ice_cq_errno_t cq_err)
+{
+	switch (cq_err) {
+	case ICE_CQ_SUCCESS:
+		return ("No error");
+	case ICE_CQ_EPERM:
+		return ("Operation not permitted");
+	case ICE_CQ_ENOENT:
+		return ("No such element");
+	case ICE_CQ_ESRCH:
+		return ("Bad opcode");
+	case ICE_CQ_EINTR:
+		return ("Opreation interrupted");
+	case ICE_CQ_EIO:
+		return ("I/O error or firmware internal error");
+	case ICE_CQ_ENXIO:
+		return ("No such resource");
+	case ICE_CQ_E2BIG:
+		return ("Argument too long");
+	case ICE_CQ_EAGAIN:
+		return ("Try again");
+	case ICE_CQ_ENOMEM:
+		return ("(device) Out of memory");
+	case ICE_CQ_EACCESS:
+		return ("Permission denied");
+	case ICE_CQ_EFAULT:
+		return ("Bad address");
+	case ICE_CQ_EBUSY:
+		return ("Device or resource busy");
+	case ICE_CQ_EEXIST:
+		return ("Attempt to create something that exists");
+	case ICE_CQ_EINVAL:
+		return ("Invalid argument");
+	case ICE_CQ_ENOTTY:
+		return ("Not a typewriter");
+	case ICE_CQ_ENOSPC:
+		return ("No space left for device allocation failure");
+	case ICE_CQ_ENOSYS:
+		return ("Function not implemented");
+	case ICE_CQ_ERANGE:
+		return ("Parameter out of range");
+	case ICE_CQ_EFLUSHED:
+		return ("Command flushed because a previous command completed "
+		    "in error");
+	case ICE_CQ_BAD_ADDR:
+		return ("Internal error. Descriptor contains a bad pointer");
+	case ICE_CQ_EMODE:
+		return ("Operation not allowed in current device mode");
+	case ICE_CQ_EFBIG:
+		return ("File too big");
+	case ICE_CQ_ESBCOMP:
+		return ("Cannot find enough space for the message in the "
+		    "sideband or mailbox queue");
+	case ICE_CQ_RC_ENOSEC:
+		return ("Missing security manifest");
+	case ICE_CQ_RC_EBADSIG:
+		return ("Bad RSA signature");
+	case ICE_CQ_RC_ESVN:
+		return ("SVN number prohibits this package");
+	case ICE_CQ_RC_EBADMAN:
+		return ("Manifest hash mismatches manifest");
+	case ICE_CQ_RC_EBADBUF:
+		return ("Buffer hash mismatches manifest");
+	case ICE_CQ_EACCES_BMCU:
+		return ("BMC update in progress");
+	default:
+		return ("Unknown");
+	}
+}
+
 int
 ice_controlq_err_to_errno(ice_cq_errno_t cq_err)
 {
@@ -101,6 +217,11 @@ ice_controlq_err_to_errno(ice_cq_errno_t cq_err)
 	case ICE_CQ_EFBIG:
 		return (EFBIG);
 	case ICE_CQ_ESBCOMP:
+	case ICE_CQ_RC_ENOSEC:
+	case ICE_CQ_RC_EBADSIG:
+	case ICE_CQ_RC_ESVN:
+	case ICE_CQ_RC_EBADMAN:
+	case ICE_CQ_RC_EBADBUF:
 	case ICE_CQ_EACCES_BMCU:
 		/* TODO */
 		return (EIO);
@@ -684,8 +805,9 @@ ice_cmd_driver_version(ice_t *ice, uint8_t maj, uint8_t min, uint8_t patch,
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "send driver version failed with: 0x%x "
-		    "(fw private: %x)", err, hw);
+		ice_error(ice, "send driver version failed with: 0x%x %s (%s)"
+		    "(fw private: %x)", err, ice_controlq_errmsg(err),
+		    ice_controlq_errstr(err), hw);
 		return (false);
 	}
 
@@ -1152,8 +1274,9 @@ ice_cmd_get_phy_abilities(ice_t *ice, ice_phy_abilities_t *datap,
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "failed to read PHY abilities: 0x%x "
-		    "(fw private: %x)", err, hw);
+		ice_error(ice, "failed to read PHY abilities: 0x%x %s (%s)"
+		    "(fw private: %x)", err, ice_controlq_errmsg(err),
+		    ice_controlq_errstr(err), hw);
 		return (false);
 	}
 
