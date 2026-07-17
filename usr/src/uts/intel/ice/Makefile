@@ -24,7 +24,10 @@ CONF_SRCDIR	= $(UTSBASE)/common/io/ice
 FWDIR		= $(UTSBASE)/common/io/ice
 DDP_VERSION	= 1.3.41.0
 DDP_FILE	= ice-$(DDP_VERSION).pkg
-ROOTFIRMWARE	= $(DDP_FILE:%=$(ROOT_FIRMWARE_DIR)/$(MODULE)/%)
+DDP_LINK	= ice.pkg
+ROOTFIRMWARE	= \
+	$(DDP_FILE:%=$(ROOT_FIRMWARE_DIR)/$(MODULE)/%)	\
+	$(DDP_LINK:%=$(ROOT_FIRMWARE_DIR)/$(MODULE)/%)
 
 include $(UTSBASE)/intel/Makefile.intel
 
@@ -47,7 +50,7 @@ clobber:	$(CLOBBER_DEPS)
 
 install:	$(INSTALL_DEPS) $(ROOTFIRMWARE)
 
-$(ROOT_FIRMARE_DIR)/$(MODULE)/ice.pkg := INSLINKTARGET = $(DDP_FILE)
+$(ROOT_FIRMWARE_DIR)/$(MODULE)/ice.pkg := INSLINKTARGET = $(DDP_FILE)
 
 include $(UTSBASE)/Makefile.mapfile
 include $(UTSBASE)/intel/Makefile.targ
