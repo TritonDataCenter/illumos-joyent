@@ -652,6 +652,13 @@ ice_ddp_check_id(ice_t *ice, const uint8_t **hdrp, uint32_t *lenp)
 	uint32_t len = *lenp;
 	uint32_t i, n;
 
+	/*
+	 * To recap Table 7-182, the device id table has a 4 byte
+	 * count (may be 0) followed by an array of
+	 * (PCI device id, PCI vendor id, PCI sub-device ID, PCI sub-vendor
+	 * IDs). I.e. a 32-byte count (n) followed by 'n' (4 * 16-bit)
+	 * entries.
+	 */
 	if (len < sizeof (uint32_t)) {
 		ice_error(ice, "DDP configuration segment size (%u) too small: "
 		    "failed to read device ID count");
@@ -663,11 +670,23 @@ ice_ddp_check_id(ice_t *ice, const uint8_t **hdrp, uint32_t *lenp)
 	p += sizeof (n);
 	len -= sizeof (n);
 
-	if (n * 4 * sizeof (uint16_t) < len) {
+	/* Cast to size_t to avoid overflows */
+	if ((size_t)n * 4 * sizeof (uint16_t) > len) {
 		ice_error(ice, "DDP configuration segment device ID count (%u)"
 		    " overflow", n);
 		return (false);
 	}
+
+	/* Advance *hdrp after the device ID table */
+	*hdrp = p;
+	*hdrp += n * 4 * sizeof (uint16_t);
+
+	/*
+	 * Reduce the remaining length of the segment by the size of
+	 * the device id table.
+	 */
+	*lenp = len;
+	*lenp -= n * 4 * sizeof (uint16_t);
 
 	for (i = 0; i < n; i++) {
 		uint16_t devid, venid, subdevid, subvenid;
@@ -685,27 +704,26 @@ ice_ddp_check_id(ice_t *ice, const uint8_t **hdrp, uint32_t *lenp)
 		subvenid = LE_IN16(p);
 		p += sizeof (uint16_t);
 
-		if (devid == ice->ice_pci_did && venid == ice->ice_pci_vid &&
+		if (devid == ice->ice_pci_did &&
+		    venid == ice->ice_pci_vid &&
 		    subdevid == ice->ice_pci_sdid &&
 		    subvenid == ice->ice_pci_svid) {
-			const uint8_t *end;
-			uint32_t total = n * 4 * sizeof (uint16_t);
-
-			/*
-			 * Set *hdrp and *lenp to reflect the remainder of
-			 * the segment after the device ID table.
-			 */
-			end = *hdrp + sizeof (uint32_t) + total;
-			*hdrp = end;
-			*lenp = len;
-
 			return (true);
 		}
 	}
 
-	ice_error(ice, "DDP configuration segment does not contain a matching "
-	    "PCI id for device");
-	return (false);
+	/*
+	 * We assume if there is a device id table, that we should be
+	 * able to find a match (if not, we probably need an updated
+	 * DDP package).
+	 */
+	if (n > 0) {
+		ice_error(ice, "DDP configuration segment does not contain a "
+		    "matching PCI id for device");
+		return (false);
+	}
+
+	return (true);
 }
 
 static bool
