@@ -1566,7 +1566,7 @@ ice_tx_pkt_ctor(void *buf, void *arg __unused, int kmflags __unused)
 void
 ice_tx_init(void)
 {
-	ice_tx_pkt_cache = kmem_cache_create("ice tx pkts",
+	ice_tx_pkt_cache = kmem_cache_create("ice_tx_pkt_t",
 	    sizeof (ice_tx_pkt_t), 8, ice_tx_pkt_ctor, NULL, NULL, NULL, NULL,
 	    0);
 }

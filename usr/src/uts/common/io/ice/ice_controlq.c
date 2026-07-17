@@ -1274,9 +1274,9 @@ ice_cmd_get_phy_abilities(ice_t *ice, ice_phy_abilities_t *datap,
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "failed to read PHY abilities: 0x%x %s (%s)"
-		    "(fw private: %x)", err, ice_controlq_errmsg(err),
-		    ice_controlq_errstr(err), hw);
+		ice_error(ice, "failed to read PHY abilities: %s - %s (0x%x) "
+		    "(fw private: %x)", ice_controlq_errmsg(err),
+		    ice_controlq_errstr(err), err, hw);
 		return (false);
 	}
 
@@ -1322,8 +1322,9 @@ ice_cmd_get_link_status(ice_t *ice, ice_link_status_t *linkp, ice_lse_t lse)
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "failed to get link status: 0x%x "
-		    "(fw private: %x)", err, hw);
+		ice_error(ice, "failed to get link status: %s - %s (0x%x) "
+		    "(fw private: %x)", ice_controlq_errstr(err),
+		    ice_controlq_errmsg(err), err, hw);
 		return (false);
 	}
 
@@ -1351,8 +1352,10 @@ ice_cmd_set_event_mask(ice_t *ice, uint16_t mask)
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "set event mask command failed with: 0x%x "
-		    "(fw private: %x)", err, hw);
+		ice_error(ice, "set event mask command failed with: "
+		    "%s - %s (0x%x) (fw private: %x)",
+		    ice_controlq_errstr(err), ice_controlq_errmsg(err), err,
+		    hw);
 		return (false);
 	}
 
@@ -1380,8 +1383,9 @@ ice_cmd_setup_link(ice_t *ice, bool enable)
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "setup link command failed with: 0x%x "
-		    "(fw private: %x)", err, hw);
+		ice_error(ice, "setup link command failed with: %s - %s (0x%x) "
+		    "(fw private: %x)", ice_controlq_errstr(err),
+		    ice_controlq_errmsg(err), err, hw);
 		return (false);
 	}
 
@@ -1415,8 +1419,9 @@ ice_cmd_get_switch_config(ice_t *ice, void *buf, size_t bufsize, uint16_t first,
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "failed to get link status: 0x%x "
-		    "(fw private: %x)", err, hw);
+		ice_error(ice, "failed to get link status: %s - %s (0x%x) "
+		    "(fw private: %x)", ice_controlq_errstr(err),
+		    ice_controlq_errmsg(err), err, hw);
 		return (false);
 	}
 
@@ -1468,8 +1473,10 @@ ice_cmd_free_vsi(ice_t *ice, ice_vsi_t *vsi, bool keep)
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "free vsi (%u) command failed with: 0x%x "
-		    "(fw private: %x)", vsi->ivsi_id, err, hw);
+		ice_error(ice, "free vsi (%u) command failed with: "
+		    "%s - %s (0x%x) (fw private: %x)", vsi->ivsi_id,
+		    ice_controlq_errstr(err), ice_controlq_errmsg(err), err,
+		    hw);
 		return (false);
 	}
 
@@ -1530,8 +1537,10 @@ ice_cmd_add_vsi(ice_t *ice, ice_vsi_t *vsi)
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "add vsi (%u) command failed with: 0x%x "
-		    "(fw private: %x)", vsi->ivsi_id, err, hw);
+		ice_error(ice, "add vsi (%u) command failed with: "
+		    "%s - %s (0x%x) (fw private: %x)", vsi->ivsi_id,
+		    ice_controlq_errstr(err), ice_controlq_errmsg(err), err,
+		    hw);
 		return (false);
 	}
 
@@ -1580,8 +1589,10 @@ ice_cmd_set_rss_key(ice_t *ice, ice_vsi_t *vsi, void *buf, uint_t len)
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "set rss key (VSI %u) command failed with: 0x%x "
-		    "(fw private: %x)", vsi->ivsi_id, err, hw);
+		ice_error(ice, "set rss key (VSI %u) command failed with: "
+		    "%s - %s (0x%x) (fw private: %x)", vsi->ivsi_id,
+		    ice_controlq_errstr(err), ice_controlq_errmsg(err), err,
+		    hw);
 		return (false);
 	}
 
@@ -1840,14 +1851,22 @@ ice_cmd_download_pkg(ice_t *ice, const void *pkg, size_t len, bool last)
 	}
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, (void *)pkg,
-	    ICE_CMD_COPY_FROM_DEV)) {
+	    ICE_CMD_COPY_TO_DEV)) {
 		return (false);
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
+		uint32_t offset;
+		uint32_t info;
+
+		offset = LE_32(desc.icqd_command.icc_generic.iccg_param0);
+		info = LE_32(desc.icqd_command.icc_generic.iccg_param1);
+
 		/* TODO should grab the error info and offset to display */
-		ice_error(ice, "failed to download package to device: 0x%x "
-		    "(fw private: %x)", err, hw);
+		ice_error(ice, "failed to download package to device: "
+		    "%s - %s (0x%x) (fw private: %x, offset 0x%x info 0x%x)",
+		    ice_controlq_errstr(err), ice_controlq_errmsg(err), err,
+		    hw, offset, info);
 		return (false);
 	}
 
