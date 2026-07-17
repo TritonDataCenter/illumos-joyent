@@ -149,6 +149,23 @@ ice_bitset32(uint32_t reg, uint_t high, uint_t low, uint32_t val)
 #define	ICE_REG_PF_FUNC_RID_BUS(x)	BITX(x, 15, 8)
 
 /*
+ * The ICE_REG_GLGEN_RSTCTL contains global reset parameters
+ */
+#define	ICE_REG_GLGEN_RSTCTL	0x000B8180
+/* The reset delay is in units of 100ms */
+#define	ICE_REG_GLGEN_RSTCTL_GRSTDEL		BITX(x, 5, 0)
+
+/*
+ * The ICE_REG_GLGEN_RSTAT register contains the global reset
+ * status.
+ */
+#define	ICE_REG_GLGEN_RSTAT	0x000B8188
+#define	ICE_REG_GLGEN_RSTAT_DEVSTATE(x)		BITX(x, 1, 0)
+#define	ICE_REG_GLGEN_RSTAT_DEVSTATE_ACTIVE		0
+#define	ICE_REG_GLGEN_RSTAT_DEVSTATE_REQUSTED		1
+#define	ICE_REG_GLGEN_RSTAT_DEVSTATE_INPROGRESS		2
+
+/*
  * The ICE_REG_GL_UFUSE_SOC provides information about the hardware chip that
  * we're working with. This is important for properly identifying the hardware
  * for things like ITRs.
@@ -240,7 +257,41 @@ ice_bitset32(uint32_t reg, uint_t high, uint_t low, uint32_t val)
 
 /*
  * NVM related registers.
- *
+ */
+
+/*
+ * The GLNVM_ULD register provodes the status of loading the
+ * shadow RAM and alternate module
+ */
+#define	ICE_REG_GLNVM_ULD	0x000B6008
+#define	ICE_REG_GLNVM_ULD_PCIER_DONE(x)		BITX(x, 0, 0)
+#define	ICE_REG_GLNVM_ULD_PCIER_DONE1(x)	BITX(x, 1, 1)
+#define	ICE_REG_GLNVM_ULD_CORER_DONE(x)		BITX(x, 3, 3)
+#define	ICE_REG_GLNVM_ULD_GLOBR_DONE(x)		BITX(x, 4, 4)
+#define	ICE_REG_GLNVM_ULD_POR_DONE(x)		BITX(x, 5, 5)
+#define	ICE_REG_GLNVM_ULD_POR_DONE1(x)		BITX(x, 8, 8)
+#define	ICE_REG_GLNVM_ULD_PCIER_DONE2(x)	BITX(x, 9, 9)
+#define	ICE_REG_GLNVM_ULD_PE_DONE(x)		BITX(x, 10, 10)
+
+#define	ICE_REG_GLNVM_ULD_STR "\020" \
+	"\013PE" \
+	"\012PCIER_DONE_2" \
+	"\011POR_DONE_1" \
+	"\006POR_DONE" \
+	"\005GLOBR_DONE" \
+	"\004CORER_DONE" \
+	"\002PCIER_DONE_1" \
+	"\001PCIER_DONE"
+
+#define	ICE_GLNVM_RESET_WAIT	5000	/* ms */
+
+/*
+ * Convienence mask of all the done bits except PE done. PE done appears
+ * to only be relevant when iWARP is being used.
+ */
+#define	ICE_REG_GLNVM_ULD_DONE			0x0000033B
+
+/*
  * GLNVM_GENS contains information about the size of the NVM and its presence.
  */
 #define	ICE_REG_GLNVM_GENS	0x000B6100
@@ -281,6 +332,16 @@ ice_bitset32(uint32_t reg, uint_t high, uint_t low, uint32_t val)
 #define	ICE_NVM_PBA_WORD3	0x03
 #define	ICE_NVM_PBA_WORD4	0x04
 #define	ICE_NVM_PBA_WORD5	0x05
+
+/*
+ * Manageability Registers
+ */
+#define	ICE_REG_MNG_FWSM		0x000B6134
+#define	ICE_REG_MNG_FWSM_FW_MODES(x)		BITX(x, 1, 0)
+#define	ICE_REG_MNG_FWSM_NORMAL			0
+#define	ICE_REG_MNG_FWSM_DEBUG			1
+#define	ICE_REG_MNG_FWSM_RECOVERY		2
+#define	ICE_REG_MNG_FWSM_DEBUG_RECOVERY		3
 
 /*
  * Capability structure defined by hardware and the various capability IDs.

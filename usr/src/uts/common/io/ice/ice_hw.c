@@ -233,15 +233,81 @@ ice_txq_context_write(ice_t *ice, ice_hw_txq_context_t *ctxt, uint8_t *dest,
 	return (true);
 }
 
+/*
+ * Check if a global reset is active, and if so, wait for it to complete
+ */
+static bool
+ice_pf_check_reset(ice_t *ice)
+{
+	uint32_t val, val2;
+	uint_t i;
+
+	val = ice_reg_read(ice, ICE_REG_GLGEN_RSTAT);
+	val2 = ice_reg_read(ice, ICE_REG_GLNVM_ULD);
+
+	/* No reset active, we're good */
+	if ((ICE_REG_GLGEN_RSTAT_DEVSTATE(val) ==
+	    ICE_REG_GLGEN_RSTAT_DEVSTATE_ACTIVE) &&
+	    (val2 & ICE_REG_GLNVM_ULD_DONE) == ICE_REG_GLNVM_ULD_DONE) {
+		return (true);
+	}
+
+	val = ice_reg_read(ice, ICE_REG_GLGEN_RSTAT);
+	/*
+	 * The FreeBSD driver suggests adding 1s to the delay time to allow
+	 * long running AQ commands to complete. We follow this suggestion.
+	 */
+	val += 10;
+
+	for (i = 0; i < val; i++) {
+		/*
+		 * The timeout is in units of 100ms, so we'll wait
+		 * 100ms at a time.
+		 */
+		delay(drv_usectohz(100 * 1000));
+
+		val2 = ice_reg_read(ice, ICE_REG_GLGEN_RSTAT);
+		if (ICE_REG_GLGEN_RSTAT_DEVSTATE(val2) ==
+		    ICE_REG_GLGEN_RSTAT_DEVSTATE_ACTIVE) {
+			break;
+		}
+	}
+
+	if (i == val) {
+		ice_error(ice, "timeout waiting for global reset to complete");
+		return (false);
+	}
+
+	/*
+	 * Check global reset processes. Check a somewhat arbitrary every
+	 * 10ms for completion.
+	 */
+	for (i = 0; i < ICE_GLNVM_RESET_WAIT / 10; i++) {
+		val = ice_reg_read(ice, ICE_REG_GLNVM_ULD);
+		if ((val & ICE_REG_GLNVM_ULD_DONE) == ICE_REG_GLNVM_ULD_DONE) {
+			/* All done */
+			return (true);
+		}
+
+		delay(drv_usectohz(10 * 1000));
+	}
+
+	ice_error(ice, "timeout waiting for global reset processes to "
+	    "complete: GLNVM_ULD = 0x%b", val, ICE_REG_GLNVM_ULD_STR);
+
+	return (false);
+}
+
 bool
 ice_pf_reset(ice_t *ice)
 {
 	uint_t i;
 	uint32_t val;
 
-	/*
-	 * XXX Check if a global reset is in progress.
-	 */
+	if (!ice_pf_check_reset(ice)) {
+		return (false);
+	}
+
 	val = ice_reg_read(ice, ICE_REG_PFGEN_CTRL);
 	val |= ICE_REG_PFGEN_CTRL_PFSWR;
 	ice_reg_write(ice, ICE_REG_PFGEN_CTRL, val);

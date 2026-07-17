@@ -872,7 +872,7 @@ ice_dma_sync(ice_t *ice, ice_dma_buffer_t *dma, uint_t flags)
 	return (true);
 }
 
-extern int ice_load_ddp(ice_t *);
+extern bool ice_load_ddp(ice_t *);
 extern void ice_buf_init(ice_t *);
 extern void ice_buf_fini(ice_t *);
 

@@ -155,38 +155,39 @@ static void ice_ddp_free_data(ice_pkg_data_t *);
  * >= NVM version
  *
  */
-int
+bool
 ice_load_ddp(ice_t *ice)
 {
 	firmware_handle_t	fh;
-	int			ret = 0;
 	ice_seg_idx_t		*idx;
 	ice_pkg_data_t		data = { 0 };
 	uint32_t		nidx;
+	int			rc;
+	bool			ret = false;
 
-	ret = firmware_open(ICE_MODULE_NAME, "ice.pkg", &fh);
-	if (ret != 0) {
-		return (ret);
+	rc = firmware_open(ICE_MODULE_NAME, "ice.pkg", &fh);
+	if (rc != 0) {
+		ice_error(ice, "failed to read DDP package ice.pkg: %d", rc);
+		return (false);
 	}
 
 	if (!ice_ddp_get_segs(ice, fh, &idx, &nidx)) {
-		ret = EIO;
 		goto done;
 	}
 
 	if (!ice_ddp_get_metadata(ice, fh, idx, nidx)) {
-		ret = EIO;
 		goto done;
 	}
 	
 	if (!ice_ddp_get_cfg(ice, fh, idx, nidx, &data)) {
-		ret = EIO;
 		goto done;
 	}
 
 	if (!ice_ddp_download_cfg(ice, &data)) {
-		ret = EIO;
+		goto done;
 	}
+
+	ret = true;
 
 done:
 	kmem_free(idx, nidx * sizeof (*idx));
@@ -470,7 +471,7 @@ ice_ddp_get_metadata(ice_t *ice, firmware_handle_t fh, ice_seg_idx_t *idx,
 
 	ice->ice_pkg_version = m.ipgm_version;
 
-	dev_err(ice->ice_dip, CE_CONT, "?DDP package %s version %u.%u.%u.%u\n",
+	dev_err(ice->ice_dip, CE_CONT, "?DDP package '%s' version %u.%u.%u.%u\n",
 	    m.ipgm_name, m.ipgm_version.ipv_major, m.ipgm_version.ipv_minor,
 	    m.ipgm_version.ipv_update, m.ipgm_version.ipv_draft);
 

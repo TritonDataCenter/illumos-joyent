@@ -196,6 +196,30 @@ ice_identify(ice_t *ice)
 	ice->ice_pf_id = ice->ice_pci_func;
 }
 
+static bool
+ice_check_mode(ice_t *ice)
+{
+	uint32_t reg;
+
+	reg = ice_reg_read(ice, ICE_REG_MNG_FWSM);
+	switch (ICE_REG_MNG_FWSM_FW_MODES(reg)) {
+	case ICE_REG_MNG_FWSM_NORMAL:
+		return (true);
+	case ICE_REG_MNG_FWSM_DEBUG:
+		/* This seems unusual enough to probably notify the operator */
+		dev_err(ice->ice_dip, CE_NOTE, "NIC is in debug mode");
+		return (true);
+	case ICE_REG_MNG_FWSM_RECOVERY:
+		ice_error(ice, "NIC is in recovery mode; cannot use");
+		return (false);
+	case ICE_REG_MNG_FWSM_DEBUG_RECOVERY:
+		ice_error(ice, "NIC is in debug + recovery mode; cannot use");
+		return (false);
+	}
+
+	/*NOTREACHED*/
+	return (false);
+}
 
 /*
  * Initialize any properties that we want to support via a driver.conf option.
@@ -219,7 +243,7 @@ ice_firmware_check(ice_t *ice)
 		return (B_FALSE);
 	}
 
-	dev_err(ice->ice_dip, CE_NOTE, "firmware: %u.%u.%u",
+	dev_err(ice->ice_dip, CE_CONT, "?firmware: %u.%u.%u",
 	    ice->ice_fwinfo.ifi_fw_major, ice->ice_fwinfo.ifi_fw_minor,
 	    ice->ice_fwinfo.ifi_fw_patch);
 
@@ -1559,6 +1583,12 @@ ice_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	ice->ice_seq |= ICE_ATTACH_REGS;
 
 	ice_identify(ice);
+
+	/* For now at least we can't handle recovery mode */
+	if (!ice_check_mode(ice)) {
+		goto err;
+	}
+
 	ice_properties_init(ice);
 
 	if (!ice_pf_reset(ice)) {

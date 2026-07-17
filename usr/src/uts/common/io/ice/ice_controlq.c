@@ -1638,8 +1638,9 @@ ice_cmd_set_rss_lut(ice_t *ice, ice_vsi_t *vsi, void *buf, uint_t len)
 	}
 
 	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "set rss lut (VSI %u) command failed with: 0x%x "
-		    "(fw private: %x)", vsi->ivsi_id, err, hw);
+		ice_error(ice, "set rss lut (VSI %u) command failed with: "
+		    "%s - %s (0x%x) (fw private: %x)", vsi->ivsi_id,
+		    ice_controlq_errstr(err), ice_controlq_errmsg(err), err, hw);
 		return (false);
 	}
 
