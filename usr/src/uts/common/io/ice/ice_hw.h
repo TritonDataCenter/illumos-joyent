@@ -409,6 +409,7 @@ typedef struct ice_phy_module {
 	uint8_t ipm_rev[4];
 	uint8_t ipm_rsvd1[8];
 } ice_phy_module_t;
+CTASSERT(sizeof (ice_phy_module_t) == 32);
 
 typedef struct ice_phy_abilities {
 	uint8_t	ipa_type[16];
@@ -422,9 +423,13 @@ typedef struct ice_phy_abilities {
 	uint8_t ipa_cmte;
 	uint8_t ipa_ext_code;
 	uint8_t ipa_mod_type;
+	uint8_t	ipa_mod_tech;
+	uint8_t ipa_mod_code;
 	uint8_t ipa_qual_mod_count;
+	uint8_t ipa_resv[7];
 	ice_phy_module_t ipa_modules[16];
 } ice_phy_abilities_t;
+CTASSERT(sizeof (ice_phy_abilities_t) == 560);
 
 #define	ICE_PHY_CAP_TX_PAUSE_ENABLED	0x01
 #define	ICE_PHY_CAP_RX_PAUSE_ENABLED	0x02
