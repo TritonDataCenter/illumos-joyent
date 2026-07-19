@@ -1,0 +1,32 @@
+# Intel E810 OS-Default DDP package
+
+`ice.pkg` is Intel's OS-Default Dynamic Device Personalization package,
+version 1.3.41.0.  The ice(4D) driver loads it during attach through
+`firmware_open(9F)`.  If it is absent or rejected, the driver deliberately
+falls back to Safe Mode.
+
+`usr/src/uts/intel/ice/Makefile` installs the package as
+`/kernel/firmware/ice/ice.pkg`.  The package manifest must include that path
+when the driver is integrated into an IPS package.  A successful attach logs
+the active package name and version reported by the device to the system log.
+
+The file is imported byte-for-byte from FreeBSD `freebsd-src` commit
+`d0b1a389003b1e6ff5bcf35a7c04654ea7ff87bd`:
+
+```
+sys/contrib/dev/ice/ice-1.3.41.0.pkg
+```
+
+FreeBSD identifies the package as version 1.3.41.0 in
+`sys/modules/ice_ddp/Makefile`.  The imported FreeBSD Git blob is
+`71e75a5d78365ae4a23bef57776e835e5009bc29`.
+
+The SHA-256 digest of `ice.pkg` is:
+
+```
+2925f8601490d4341dec36e27aa08e17c419ba2d9b4c7c0c6e798b2fe14cff92
+```
+
+Do not modify the package.  Updates must come from a redistributable Intel or
+FreeBSD release and must update the provenance, digest, and accompanying
+license in the same change.

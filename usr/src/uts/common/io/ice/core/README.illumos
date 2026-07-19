@@ -1,0 +1,30 @@
+#
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source.  A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+#
+
+This directory contains files extracted from the Intel FreeBSD ice
+driver. This uses the FreeBSD main branch, git SHA
+310145642312e1c5fb3d8efa8321cf905d0354c4.
+
+These files are the OS-independent "common code" and are used unmodified.
+All illumos adaptation lives in the ../ice_osdep.h and ../ice_osdep.c
+shim and in the surrounding driver; nothing in this directory is changed.
+
+The following files were imported but are intentionally not compiled (see
+the ICE_INTC_OBJS list in usr/src/uts/common/Makefile.files):
+
+    ice_dcb.c		DCB/LLDP support; no coupling into the rest of the
+			common code, omitted until needed.
+    ice_vf_mbx.c	SR-IOV virtchnl mailbox; omitted until IOV support
+			is added.
+
+The following illumos changes have further modified the common code:
+
+    (none yet)
