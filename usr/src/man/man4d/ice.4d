@@ -1,0 +1,129 @@
+.\"
+.\" This file and its contents are supplied under the terms of the
+.\" Common Development and Distribution License ("CDDL"), version 1.0.
+.\" You may only use this file in accordance with the terms of version
+.\" 1.0 of the CDDL.
+.\"
+.\" A full copy of the text of the CDDL should have accompanied this
+.\" source.  A copy of the CDDL is also available via the Internet at
+.\" http://www.illumos.org/license/CDDL.
+.\"
+.\"
+.\" Copyright 2026 Edgecast Cloud LLC.
+.\"
+.Dd July 18, 2026
+.Dt ICE 4D
+.Os
+.Sh NAME
+.Nm ice
+.Nd Intel E810 Ethernet Device Driver
+.Sh SYNOPSIS
+.Pa /dev/net/ice*
+.Sh DESCRIPTION
+The
+.Nm
+driver is a GLDv3, multi-threaded, clonable, loadable device driver that
+supports the Data Link Provider Interface,
+.Xr dlpi 4P ,
+on the Intel E810 family of Ethernet controllers.
+.Pp
+The controller negotiates its rate with the attached media and supported
+speeds range from 1 GbE through 100 GbE depending on the installed
+transceiver or cable.
+.Pp
+In addition to basic device initialization and the sending and receiving of
+frames, the driver supports the following features:
+.Bl -dash -offset indent
+.It
+Jumbo frames up to 9706 bytes.
+.It
+Promiscuous access via
+.Xr snoop 8
+and
+.Xr dlpi 4P .
+.It
+IPv4 header checksum offload.
+.It
+IPv4 and IPv6 TCP, UDP checksum offload.
+.It
+Receive Side Scaling
+.Pq RSS
+across multiple hardware queues.
+.It
+TCP Segmentation Offload
+.Pq LSO ,
+disabled by default; see
+.Sx PROPERTIES .
+.It
+Transceiver information through
+.Xr dladm 8 .
+.El
+.Pp
+The
+.Nm
+driver does not currently support hardware VLAN filtering offload, energy
+efficient Ethernet
+.Pq EEE ,
+SR-IOV, or hardware flow control through pause frames.
+.Sh CONFIGURATION
+The
+.Nm
+driver is configured by defining properties in its
+.Xr driver.conf 5
+file
+.Pa /kernel/drv/ice.conf .
+Values there apply to all
+.Nm
+instances; the properties are described in
+.Sx PROPERTIES .
+The maximum transmission unit and other data-link properties may also be set
+at runtime with
+.Xr dladm 8 .
+.Pp
+The driver requires the Dynamic Device Personalization
+.Pq DDP
+package installed at
+.Pa /kernel/firmware/ice/ice.pkg .
+If the package cannot be loaded the device enters a reduced-function safe mode
+with a single queue.
+.Sh PROPERTIES
+The following properties may be set in the
+.Nm
+.Xr driver.conf 5
+file.
+.Bl -tag -width Ds
+.It Sy num_queues
+The number of receive and transmit data queues to allocate.
+The value is clamped to the number of online CPUs and the number of MSI-X
+interrupt vectors the platform grants, and is rounded down to a power of two.
+The default is the driver maximum.
+.It Sy tx_lso_enable
+When set to a non-zero value, the driver advertises TCP large-send (LSO/TSO)
+segmentation offload.
+The default is
+.Sy 0
+.Pq disabled .
+.It Sy default_mtu
+The initial maximum transmission unit, in bytes.
+The MTU may also be changed at runtime with
+.Xr dladm 8 .
+The default is
+.Sy 1500 .
+.El
+.Sh FILES
+.Bl -tag -width Pa
+.It Pa /dev/net/ice*
+Per-instance character-special device.
+.It Pa /kernel/drv/amd64/ice
+Device driver
+.Pq 64-bit .
+.It Pa /kernel/drv/ice.conf
+Driver configuration file.
+.It Pa /kernel/firmware/ice/ice.pkg
+Dynamic Device Personalization package.
+.El
+.Sh SEE ALSO
+.Xr dlpi 4P ,
+.Xr driver.conf 5 ,
+.Xr dladm 8 ,
+.Xr snoop 8

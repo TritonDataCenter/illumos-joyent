@@ -196,6 +196,7 @@ i386_MANFILES=	ahci.4d		\
 		ecpp.4d		\
 		elxl.4d		\
 		i40e.4d		\
+		ice.4d		\
 		imc.4d		\
 		imcstub.4d	\
 		ipmi.4d		\
