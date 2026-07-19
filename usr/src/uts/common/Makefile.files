@@ -2105,6 +2105,17 @@ I40E_INTC_OBJS = i40e_adminq.o i40e_common.o i40e_hmc.o i40e_lan_hmc.o \
 		 i40e_nvm.o i40e_dcb.o
 
 #
+#	Intel E810 (ice) NIC driver module
+#
+# illumos-written ones.
+ICE_OBJS =	ice_osdep.o ice.o ice_intr.o ice_vsi.o ice_dma.o ice_tx.o \
+		ice_rx.o ice_gld.o ice_ddp.o ice_stats.o
+# Intel-written ones.  (ice_dcb.o and ice_vf_mbx.o intentionally omitted)
+ICE_INTC_OBJS =	ice_common.o ice_controlq.o ice_sched.o ice_switch.o \
+		ice_nvm.o ice_flow.o ice_flex_pipe.o ice_ddp_common.o \
+		ice_vlan_mode.o ice_fwlog.o
+
+#
 #	Solarflare 1/10/40GbE NIC driver module
 #
 #	NB: The illumos specific sources are listed first, with the
