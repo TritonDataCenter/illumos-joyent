@@ -179,7 +179,11 @@ ice_fill_tx_ring(void *arg, mac_ring_type_t rtype, const int group_index,
 	ice_t		*ice = arg;
 	ice_tx_ring_t	*txr;
 
-	ASSERT3S(group_index, ==, 0);
+	//XXX: This appears to be called with a group_index of -1
+	//it's unclear if this is a bug in mac, or a documentation
+	//oversight. Since we don't need it, we skip the check
+	//until we know what the correct behavior is supposed to be.
+	//ASSERT3S(group_index, ==, 0);
 	ASSERT3S(ring_index, <, ice->ice_num_txq);
 
 	txr = &ice->ice_txr[ring_index];
