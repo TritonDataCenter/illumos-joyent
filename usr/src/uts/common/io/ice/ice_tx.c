@@ -687,7 +687,7 @@ ice_tx_pkt_init(ice_tx_ring_t *txr, ice_tx_pkt_t *pkt, mblk_t *mp)
 			 * we drop it.
 			 */
 			txr->itxr_stats.ictxs_badmss.value.ui64++;
-			
+
 			pkt->itxp_mss = 0;
 			if (pkt->itxp_msglen > txr->itxr_ice->ice_max_mtu) {
 				return (false);

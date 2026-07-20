@@ -11,6 +11,7 @@
 
 #
 # Copyright 2025 Richard Lowe
+# Copyright 2026 RackTop Systems, Inc.
 #
 
 syntax: glob
@@ -43,6 +44,7 @@ usr/src/test/util-tests/tests/pcieadm/igb.pci
 
 # Firmware
 usr/src/cmd/luxadm/ibfirmware
+usr/src/uts/common/io/ice/*.pkg
 usr/src/uts/common/io/mwl/mwl_fw/mw88W8363
 usr/src/uts/common/io/mwl/mwl_fw/mwlboot
 

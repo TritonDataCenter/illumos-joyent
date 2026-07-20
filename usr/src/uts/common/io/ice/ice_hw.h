@@ -1078,7 +1078,7 @@ typedef enum ice_sw_recipe {
 #define	ICE_SW_RULE_ACT_OTHER_MIRROR		0
 #define	ICE_SW_RULE_ACT_SET_STAT		(3 << 17)
 #define	ICE_SW_RULE_ACT_MIRROR_VSI(x)		ICE_SW_RULE_ACT_VSI(x)
-#define	ICE_SW_RULE_ACT_STAT_IDX(x) 		(BITX(x, 11, 4) << 4)
+#define	ICE_SW_RULE_ACT_STAT_IDX(x)		(BITX(x, 11, 4) << 4)
 
 typedef struct ice_sw_large_action {
 	uint16_t	iswla_index;

@@ -178,7 +178,7 @@ ice_load_ddp(ice_t *ice)
 	if (!ice_ddp_get_metadata(ice, fh, idx, nidx)) {
 		goto done;
 	}
-	
+
 	if (!ice_ddp_get_cfg(ice, fh, idx, nidx, &data)) {
 		goto done;
 	}
@@ -258,7 +258,7 @@ ice_ddp_get_segs(ice_t *ice, firmware_handle_t fh, ice_seg_idx_t **idxp,
 		kmem_free(segs, n * sizeof (uint32_t));
 		ice_error(ice, "failed to read DDP package segment offsets");
 		return (false);
-	}	
+	}
 
 	/* Sanity check the offsets */
 	for (i = 0; i < n; i++) {
@@ -471,7 +471,8 @@ ice_ddp_get_metadata(ice_t *ice, firmware_handle_t fh, ice_seg_idx_t *idx,
 
 	ice->ice_pkg_version = m.ipgm_version;
 
-	dev_err(ice->ice_dip, CE_CONT, "?DDP package '%s' version %u.%u.%u.%u\n",
+	dev_err(ice->ice_dip, CE_CONT,
+	    "?DDP package '%s' version %u.%u.%u.%u\n",
 	    m.ipgm_name, m.ipgm_version.ipv_major, m.ipgm_version.ipv_minor,
 	    m.ipgm_version.ipv_update, m.ipgm_version.ipv_draft);
 
@@ -488,7 +489,6 @@ ice_ddp_download_cfg(ice_t *ice, ice_pkg_data_t *dp)
 	uint32_t	count = 0;
 	bool		ret = false;
 	bool		last = true;
-	
 
 	if (!ice_ddp_check_id(ice, &p, &len)) {
 		return (false);

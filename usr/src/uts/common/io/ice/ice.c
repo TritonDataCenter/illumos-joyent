@@ -1231,7 +1231,7 @@ ice_rx_ring_init(ice_t *ice, ice_rx_ring_t *rxr, uint_t index)
 	kstat_named_init(&rqs->icrxs_bind_no_rcb, "bind_no_rcb",
 	    KSTAT_DATA_UINT64);
 	kstat_named_init(&rqs->icrxs_bind_no_mp, "bind_no_mp",
-	KSTAT_DATA_UINT64);
+	    KSTAT_DATA_UINT64);
 	kstat_named_init(&rqs->icrxs_hck_unknown, "hck_unknown",
 	    KSTAT_DATA_UINT64);
 	kstat_named_init(&rqs->icrxs_hck_nol3l4p, "hck_nol3l4p",
@@ -1428,7 +1428,7 @@ ice_ring_init(ice_t *ice)
 			ice->ice_rxr[i].irxr_vec = vector++;
 			vector %= ice->ice_nintrs;
 
-			/* Reserve vector 0 for the controlq if MSI-X*/
+			/* Reserve vector 0 for the controlq if MSI-X */
 			if (vector == 0 && ice->ice_nintrs > 1)
 				vector++;
 		}

@@ -952,7 +952,8 @@ ice_rx_stop(ice_t *ice)
 	size_t n_rcbs, sz;
 	uint_t i;
 
-	/* XXX: should we have a CV to wait for onloan buffers to be
+	/*
+	 * XXX: should we have a CV to wait for onloan buffers to be
 	 * returned?
 	 */
 

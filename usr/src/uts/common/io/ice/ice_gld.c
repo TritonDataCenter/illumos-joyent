@@ -179,11 +179,11 @@ ice_fill_tx_ring(void *arg, mac_ring_type_t rtype, const int group_index,
 	ice_t		*ice = arg;
 	ice_tx_ring_t	*txr;
 
-	//XXX: This appears to be called with a group_index of -1
-	//it's unclear if this is a bug in mac, or a documentation
-	//oversight. Since we don't need it, we skip the check
-	//until we know what the correct behavior is supposed to be.
-	//ASSERT3S(group_index, ==, 0);
+	// XXX: This appears to be called with a group_index of -1
+	// it's unclear if this is a bug in mac, or a documentation
+	// oversight. Since we don't need it, we skip the check
+	// until we know what the correct behavior is supposed to be.
+	// ASSERT3S(group_index, ==, 0);
 	ASSERT3S(ring_index, <, ice->ice_num_txq);
 
 	txr = &ice->ice_txr[ring_index];
@@ -336,16 +336,16 @@ ice_promisc_init_rule(ice_sw_rule_t *rule, uint16_t vsi_id, uint16_t src,
 	ice_sw_lookup_t *lk = &rule->iswr_data.iswr_lookup;
 
 	rule->iswr_type = tx ?
-		LE_16(ICE_SW_RULE_T_LOOKUP_TX) :
-		LE_16(ICE_SW_RULE_T_LOOKUP_RX);
+	    LE_16(ICE_SW_RULE_T_LOOKUP_TX) :
+	    LE_16(ICE_SW_RULE_T_LOOKUP_RX);
 
 	lk->iswl_rid = LE_16(ICE_SW_RECIPE_PROMISC);
 	lk->iswl_source = LE_16(src);
 	lk->iswl_action = LE_32(
-		ICE_SW_RULE_ACT_T_LOGICAL_PORT_FWD |
-		ICE_SW_RULE_ACT_LAN_EN |
-		(uint32_t)vsi_id << ICE_SW_RULE_ACT_VSI_SHIFT |
-		ICE_SW_RULE_ACT_VSI_VALID);
+	    ICE_SW_RULE_ACT_T_LOGICAL_PORT_FWD |
+	    ICE_SW_RULE_ACT_LAN_EN |
+	    (uint32_t)vsi_id << ICE_SW_RULE_ACT_VSI_SHIFT |
+	    ICE_SW_RULE_ACT_VSI_VALID);
 	lk->iswl_header_len = RULE_DATA_SZ;
 
 	lk->iswl_data[0] = 0x2;

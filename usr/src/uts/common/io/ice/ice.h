@@ -681,7 +681,7 @@ typedef struct ice {
 	/*
 	 * Since promiscuous mode can be set on group 0 (which for us is
 	 * the first VSI), we track the corresponding switch rule ids
-	 * here instead of in the VSI. This includes 
+	 * here instead of in the VSI.
 	 */
 	uint16_t		ice_promisc_rid_tx;
 	uint16_t		ice_promisc_m_rid_tx;
@@ -854,7 +854,7 @@ extern void ice_dma_free(ice_dma_buffer_t *);
 extern bool ice_dma_alloc(ice_t *, ice_dma_buffer_t *, ddi_dma_attr_t *,
     ddi_device_acc_attr_t *, bool, size_t, bool);
 extern int ice_check_dma_handle(ddi_dma_handle_t);
-extern ice_dma_buffer_t * ice_small_buf_alloc(ice_t *);
+extern ice_dma_buffer_t *ice_small_buf_alloc(ice_t *);
 extern void ice_small_buf_free(ice_t *, ice_dma_buffer_t *);
 extern ice_dma_buffer_t *ice_buf_alloc(ice_t *);
 extern void ice_buf_free(ice_t *, ice_dma_buffer_t *);

@@ -593,7 +593,7 @@ typedef enum {
 
 /*
  * Submit a command to the send queue, bump the register that indicates that we
-* own it,
+ * own it,
  * XXX Indirect commands are being punted on, we're not properly copying things
  * out.
  */
@@ -796,11 +796,11 @@ ice_cmd_driver_version(ice_t *ice, uint8_t maj, uint8_t min, uint8_t patch,
 	dv->iccdv_minor = min;
 	dv->iccdv_build = patch;
 	dv->iccdv_sub_build = rc;
-	//iccdv_data_{high,low}
+	// iccdv_data_{high,low}
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DRIVER_VERSION, slen, true);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, (void *)str,
-	   ICE_CMD_COPY_TO_DEV)) {
+	    ICE_CMD_COPY_TO_DEV)) {
 		return (false);
 	}
 
@@ -1640,7 +1640,8 @@ ice_cmd_set_rss_lut(ice_t *ice, ice_vsi_t *vsi, void *buf, uint_t len)
 	if (!ice_cmd_result(&desc, &err, &hw)) {
 		ice_error(ice, "set rss lut (VSI %u) command failed with: "
 		    "%s - %s (0x%x) (fw private: %x)", vsi->ivsi_id,
-		    ice_controlq_errstr(err), ice_controlq_errmsg(err), err, hw);
+		    ice_controlq_errstr(err), ice_controlq_errmsg(err), err,
+		    hw);
 		return (false);
 	}
 
@@ -1791,7 +1792,8 @@ ice_cmd_switch_rules(ice_t *ice, ice_cq_opcode_t op, uint16_t nrules,
 		return (false);
 	}
 
-	/* XXX: do we resync the data back from the device? the add
+	/*
+	 * XXX: do we resync the data back from the device? the add
 	 * command at least updates the descriptor with the assigned index
 	 * from the hardware, which we need to later reference it.
 	 */

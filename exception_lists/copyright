@@ -27,6 +27,7 @@
 # Copyright 2024 Oxide Computer Company
 # Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
 # Copyright 2026 Hans Rosenfeld
+# Copyright 2026 RackTop Systems, Inc.
 #
 
 syntax: glob
@@ -476,6 +477,7 @@ usr/src/uts/common/io/iwn/THIRDPARTYLICENSE.descrip
 usr/src/uts/common/io/iwn/fw-iw/THIRDPARTYLICENSE
 usr/src/uts/common/io/iwn/fw-iw/THIRDPARTYLICENSE.descrip
 usr/src/uts/common/io/iwn/fw-iw/*.ucode
+usr/src/uts/common/io/ice/ice-*.pkg
 usr/src/uts/common/io/igc/core/*
 usr/src/uts/common/io/ixgbe/core/*
 usr/src/uts/common/fs/zfs/THIRDPARTYLICENSE.lz4.descrip
