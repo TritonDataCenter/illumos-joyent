@@ -398,7 +398,7 @@ ice_buf_init(ice_t *ice)
 	 * smarter here and cap this at some limit to spread amongst the
 	 * RX buffers.
 	 */
-	for (i = 0; i < ice->ice_itr_rx; i++) {
+	for (i = 0; i < ice->ice_num_rxq_per_vsi * ice->ice_num_vsis; i++) {
 		n_buf += ice->ice_rxr[i].irxr_size;
 	}
 
