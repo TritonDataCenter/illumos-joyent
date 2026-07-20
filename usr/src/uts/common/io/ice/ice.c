@@ -1549,8 +1549,6 @@ ice_cleanup(ice_t *ice)
 		ice->ice_seq &= ~ICE_ATTACH_FM;
 	}
 
-	ice_tx_fini();
-
 	ASSERT0(ice->ice_seq);
 	kmem_free(ice, sizeof (ice_t));
 }
@@ -1570,8 +1568,6 @@ ice_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 
 	list_create(&ice->ice_mc_macs, sizeof (ice_vsi_mac_t),
 	    offsetof(ice_vsi_mac_t, ivm_node));
-
-	ice_tx_init();
 
 	ice_fm_init(ice);
 	ice->ice_seq |= ICE_ATTACH_FM;
@@ -1812,6 +1808,8 @@ _init(void)
 {
 	int ret;
 
+	ice_tx_init();
+
 	mac_init_ops(&ice_dev_ops, ICE_MODULE_NAME);
 
 	if ((ret = mod_install(&ice_modlinkage)) != 0) {
@@ -1838,5 +1836,8 @@ _fini(void)
 	}
 
 	mac_fini_ops(&ice_dev_ops);
+
+	ice_tx_fini();
+
 	return (ret);
 }
