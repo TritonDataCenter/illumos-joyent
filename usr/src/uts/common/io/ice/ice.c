@@ -1365,9 +1365,14 @@ ice_ring_init(ice_t *ice)
 			goto fail_tx;
 	}
 
-	/* Assign the available interrupt vectors to the RX and TX rings */
+	/*
+	 * Assign the available interrupt vectors to the RX and TX rings.
+	 * Since the controlq always gets its own vector, we use > and not
+	 * >= when comparing the # of vectors we want for a given 'scheme'
+	 * (vector per queue, vector per tx/rx queue pair, etc).
+	 */
 
-	if (ice->ice_nintrs >= ice->ice_num_rxq_per_vsi + ice->ice_num_txq) {
+	if (ice->ice_nintrs > ice->ice_num_rxq_per_vsi + ice->ice_num_txq) {
 		/* Every ring gets its own vector */
 		for (i = 0; i < ice->ice_num_rxq_per_vsi; i++) {
 			ASSERT3U(vector, <, ice->ice_nintrs);
@@ -1378,7 +1383,7 @@ ice_ring_init(ice_t *ice)
 			ASSERT3U(vector, <, ice->ice_nintrs);
 			ice->ice_txr[i].itxr_vec = vector++;
 		}
-	} else if (ice->ice_nintrs >= MAX(ice->ice_num_rxq_per_vsi,
+	} else if (ice->ice_nintrs > MAX(ice->ice_num_rxq_per_vsi,
 	    ice->ice_num_txq)) {
 		/*
 		 * Try to pair up (as much as possible) a TX and RX queue
