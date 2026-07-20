@@ -1342,6 +1342,27 @@ ice_tx_ring_fini(ice_tx_ring_t *txr)
 	cv_destroy(&txr->itxr_cv);
 }
 
+static void
+ice_ring_fini(ice_t *ice)
+{
+	uint_t i;
+
+	for (i = ice->ice_num_txq; i > 0; i--) {
+		ice_tx_ring_t *txr = &ice->ice_txr[i - 1];
+
+		ice_intr_remove_handler(ice, txr->itxr_vec, &txr->itxr_intr);
+		ice_tx_ring_fini(txr);
+	}
+
+	ASSERT3U(ice->ice_num_vsis, ==, 1);
+	for (i = ice->ice_num_rxq_per_vsi; i > 0; i--) {
+		ice_rx_ring_t *rxr = &ice->ice_rxr[i - 1];
+
+		ice_intr_remove_handler(ice, rxr->irxr_vec, &rxr->irxr_intr);
+		ice_rx_ring_fini(rxr);
+	}
+}
+
 static bool
 ice_ring_init(ice_t *ice)
 {
@@ -1442,13 +1463,13 @@ ice_ring_init(ice_t *ice)
 
 fail_tx:
 	while (i-- > 0)
-		ice_tx_ring_fini(&ice->ice_txr[i]);
+		ice_tx_ring_fini(&ice->ice_txr[i - 1]);
 
 	i = ice->ice_num_rxq_per_vsi;
 
 fail_rx:
 	while (i-- > 0)
-		ice_rx_ring_fini(&ice->ice_rxr[i]);
+		ice_rx_ring_fini(&ice->ice_rxr[i - 1]);
 
 	return (false);
 }
@@ -1471,7 +1492,7 @@ ice_cleanup(ice_t *ice)
 	}
 
 	if (ice->ice_seq & ICE_ATTACH_RING) {
-		// TODO
+		ice_ring_fini(ice);
 	}
 
 	if (ice->ice_seq & ICE_ATTACH_VSI) {
