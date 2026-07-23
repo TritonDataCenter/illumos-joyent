@@ -341,6 +341,12 @@ typedef struct ice_tx_ctrl_block {
 	hrtime_t		itcb_tx_time;
 } ice_tx_ctrl_block_t;
 
+/* The maximum size of a TX ring */
+#define	ICE_TX_RING_MAX_SIZE	0x1FE0
+
+/* A rather arbitrary default */
+#define	ICE_TX_RING_DEFAULT_SIZE	1024
+
 #define	ICE_TX_MAX_DESC		8
 #define	ICE_TX_MAX_LSO_DESC	32
 
@@ -410,6 +416,9 @@ typedef struct ice_tx_ring {
 
 /* The maximum size of a RX ring */
 #define	ICE_RX_RING_MAX_SIZE	0x1FE0
+
+/* A rather arbitrary default ring size */
+#define	ICE_RX_RING_DEFAULT_SIZE	1024
 
 struct ice_rx_ring;
 

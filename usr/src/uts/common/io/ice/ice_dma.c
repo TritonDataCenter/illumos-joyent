@@ -384,13 +384,14 @@ ice_small_buf_free(ice_t *ice, ice_dma_buffer_t *buf)
 void
 ice_buf_init(ice_t *ice)
 {
-	size_t i, n_buf;
+	size_t i, n_buf, bufsz;
 	ddi_dma_attr_t attr;
 	ddi_device_acc_attr_t acc;
 
 	ice_pkt_dma_attr(ice, &attr);
 	ice_dma_acc_attr(ice, &acc);
 
+	bufsz = MIN(4096, ice->ice_mtu);
 	n_buf = 0;
 
 	/*
@@ -413,7 +414,7 @@ ice_buf_init(ice_t *ice)
 	    KM_SLEEP);
 	for (i = 0; i < n_buf; i++) {
 		VERIFY(ice_dma_alloc(ice, &ice->ice_bufs[i], &attr, &acc,
-		    true, ice->ice_buf_sz, true));
+		    true, bufsz, true));
 		ice->ice_dma_bufs[i] = &ice->ice_bufs[i];
 	}
 	ice->ice_buf_sz = ice->ice_buf_alloc = n_buf;
@@ -429,7 +430,7 @@ ice_buf_init(ice_t *ice)
 
 	for (i = 0; i < n_buf; i++) {
 		VERIFY(ice_dma_alloc(ice, &ice->ice_small_bufs[i], &attr,
-		    &acc, true, ice->ice_small_buf_sz, true));
+		    &acc, true, ICE_TX_SMALL_PKT, true));
 		ice->ice_dma_small_bufs[i] = &ice->ice_small_bufs[i];
 	}
 	ice->ice_small_buf_sz = ice->ice_small_buf_alloc = n_buf;

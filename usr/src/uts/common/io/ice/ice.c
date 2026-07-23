@@ -842,7 +842,6 @@ start:
 	}
 
 	if ((work & ICE_WORK_LINK_STATUS_EVENT) != 0) {
-		ice_error(ice, "XXX attempting LSE");
 		if (!ice_link_status_update(ice)) {
 			ice_error(ice, "failed to update ice link status due "
 			    "to controlq event");
@@ -1197,6 +1196,7 @@ ice_rx_ring_init(ice_t *ice, ice_rx_ring_t *rxr, uint_t index)
 	    DDI_INTR_PRI(ice->ice_intr_pri));
 	rxr->irxr_ice = ice;
 	rxr->irxr_index = index;
+	rxr->irxr_size = ice->ice_rx_rsize;
 
 	(void) snprintf(buf, sizeof (buf), "rx_%u", index);
 
@@ -1275,6 +1275,7 @@ ice_tx_ring_init(ice_t *ice, ice_tx_ring_t *txr, uint_t index)
 
 	txr->itxr_ice = ice;
 	txr->itxr_index = index;
+	txr->itxr_size = ICE_TX_RING_DEFAULT_SIZE;
 	mutex_init(&txr->itxr_lock, NULL, MUTEX_DRIVER, pri);
 	mutex_init(&txr->itxr_tcb_lock, NULL, MUTEX_DRIVER, pri);
 	cv_init(&txr->itxr_cv, NULL, CV_DRIVER, NULL);
@@ -1587,6 +1588,8 @@ ice_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	ice = kmem_zalloc(sizeof (ice_t), KM_SLEEP);
 	ice->ice_dip = dip;
 	ice->ice_inst = ddi_get_instance(dip);
+
+	ice->ice_rx_rsize = ICE_TX_RING_DEFAULT_SIZE;
 
 	list_create(&ice->ice_mc_macs, sizeof (ice_vsi_mac_t),
 	    offsetof(ice_vsi_mac_t, ivm_node));

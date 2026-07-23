@@ -1418,8 +1418,8 @@ ice_tx_teardown_bufs(ice_tx_ring_t *txr)
 	while (txr->itxr_tcb_nfree > 0) {
 		ice_tx_ctrl_block_t *tcb;
 
-		tcb = txr->itxr_tcb_free_list[txr->itxr_tcb_nfree];
-		txr->itxr_tcb_free_list[--txr->itxr_tcb_nfree] = NULL;
+		tcb = txr->itxr_tcb_free_list[--txr->itxr_tcb_nfree];
+		txr->itxr_tcb_free_list[txr->itxr_tcb_nfree] = NULL;
 
 		ddi_dma_free_handle(&tcb->itcb_dmah);
 		ddi_dma_free_handle(&tcb->itcb_lso_dmah);
