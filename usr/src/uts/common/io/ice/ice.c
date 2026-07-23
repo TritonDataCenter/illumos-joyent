@@ -1493,6 +1493,7 @@ ice_cleanup(ice_t *ice)
 
 	if (ice->ice_seq & ICE_ATTACH_RING) {
 		ice_ring_fini(ice);
+		ice->ice_seq &= ~ICE_ATTACH_RING;
 	}
 
 	if (ice->ice_seq & ICE_ATTACH_VSI) {
