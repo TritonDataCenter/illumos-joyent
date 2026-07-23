@@ -921,7 +921,7 @@ ice_rx_start(ice_t *ice)
 	 */
 
 	n_rcbs = 0;
-	for (i = 0; i < ice->ice_itr_rx; i++) {
+	for (i = 0; i < ice->ice_num_rxq_per_vsi * ice->ice_num_vsis; i++) {
 		ice_rx_ring_t *rxr = &ice->ice_rxr[i];
 
 		n_rcbs += rxr->irxr_size;
