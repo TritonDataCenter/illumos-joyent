@@ -1452,13 +1452,8 @@ ice_ring_tx_start(mac_ring_driver_t mri, uint64_t gen)
 	ice_tx_ring_t		*txr = (ice_tx_ring_t *)mri;
 	ice_t			*ice = txr->itxr_ice;
 	ice_vsi_t		*vsi = list_head(&ice->ice_vsi);
-	ice_hw_txq_context_t	ctx = {
-		.ihtc_vmvf_type = ICE_HW_TXQ_CTX_VMVF_TYPE_PF,
-		.ihtc_vsi_id = vsi->ivsi_id,
-		.ihtc_qlen = txr->itxr_size,
-		.ihtc_tso = 1,
-		// TODO -- other fields
-	};
+	uint64_t		ring_pa;
+	ice_hw_txq_context_t	ctx = { 0 };
 
 	ASSERT3P(vsi, !=, NULL);
 
@@ -1467,7 +1462,16 @@ ice_ring_tx_start(mac_ring_driver_t mri, uint64_t gen)
 		return (-1);
 	}
 
-	ctx.ihtc_base = txr->itxr_dma.idb_cookie.dmac_laddress;
+	ring_pa = txr->itxr_dma.idb_cookie.dmac_laddress;
+
+	/* Double check the ring's physical address is properly aligned */
+	ASSERT3U(P2PHASE(ring_pa, (1ULL << 7)), ==, 0);
+
+	ctx.ihtc_base = ring_pa >> 7;
+	ctx.ihtc_vmvf_type = ICE_HW_TXQ_CTX_VMVF_TYPE_PF;
+	ctx.ihtc_vsi_id = vsi->ivsi_id;
+	ctx.ihtc_qlen = txr->itxr_size;
+	ctx.ihtc_tso = 1;
 
 	if (!ice_cmd_add_txq_grp(ice, vsi, &ctx)) {
 		ice_tx_teardown_bufs(txr);

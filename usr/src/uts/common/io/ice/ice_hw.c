@@ -68,6 +68,7 @@ const ice_context_map_t ice_txq_map[] = {
 	{ offsetof(ice_hw_txq_context_t, ihtc_vmvf_type), 1, 78, 79 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_vsi_id), 2, 80, 89 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_tsync), 1, 90, 90 },
+	{ offsetof(ice_hw_txq_context_t, ihtc_tso), 1, 91, 91 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_alt_vlan), 1, 92, 92 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_cpuid), 1, 93, 100 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_wb_mode), 1, 101, 101 },
@@ -201,6 +202,8 @@ ice_rxq_context_write(ice_t *ice, ice_hw_rxq_context_t *ctxt, uint_t index)
 	for (i = 0; i < ARRAY_SIZE(ice_rxq_map); i++) {
 		if (!ice_context_write(ice, (uint8_t *)ctxt, buf, sizeof (buf),
 		    &ice_rxq_map[i])) {
+			ice_error(ice, "failed writing RX queue context "
+			    "field %u", i);
 			return (false);
 		}
 	}
@@ -226,6 +229,8 @@ ice_txq_context_write(ice_t *ice, ice_hw_txq_context_t *ctxt, uint8_t *dest,
 	for (i = 0; i < ARRAY_SIZE(ice_txq_map); i++) {
 		if (!ice_context_write(ice, (uint8_t *)ctxt, dest, len,
 		    &ice_txq_map[i])) {
+			ice_error(ice, "failed writing TX queue context "
+			    "field %u", i);
 			return (false);
 		}
 	}
