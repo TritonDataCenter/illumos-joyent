@@ -1688,7 +1688,8 @@ ice_cmd_get_default_scheduler(ice_t *ice, void *buf, size_t len,
  * at a time.
  */
 bool
-ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_hw_txq_context_t *ctx)
+ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_tx_ring_t *txr,
+    ice_hw_txq_context_t *ctx)
 {
 	ice_hw_txq_group_t	*grp;
 	ice_hw_txq_perq_t	*perq;
@@ -1706,18 +1707,40 @@ ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_hw_txq_context_t *ctx)
 	grp = kmem_zalloc(len, KM_SLEEP);
 	perq = &grp->ihtg_perq[0];
 
-	ice_cmd_indirect_init(&desc, ICE_CQ_OP_ADD_TXQ, len, false);
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_ADD_TXQ, len, true);
 	add_txq = &desc.icqd_command.icc_add_txq;
 
 	add_txq->iccat_ngrp = 1;
 
-	// TODO fill out struct
+	// grp->ithg_teid = ???
 	grp->ihtg_nqueue = 1;
+
+	/*
+	 * Currently, we use a contiguous span of TX queue ids
+	 * from the hardware, so we do not need to do any mapping of
+	 * ids. If we start supporting multiple VSIs or RDMA, this
+	 * will likely need to change.
+	 */
+	perq->ihtp_qid = txr->itxr_index;
+
+	perq->ihtp_valid_sect =
+	    ICE_HW_TXQ_PERQ_VALID_SECT_GENERIC |
+	    ICE_HW_TXQ_PERQ_VALID_SECT_CIR |
+	    ICE_HW_TXQ_PERQ_VALID_SECT_EIR;
+
+	perq->ihtp_generic = 0;
+
+	perq->ihtp_cir_bw_id = LE_16(ICE_SCHED_DEFAULT_PROFILE_ID);
+	perq->ihtp_cir_bw_wfq_weights = LE_16(ICE_SCHED_DEFAULT_WEIGHT);
+
+	perq->ihtp_eir_bw_id = LE_16(ICE_SCHED_DEFAULT_PROFILE_ID);
+	perq->ihtp_eir_bw_wfq_weights = LE_16(ICE_SCHED_DEFAULT_WEIGHT);
 
 	if (!ice_txq_context_write(ice, ctx, &perq->ihtp_ctx[0],
 	    sizeof (perq->ihtp_ctx))) {
-			kmem_free(grp, len);
-			return (false);
+		ice_error(ice, "Failed to write TX queue context");
+		kmem_free(grp, len);
+		return (false);
 	}
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, grp,
@@ -1734,8 +1757,57 @@ ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_hw_txq_context_t *ctx)
 		return (false);
 	}
 
+	txr->itxr_teid = LE_32(perq->ihtp_qteid);
+
 	kmem_free(grp, len);
 	return (true);
+}
+
+bool
+ice_cmd_disable_queue(ice_t *ice, ice_tx_ring_t *txr)
+{
+	ice_hw_txq_disable_grp_t	*grp;
+	ice_cq_cmd_txq_disable_flow_t	*df;
+	size_t				len;
+	ice_cq_desc_t			desc;
+	ice_cq_errno_t			err;
+	bool				ret = false;
+	uint8_t				hw;
+
+	/* We disable one TX queue at a time */
+	len = sizeof (*grp) + 1 * sizeof (uint16_t);
+
+	/* From Table 10-38, the command buffer needs to be 4-byte aligned */
+	len = P2ROUNDUP(len, 4);
+
+	grp = kmem_zalloc(len, KM_SLEEP);
+	//grp->txqd_pteid = txr->itxr_teid;
+	grp->txqd_nqueue = 1;
+	//grp->txqd_qids[0] = ???;
+
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DISABLE_FLOW, len, true);
+	df = &desc.icqd_command.icc_txq_disable_flow;
+	df->icctdf_flags = ICE_CQ_DISABLE_FLOW_SET_TIMEOUT(0, 5);
+	df->icctdf_nqgrp = 1;
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, grp,
+	    ICE_CMD_COPY_TO_DEV)) {
+		goto done;
+	}
+
+	if (!ice_cmd_result(&desc, &err, &hw)) {
+		ice_error(ice, "failed to disable TX queue %u: "
+		    "%s (%s - 0x%x) (fw private: %x)",
+		    txr->itxr_index, ice_controlq_errmsg(err),
+		    ice_controlq_errstr(err), err, hw);
+		goto done;
+	}
+
+	ret = true;
+
+done:
+	kmem_free(grp, len);
+	return (ret);
 }
 
 /* Add/Remove/Update switch rules */

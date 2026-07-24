@@ -59,6 +59,11 @@ const ice_context_map_t ice_rxq_map[] = {
 	{ offsetof(ice_hw_rxq_context_t, ihrc_req),  1, 201, 201 }
 };
 
+/*
+ * From Table 10-29 (section 10.5.5.2.1), bit 91 is 'Internal Usage Flag'
+ * but must be equal to TSO_Enabled_Queue (bit 152). So we propagate the
+ * value of ice_hw_txq_context_t.ihtc_tso to both bits.
+ */
 const ice_context_map_t ice_txq_map[] = {
 	{ offsetof(ice_hw_txq_context_t, ihtc_base), 8, 0, 56 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_port), 1, 57, 59 },
@@ -74,7 +79,8 @@ const ice_context_map_t ice_txq_map[] = {
 	{ offsetof(ice_hw_txq_context_t, ihtc_wb_mode), 1, 101, 101 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_tphrdesc), 1, 102, 102 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_tphdrdata), 1, 103, 103 },
-	{ offsetof(ice_hw_txq_context_t, ihtc_compq_id), 2, 104, 104 },
+	{ offsetof(ice_hw_txq_context_t, ihtc_tphwrdesc), 1, 104, 104 },
+	{ offsetof(ice_hw_txq_context_t, ihtc_compq_id), 2, 105, 113 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_func_qnum), 2, 114, 127 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_itr_mode), 1, 128, 128 },
 	{ offsetof(ice_hw_txq_context_t, ihtc_profile), 1, 129, 134 },
@@ -150,7 +156,7 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 		val = *((uint64_t *)src + map->icm_member);
 		break;
 	default:
-		ice_error(ice, "context entry has invalid member legth: %u",
+		ice_error(ice, "context entry has invalid member length: %u",
 		    map->icm_memlen);
 		return (false);
 	}
@@ -230,7 +236,9 @@ ice_txq_context_write(ice_t *ice, ice_hw_txq_context_t *ctxt, uint8_t *dest,
 		if (!ice_context_write(ice, (uint8_t *)ctxt, dest, len,
 		    &ice_txq_map[i])) {
 			ice_error(ice, "failed writing TX queue context "
-			    "field %u", i);
+			    "field %u (bits [%u, %u)", i,
+			    ice_txq_map[i].icm_minbit,
+			    ice_txq_map[i].icm_maxbit);
 			return (false);
 		}
 	}

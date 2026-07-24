@@ -1453,7 +1453,7 @@ ice_ring_tx_start(mac_ring_driver_t mri, uint64_t gen)
 	ice_t			*ice = txr->itxr_ice;
 	ice_vsi_t		*vsi = list_head(&ice->ice_vsi);
 	uint64_t		ring_pa;
-	ice_hw_txq_context_t	ctx = { 0 };
+	ice_hw_txq_context_t	ctx;
 
 	ASSERT3P(vsi, !=, NULL);
 
@@ -1467,13 +1467,24 @@ ice_ring_tx_start(mac_ring_driver_t mri, uint64_t gen)
 	/* Double check the ring's physical address is properly aligned */
 	ASSERT3U(P2PHASE(ring_pa, (1ULL << 7)), ==, 0);
 
+	bzero(&ctx, sizeof (ctx));
+
 	ctx.ihtc_base = ring_pa >> 7;
 	ctx.ihtc_vmvf_type = ICE_HW_TXQ_CTX_VMVF_TYPE_PF;
 	ctx.ihtc_vsi_id = vsi->ivsi_id;
 	ctx.ihtc_qlen = txr->itxr_size;
+	ctx.ihtc_port = ice->ice_port_id;
+	ctx.ihtc_legacy = 1;
 	ctx.ihtc_tso = 1;
+	/*
+	 * If we support multiple VSIs or RDMA, this will need to be
+	 * the mapped TX queue id. We probably would also need to be
+	 * mindful of the lower limit (2K vs. 16K) for TSO queues when
+	 * allocating/assigning TX queues to a mac NIC.
+	 */
+	ctx.ihtc_tso_queue = txr->itxr_index;
 
-	if (!ice_cmd_add_txq_grp(ice, vsi, &ctx)) {
+	if (!ice_cmd_add_txq_grp(ice, vsi, txr, &ctx)) {
 		ice_tx_teardown_bufs(txr);
 		return (-1);
 	}
@@ -1487,10 +1498,13 @@ ice_ring_tx_start(mac_ring_driver_t mri, uint64_t gen)
 void
 ice_ring_tx_stop(mac_ring_driver_t mri)
 {
-	ice_tx_ring_t		*txr = (ice_tx_ring_t *)mri;
+	ice_tx_ring_t	*txr = (ice_tx_ring_t *)mri;
+	ice_t		*ice = txr->itxr_ice;	
 
-
-	// TODO -- stop queue
+	if (!ice_cmd_disable_queue(ice, txr)) {
+		ice_error(ice, "failed to disable TX queue %u",
+		    txr->itxr_index);
+	}
 
 	ice_tx_teardown_bufs(txr);
 }

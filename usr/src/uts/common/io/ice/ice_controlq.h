@@ -448,6 +448,7 @@ typedef struct ice_cq_cmd_txq_disable_flow {
 	uint32_t	icctdf_data_high;
 	uint32_t	icctdf_data_low;
 } ice_cq_cmd_txq_disable_flow_t;
+#define	ICE_CQ_DISABLE_FLOW_SET_TIMEOUT(r, v)	ice_bitset8(r, 2, 7, v)
 
 typedef struct ice_cq_cmd_add_switch_rule {
 	uint16_t	iccasr_nrules;

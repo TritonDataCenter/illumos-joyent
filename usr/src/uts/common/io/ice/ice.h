@@ -259,6 +259,11 @@ typedef struct ice_vsi_mac {
 	uint8_t			ivm_mac[ETHERADDRL];
 } ice_vsi_mac_t;
 
+/*
+ * If we support multiple VSIs or RDMA, we'll want to have queue id
+ * maps in each VSI that'll translate a [0..#queues) value into a
+ * physical queue id for both TX and RX.
+ */
 struct ice;
 typedef struct ice_vsi {
 	list_node_t		ivsi_node;
@@ -382,6 +387,8 @@ typedef struct ice_txq_stat {
 typedef struct ice_tx_ring {
 	ice_intr_handler_t	itxr_intr;
 	struct ice		*itxr_ice;		/* RO */
+
+	uint32_t		itxr_teid;
 
 	kmutex_t		itxr_lock;
 	kcondvar_t		itxr_cv;
@@ -707,6 +714,10 @@ typedef struct ice {
 	 * Eventually, it may make more sense to move the rings into
 	 * the vsi struct, but for now since there's just 1 vsi, they
 	 * sit here.
+	 *
+	 * Additionally, we'll probably want id_space_ts for the TX and
+	 * RX queue ids to allow individual queues to be allocated to
+	 * specific VSIs.
 	 */
 	ice_rx_ring_t		*ice_rxr;
 	ice_tx_ring_t		*ice_txr;
@@ -944,7 +955,9 @@ extern bool ice_cmd_set_rss_lut(ice_t *, ice_vsi_t *, void *, uint_t);
 
 extern bool ice_cmd_get_default_scheduler(ice_t *, void *, size_t, uint16_t *);
 
-extern bool ice_cmd_add_txq_grp(ice_t *, ice_vsi_t *, ice_hw_txq_context_t *);
+extern bool ice_cmd_add_txq_grp(ice_t *, ice_vsi_t *, ice_tx_ring_t *,
+    ice_hw_txq_context_t *);
+extern bool ice_cmd_disable_queue(ice_t *, ice_tx_ring_t *);
 extern bool ice_cmd_switch_rules(ice_t *, ice_cq_opcode_t, uint16_t,
     ice_sw_rule_t *);
 extern bool ice_cmd_download_pkg(ice_t *, const void *, size_t, bool);

@@ -889,6 +889,7 @@ typedef struct ice_hw_txq_context {
 	uint8_t		ihtc_wb_mode;
 	uint8_t		ihtc_tphrdesc;
 	uint8_t		ihtc_tphdrdata;
+	uint8_t		ihtc_tphwrdesc;
 	uint16_t	ihtc_compq_id;
 	uint16_t	ihtc_func_qnum;
 	uint8_t		ihtc_itr_mode;
@@ -936,17 +937,24 @@ typedef struct ice_hw_txq_perq {
 
 	/* TX Scheduler Leaf Node Config */
 	uint8_t		ihtp_rsvd3;
-	uint8_t		ithp_valid_sect;
-	uint8_t		ithp_generic;
-	uint8_t		ithp_rsvd4;
-	uint16_t	ithp_cir_bw_id;
-	uint16_t	ithp_cir_bw_wfq_weights;
-	uint16_t	ithp_eir_bw_id;
-	uint16_t	ithp_eir_bw_wfq_weights;
-	uint16_t	ithp_shared_profile_id;
-	uint16_t	ithp_rsvd5;
+	uint8_t		ihtp_valid_sect;
+	uint8_t		ihtp_generic;
+	uint8_t		ihtp_rsvd4;
+	uint16_t	ihtp_cir_bw_id;
+	uint16_t	ihtp_cir_bw_wfq_weights;
+	uint16_t	ihtp_eir_bw_id;
+	uint16_t	ihtp_eir_bw_wfq_weights;
+	uint16_t	ihtp_shared_profile_id;
+	uint16_t	ihtp_rsvd5;
 } __packed ice_hw_txq_perq_t;
 CTASSERT(sizeof (ice_hw_txq_perq_t) == 48);
+#define	ICE_HW_TXQ_PERQ_VALID_SECT_GENERIC	(1 << 0)
+#define	ICE_HW_TXQ_PERQ_VALID_SECT_CIR		(1 << 1)
+#define	ICE_HW_TXQ_PERQ_VALID_SECT_EIR		(1 << 2)
+#define	ICE_HW_TXQ_PERQ_VALID_SECT_SHARED	(1 << 3)
+
+#define	ICE_SCHED_DEFAULT_PROFILE_ID	0
+#define	ICE_SCHED_DEFAULT_WEIGHT	4
 
 typedef struct ice_hw_txq_group {
 	uint32_t		ihtg_teid;
