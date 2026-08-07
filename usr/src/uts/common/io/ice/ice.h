@@ -275,6 +275,7 @@ typedef struct ice_vsi {
 	ice_vsi_type_t		ivsi_type;		/* RO */
 	ice_vsi_flags_t		ivsi_flags;
 	ice_hw_vsi_context_t	ivsi_ctxt;
+	uint16_t		ivsi_ntxq;
 	uint16_t		ivsi_nrxq;
 	uint16_t		ivsi_frxq;
 	uint16_t		ivsi_nvlan;
@@ -283,6 +284,7 @@ typedef struct ice_vsi {
 	uint16_t		ivsi_mac_rule_idx;
 	uint16_t		ivsi_bcast_rule_idx;
 } ice_vsi_t;
+#define	ICE_VSI_MAX	767
 
 /*
  * A controlq structure represents a single communication ring that is used with
@@ -621,6 +623,25 @@ typedef enum ice_mac {
 } ice_mac_t;
 
 /*
+ * For now, all we care about is the TEIDs, though this might change
+ * in the future.
+ */
+typedef struct ice_sched_node {
+	struct ice_sched_node	*isn_parent;
+	struct ice_sched_node	*isn_sibling;
+	struct ice_sched_node	**isn_children;
+	uint32_t		isn_teid;
+	bool			isn_used;
+	uint16_t		isn_vsi;
+	uint8_t			isn_level;
+	uint8_t			isn_nchildren;
+	uint8_t			isn_type;
+} ice_sched_node_t;
+
+/* From Table 8-23 */
+#define	ICE_SCHED_NODE_MAX_DEPTH	9
+
+/*
  * This structure is the primary per-physical function state.
  */
 typedef struct ice {
@@ -801,6 +822,15 @@ typedef struct ice {
 	uint16_t	ice_sched_nbranches;
 	uint8_t		ice_sched_buf[4096];
 
+	kmutex_t		ice_tx_sched_lock;
+	ice_sched_node_t	*ice_tx_sched_root;
+	uint8_t			ice_tx_sched_depth;
+	uint8_t			ice_tx_sched_entry;
+	uint16_t		ice_tx_max_layers;
+	uint16_t		ice_tx_max_sw_layers;
+				/* Max siblings per level */
+	uint16_t		ice_tx_sched_max_sibs[ICE_SCHED_NODE_MAX_DEPTH];
+
 	/* protects ice_rxbuf_onloan */
 	kmutex_t		ice_rxbuf_lock;
 	ice_rx_ctrl_block_t	*ice_rcbs;
@@ -954,6 +984,12 @@ extern bool ice_cmd_set_rss_key(ice_t *, ice_vsi_t *, void *, uint_t);
 extern bool ice_cmd_set_rss_lut(ice_t *, ice_vsi_t *, void *, uint_t);
 
 extern bool ice_cmd_get_default_scheduler(ice_t *, void *, size_t, uint16_t *);
+extern bool ice_cmd_get_sched_resource_alloc(ice_t *, void *, size_t *);
+extern bool ice_cmd_add_sched_elements(ice_t *, uint16_t *,
+    ice_hw_sched_grp_t *);
+extern bool ice_cmd_del_sched_elements(ice_t *, uint16_t *,
+    ice_hw_delete_sched_elements_t *);
+extern ice_sched_node_t *ice_tx_sched_txq_parent(ice_vsi_t *);
 
 extern bool ice_cmd_add_txq_grp(ice_t *, ice_vsi_t *, ice_tx_ring_t *,
     ice_hw_txq_context_t *);
@@ -974,6 +1010,18 @@ extern boolean_t ice_nvm_init(ice_t *);
 extern void ice_nvm_fini(ice_t *);
 extern boolean_t ice_nvm_read16(ice_t *, uint32_t, uint16_t *);
 extern boolean_t ice_nvm_read_pba(ice_t *);
+
+/*
+ * TX Scheduler related functions
+ */
+extern bool ice_parse_tx_sched(ice_t *, const uint8_t *, size_t, uint8_t);
+extern void ice_tx_sched_free_nodes(ice_t *, ice_sched_node_t *);
+extern bool ice_tx_sched_add_vsi_node(ice_t *, ice_vsi_t *);
+extern ice_sched_node_t *ice_tx_sched_alloc_node(ice_t *, ice_sched_node_t *,
+    uint32_t, uint8_t);
+extern ice_sched_node_t *ice_tx_sched_find_node(ice_t *, ice_sched_node_t *,
+    uint32_t);
+extern bool ice_tx_sched_del_elt(ice_t *, ice_sched_node_t *);
 
 /*
  * Hardware related functions (one that manipulate registers)

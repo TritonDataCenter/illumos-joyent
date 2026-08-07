@@ -130,7 +130,7 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 	 * Make sure that we can place a uint64_t worth of data from fbyte.
 	 */
 	fbyte = map->icm_minbit / 8;
-	if (fbyte + sizeof (uint64_t) >= destlen) {
+	if (fbyte + sizeof (uint64_t) > destlen) {
 		ice_error(ice, "context entry starts at byte %u, but the "
 		    "buffer is %zu bytes long and we need space for 8 bytes",
 		    fbyte, destlen);
@@ -147,13 +147,13 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 		val = *((uint8_t *)src + map->icm_member);
 		break;
 	case 2:
-		val = *((uint16_t *)src + map->icm_member);
+		val = *((uint16_t *)(src + map->icm_member));
 		break;
 	case 4:
-		val = *((uint32_t *)src + map->icm_member);
+		val = *((uint32_t *)(src + map->icm_member));
 		break;
 	case 8:
-		val = *((uint64_t *)src + map->icm_member);
+		val = *((uint64_t *)(src + map->icm_member));
 		break;
 	default:
 		ice_error(ice, "context entry has invalid member length: %u",
@@ -195,8 +195,9 @@ ice_context_write(ice_t *ice, const uint8_t *src, void *dest, size_t destlen,
 bool
 ice_rxq_context_write(ice_t *ice, ice_hw_rxq_context_t *ctxt, uint_t index)
 {
+	/* Similar to the TXQ, we need some padding for ice_context_write() */
+	uint8_t buf[ICE_HW_RXQ_CTX_PHYSICAL_SIZE + sizeof (uint64_t)];
 	uint_t i;
-	uint8_t buf[ICE_HW_RXQ_CTX_PHYSICAL_SIZE];
 
 	if (index >= ICE_MAX_RX_QUEUES) {
 		ice_error(ice, "asked to write rxq context to illegal index: "
@@ -225,23 +226,34 @@ ice_rxq_context_write(ice_t *ice, ice_hw_rxq_context_t *ctxt, uint_t index)
 	return (true);
 }
 
+/*
+ * ice_context_write() required len to be a multiple of 8 (sizeof (uint64_t)),
+ * however the size in the hw struct is 22 bytes (Table 10-34), so we have
+ * to bounce the packed context through a temporary buffer.
+ */
+#define	ICE_TX_CTX_TEMP_SZ 32
+
 bool
 ice_txq_context_write(ice_t *ice, ice_hw_txq_context_t *ctxt, uint8_t *dest,
     size_t len)
 {
+	uint8_t bounce[ICE_TX_CTX_TEMP_SZ] = { 0 };
 	uint_t i;
+
+	ASSERT3U(len, <=, sizeof (bounce));
 
 	bzero(dest, len);
 	for (i = 0; i < ARRAY_SIZE(ice_txq_map); i++) {
-		if (!ice_context_write(ice, (uint8_t *)ctxt, dest, len,
-		    &ice_txq_map[i])) {
+		if (!ice_context_write(ice, (uint8_t *)ctxt, bounce,
+		    sizeof (bounce), &ice_txq_map[i])) {
 			ice_error(ice, "failed writing TX queue context "
-			    "field %u (bits [%u, %u)", i,
+			    "field %u (bits [%u, %u])", i,
 			    ice_txq_map[i].icm_minbit,
 			    ice_txq_map[i].icm_maxbit);
 			return (false);
 		}
 	}
+	bcopy(bounce, dest, len);
 
 	return (true);
 }

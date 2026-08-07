@@ -674,6 +674,7 @@ typedef struct ice_hw_vsi_context {
 	/* Reserved */
 	uint8_t		ihvc_reserved[24];
 } __packed ice_hw_vsi_context_t;
+CTASSERT(sizeof (ice_hw_vsi_context_t) == 128);
 
 #define	ICE_HW_VSI_SECTION_SWITCHING	(1 << 0)
 #define	ICE_HW_VSI_SECTION_SECURITY	(1 << 1)
@@ -1002,7 +1003,7 @@ typedef struct ice_tx_desc {
 #define	ICE_TX_DESC_DTYPE_DONE		ICE_TX_DESC_DTYPE_MASK
 
 /*
- * Scheduler Structures returned by hardware.
+ * Scheduler Structures used by hardware.
  */
 typedef struct ice_hw_sched_elem {
 	uint32_t	ihse_pteid;
@@ -1022,9 +1023,23 @@ typedef struct ice_hw_sched_elem {
 typedef struct ice_hw_sched_branch {
 	uint32_t		ihsb_rsvd;
 	uint16_t		ihsb_nelms;
-	uint16_t		ihsb_rsvd1;
+	uint8_t			ihsb_rsvd2[2];
 	ice_hw_sched_elem_t	ihsb_elems[];
 } __packed ice_hw_sched_branch_t;
+
+typedef struct ice_hw_sched_grp {
+	uint32_t		ihsg_pteid;
+	uint16_t		ihsg_nelems;
+	uint8_t			ihsg_rsvd1[2];
+	ice_hw_sched_elem_t	ihsg_elems[];
+} __packed ice_hw_sched_grp_t;
+
+typedef struct ice_hw_delete_sched_elements {
+	uint32_t	ihdse_pteid;
+	uint16_t	ihdse_nelements;
+	uint8_t		ihdse_resv[2];
+	uint32_t	ihdse_teids[];
+} __packed ice_hw_delete_sched_elements_t;
 
 typedef struct ice_sw_lookup {
 	uint16_t	iswl_rid;	/* recipe id */
@@ -1122,6 +1137,88 @@ typedef struct ice_sw_rule {
 		ice_sw_vsi_query_t	iswr_vsi_query;
 	} iswr_data;
 } ice_sw_rule_t;
+
+typedef struct ice_hw_tx_sched_layer {
+	uint8_t		ihtsl_layer;
+	uint8_t		ihtsl_chunk_size;
+	uint16_t	ihtsl_max_nodes;
+	uint8_t		ihtsl_resv[6];
+	uint16_t	ihtsl_max_sibling;
+	uint16_t	ihtsl_ncir_shared;
+	uint16_t	ihtsl_neir_shared;
+	uint16_t	ihtsl_nsrl_shared;
+	uint8_t		ihtls_resv2[14];
+} __packed ice_hw_tx_sched_layer_t;
+CTASSERT(sizeof (ice_hw_tx_sched_layer_t) == 32);
+
+#define	ICE_TX_SCHED_MAX_DEPTH	9
+#define	ICE_TX_SCHED_RES_ALLOC_SIZE	2048
+
+typedef struct ice_hw_tx_sched_gen {
+	uint16_t	ihtsg_nphys_layers;
+	uint16_t	ihtsg_nlayers;
+	uint8_t		ihtsg_flat_bitmap;
+	uint8_t		ihtsg_dev_ncgd;
+	uint8_t		ihtsg_pf_ncgd;
+	uint8_t		ihtsg_resv;
+	uint16_t	ihtsg_nrdma_qset;
+	uint8_t		ihtsg_resv2[22];
+	ice_hw_tx_sched_layer_t	ihtsg_layer_prop[ICE_TX_SCHED_MAX_DEPTH];
+} __packed ice_hw_tx_sched_gen_t;
+CTASSERT(sizeof (ice_hw_tx_sched_gen_t) == 320);
+
+typedef struct ice_hw_tx_sched_elt {
+	uint32_t	ihtse_pteid;		/* Parent TEID */
+	uint32_t	ihtse_teid;		/* Element TEID */
+	uint8_t		ihtse_eltype;		/* Element type */
+	uint8_t		ihtse_valid_sect;	/* Valid sections */
+	uint8_t		ihtse_generic;
+	uint8_t		ihtse_flags;
+	uint16_t	ihtse_cir_bw_prof_id;
+	uint16_t	ihtse_cir_bw_wt;
+	uint16_t	ihtse_eir_bw_prof_id;
+	uint16_t	ihtse_eir_bw_wt;
+	uint16_t	ihtse_shared_prof_id;
+	uint8_t		ihtse_reserved[2];
+} __packed ice_hw_tx_sched_elt_t;
+CTASSERT(sizeof (ice_hw_tx_sched_elt_t) == 24);
+
+#define	ICE_TX_SCHED_TEID_INVALID	0xffffffff
+
+#define	ICE_TX_SCHED_ET_UNDEFINED	0
+#define	ICE_TX_SCHED_ET_ROOT		1
+#define	ICE_TX_SCHED_ET_TC		2
+#define	ICE_TX_SCHED_ET_SE_GENERIC	3
+#define	ICE_TX_SCHED_ET_SOFT_SE		4
+#define	ICE_TX_SCHED_ET_LEAF		5
+
+#define	ICE_TX_SCHED_SECT_GENERIC	(1 << 0)
+#define	ICE_TX_SCHED_SECT_CIR_BW	(1 << 1)
+#define	ICE_TX_SCHED_SECT_EIR_BW	(1 << 2)
+#define	ICE_TX_SCHED_SECT_SHARED_BW	(1 << 3)
+
+#define	ICE_TX_SCHED_GEN_MODE(x)	ice_bitx(x, 0, 1)
+#define	ICE_TX_SCHED_GEN_BPS			0
+#define	ICE_TX_SCHED_GEN_PPS			1
+#define	ICE_TX_SCHED_GEN_PRI(x)		ice_bitx(x, 1, 3)
+#define	ICE_TX_SCHED_GEN_SINGLE_PRI(x)	ice_bitx(x, 4, 4)
+#define	ICE_TX_SCHED_GEN_SINGLE_PRI_NODE	0
+#define	ICE_TX_SCHED_GEN_SINGLE_PRI_WFQ		1
+#define	ICE_TX_SCHED_GEN_ADJ(x)		ice_bitx(x, 5, 6)
+
+#define	ICE_TX_SCHED_SUSPEND		(1 << 0)
+
+#define	ICE_TX_SCHED_DEFAULT_TOPO_SIZE	4096
+
+typedef struct ice_hw_tx_branch {
+	uint8_t			ihtb_resv[4];
+	uint16_t		ihtb_nelt;
+	uint8_t			ihtb_resv2[2];
+	ice_hw_tx_sched_elt_t	ihtb_elts[];
+} __packed ice_hw_tx_branch_t;
+
+#define	ICE_TX_SCHED_BR_NELT_MIN	2
+#define	ICE_TX_SCHED_BR_NELT_MAX	9
 
 #ifdef __cplusplus
 }

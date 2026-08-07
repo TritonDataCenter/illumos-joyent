@@ -83,6 +83,9 @@ typedef enum ice_cq_opcode {
 	 * TX Scheduler Information
 	 */
 	ICE_CQ_OP_QUERY_DEFAULT_SCHEDULER = 0x400,
+	ICE_CQ_OP_ADD_SCHED_ELEMENTS = 0x401,
+	ICE_CQ_OP_DELETE_SCHED_ELEMENTS = 0x40f,
+	ICE_CQ_OP_QUERY_SCHED_RES_ALLOC = 0x412,
 	/*
 	 * Link Configuration
 	 */
@@ -354,13 +357,14 @@ typedef struct ice_cq_cmd_get_switch_config {
 
 typedef struct ice_cq_cmd_add_vsi {
 	uint16_t	iccav_vsi;
-	uint16_t	iccav_rsvd;
+	uint8_t		iccav_rsvd[2];
 	uint8_t		iccav_vfid;
 	uint8_t		iccav_rsvd1;
 	uint16_t	iccav_type;
 	uint32_t	iccav_data_high;
 	uint32_t	iccav_data_low;
 } ice_cq_cmd_add_vsi_t;
+CTASSERT(sizeof (ice_cq_cmd_add_vsi_t) == 16);
 
 /*
  * The ADD VSI reply structure is different enough from the input one that it's
@@ -374,6 +378,7 @@ typedef struct ice_cq_cmd_add_vsi_reply {
 	uint32_t	iccavr_data_high;
 	uint32_t	iccavr_data_low;
 } ice_cq_cmd_add_vsi_reply_t;
+CTASSERT(sizeof (ice_cq_cmd_add_vsi_reply_t) == 16);
 
 typedef struct ice_cq_cmd_free_vsi {
 	uint16_t	iccfv_vsi;
@@ -382,7 +387,7 @@ typedef struct ice_cq_cmd_free_vsi {
 } ice_cq_cmd_free_vsi_t;
 
 #define	ICE_CQ_VSI_VALID	(1 << 15)
-#define	ICE_CQ_VSI_MASK		0x03ff
+#define	ICE_CQ_VSI_MASK		0x02ff
 
 #define	ICE_CQ_VSI_TYPE_VF	0x00
 #define	ICE_CQ_VSI_TYPE_VMDQ2	0x01
@@ -431,6 +436,22 @@ typedef struct ice_cq_cmd_query_default_scheduler {
 
 #define	ICE_CQ_QUERY_DEFAULT_SCHED_BUF_SIZE	4096
 
+typedef struct ice_cq_cmd_add_sched_elements {
+	uint16_t	iccase_ngroups;
+	uint16_t	iccase_nadded;
+	uint8_t		iccase_resv[4];
+	uint32_t	iccase_data_high;
+	uint32_t	iccase_data_low;
+} ice_cq_cmd_add_sched_elements_t;
+
+typedef struct ice_cq_cmd_delete_sched_elements {
+	uint16_t	iccdse_ngroups;
+	uint16_t	iccdse_ndeleted;
+	uint8_t		iccdse_resv[4];
+	uint32_t	iccdse_data_high;
+	uint32_t	iccdse_data_low;
+} ice_cq_cmd_delete_sched_elements_t;
+
 typedef struct ice_cq_cmd_add_txq {
 	uint8_t		iccat_ngrp;
 	uint8_t		iccat_rsvd[7];
@@ -448,7 +469,7 @@ typedef struct ice_cq_cmd_txq_disable_flow {
 	uint32_t	icctdf_data_high;
 	uint32_t	icctdf_data_low;
 } ice_cq_cmd_txq_disable_flow_t;
-#define	ICE_CQ_DISABLE_FLOW_SET_TIMEOUT(r, v)	ice_bitset8(r, 2, 7, v)
+#define	ICE_CQ_DISABLE_FLOW_SET_TIMEOUT(r, v)	ice_bitset8(r, 7, 2, v)
 
 typedef struct ice_cq_cmd_add_switch_rule {
 	uint16_t	iccasr_nrules;
@@ -489,6 +510,8 @@ typedef union ice_cq_cmd {
 	ice_cq_cmd_set_event_mask_t icc_set_event_mask;
 	ice_cq_cmd_setup_link_t icc_setup_link;
 	ice_cq_cmd_get_switch_config_t icc_get_switch_config;
+	ice_cq_cmd_add_sched_elements_t icc_add_sched_elements;
+	ice_cq_cmd_delete_sched_elements_t icc_del_sched_elements;
 	ice_cq_cmd_add_vsi_t icc_add_vsi;
 	ice_cq_cmd_add_vsi_reply_t icc_add_vsi_reply;
 	ice_cq_cmd_free_vsi_t icc_free_vsi;
@@ -500,6 +523,7 @@ typedef union ice_cq_cmd {
 	ice_cq_cmd_add_switch_rule_t icc_add_switch_rule;
 	ice_cq_cmd_download_pkg_t icc_download_pkg;
 } ice_cq_cmd_t;
+CTASSERT(sizeof (ice_cq_cmd_t) == 16);
 
 /*
  * This represents a single entry in the control queue.

@@ -1469,6 +1469,8 @@ ice_ring_tx_start(mac_ring_driver_t mri, uint64_t gen)
 
 	bzero(&ctx, sizeof (ctx));
 
+	ASSERT3U(vsi->ivsi_id, <, 768);
+
 	ctx.ihtc_base = ring_pa >> 7;
 	ctx.ihtc_vmvf_type = ICE_HW_TXQ_CTX_VMVF_TYPE_PF;
 	ctx.ihtc_vsi_id = vsi->ivsi_id;
@@ -1498,13 +1500,26 @@ ice_ring_tx_start(mac_ring_driver_t mri, uint64_t gen)
 void
 ice_ring_tx_stop(mac_ring_driver_t mri)
 {
-	ice_tx_ring_t	*txr = (ice_tx_ring_t *)mri;
-	ice_t		*ice = txr->itxr_ice;	
+	ice_tx_ring_t		*txr = (ice_tx_ring_t *)mri;
+	ice_t			*ice = txr->itxr_ice;	
+	ice_sched_node_t	*txnode;
 
 	if (!ice_cmd_disable_queue(ice, txr)) {
 		ice_error(ice, "failed to disable TX queue %u",
 		    txr->itxr_index);
 	}
+
+	mutex_enter(&ice->ice_tx_sched_lock);
+
+	txnode = ice_tx_sched_find_node(ice, ice->ice_tx_sched_root,
+	    txr->itxr_teid);
+	ASSERT3P(txnode, !=, NULL);
+
+	(void) ice_tx_sched_del_elt(ice, txnode);
+
+	mutex_exit(&ice->ice_tx_sched_lock);
+
+	txr->itxr_teid = ICE_TX_SCHED_TEID_INVALID;
 
 	ice_tx_teardown_bufs(txr);
 }

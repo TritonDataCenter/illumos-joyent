@@ -958,14 +958,79 @@ err:
 	return (B_FALSE);
 }
 
-static boolean_t
+static bool
 ice_tx_scheduler_init(ice_t *ice)
 {
-	if (!ice_cmd_get_default_scheduler(ice, ice->ice_sched_buf,
-	    sizeof (ice->ice_sched_buf), &ice->ice_sched_nbranches)) {
-		return (B_FALSE);
+	uint8_t			*buf = NULL;
+	ice_hw_tx_sched_gen_t	*gen;
+	size_t			buflen;
+	uint16_t		nbranch;
+
+	mutex_init(&ice->ice_tx_sched_lock, NULL, MUTEX_DRIVER,
+	    DDI_INTR_PRI(ice->ice_intr_pri));
+
+	buf = kmem_zalloc(ICE_TX_SCHED_DEFAULT_TOPO_SIZE, KM_SLEEP);
+
+	/*
+	 * Take advantage of the required buffer size for the Query Scheduler
+	 * Resource command (2048) being less than for querying the default
+	 * topology size so we can reuse the buffer.
+	 */
+	CTASSERT(ICE_TX_SCHED_RES_ALLOC_SIZE <= ICE_TX_SCHED_DEFAULT_TOPO_SIZE);
+
+	buflen = ICE_TX_SCHED_RES_ALLOC_SIZE;
+	if (!ice_cmd_get_sched_resource_alloc(ice, buf, &buflen)) {
+		goto fail;
 	}
-	return (B_TRUE);
+
+	if (buflen > ICE_TX_SCHED_RES_ALLOC_SIZE) {
+		ice_error(ice, "resource allocation size (%zu bytes) is larger "
+		    "than allowed", buflen);
+		goto fail;
+	}
+	gen = (ice_hw_tx_sched_gen_t *)buf;
+
+	ice->ice_tx_max_layers = LE_16(gen->ihtsg_nphys_layers);
+
+	ice->ice_tx_max_sw_layers = LE_16(gen->ihtsg_nlayers);
+	if (ice->ice_tx_max_sw_layers > ICE_SCHED_NODE_MAX_DEPTH) {
+		ice_error(ice, "hardware reported invalid number of scheduling "
+		    "layers (%u)", ice->ice_tx_max_sw_layers);
+		goto fail;
+	}
+
+	if (buflen < sizeof (*gen)) {
+		ice_error(ice, "hardware truncated scheduling data: "
+		    "returned %zu bytes with %u layers ", buflen,
+		    ice->ice_tx_max_sw_layers);
+		goto fail;
+	}
+
+	for (uint_t i = 0; i < ice->ice_tx_max_sw_layers; i++) {
+		ice->ice_tx_sched_max_sibs[i] =
+		    gen->ihtsg_layer_prop[i].ihtsl_max_sibling;
+	}
+
+	buflen = ICE_TX_SCHED_DEFAULT_TOPO_SIZE;
+	bzero(buf, buflen);
+	if (!ice_cmd_get_default_scheduler(ice, buf, buflen, &nbranch)) {
+		goto fail;
+	}
+
+	if (!ice_parse_tx_sched(ice, buf, buflen, nbranch)) {
+		goto fail;
+	}
+
+	kmem_free(buf, ICE_TX_SCHED_DEFAULT_TOPO_SIZE);
+	return (true);
+
+fail:
+	if (buf != NULL) {
+		kmem_free(buf, ICE_TX_SCHED_DEFAULT_TOPO_SIZE);
+	}
+
+	mutex_destroy(&ice->ice_tx_sched_lock);
+	return (false);
 }
 
 static void
@@ -1120,6 +1185,7 @@ ice_vsi_alloc(ice_t *ice, uint_t vsi_id, ice_vsi_type_t type)
 	ice_vsi_t *vsi;
 
 	vsi = kmem_zalloc(sizeof (ice_vsi_t), KM_SLEEP);
+	vsi->ivsi_ice = ice;
 	vsi->ivsi_id = vsi_id;
 	vsi->ivsi_type = type;
 
@@ -1137,6 +1203,7 @@ ice_vsi_alloc(ice_t *ice, uint_t vsi_id, ice_vsi_type_t type)
 	 */
 	vsi->ivsi_nrxq = 1;
 	vsi->ivsi_frxq = 0;
+	vsi->ivsi_ntxq = 1;
 
 	ice_vsi_context_fill(ice, vsi);
 
@@ -1154,6 +1221,19 @@ ice_vsi_alloc(ice_t *ice, uint_t vsi_id, ice_vsi_type_t type)
 
 	list_create(&vsi->ivsi_macs, sizeof (ice_vsi_mac_t),
 	    offsetof(ice_vsi_mac_t, ivm_node));
+
+	/*
+	 * Since we currently do not offload traffic shaping (i.e. flows
+	 * in MAC parlance) to the NIC, we also do not support multiple
+	 * traffic classes. I.e. everything currently uses tc0. As such
+	 * we only create a VSI tx scheduler node for tc0. If we ever
+	 * add support for offloading flows to NICs, this likely will
+	 * need to change.
+	 */
+	if (!ice_tx_sched_add_vsi_node(ice, vsi)) {
+		ice_vsi_free(ice, vsi);
+		return (NULL);
+	}
 
 	/*
 	 * XXX What queue initialization should we be doing here?
@@ -1276,6 +1356,7 @@ ice_tx_ring_init(ice_t *ice, ice_tx_ring_t *txr, uint_t index)
 	txr->itxr_ice = ice;
 	txr->itxr_index = index;
 	txr->itxr_size = ICE_TX_RING_DEFAULT_SIZE;
+	txr->itxr_teid = ICE_TX_SCHED_TEID_INVALID;
 	mutex_init(&txr->itxr_lock, NULL, MUTEX_DRIVER, pri);
 	mutex_init(&txr->itxr_tcb_lock, NULL, MUTEX_DRIVER, pri);
 	cv_init(&txr->itxr_cv, NULL, CV_DRIVER, NULL);
@@ -1504,6 +1585,10 @@ ice_cleanup(ice_t *ice)
 			ice_vsi_free(ice, vsi);
 		}
 		list_destroy(&ice->ice_vsi);
+
+		ice_tx_sched_free_nodes(ice, ice->ice_tx_sched_root);
+		mutex_destroy(&ice->ice_tx_sched_lock);
+
 		ice->ice_seq &= ~ICE_ATTACH_VSI;
 	}
 
@@ -1705,6 +1790,7 @@ ice_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	}
 
 	if (!ice_tx_scheduler_init(ice)) {
+		ice_error(ice, "TX sched depth: %u", ice->ice_tx_sched_depth);
 		goto err;
 	}
 

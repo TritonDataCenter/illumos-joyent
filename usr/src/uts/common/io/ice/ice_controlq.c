@@ -420,7 +420,7 @@ ice_controlq_rq_desc_reset(ice_controlq_t *cqp, uint_t ent)
 	desc->icqd_command.icc_generic.iccg_data_high =
 	    LE_32(dmap->idb_cookie.dmac_laddress >> 32);
 	desc->icqd_command.icc_generic.iccg_data_low =
-	    LE_32(dmap->idb_cookie.dmac_laddress & UINT32_MAX);
+LE_32(dmap->idb_cookie.dmac_laddress & UINT32_MAX);
 }
 
 void
@@ -736,6 +736,29 @@ ice_cmd_result(ice_cq_desc_t *desc, ice_cq_errno_t *errp, uint8_t *hwcode)
 
 	return (false);
 }
+ 
+static bool
+ice_cmd_ckerr(ice_t *ice, ice_cq_desc_t *desc, const char *msg, ...)
+{
+	ice_cq_errno_t err;
+	uint8_t hw;
+
+	if (ice_cmd_result(desc, &err, &hw)) {
+		return (true);
+	}
+
+	va_list ap;
+	char buf[256];
+
+	va_start(ap, msg);
+	(void) vsnprintf(buf, sizeof (buf), msg, ap);
+	va_end(ap);
+
+	ice_error(ice, "%s command failed with: %s (%s - %u) (fw private: %x)",
+	    buf, ice_controlq_errmsg(err), ice_controlq_errstr(err), err, hw);
+
+	return (false);
+}
 
 /*
  * Query the firmware for its version information and store that on the ice_t as
@@ -782,10 +805,8 @@ ice_cmd_driver_version(ice_t *ice, uint8_t maj, uint8_t min, uint8_t patch,
     uint8_t rc, const char *str)
 {
 	ice_cq_desc_t			desc;
-	ice_cq_errno_t			err;
 	ice_cq_cmd_driver_version_t	*dv;
 	size_t				slen = 0;
-	uint8_t				hw = 0;
 
 	if (str != NULL) {
 		slen = strlen(str);
@@ -804,22 +825,13 @@ ice_cmd_driver_version(ice_t *ice, uint8_t maj, uint8_t min, uint8_t patch,
 		return (false);
 	}
 
-	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "send driver version failed with: 0x%x %s (%s)"
-		    "(fw private: %x)", err, ice_controlq_errmsg(err),
-		    ice_controlq_errstr(err), hw);
-		return (false);
-	}
-
-	return (true);
+	return (ice_cmd_ckerr(ice, &desc, "send driver version"));
 }
 
 bool
 ice_cmd_queue_shutdown(ice_t *ice, bool unload)
 {
 	ice_cq_desc_t desc;
-	ice_cq_errno_t err;
-	uint8_t hw;
 	ice_cq_cmd_queue_shutdown_t *qsp;
 
 	ice_cmd_direct_init(&desc, ICE_CQ_OP_QUEUE_SHUTDOWN);
@@ -833,13 +845,7 @@ ice_cmd_queue_shutdown(ice_t *ice, bool unload)
 		return (false);
 	}
 
-	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "queue shutdown command failed with: 0x%x "
-		    "(fw private: %x)", err, hw);
-		return (false);
-	}
-
-	return (true);
+	return (ice_cmd_ckerr(ice, &desc, "queue shutdown"));
 }
 
 bool
@@ -1505,12 +1511,19 @@ ice_cmd_add_vsi(ice_t *ice, ice_vsi_t *vsi)
 		return (false);
 	}
 
+	if (vsi->ivsi_id > ICE_VSI_MAX) {
+		ice_error(ice, "vsi id %u is too large", vsi->ivsi_id);
+		return (false);
+	}
+
 	ice_cmd_indirect_init(&desc, ICE_CQ_OP_ADD_VSI,
 	    sizeof (vsi->ivsi_ctxt), true);
 	add = &desc.icqd_command.icc_add_vsi;
+
 	if ((vsi->ivsi_flags & ICE_VSI_F_POOL_ALLOC) == 0) {
 		add->iccav_vsi = LE_16(vsi->ivsi_id | ICE_CQ_VSI_VALID);
 	}
+
 	switch (vsi->ivsi_type) {
 	case ICE_VSI_TYPE_PF:
 		hw_type = ICE_CQ_VSI_TYPE_PF;
@@ -1683,6 +1696,119 @@ ice_cmd_get_default_scheduler(ice_t *ice, void *buf, size_t len,
 	return (true);
 }
 
+bool
+ice_cmd_get_sched_resource_alloc(ice_t *ice, void *buf, size_t *buflenp)
+{
+	ice_cq_desc_t		desc;
+	ice_cq_errno_t		err;
+	uint8_t			hw;
+
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_QUERY_SCHED_RES_ALLOC,
+	    *buflenp, false);
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, buf,
+	    ICE_CMD_COPY_FROM_DEV)) {
+		return (false);
+	}
+
+	if (!ice_cmd_result(&desc, &err, &hw)) {
+		ice_error(ice, "query scheduler resource allocation command "
+		    "failed: %s (%u - %s) (fw private: %x)",
+		    ice_controlq_errmsg(err), err, ice_controlq_errstr(err),
+		    hw);
+		return (false);
+	}
+
+	*buflenp = LE_16(desc.icqd_data_len);
+	return (true);
+}
+
+bool
+ice_cmd_add_sched_elements(ice_t *ice, uint16_t *ngroup,
+    ice_hw_sched_grp_t *groups)
+{
+	ice_hw_sched_grp_t		*gp;
+	ice_cq_cmd_add_sched_elements_t	*add;
+	ice_cq_desc_t			desc;
+	size_t				len;
+	uint_t				i;
+
+	len = 0;
+	gp = groups;
+	for (i = 0; i < *ngroup; i++) {
+		size_t grplen;
+		size_t nelems = LE_32(gp->ihsg_nelems);
+
+		grplen = nelems * sizeof (ice_hw_sched_elem_t);
+		len += sizeof (*gp) + grplen;
+
+		gp = (ice_hw_sched_grp_t *)&gp->ihsg_elems[nelems];
+	}
+	
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_ADD_SCHED_ELEMENTS, len, true);
+	
+	add = &desc.icqd_command.icc_add_sched_elements;
+	add->iccase_ngroups = LE_16(*ngroup);
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, groups,
+	    ICE_CMD_COPY_BOTH)) {
+		return (false);
+	}
+
+	*ngroup = LE_16(add->iccase_nadded);
+
+	return (ice_cmd_ckerr(ice, &desc, "add scheduler elements"));
+}
+
+bool
+ice_cmd_del_sched_elements(ice_t *ice, uint16_t *ngroup,
+    ice_hw_delete_sched_elements_t *elts)
+{
+	ice_hw_delete_sched_elements_t		*ep;
+	ice_cq_cmd_delete_sched_elements_t	*del;
+	ice_cq_desc_t				desc;
+	uint_t					i;
+	size_t					len = 0;
+
+	ep = elts;
+	for (i = 0; i < *ngroup; i++) {
+		uint8_t *p = (uint8_t *)ep;
+		size_t grplen;
+
+		grplen = sizeof (*ep) +
+		    LE_32(ep->ihdse_nelements) * sizeof (uint32_t);
+
+		len += grplen;
+
+		p += grplen;
+		ep = (ice_hw_delete_sched_elements_t *)p;
+	}
+
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DELETE_SCHED_ELEMENTS, len,
+	    true);
+
+	del = &desc.icqd_command.icc_del_sched_elements;
+	del->iccdse_ngroups = LE_16(*ngroup);
+
+	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, elts,
+	    ICE_CMD_COPY_BOTH)) {
+		return (false);
+	}
+
+	/*
+	 * The datasheet says that the number of groups successfully
+	 * deleted is set even on error. It's unclear on the exact semantics
+	 * (i.e. which groups) on error. The assumption (since it's likely
+	 * the simplest behavior) is that it stops processing on the first
+	 * error encountered. E.g. if 3 groups are submitted and it fails
+	 * with 2 groups deleted, the first two groups submitted were the
+	 * ones that were deleted while the last group was not.
+	 */
+	*ngroup = LE_16(del->iccdse_ndeleted);
+
+	return (ice_cmd_ckerr(ice, &desc, "delete scheduler elements"));
+}
+
 /*
  * Add a TX queue to a VSI. Currently we only support adding one TX queue
  * at a time.
@@ -1694,13 +1820,15 @@ ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_tx_ring_t *txr,
 	ice_hw_txq_group_t	*grp;
 	ice_hw_txq_perq_t	*perq;
 	ice_cq_cmd_add_txq_t	*add_txq;
+	ice_sched_node_t	*parent;
 	size_t			len;
 	ice_cq_desc_t		desc;
-	ice_cq_errno_t		err;
-	uint8_t			code;
 
 	CTASSERT(sizeof (ice_hw_txq_group_t) + sizeof (ice_hw_txq_perq_t) <=
 	    UINT16_MAX);
+
+	parent = ice_tx_sched_txq_parent(vsi);
+	ASSERT3P(parent, !=, NULL);
 
 	len = sizeof (ice_hw_txq_group_t) + sizeof (ice_hw_txq_perq_t);
 
@@ -1712,7 +1840,7 @@ ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_tx_ring_t *txr,
 
 	add_txq->iccat_ngrp = 1;
 
-	// grp->ithg_teid = ???
+	grp->ihtg_teid = parent->isn_teid;
 	grp->ihtg_nqueue = 1;
 
 	/*
@@ -1750,14 +1878,15 @@ ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_tx_ring_t *txr,
 		return (false);
 	}
 
-	if (!ice_cmd_result(&desc, &err, &code)) {
+	if (!ice_cmd_ckerr(ice, &desc, "add TX queue group")) {
 		kmem_free(grp, len);
-		ice_error(ice, "add TX queue command failed with 0x%x "
-		    "(fw private: %x)", err, code);
 		return (false);
 	}
 
 	txr->itxr_teid = LE_32(perq->ihtp_qteid);
+
+	VERIFY3P(ice_tx_sched_alloc_node(ice, parent, txr->itxr_teid,
+	    ICE_TX_SCHED_ET_LEAF), !=, NULL);
 
 	kmem_free(grp, len);
 	return (true);

@@ -89,10 +89,18 @@ ice_vsi_find_mac(ice_vsi_t *vsi, const uint8_t *addr)
 static int
 ice_group_add_mac(void *arg, const uint8_t *mac_addr)
 {
-	ice_vsi_t	*vsi = (ice_vsi_t *)arg;
-	ice_t		*ice = vsi->ivsi_ice;
+	ice_t		*ice = arg;
+	ice_vsi_t	*vsi;
 	ice_vsi_mac_t	*mac;
 	int		ret = 0;
+
+	/*
+	 * For now, we assume we're always using the first VSI. If
+	 * we start supporting multiple VSIs (e.g. VFs for virtualization)
+	 * we probably need to have mac(9E) use the ice_vsi_t as it's
+	 * handle instead of the ice_t.
+	 */
+	vsi = list_head(&ice->ice_vsi);
 
 	mac = kmem_zalloc(sizeof (*mac), KM_SLEEP);
 	bcopy(mac_addr, mac->ivm_mac, ETHERADDRL);
@@ -128,10 +136,12 @@ fail:
 static int
 ice_group_remove_mac(void *arg, const uint8_t *mac_addr)
 {
-	ice_vsi_t	*vsi = (ice_vsi_t *)arg;
-	ice_t		*ice = vsi->ivsi_ice;
+	ice_t		*ice = arg;
+	ice_vsi_t	*vsi;
 	ice_vsi_mac_t	*mac = NULL;
 	int		ret = 0;
+
+	vsi = list_head(&ice->ice_vsi);
 
 	mutex_enter(&vsi->ivsi_lock);
 	mac = ice_vsi_find_mac(vsi, mac_addr);
