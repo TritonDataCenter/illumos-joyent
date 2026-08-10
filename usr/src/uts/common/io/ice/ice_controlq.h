@@ -469,7 +469,10 @@ typedef struct ice_cq_cmd_txq_disable_flow {
 	uint32_t	icctdf_data_high;
 	uint32_t	icctdf_data_low;
 } ice_cq_cmd_txq_disable_flow_t;
-#define	ICE_CQ_DISABLE_FLOW_SET_TIMEOUT(r, v)	ice_bitset8(r, 7, 2, v)
+#define	ICE_CQ_DISABLE_FLOW_F_NORESET		(1 << 0)
+#define	ICE_CQ_DISABLE_FLOW_F_SUBSEQUENT	(1 << 2)
+#define	ICE_CQ_DISABLE_FLOW_F_FLUSH		(1 << 3)
+#define	ICE_CQ_DISABLE_FLOW_SET_TIMEOUT(v)	ice_bitset8(0, 7, 2, v)
 
 typedef struct ice_cq_cmd_add_switch_rule {
 	uint16_t	iccasr_nrules;

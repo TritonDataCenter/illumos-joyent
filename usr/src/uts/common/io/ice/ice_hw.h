@@ -963,9 +963,7 @@ typedef struct ice_hw_txq_group {
 	uint8_t			ihtg_rsvd[3];
 	ice_hw_txq_perq_t	ihtg_perq[];
 } __packed ice_hw_txq_group_t;
-
-#define	ICE_TX_TXQ_DISABLE_QID_LAN	0x0000
-#define	ICE_TX_TXQ_DISABLE_QID_RDMA	0x4000
+CTASSERT(sizeof (ice_hw_txq_group_t) == 8);
 
 typedef struct ice_hw_txq_disable_grp {
 	uint32_t	txqd_pteid;
@@ -973,6 +971,11 @@ typedef struct ice_hw_txq_disable_grp {
 	uint8_t		txqd_resv;
 	uint16_t	txqd_qids[];
 } ice_hw_txq_disable_grp_t;
+CTASSERT(sizeof (ice_hw_txq_disable_grp_t) == 8);
+#define	ICE_TX_TXQ_SET_QUID(r, v)	ice_bitset16(r, 14, 0, v)
+#define	ICE_TX_TXQ_SET_QTYPE(r, t)	ice_bitset16(r, 15, 15, t)
+#define	ICE_TX_TXQ_QID_LAN		0
+#define	ICE_TX_TXQ_QID_RDMA		1
 
 typedef struct ice_tx_desc {
 	uint64_t	itxd_qw0;
@@ -1041,15 +1044,11 @@ typedef struct ice_hw_delete_sched_elements {
 	uint32_t	ihdse_teids[];
 } __packed ice_hw_delete_sched_elements_t;
 
-typedef struct ice_sw_lookup {
-	uint16_t	iswl_rid;	/* recipe id */
-	uint16_t	iswl_source;	/* source vsi or port */
-	uint32_t	iswl_action;
-	uint16_t	iswl_index;	/* LUT index */
-	uint16_t	iswl_header_len;
-	uint8_t		iswl_data[];
-} ice_sw_lookup_t;
-
+/*
+ * These values are the sample (i.e. default) recipes in the NIC from
+ * Table 7-10. We don't create any custom switch recipes since the
+ * ones there provide what we need.
+ */
 typedef enum ice_sw_recipe {
 	ICE_SW_RECIPE_ETHERTYPE = 0,
 	ICE_SW_RECIPE_MAC = 1,
@@ -1061,8 +1060,65 @@ typedef enum ice_sw_recipe {
 	ICE_SW_RECIPE_PROMISC_VLAN = 9,
 } ice_sw_recipe_t;
 
-/* Fields of icswl_action */
-#define	ICE_SW_RULE_ACT_TYPE(x)			BITX(x, 2, 0)
+/*
+ * The layout of the add/update/remove switch rules data buffer
+ * documented in 7.8.12.6.1.1 is a bit misleading. The initial definition
+ * suggests a struct with a header followed by a union depending on the
+ * specific type of rule. However the further examples suggest different
+ * structs for lookup, vsi lists, etc. that share a common header.
+ * Examination of the FreeBSD driver agrees with the latter characterization.
+ *
+ * The distinction is important since a struct w/ a union will have
+ * padding, but that apparently is not what the hardware is expecting.
+ * As such, these don't _exactly_ match the definitino in 7.8.12.6.1.1
+ * for that reason.
+ */
+typedef struct ice_sw_rule_hdr {
+	uint16_t	iswrh_type;
+	uint16_t	iswrh_status;
+} ice_sw_rule_hdr_t;
+#define	ICE_SW_RULE_T_LOOKUP_RX		0x0
+#define	ICE_SW_RULE_T_LOOKUP_TX		0x1
+#define	ICE_SW_RULE_T_LARGE_ACTION	0x2
+#define	ICE_SW_RULE_T_VSI_LIST_SET	0x3
+#define	ICE_SW_RULE_T_VSI_LIST_CLEAR	0x4
+#define	ICE_SW_RULE_T_PRUNE_LIST_SET	0x5
+#define	ICE_SW_RULE_T_PRUNE_LIST_CLEAR	0x6
+
+typedef struct ice_sw_lookup {
+	ice_sw_rule_hdr_t	iswl_hdr;
+	uint16_t		iswl_rid;	/* recipe id */
+	uint16_t		iswl_source;	/* source vsi or port */
+	uint32_t		iswl_action;
+	uint16_t		iswl_index;	/* LUT index */
+	uint16_t		iswl_header_len;
+	uint8_t			iswl_data[];
+} ice_sw_lookup_t;
+CTASSERT(sizeof (ice_sw_lookup_t) == 16);
+
+typedef struct ice_sw_large_action {
+	ice_sw_rule_hdr_t	isla_hdr;
+	uint16_t		isla_index;
+	uint16_t		isla_size;
+	uint32_t		lsla_action[];
+} ice_sw_large_action_t;
+CTASSERT(sizeof (ice_sw_large_action_t) == 8);
+
+typedef struct ice_sw_vsi_list {
+	ice_sw_rule_hdr_t	isvl_hdr;
+	uint16_t		isvl_nvsi;	/* 0 to clear entire list */
+	uint16_t		isvl_vsi[];
+} ice_sw_vsi_list_t;
+CTASSERT(sizeof (ice_sw_vsi_list_t) == 6);
+
+typedef struct ice_sw_vsi_query {
+	ice_sw_rule_hdr_t	isvq_hdr;
+	uint8_t			isvq_vsi_list[96];	/* VSI bitmap */
+} ice_sw_vsi_query_t;
+CTASSERT(sizeof (ice_sw_vsi_query_t) == 100);
+
+/* Macros for the action value */
+#define	ICE_SW_RULE_ACT_TYPE(x)			ice_bitx32(x, 2, 0)
 #define	ICE_SW_RULE_ACT_T_LOGICAL_PORT_FWD	0x0
 #define	ICE_SW_RULE_ACT_T_FWD_QUEUE		0x1
 #define	ICE_SW_RULE_ACT_T_PRUNE			0x2
@@ -1072,71 +1128,33 @@ typedef enum ice_sw_recipe {
 #define	ICE_SW_RULE_ACT_LB_EN			(1 << 2)
 #define	ICE_SW_RULE_ACT_LAN_EN			(1 << 3)
 /* Type 0 */
-#define	ICE_SW_RULE_ACT_VSI_SHIFT		4
-#define	ICE_SW_RULE_ACT_VSI(x) \
-	(BITX(x, 14, 4) >> ICE_SW_RULE_ACT_VSI_SHIFT)
+#define	ICE_SW_RULE_ACT_SET_VSI(r, v)		ice_bitset32(r, 13, 4, v)
+#define	ICE_SW_RULE_ACT_VSI(x)			ice_bitx32(x, 13, 4)
 #define	ICE_SW_RULE_ACT_VSI_LIST		(1 << 14)
 #define	ICE_SW_RULE_ACT_VSI_VALID		(1 << 17)
 #define	ICE_SW_RULE_ACT_DROP			(1 << 18)
 /* Type 1 */
-#define	ICE_SW_RULE_ACT_QIDX_SHIFT		4
-#define	ICE_SW_RULE_ACT_QIDX(x) \
-	(BITX(x, 15, 4) >> ICE_SW_RULE_ACT_QIDX_SHIFT)
-#define	ICE_SW_RULE_ACT_QSZ_SHIFT		15
-#define	ICE_SW_RULE_ACT_QSZ(x) \
-	(BITX(x, 18, 15) >> ICE_SW_RULE_ACT_QSZ_SHIFT)
+#define	ICE_SW_RULE_ACT_SET_QIDX(r, v)		ice_bitset32(r, 14, 4, v)
+#define	ICE_SW_RULE_ACT_QIDX(x)			ice_bitx32(x, 14, 4)
+#define	ICE_SW_RULE_ACT_SET_QSZ(r, v)		ice_bitset32(r, 17, 15, v)
+#define	ICE_SW_RULE_ACT_QSZ(x)			ice_bitx32(x, 17, 15)
 #define	ICE_SW_RULE_ACT_Q_PRI			(1 << 18)
 /* Type 2 */
 #define	ICE_SW_RULE_ACT_EGRESS			(1 << 15)
 #define	ICE_SW_RULE_ACT_INGRESS			(1 << 16)
 #define	ICE_SW_RULE_ACT_PRUNE			(1 << 17)
-#define	ICE_SW_RULE_ACT_LPTR_SHIFT		4
-#define	ICE_SW_RULE_ACT_LPTR(x) \
-	(BITX(x, 17, 4) >> ICE_SW_RULE_ACT_LARGE_PTR_SHIFT)
+#define	ICE_SW_RULE_ACT_SET_LPTR(r, v) \
+	ice_bitset32(r | (1 << 18), 16, 4, v)
+#define	ICE_SW_RULE_ACT_LPTR(x)			ice_bitx32(x, 16, 4)
 #define	ICE_SW_RULE_ACT_LPTR_HAS_FWD		(1 << 17)
 /* Distinguishes between PRUNE and LPTR (large pointer) */
-#define	ICE_SW_RULE_ACT_IS_LPTR			(1 << 18)
+#define	ICE_SW_RULE_ACT_IS_LPTR(x)		ice_bitx32(x, 18, 18)
 /* Type 3 */
-#define	ICE_SW_RULE_ACT_OTHER_TYPE(x)		BITX(x, 19, 17)
+#define	ICE_SW_RULE_ACT_OTHER_TYPE(x)		ice_bitx32(x, 19, 17)
 #define	ICE_SW_RULE_ACT_OTHER_MIRROR		0
 #define	ICE_SW_RULE_ACT_SET_STAT		(3 << 17)
 #define	ICE_SW_RULE_ACT_MIRROR_VSI(x)		ICE_SW_RULE_ACT_VSI(x)
-#define	ICE_SW_RULE_ACT_STAT_IDX(x)		(BITX(x, 11, 4) << 4)
-
-typedef struct ice_sw_large_action {
-	uint16_t	iswla_index;
-	uint16_t	iswla_size;
-	uint32_t	lswla_action[];
-} ice_sw_large_action_t;
-
-typedef struct ice_sw_vsi_list {
-	uint16_t	iswvl_index;
-	uint16_t	iswvl_nvsi;	/* use 0 to clear entire list */
-	uint16_t	iswvl_vsi[];
-} ice_sw_vsi_list_t;
-
-typedef struct ice_sw_vsi_query {
-	uint16_t	iswvq_index;
-	uint8_t		iswvq_vsi_list[96];	/* Bitmap of VSI list */
-} ice_sw_vsi_query_t;
-
-#define	ICE_SW_RULE_T_LOOKUP_RX		0x0
-#define	ICE_SW_RULE_T_LOOKUP_TX		0x1
-#define	ICE_SW_RULE_T_LARGE_ACTION	0x2
-#define	ICE_SW_RULE_T_VSI_LIST_SET	0x3
-#define	ICE_SW_RULE_T_VSI_LIST_CLEAR	0x4
-#define	ICE_SW_RULE_T_PRUNE_LIST_SET	0x5
-#define	ICE_SW_RULE_T_PRUNE_LIST_CLEAR	0x6
-typedef struct ice_sw_rule {
-	uint16_t	iswr_type;
-	uint16_t	iswr_status;
-	union {
-		ice_sw_lookup_t		iswr_lookup;
-		ice_sw_large_action_t	iswr_large_action;
-		ice_sw_vsi_list_t	iswr_vsi_list;
-		ice_sw_vsi_query_t	iswr_vsi_query;
-	} iswr_data;
-} ice_sw_rule_t;
+#define	ICE_SW_RULE_ACT_STAT_IDX(x)		ice_bitx32(x, 11, 4)
 
 typedef struct ice_hw_tx_sched_layer {
 	uint8_t		ihtsl_layer;

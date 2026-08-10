@@ -505,7 +505,7 @@ ice_tx_sched_add_children(ice_t *ice, ice_sched_node_t *parent, uint8_t *buf,
 }
 
 static bool
-ice_tx_sched_del_elt_impl(ice_t *ice, ice_sched_node_t *node)
+ice_tx_sched_del_elt_impl(ice_t *ice, ice_sched_node_t *node, bool del_from_hw)
 {
 	ice_sched_node_t		*parent = node->isn_parent;
 	uint64_t			buf[4] = { 0 };
@@ -536,9 +536,11 @@ ice_tx_sched_del_elt_impl(ice_t *ice, ice_sched_node_t *node)
 	del->ihdse_nelements = LE_16(ngroup);
 	del->ihdse_teids[0] = LE_32(node->isn_teid);
 
-	if (!ice_cmd_del_sched_elements(ice, &ngroup, del)) {
-		ASSERT3U(ngroup, ==, 0);
-		return (false);
+	if (del_from_hw || node->isn_type != ICE_TX_SCHED_ET_LEAF) {
+		if (!ice_cmd_del_sched_elements(ice, &ngroup, del)) {
+			ASSERT3U(ngroup, ==, 0);
+			return (false);
+		}
 	}
 
 	/*
@@ -586,28 +588,30 @@ ice_tx_sched_del_elt_impl(ice_t *ice, ice_sched_node_t *node)
 }
 
 bool
-ice_tx_sched_del_elt(ice_t *ice, ice_sched_node_t *node)
+ice_tx_sched_del_elt(ice_t *ice, ice_sched_node_t *node, bool del_from_hw)
 {
 	switch (node->isn_type) {
 	case ICE_TX_SCHED_ET_ROOT:
 	case ICE_TX_SCHED_ET_TC:
+		/* root and tc nodes cannot be deleted by the driver. */
+		return (false);
 	case ICE_TX_SCHED_ET_LEAF:
 		/*
-		 * root and tc nodes cannot be deleted by the driver.
-		 *
 		 * The wording in 8.3.4.3.6.9 is a bit confusing, but
 		 * it appears that a leaf node (aside from any initial
 		 * leaf nodes after reset) are deleted when the TX ring or
 		 * RDMA qset associated with the node is deleted (that is
 		 * the TX scheduler node is implicitly deleted when the
-		 * associated entity is deleted).
+		 * associated entity is deleted), so we should only
+		 * need to delete our ice_sched_node_t.
 		 */
-		return (false);
+		ASSERT(!del_from_hw);
+		break;
 	default:
 		break;
 	}
 
-	return (ice_tx_sched_del_elt_impl(ice, node));
+	return (ice_tx_sched_del_elt_impl(ice, node, del_from_hw));
 }
 
 ice_sched_node_t *
@@ -618,6 +622,11 @@ ice_tx_sched_alloc_node(ice_t *ice, ice_sched_node_t *parent, uint32_t teid,
 	size_t			childsz;
 	uint8_t			max_children;
 	uint8_t			level;
+
+	ASSERT(MUTEX_HELD(&ice->ice_tx_sched_lock));
+
+	ASSERT3P(ice_tx_sched_find_node(ice, ice->ice_tx_sched_root, teid),
+	    ==, NULL);
 
 	if (parent != NULL) {
 		level = parent->isn_level + 1;
@@ -728,7 +737,7 @@ ice_tx_sched_prune_defaults(ice_t *ice, ice_sched_node_t *node)
 		break;
 	}
 
-	return (ice_tx_sched_del_elt_impl(ice, node));
+	return (ice_tx_sched_del_elt_impl(ice, node, true));
 }
 
 static uint8_t

@@ -1545,7 +1545,7 @@ ice_cmd_add_vsi(ice_t *ice, ice_vsi_t *vsi)
 	add->iccav_type = LE_16(hw_type);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, &vsi->ivsi_ctxt,
-	    ICE_CMD_COPY_TO_DEV)) {
+	    ICE_CMD_COPY_BOTH)) {
 		return (false);
 	}
 
@@ -1872,7 +1872,7 @@ ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_tx_ring_t *txr,
 	}
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, grp,
-	    ICE_CMD_COPY_TO_DEV)) {
+	    ICE_CMD_COPY_BOTH)) {
 		kmem_free(grp, len);
 		ice_error(ice, "Failed to add TX queue to group");
 		return (false);
@@ -1884,72 +1884,89 @@ ice_cmd_add_txq_grp(ice_t *ice, ice_vsi_t *vsi, ice_tx_ring_t *txr,
 	}
 
 	txr->itxr_teid = LE_32(perq->ihtp_qteid);
+	ASSERT3U(txr->itxr_teid, !=, ICE_TX_SCHED_TEID_INVALID);
+
+	mutex_enter(&ice->ice_tx_sched_lock);
 
 	VERIFY3P(ice_tx_sched_alloc_node(ice, parent, txr->itxr_teid,
 	    ICE_TX_SCHED_ET_LEAF), !=, NULL);
+
+	mutex_exit(&ice->ice_tx_sched_lock);
 
 	kmem_free(grp, len);
 	return (true);
 }
 
+/*
+ * From Table 10-38, the buffer passed to the NIC must be aligned to 4
+ * bytes
+ */
+#define	DISABLE_SZ \
+    (P2ROUNDUP(sizeof (ice_hw_txq_disable_grp_t) + 1 * sizeof (uint16_t), \
+    sizeof (uint32_t)))
+
 bool
 ice_cmd_disable_queue(ice_t *ice, ice_tx_ring_t *txr)
 {
+	uint8_t				buf[DISABLE_SZ] = { 0 };
 	ice_hw_txq_disable_grp_t	*grp;
 	ice_cq_cmd_txq_disable_flow_t	*df;
-	size_t				len;
+	ice_sched_node_t		*txnode;
 	ice_cq_desc_t			desc;
-	ice_cq_errno_t			err;
 	bool				ret = false;
-	uint8_t				hw;
+	uint16_t			qid = 0;
 
-	/* We disable one TX queue at a time */
-	len = sizeof (*grp) + 1 * sizeof (uint16_t);
+	qid = ICE_TX_TXQ_SET_QUID(qid, txr->itxr_index);
+	qid = ICE_TX_TXQ_SET_QTYPE(qid, ICE_TX_TXQ_QID_LAN);
 
-	/* From Table 10-38, the command buffer needs to be 4-byte aligned */
-	len = P2ROUNDUP(len, 4);
+	grp = (ice_hw_txq_disable_grp_t *)buf;
 
-	grp = kmem_zalloc(len, KM_SLEEP);
-	//grp->txqd_pteid = txr->itxr_teid;
-	grp->txqd_nqueue = 1;
-	//grp->txqd_qids[0] = ???;
+	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DISABLE_FLOW, DISABLE_SZ, true);
 
-	ice_cmd_indirect_init(&desc, ICE_CQ_OP_DISABLE_FLOW, len, true);
+	mutex_enter(&ice->ice_tx_sched_lock);
+
+	txnode = ice_tx_sched_find_node(ice, ice->ice_tx_sched_root,
+	    txr->itxr_teid);
+	ASSERT3P(txnode, !=, NULL);
+	ASSERT3P(txnode->isn_parent, !=, NULL);
+
+	grp->txqd_pteid = LE_32(txnode->isn_parent->isn_teid);
+	grp->txqd_nqueue = 1;		/* single byte */
+	grp->txqd_qids[0] = LE_16(qid);
+
 	df = &desc.icqd_command.icc_txq_disable_flow;
-	df->icctdf_flags = ICE_CQ_DISABLE_FLOW_SET_TIMEOUT(0, 5);
-	df->icctdf_nqgrp = 1;
+	df->icctdf_flags = ICE_CQ_DISABLE_FLOW_F_NORESET;
+	df->icctdf_timeout = ICE_CQ_DISABLE_FLOW_SET_TIMEOUT(5);
+	df->icctdf_nqgrp = 1;		/* Single byte */
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, grp,
 	    ICE_CMD_COPY_TO_DEV)) {
 		goto done;
 	}
 
-	if (!ice_cmd_result(&desc, &err, &hw)) {
-		ice_error(ice, "failed to disable TX queue %u: "
-		    "%s (%s - 0x%x) (fw private: %x)",
-		    txr->itxr_index, ice_controlq_errmsg(err),
-		    ice_controlq_errstr(err), err, hw);
+	if (!ice_cmd_ckerr(ice, &desc, "disable TX queue %u",
+	    txr->itxr_index)) {
 		goto done;
 	}
 
+	VERIFY(ice_tx_sched_del_elt(ice, txnode, false));
+	txr->itxr_teid = ICE_TX_SCHED_TEID_INVALID;
+	
 	ret = true;
 
 done:
-	kmem_free(grp, len);
+	mutex_exit(&ice->ice_tx_sched_lock);
 	return (ret);
 }
 
 /* Add/Remove/Update switch rules */
 bool
 ice_cmd_switch_rules(ice_t *ice, ice_cq_opcode_t op, uint16_t nrules,
-    ice_sw_rule_t *rules)
+    void *rules, size_t len)
 {
 	const char			*opstr = "";
 	ice_cq_cmd_add_switch_rule_t	*add_rule;
-	size_t				len;
 	ice_cq_desc_t			desc;
-	ice_cq_errno_t			err;
-	uint8_t				code;
 
 	switch (op) {
 	case ICE_CQ_OP_ADD_SW_RULES:
@@ -1966,29 +1983,13 @@ ice_cmd_switch_rules(ice_t *ice, ice_cq_opcode_t op, uint16_t nrules,
 		    op);
 	}
 
-	/*
-	 * It's not clear if we can use a large buf with this command.
-	 * So for now, we strongly disallow it.
-	 */
-	len = (size_t)nrules * sizeof (*rules);
-	VERIFY3U(len, <, ICE_CQ_LARGE_BUF);
-
-	/*
-	 * This seems like an indirect command, but examination of the
-	 * FreeBSD sources suggest that we shouldn't set all the flags
-	 * we normally set for an indirect command (see ice_aq_sw_fules())
-	 */
-	ice_cmd_direct_init(&desc, op);
-
-	desc.icqd_flags |= LE_16(ICE_CQ_DESC_FLAGS_RD);
-	desc.icqd_data_len = LE_16(len);
+	ice_cmd_indirect_init(&desc, op, len, true);
 
 	add_rule = &desc.icqd_command.icc_add_switch_rule;
-
 	add_rule->iccasr_nrules = LE_16(nrules);
 
 	if (!ice_cmd_submit(ice, &ice->ice_asq, &desc, rules,
-	    ICE_CMD_COPY_TO_DEV)) {
+	    ICE_CMD_COPY_BOTH)) {
 		ice_error(ice, "failed switch %s operation", opstr);
 		return (false);
 	}
@@ -1998,12 +1999,7 @@ ice_cmd_switch_rules(ice_t *ice, ice_cq_opcode_t op, uint16_t nrules,
 	 * command at least updates the descriptor with the assigned index
 	 * from the hardware, which we need to later reference it.
 	 */
-	if (!ice_cmd_result(&desc, &err, &code)) {
-		ice_error(ice, "failed switch %s operation: %d", err);
-		return (false);
-	}
-
-	return (true);
+	return (ice_cmd_ckerr(ice, &desc, "switch rules %s", opstr));
 }
 
 bool

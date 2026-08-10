@@ -1502,24 +1502,11 @@ ice_ring_tx_stop(mac_ring_driver_t mri)
 {
 	ice_tx_ring_t		*txr = (ice_tx_ring_t *)mri;
 	ice_t			*ice = txr->itxr_ice;	
-	ice_sched_node_t	*txnode;
 
 	if (!ice_cmd_disable_queue(ice, txr)) {
 		ice_error(ice, "failed to disable TX queue %u",
 		    txr->itxr_index);
 	}
-
-	mutex_enter(&ice->ice_tx_sched_lock);
-
-	txnode = ice_tx_sched_find_node(ice, ice->ice_tx_sched_root,
-	    txr->itxr_teid);
-	ASSERT3P(txnode, !=, NULL);
-
-	(void) ice_tx_sched_del_elt(ice, txnode);
-
-	mutex_exit(&ice->ice_tx_sched_lock);
-
-	txr->itxr_teid = ICE_TX_SCHED_TEID_INVALID;
 
 	ice_tx_teardown_bufs(txr);
 }

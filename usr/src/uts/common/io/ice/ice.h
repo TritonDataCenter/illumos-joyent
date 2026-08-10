@@ -940,6 +940,9 @@ extern void ice_tx_fini(void);
 extern bool ice_controlq_init(ice_t *);
 extern void ice_controlq_fini(ice_t *);
 
+extern const char *ice_controlq_errmsg(ice_cq_errno_t);
+extern const char *ice_controlq_errstr(ice_cq_errno_t);
+
 extern ice_work_task_t ice_controlq_rq_process(ice_t *);
 
 extern bool ice_cmd_get_version(ice_t *, ice_fw_info_t *);
@@ -995,13 +998,13 @@ extern bool ice_cmd_add_txq_grp(ice_t *, ice_vsi_t *, ice_tx_ring_t *,
     ice_hw_txq_context_t *);
 extern bool ice_cmd_disable_queue(ice_t *, ice_tx_ring_t *);
 extern bool ice_cmd_switch_rules(ice_t *, ice_cq_opcode_t, uint16_t,
-    ice_sw_rule_t *);
+    void *, size_t);
 extern bool ice_cmd_download_pkg(ice_t *, const void *, size_t, bool);
 
-
-
+extern bool ice_promisc_on(ice_t *);
+extern bool ice_promisc_off(ice_t *);
 extern int ice_add_mac(ice_t *, uint_t, const uint8_t *, uint16_t *);
-extern int ice_remove_rule(ice_t *, uint16_t);
+extern int ice_remove_rule(ice_t *, uint16_t, uint16_t *);
 
 /*
  * NVM related functions
@@ -1021,7 +1024,7 @@ extern ice_sched_node_t *ice_tx_sched_alloc_node(ice_t *, ice_sched_node_t *,
     uint32_t, uint8_t);
 extern ice_sched_node_t *ice_tx_sched_find_node(ice_t *, ice_sched_node_t *,
     uint32_t);
-extern bool ice_tx_sched_del_elt(ice_t *, ice_sched_node_t *);
+extern bool ice_tx_sched_del_elt(ice_t *, ice_sched_node_t *, bool);
 
 /*
  * Hardware related functions (one that manipulate registers)

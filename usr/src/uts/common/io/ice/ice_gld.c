@@ -150,7 +150,7 @@ ice_group_remove_mac(void *arg, const uint8_t *mac_addr)
 		return (ENOENT);
 	}
 
-	ret = ice_remove_rule(ice, mac->ivm_idx);
+	ret = ice_remove_rule(ice, 1, &mac->ivm_idx);
 	if (ret == 0) {
 		list_remove(&vsi->ivsi_macs, mac);
 	}
@@ -335,128 +335,19 @@ err:
 	return (EIO);
 }
 
-#define	RULE_DATA_SZ	16
-#define	RULE_SZ		(sizeof (ice_sw_rule_t) + RULE_DATA_SZ)
-CTASSERT(RULE_SZ % sizeof (uint64_t) == 0);
-
-static void
-ice_promisc_init_rule(ice_sw_rule_t *rule, uint16_t vsi_id, uint16_t src,
-    bool tx, bool mcast)
-{
-	ice_sw_lookup_t *lk = &rule->iswr_data.iswr_lookup;
-
-	rule->iswr_type = tx ?
-	    LE_16(ICE_SW_RULE_T_LOOKUP_TX) :
-	    LE_16(ICE_SW_RULE_T_LOOKUP_RX);
-
-	lk->iswl_rid = LE_16(ICE_SW_RECIPE_PROMISC);
-	lk->iswl_source = LE_16(src);
-	lk->iswl_action = LE_32(
-	    ICE_SW_RULE_ACT_T_LOGICAL_PORT_FWD |
-	    ICE_SW_RULE_ACT_LAN_EN |
-	    (uint32_t)vsi_id << ICE_SW_RULE_ACT_VSI_SHIFT |
-	    ICE_SW_RULE_ACT_VSI_VALID);
-	lk->iswl_header_len = RULE_DATA_SZ;
-
-	lk->iswl_data[0] = 0x2;
-	lk->iswl_data[6] = 0x2;
-
-	if (mcast)
-		lk->iswl_data[0] |= 0x01;
-}
-
 static int
 ice_m_setpromisc(void *arg, boolean_t enable)
 {
-	ice_t		*ice = arg;
-	ice_vsi_t	*vsi;
-	union {
-		ice_sw_rule_t	rule;
-		uint64_t	data[RULE_SZ/sizeof (uint64_t)];
-	} u[4];
-	ice_sw_rule_t	*r_rx = &u[0].rule;
-	ice_sw_rule_t	*r_mrx = &u[1].rule;
-	ice_sw_rule_t	*r_tx = &u[2].rule;
-	ice_sw_rule_t	*r_mtx = &u[3].rule;
+	ice_t	*ice = arg;
+	bool	ret;
 
-	/*
-	 * Per mac_capab_rings(9E), broadcast, multicast, and
-	 * promiscuous mode should only be enabled on the first group
-	 * which is always the first VSI
-	 */
-	vsi = list_head(&ice->ice_vsi);
-
-	bzero(u, sizeof (u));
-
-	if (!enable) {
-
-		(void) ice_remove_rule(ice, ice->ice_promisc_rid_tx);
-		(void) ice_remove_rule(ice, ice->ice_promisc_m_rid_tx);
-		(void) ice_remove_rule(ice, ice->ice_promisc_rid_rx);
-		(void) ice_remove_rule(ice, ice->ice_promisc_m_rid_rx);
-
-		/*
-		 * Since all of these rule ids have to be distinct, we
-		 * set them all to 0 to indicate that they're not set
-		 * (there doesn't appear to be any sort of 'invalid'
-		 * sentinel value that could be used).
-		 */
-		ice->ice_promisc_rid_tx = ice->ice_promisc_m_rid_tx =
-		    ice->ice_promisc_rid_rx = ice->ice_promisc_m_rid_rx = 0;
-
-		return (0);
+	if (enable) {
+		ret = ice_promisc_on(ice);
+	} else {
+		ret = ice_promisc_off(ice);
 	}
 
-	ice_promisc_init_rule(r_rx, vsi->ivsi_id, ice->ice_port_id, false,
-	    false);
-	ice_promisc_init_rule(r_mrx, vsi->ivsi_id, ice->ice_port_id, false,
-	    true);
-	ice_promisc_init_rule(r_tx, vsi->ivsi_id, vsi->ivsi_id, true, false);
-	ice_promisc_init_rule(r_mtx, vsi->ivsi_id, vsi->ivsi_id, true, true);
-
-	if (!ice_cmd_switch_rules(ice, ICE_CQ_OP_ADD_SW_RULES, 4, r_rx)) {
-		return (EIO);
-	}
-
-	uint16_t rids[4] = { 0 };
-	uint_t n_succeed = 0;
-
-	for (uint_t i = 0; i < 4; i++) {
-		if (u[i].rule.iswr_status == 0) {
-			rids[n_succeed++] =
-			    u[i].rule.iswr_data.iswr_lookup.iswl_index;
-		}
-	}
-
-	if (n_succeed == 0) {
-		/* Failed to add any rule, just return failure */
-		return (EIO);
-	}
-
-	if (n_succeed != 4) {
-		ice_sw_rule_t	*r = &u[0].rule;
-
-		/*
-		 * Only partially succeeded, so need to delete the rules that
-		 * succeeded so we can back out.
-		 */
-		bzero(&u, sizeof (u));
-		for (uint_t i = 0; i < n_succeed; i++) {
-			r[i].iswr_data.iswr_lookup.iswl_index = rids[i];
-		}
-
-		(void) ice_cmd_switch_rules(ice, ICE_CQ_OP_REMOVE_SW_RULES,
-		    n_succeed, &u[0].rule);
-
-		return (EIO);
-	}
-
-	ice->ice_promisc_rid_tx = r_tx->iswr_data.iswr_lookup.iswl_index;
-	ice->ice_promisc_m_rid_tx = r_mtx->iswr_data.iswr_lookup.iswl_index;
-	ice->ice_promisc_rid_rx = r_rx->iswr_data.iswr_lookup.iswl_index;
-	ice->ice_promisc_m_rid_rx = r_rx->iswr_data.iswr_lookup.iswl_index;
-
-	return (0);
+	return (ret ? 0 : EIO);
 }
 
 static int
@@ -492,7 +383,7 @@ ice_m_multicast(void *arg, boolean_t add, const uint8_t *addr)
 			return (ENOENT);
 		}
 
-		ret = ice_remove_rule(ice, mac->ivm_idx);
+		ret = ice_remove_rule(ice, 1, &mac->ivm_idx);
 		if (ret != 0) {
 			list_remove(&ice->ice_mc_macs, mac);
 			kmem_free(mac, sizeof (*mac));
