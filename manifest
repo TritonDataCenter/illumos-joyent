@@ -13250,6 +13250,7 @@ f usr/share/man/man3c/door_server_create.3c 0444 root bin
 s usr/share/man/man3c/door_setparam.3c=door_getparam.3c
 f usr/share/man/man3c/door_ucred.3c 0444 root bin
 s usr/share/man/man3c/door_unbind.3c=door_bind.3c
+s usr/share/man/man3c/door_xcreate.3c=door_create.3c
 s usr/share/man/man3c/double_to_decimal.3c=floating_to_decimal.3c
 s usr/share/man/man3c/dprintf.3c=printf.3c
 f usr/share/man/man3c/drand48.3c 0444 root bin
