@@ -20927,6 +20927,7 @@ s usr/share/man/man9f/ddi_modclose.9f=ddi_modopen.9f
 f usr/share/man/man9f/ddi_model_convert_from.9f 0444 root bin
 f usr/share/man/man9f/ddi_modopen.9f 0444 root bin
 s usr/share/man/man9f/ddi_modsym.9f=ddi_modopen.9f
+f usr/share/man/man9f/ddi_ncpus_expected.9f 0444 root bin
 f usr/share/man/man9f/ddi_no_info.9f 0444 root bin
 f usr/share/man/man9f/ddi_node_name.9f 0444 root bin
 f usr/share/man/man9f/ddi_peek.9f 0444 root bin

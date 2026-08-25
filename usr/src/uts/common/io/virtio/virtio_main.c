@@ -12,7 +12,7 @@
 /*
  * Copyright 2019 Joyent, Inc.
  * Copyright 2022 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2025 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  * Copyright 2026 Hans Rosenfeld
  */
 
@@ -517,21 +517,11 @@ virtio_unmap_cap(virtio_t *vio, virtio_pci_cap_t *cap)
 static boolean_t
 virtio_map_cap(virtio_t *vio, virtio_pci_cap_t *cap)
 {
-	static uint8_t baridx = UINT8_MAX;
-	static int rnumber = -1;
+	int rnumber;
 
 	VERIFY(cap->vpc_type);
 
-	/*
-	 * With most hypervisors all of the capabilities point to the same BAR
-	 * so we can cache and re-use the corresponding register number.
-	 * This function is only called serially from `virtio_init` during
-	 * driver attach so it is safe to use static locals.
-	 */
-	if (baridx != cap->vpc_baridx) {
-		baridx = cap->vpc_baridx;
-		rnumber = virtio_bar_to_rnumber(vio, baridx);
-	}
+	rnumber = virtio_bar_to_rnumber(vio, cap->vpc_baridx);
 
 	if (rnumber == -1 || ddi_regs_map_setup(vio->vio_dip, rnumber,
 	    (caddr_t *)&cap->vpc_bar, cap->vpc_offset, cap->vpc_size,
@@ -861,6 +851,7 @@ virtio_queue_alloc(virtio_t *vio, uint16_t qidx, const char *name,
 			    "for notify region of size 0x%" PRIx64,
 			    name, (uint_t)qidx,
 			    noff, vio->vio_cap_notify.vpc_size);
+			mutex_exit(&vio->vio_mutex);
 			return (NULL);
 		}
 	}
@@ -1066,6 +1057,59 @@ virtio_queue_nactive(virtio_queue_t *viq)
 	mutex_exit(&viq->viq_mutex);
 
 	return (r);
+}
+
+/*
+ * Check whether the device has returned descriptor chains that have not yet
+ * been collected with virtio_queue_poll(). The device consults the
+ * NO_INTERRUPT flag only at the moment it returns a chain, so no interrupt is
+ * generated for chains returned while the flag was set and clearing it is not
+ * retroactive. A driver that clears the flag should use this to discover
+ * outstanding work and process the queue itself.
+ */
+boolean_t
+virtio_queue_pending(virtio_queue_t *viq)
+{
+	boolean_t pending = B_FALSE;
+
+	mutex_enter(&viq->viq_mutex);
+	if (!viq->viq_shutdown) {
+		/*
+		 * Taking the queue mutex provides the store-load barrier
+		 * needed when the caller has just cleared the NO_INTERRUPT
+		 * flag. The flag update is globally visible before we read
+		 * the device index, so a chain that the check misses was
+		 * returned after the flag was cleared and will have raised
+		 * an interrupt.
+		 */
+		VIRTQ_DMA_SYNC_FORKERNEL(viq);
+		pending = (viq_htog16(viq, viq->viq_dma_device->vqde_index) !=
+		    viq->viq_device_index);
+	}
+	mutex_exit(&viq->viq_mutex);
+
+	return (pending);
+}
+
+/*
+ * Return the interrupt handle for the MSI-X vector assigned to a queue, or
+ * NULL if the queue has no dedicated vector. This is the case when the
+ * framework fell back to a shared fixed interrupt, or when the queue was
+ * configured without a handler.
+ */
+ddi_intr_handle_t
+virtio_queue_intr_handle(virtio_queue_t *viq)
+{
+	virtio_t *vio = viq->viq_virtio;
+
+	VERIFY(vio->vio_initlevel & VIRTIO_INITLEVEL_INT_ADDED);
+
+	if (vio->vio_interrupt_type != DDI_INTR_TYPE_MSIX ||
+	    !viq->viq_handler_added) {
+		return (NULL);
+	}
+
+	return (vio->vio_interrupts[viq->viq_handler_index]);
 }
 
 virtio_chain_t *
@@ -1932,6 +1976,20 @@ virtio_interrupts_unwind(virtio_t *vio)
 	 */
 	if (!virtio_modern(vio))
 		vio->vio_legacy_cfg_offset = VIRTIO_LEGACY_CFG_OFFSET;
+}
+
+/*
+ * Return the interrupt type that was allocated for this device, as one of the
+ * DDI_INTR_TYPE_* constants. A driver that sized its queue configuration
+ * around per-queue MSI-X vectors can use this to discover whether the
+ * framework instead had to fall back to a single shared fixed interrupt.
+ */
+int
+virtio_interrupts_type(virtio_t *vio)
+{
+	VERIFY(vio->vio_initlevel & VIRTIO_INITLEVEL_INT_ADDED);
+
+	return (vio->vio_interrupt_type);
 }
 
 int
