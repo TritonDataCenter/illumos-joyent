@@ -233,12 +233,18 @@ tests = ['hexdump_basic.32', 'hexdump_basic.64']
 [/opt/os-tests/tests/ilstr]
 tests = ['ilstr_basic.32', 'ilstr_basic.64']
 
+[/opt/os-tests/tests/memlist]
+tests = ['memlist_test.32', 'memlist_test.64']
+
 [/opt/os-tests/tests/execvpe]
 tests = ['execvpe-test.32', 'execvpe-test.64']
 
 [/opt/os-tests/tests/minttl]
 user = root
 tests = ['minttl', 'minttl_err']
+
+[/opt/os-tests/tests/sockopt]
+tests = ['v4mapped']
 
 [/opt/os-tests/tests/tcpsig]
 pre_user = root

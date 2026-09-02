@@ -66,6 +66,7 @@ COMMON_CORE_OBJS +=			\
 		kstat_fr.o		\
 		lgrp.o			\
 		lgrp_topo.o		\
+		memlist_new.o		\
 		mmapobj.o		\
 		mutex.o			\
 		page_lock.o		\
@@ -1079,7 +1080,7 @@ RTLS_OBJS +=	rtls.o
 #
 AOUTEXEC_OBJS +=aout.o
 
-ELFEXEC_OBJS +=	elf.o elf_notes.o old_notes.o core_shstrtab.o
+ELFEXEC_OBJS +=	elf.o elf_notes.o core_shstrtab.o
 
 INTPEXEC_OBJS +=intp.o
 

@@ -23,7 +23,7 @@
  * Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2016 Joyent, Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  * Copyright 2026 Bill Sommerfeld <sommerfeld@hamachi.org>
  */
 /* Copyright (c) 1990 Mentat Inc. */
@@ -717,7 +717,12 @@ conn_opt_get(conn_opt_arg_t *coa, t_scalar_t level, t_scalar_t name,
 		}
 		break;
 	case IPPROTO_IP:
-		if (connp->conn_family != AF_INET)
+		/*
+		 * IPPROTO_IP options are supported whenever the connection
+		 * uses IPv4 on the wire, which includes AF_INET6 sockets
+		 * whose peers are IPv4-mapped IPv6 addresses.
+		 */
+		if (connp->conn_ipversion != IPV4_VERSION)
 			return (-1);
 		switch (name) {
 		case IP_OPTIONS:
@@ -930,7 +935,17 @@ conn_opt_get(conn_opt_arg_t *coa, t_scalar_t level, t_scalar_t name,
 			return (sizeof (struct in6_pktinfo));
 		}
 		case IPV6_TCLASS:
-			*i1 = ipp->ipp_tclass;
+			/*
+			 * When the connection uses IPv4 on the wire, the
+			 * traffic class is carried in the Type of Service
+			 * field of the IPv4 header, which is also set via
+			 * IP_TOS. Report the current value of that field so
+			 * that the two options always agree.
+			 */
+			if (connp->conn_ipversion == IPV4_VERSION)
+				*i1 = (int)ipp->ipp_type_of_service;
+			else
+				*i1 = ipp->ipp_tclass;
 			break;	/* goto sizeof (int) option return */
 		case IPV6_NEXTHOP: {
 			sin6_t *sin6 = (sin6_t *)ptr;
@@ -1226,24 +1241,13 @@ conn_opt_set_ip(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 	ip_stack_t	*ipst = connp->conn_netstack->netstack_ip;
 	int		error;
 
-	if (connp->conn_family == AF_INET6 &&
-	    connp->conn_ipversion == IPV4_VERSION) {
-		/*
-		 * Allow certain IPv4 options to be set on an AF_INET6 socket
-		 * if the connection is still IPv4.
-		 */
-		switch (name) {
-		case IP_TOS:
-		case T_IP_TOS:
-		case IP_TTL:
-		case IP_DONTFRAG:
-			break;
-		default:
-			return (EINVAL);
-		}
-	} else if (connp->conn_family != AF_INET) {
+	/*
+	 * IPPROTO_IP options are supported whenever the connection uses
+	 * IPv4 on the wire, which includes AF_INET6 sockets whose peers
+	 * are IPv4-mapped IPv6 addresses.
+	 */
+	if (connp->conn_ipversion != IPV4_VERSION)
 		return (EINVAL);
-	}
 
 	ifindex = UINT_MAX;
 	switch (name) {
@@ -1927,6 +1931,15 @@ conn_opt_set_ipv6(conn_opt_arg_t *coa, t_scalar_t name, uint_t inlen,
 			ipp->ipp_tclass = *i1;
 			ipp->ipp_fields |= IPPF_TCLASS;
 		}
+		/*
+		 * When the connection uses IPv4 on the wire, the traffic
+		 * class is carried in the Type of Service field of the
+		 * IPv4 header. Mirror the value so that it is picked up
+		 * when the header is next built. IP_TOS and IPV6_TCLASS
+		 * share the field, and the most recent setting prevails.
+		 */
+		if (connp->conn_ipversion == IPV4_VERSION)
+			ipp->ipp_type_of_service = ipp->ipp_tclass;
 		mutex_exit(&connp->conn_lock);
 		coa->coa_changed |= COA_HEADER_CHANGED;
 		break;

@@ -482,7 +482,8 @@ class Job:
 
     __slots__ = ('index', 'entry', 'env', 'expect_pass', 'lang',
                  'compiler', 'mflag', 'arch', 'std_flag', 'base_flags',
-                 'tmpdir', 'debug', 'extra_debug', 'force')
+                 'tmpdir', 'debug', 'extra_debug', 'force',
+                 'output', 'done')
 
     def __init__(self, index, entry, env, expect_pass, lang,
                  compiler, mflag, arch, std_flag, base_flags,
@@ -499,8 +500,10 @@ class Job:
         self.base_flags  = base_flags    # list of flags common to all jobs
         self.tmpdir      = tmpdir
         self.debug       = debug         # -d: show probe + compiler output on failure
-        self.extra_debug = extra_debug   # -D: also show compiler command on pass
+        self.extra_debug = extra_debug   # -D: also show command + probe on pass
         self.force       = force         # -f: continue after failures
+        self.output      = None         # buffered text, set once the job finishes
+        self.done        = False        # True once this job has finished
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +526,7 @@ class TestDriver:
         lock = threading.Lock()
         stop = threading.Event()
         counters = {'pass': 0, 'fail': 0}
+        next_to_print = 0
 
         orig_sigint  = signal.getsignal(signal.SIGINT)
         orig_sigterm = signal.getsignal(signal.SIGTERM)
@@ -533,9 +537,22 @@ class TestDriver:
         signal.signal(signal.SIGINT,  handle_signal)
         signal.signal(signal.SIGTERM, handle_signal)
 
+        # drain() prints a run of now-finished jobs starting at
+        # next_to_print, stopping at the first unfinished job.
+        # This makes output appears in job (array) order even
+        # though jobs complete in a non-deterministic order.
+        # Must be called with lock held.
+        def drain():
+            nonlocal next_to_print
+            while next_to_print < len(jobs) and jobs[next_to_print].done:
+                if jobs[next_to_print].output:
+                    print(jobs[next_to_print].output, flush=True)
+                    jobs[next_to_print].output = None
+                next_to_print += 1
+
         # run_job() is the worker function called by each thread in the pool.
         # It captures all output for one job in a local buffer, then acquires
-        # the lock to write (flush) it contiguously to the output stream.
+        # the lock to record it and drain any now-printable jobs in order.
         def run_job(job):
             if stop.is_set():
                 return
@@ -571,10 +588,12 @@ class TestDriver:
             if job.extra_debug:
                 out.append(f'TEST DEBUG {label}: command: {" ".join(cmd)}')
 
-            if job.debug and not passed:
+            if job.extra_debug or (job.debug and not passed):
                 out.append(f'TEST DEBUG {label}: probe program:')
                 for line in src.splitlines():
                     out.append(f'TEST DEBUG {label}:   {line}')
+
+            if job.debug and not passed:
                 with open(logfile) as lf:
                     cc_out = lf.read().strip()
                 if cc_out:
@@ -592,13 +611,15 @@ class TestDriver:
                 out.append(f'TEST {verb} {label}: {reason}')
 
             with lock:
-                print('\n'.join(out), flush=True)
+                job.output = '\n'.join(out)
+                job.done   = True
                 if passed:
                     counters['pass'] += 1
                 else:
                     counters['fail'] += 1
                     if not job.force:
                         stop.set()
+                drain()
 
         # Build the list of jobs to run.
         jobs = []
@@ -631,11 +652,23 @@ class TestDriver:
 
         # The ThreadPoolExecutor runs up to opts.j worker threads concurrently.
         # executor.submit() queues each job; the pool calls run_job(job) in a
-        # worker thread.  Exiting the "with" block waits for all submitted jobs
-        # to finish before proceeding.
+        # worker thread.  Exiting the "with" block waits for all thread pool
+        # executors to finish before proceeding.
         with ThreadPoolExecutor(max_workers=opts.j) as executor:
             for job in jobs:
                 executor.submit(run_job, job)
+
+        # All thread pool executors have finished.  If we were interrupted,
+        # there may be unfinished jobs and there may also be finished jobs
+        # scattered among those with pending output.  Scan the remainder of
+        # the jobs list and flush (drain) any jobs with pending output.
+        with lock:
+            while next_to_print < len(jobs):
+                if jobs[next_to_print].done and jobs[next_to_print].output:
+                    print(jobs[next_to_print].output, flush=True)
+                    # Could free jobs[].output here but we're
+                    # about to exit so just skip that work.
+                next_to_print += 1
 
         signal.signal(signal.SIGINT,  orig_sigint)
         signal.signal(signal.SIGTERM, orig_sigterm)
@@ -693,15 +726,32 @@ exit(99);
 }
 """
 
-# Base flags used for all C compilations.
-# We turn off -Wformat-security because the auto-generated tests don't pass
-# string literals to printf family functions, which will trigger warnings in
-# some compilers (e.g. clang-16).
-_C_BASE_FLAGS = [
-    '-Wall', '-Werror', '-nostdinc',
-    '-isystem', '/usr/include',
-    '-Wno-format-security',
-]
+def sys_include_dir(root=None):
+    """
+    Return the system include directory to use for -isystem/-nostdinc
+    compiles: '<root>/usr/include' if root is given, else '/usr/include'.
+
+    root is resolved by the caller from, in order of preference: the -R
+    command-line option, the HEADER_TEST_ROOT environment variable, or
+    None (meaning the true system root).
+    """
+    if root:
+        return os.path.join(root, 'usr/include')
+    return '/usr/include'
+
+
+def c_base_flags(root=None):
+    """
+    Base flags used for all C compilations.  We turn off -Wformat-security
+    because the auto-generated tests don't pass string literals to printf
+    family functions, which will trigger warnings in some compilers (e.g.
+    clang-16).
+    """
+    return [
+        '-Wall', '-Werror', '-nostdinc',
+        '-isystem', sys_include_dir(root),
+        '-Wno-format-security',
+    ]
 
 
 def _run_compiler_probe(compiler, src, ext, mflag, tmpdir):
@@ -782,7 +832,7 @@ def find_cxx_compiler(mflag, tmpdir, explicit=None):
     sys.exit('error: no usable C++ compiler found (tried g++, clang++)')
 
 
-def find_gcc_cxx_includes(compiler):
+def find_gcc_cxx_includes(compiler, root=None):
     """
     Query a GCC C++ compiler for its internal include directory and return a
     base_flags list with all necessary -isystem paths.
@@ -794,7 +844,11 @@ def find_gcc_cxx_includes(compiler):
       -isystem prefix/include/c++/version
       -isystem prefix/include/c++/version/target
       -isystem prefix/lib/gcc/target/version/include
-      -isystem /usr/include
+      -isystem <sys_include_dir>
+
+    The compiler's own internal C++ headers always come from the real
+    toolchain install; only the final system headers entry is redirected
+    under root (see sys_include_dir()).
     """
     result = subprocess.run(
         [compiler, '-print-file-name=include'],
@@ -819,17 +873,22 @@ def find_gcc_cxx_includes(compiler):
         '-isystem', f'{prefix}/include/c++/{version}',
         '-isystem', f'{prefix}/include/c++/{version}/{target}',
         '-isystem', f'{prefix}/lib/gcc/{target}/{version}/include',
-        '-isystem', '/usr/include',
+        '-isystem', sys_include_dir(root),
         '-Wno-format-security',
     ]
 
 
-def find_clang_cxx_includes(compiler):
+def find_clang_cxx_includes(compiler, root=None):
     """
     Query a clang++ compiler for its C++ include search paths by running
     it in preprocessing mode with -v, then parse the include list from
-    stderr.  Returns a base_flags list with -isystem for each path found,
-    plus -isystem /usr/include.
+    stderr.  Returns a base_flags list with -isystem for each path found.
+
+    clang always reports the real /usr/include in this list (it has no
+    notion of an alternate root); if root is given, that entry is
+    replaced with sys_include_dir(root) rather than appended alongside it,
+    so proto headers take precedence instead of conflicting with the
+    real ones.
     """
     result = subprocess.run(
         [compiler, '-xc++', '-E', '-v', '-'],
@@ -848,11 +907,15 @@ def find_clang_cxx_includes(compiler):
     if not paths:
         sys.exit(f'error: could not determine C++ include paths from {compiler}')
 
+    sys_dir = sys_include_dir(root)
+    if '/usr/include' in paths:
+        paths = [sys_dir if p == '/usr/include' else p for p in paths]
+    else:
+        paths.append(sys_dir)
+
     flags = ['-Wall', '-Werror', '-nostdinc']
     for p in paths:
         flags += ['-isystem', p]
-    if '/usr/include' not in paths:
-        flags += ['-isystem', '/usr/include']
     flags.append('-Wno-format-security')
     return flags
 
@@ -879,7 +942,8 @@ def _parse_args():
     p.add_argument('-d', dest='debug', action='store_true',
                    help='Show probe and compiler output on failure')
     p.add_argument('-D', dest='extra_debug', action='store_true',
-                   help='Also show compiler command (implies -d)')
+                   help='Also show compiler command and probe program for '
+                        'every test, not just failures (implies -d)')
     p.add_argument('-e', dest='env', metavar='ENV', default=None,
                    help='Narrow to one environment name')
     p.add_argument('-f', dest='force', action='store_true',
@@ -891,6 +955,12 @@ def _parse_args():
 
     p.add_argument('-C', dest='compiler_check', action='store_true',
                    help='Check compiler only, do not run tests')
+
+    p.add_argument('-R', dest='root', metavar='ROOT', default=None,
+                   help='Alternate root directory (e.g. a proto area) whose '
+                        'ROOT/usr/include is tested instead of the default '
+                        '(default: $HEADER_TEST_ROOT/usr/include if that '
+                        'environment variable is set, else /usr/include)')
 
     p.add_argument('env_cfg', nargs='?', help='Environment config file')
     p.add_argument('sym_cfgs', nargs='*', metavar='sym_cfg',
@@ -906,6 +976,8 @@ def _parse_args():
     if args.j is not None:
         jobs = args.j
     args.j = jobs
+    if args.root is None:
+        args.root = os.environ.get('HEADER_TEST_ROOT')
     if not args.compiler_check and not args.env_cfg:
         p.error('env_cfg is required unless -C is specified')
     if not args.compiler_check and not args.sym_cfgs:
@@ -921,15 +993,15 @@ def main():
     with tempfile.TemporaryDirectory() as tmpdir:
         if args.lang == 'c':
             compiler   = find_c_compiler(mflag, tmpdir, args.compiler)
-            base_flags = _C_BASE_FLAGS
+            base_flags = c_base_flags(args.root)
         else:
             # kind is 'gcc' or 'clang', used to select the right
             # include path discovery method.
             compiler, kind = find_cxx_compiler(mflag, tmpdir, args.compiler)
             if kind == 'gcc':
-                base_flags = find_gcc_cxx_includes(compiler)
+                base_flags = find_gcc_cxx_includes(compiler, args.root)
             else:
-                base_flags = find_clang_cxx_includes(compiler)
+                base_flags = find_clang_cxx_includes(compiler, args.root)
 
         if args.compiler_check:
             sys.exit(0)
