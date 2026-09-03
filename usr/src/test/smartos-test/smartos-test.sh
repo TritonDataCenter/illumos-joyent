@@ -367,7 +367,7 @@ function execute_tests {
     bhyve_test_check
     log_testrunner crypto-tests /opt/crypto-tests/runfiles/default.run
     log_testrunner elf-tests /opt/elf-tests/runfiles/default.run
-    log_testrunner header-tests /opt/header-tests/runfiles/default.run
+    log_test header-tests /opt/header-tests/bin/headertest
     i2c_tests_check
     log_testrunner libc-tests /opt/libc-tests/runfiles/default.run
     log_testrunner libproc-tests /opt/libproc-tests/runfiles/default.run
