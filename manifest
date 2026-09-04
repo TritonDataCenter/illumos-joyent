@@ -621,7 +621,6 @@ f kernel/drv/aac.conf 0644 root sys
 f kernel/drv/acpi_drv.conf 0644 root sys
 f kernel/drv/adpu320.conf 0644 root sys
 f kernel/drv/aggr.conf 0644 root sys
-f kernel/drv/amdzen.conf 0644 root sys
 d kernel/drv/amd64 0755 root sys
 f kernel/drv/amd64/aac 0755 root sys
 f kernel/drv/amd64/acpi_drv 0755 root sys
@@ -630,9 +629,9 @@ f kernel/drv/amd64/afe 0755 root sys
 f kernel/drv/amd64/aggr 0755 root sys
 f kernel/drv/amd64/ahci 0755 root sys
 f kernel/drv/amd64/amd8111s 0755 root sys
+f kernel/drv/amd64/amdnbtemp 0755 root sys
 f kernel/drv/amd64/amdzen 0755 root sys
 f kernel/drv/amd64/amdzen_stub 0755 root sys
-f kernel/drv/amd64/amdnbtemp 0755 root sys
 f kernel/drv/amd64/amr 0755 root sys
 f kernel/drv/amd64/arcmsr 0755 root sys
 f kernel/drv/amd64/arp 0755 root sys
@@ -717,8 +716,8 @@ f kernel/drv/amd64/ixgbe 0755 root sys
 f kernel/drv/amd64/kb8042 0755 root sys
 f kernel/drv/amd64/keysock 0755 root sys
 f kernel/drv/amd64/kgpio 0755 root sys
-f kernel/drv/amd64/ksensor 0755 root sys
 f kernel/drv/amd64/kmdb 0755 root sys
+f kernel/drv/amd64/ksensor 0755 root sys
 f kernel/drv/amd64/llc1 0755 root sys
 f kernel/drv/amd64/lm7x 0755 root sys
 f kernel/drv/amd64/lmrc 0755 root sys
@@ -749,8 +748,8 @@ f kernel/drv/amd64/options 0755 root sys
 f kernel/drv/amd64/overlay 0755 root sys
 f kernel/drv/amd64/pca953x 0755 root sys
 f kernel/drv/amd64/pca954x 0755 root sys
-f kernel/drv/amd64/pchtemp 0755 root sys
 f kernel/drv/amd64/pchsmbus 0755 root sys
+f kernel/drv/amd64/pchtemp 0755 root sys
 f kernel/drv/amd64/pci_pci 0755 root sys
 f kernel/drv/amd64/pcieb 0755 root sys
 f kernel/drv/amd64/physmem 0755 root sys
@@ -844,6 +843,7 @@ f kernel/drv/amd64/xhci 0755 root sys
 f kernel/drv/amd64/yge 0755 root sys
 f kernel/drv/amd64/zen_umc 0755 root sys
 f kernel/drv/amd64/zfs 0755 root sys
+f kernel/drv/amdzen.conf 0644 root sys
 f kernel/drv/amr.conf 0644 root sys
 f kernel/drv/arcmsr.conf 0644 root sys
 f kernel/drv/arp.conf 0644 root sys
@@ -2714,8 +2714,8 @@ f usr/bin/amd64/ptree 0555 root bin
 s usr/bin/amd64/pvs=../pvs
 f usr/bin/amd64/pwait 0555 root bin
 f usr/bin/amd64/pwdx 0555 root bin
-s usr/bin/amd64/rksh=../rksh
 s usr/bin/amd64/rksh93=../rksh93
+s usr/bin/amd64/rksh=../rksh
 s usr/bin/amd64/savecore=../savecore
 s usr/bin/amd64/size=../size
 s usr/bin/amd64/sort=../sort
@@ -2896,8 +2896,8 @@ f usr/bin/klist 0555 root bin
 f usr/bin/kmfcfg 0555 root bin
 f usr/bin/kpasswd 0555 root bin
 f usr/bin/krb5-config 0555 root bin
-h usr/bin/ksh=usr/bin/ksh93
 f usr/bin/ksh93 0555 root bin
+h usr/bin/ksh=usr/bin/ksh93
 f usr/bin/kstat 0555 root bin
 f usr/bin/ktutil 0555 root bin
 f usr/bin/kvmstat 0555 root bin
@@ -3042,8 +3042,8 @@ f usr/bin/regcmp 0555 root bin
 s usr/bin/remsh=rsh
 f usr/bin/renice 0555 root bin
 h usr/bin/rev=usr/bin/alias
-h usr/bin/rksh=usr/bin/ksh93
 h usr/bin/rksh93=usr/bin/ksh93
+h usr/bin/rksh=usr/bin/ksh93
 f usr/bin/rlogin 4555 root bin
 f usr/bin/rm 0555 root bin
 s usr/bin/rmail=mail
@@ -3103,10 +3103,10 @@ f usr/bin/tail 0555 root bin
 s usr/bin/tar=../sbin/tar
 f usr/bin/tbl 0555 root bin
 f usr/bin/tcopy 0555 root bin
+h usr/bin/tcsh=usr/lib/altexec
 h usr/bin/tee=usr/bin/alias
 f usr/bin/telnet 0555 root bin
 h usr/bin/test=usr/bin/alias
-h usr/bin/tcsh=usr/lib/altexec
 f usr/bin/tic 0555 root bin
 f usr/bin/time 0555 root bin
 f usr/bin/timex 0555 root bin
@@ -3164,8 +3164,8 @@ f usr/bin/yppasswd 0555 root bin
 f usr/bin/ypwhich 0555 root other
 f usr/bin/zcat 0555 root bin
 f usr/bin/ziostat 0555 root bin
-h usr/bin/zsh=usr/lib/altexec
 s usr/bin/zonename=../../sbin/zonename
+h usr/bin/zsh=usr/lib/altexec
 f usr/bin/ztest 0555 root bin
 d usr/ccs 0755 root bin
 d usr/ccs/bin 0755 root bin
@@ -3684,8 +3684,8 @@ f usr/include/libvnd.h 0644 root bin
 f usr/include/libvrrpadm.h 0644 root bin
 f usr/include/libvscan.h 0644 root bin
 f usr/include/libw.h 0644 root bin
-f usr/include/libzfs.h 0644 root bin
 f usr/include/libxpio.h 0644 root bin
+f usr/include/libzfs.h 0644 root bin
 f usr/include/libzfs_core.h 0644 root bin
 f usr/include/libzfs_jni_dataset.h 0644 root bin
 f usr/include/libzfs_jni_disk.h 0644 root bin
@@ -3803,12 +3803,12 @@ f usr/include/nfs/mapid.h 0644 root bin
 f usr/include/nfs/mount.h 0644 root bin
 f usr/include/nfs/nfs.h 0644 root bin
 f usr/include/nfs/nfs4.h 0644 root bin
-f usr/include/nfs/nfs4x.h 0644 root bin
 f usr/include/nfs/nfs4_attr.h 0644 root bin
 f usr/include/nfs/nfs4_clnt.h 0644 root bin
 f usr/include/nfs/nfs4_db_impl.h 0644 root bin
 f usr/include/nfs/nfs4_idmap_impl.h 0644 root bin
 f usr/include/nfs/nfs4_kprot.h 0644 root bin
+f usr/include/nfs/nfs4x.h 0644 root bin
 f usr/include/nfs/nfs_acl.h 0644 root bin
 f usr/include/nfs/nfs_clnt.h 0644 root bin
 f usr/include/nfs/nfs_cmd.h 0644 root bin
@@ -4331,8 +4331,8 @@ f usr/include/sys/exacct.h 0644 root bin
 f usr/include/sys/exacct_catalog.h 0644 root bin
 f usr/include/sys/exacct_impl.h 0644 root bin
 f usr/include/sys/exec.h 0644 root bin
-f usr/include/sys/execx.h 0644 root bin
 f usr/include/sys/exechdr.h 0644 root bin
+f usr/include/sys/execx.h 0644 root bin
 f usr/include/sys/extdirent.h 0644 root bin
 f usr/include/sys/fasttrap.h 0644 root bin
 f usr/include/sys/fasttrap_impl.h 0644 root bin
@@ -5727,10 +5727,10 @@ s usr/lib/amd64/libw.so=../../../lib/amd64/libw.so.1
 f usr/lib/amd64/libwrap.so.1.0 0755 root bin
 s usr/lib/amd64/libwrap.so.1=libwrap.so.1.0
 s usr/lib/amd64/libwrap.so=libwrap.so.1.0
-f usr/lib/amd64/libxpio.so.1 0755 root bin
-s usr/lib/amd64/libxpio.so=libxpio.so.1
 s usr/lib/amd64/libxnet.so.1=../../../lib/amd64/libxnet.so.1
 s usr/lib/amd64/libxnet.so=../../../lib/amd64/libxnet.so.1
+f usr/lib/amd64/libxpio.so.1 0755 root bin
+s usr/lib/amd64/libxpio.so=libxpio.so.1
 f usr/lib/amd64/liby.so.1 0755 root bin
 s usr/lib/amd64/liby.so=liby.so.1
 s usr/lib/amd64/libzdoor.so.1=../../../lib/amd64/libzdoor.so.1
@@ -6792,17 +6792,43 @@ d usr/lib/iconv 0755 root bin
 f usr/lib/iconv/646%UTF-8.so 0755 root bin
 f usr/lib/iconv/UCS-2%UTF-8.so 0755 root bin
 f usr/lib/iconv/UCS-2LE%UTF-8.so 0755 root bin
+f usr/lib/iconv/UCS-4%UTF-8.so 0755 root bin
+f usr/lib/iconv/UCS-4LE%UTF-8.so 0755 root bin
+f usr/lib/iconv/UTF-16%UTF-8.so 0755 root bin
+f usr/lib/iconv/UTF-16LE%UTF-8.so 0755 root bin
+f usr/lib/iconv/UTF-32%UTF-8.so 0755 root bin
+f usr/lib/iconv/UTF-32LE%UTF-8.so 0755 root bin
 f usr/lib/iconv/UTF-8%646.so 0755 root bin
 f usr/lib/iconv/UTF-8%UCS-2.so 0755 root bin
 f usr/lib/iconv/UTF-8%UCS-2LE.so 0755 root bin
+f usr/lib/iconv/UTF-8%UCS-4.so 0755 root bin
+f usr/lib/iconv/UTF-8%UCS-4LE.so 0755 root bin
+f usr/lib/iconv/UTF-8%UTF-16.so 0755 root bin
+f usr/lib/iconv/UTF-8%UTF-16LE.so 0755 root bin
+f usr/lib/iconv/UTF-8%UTF-32.so 0755 root bin
+f usr/lib/iconv/UTF-8%UTF-32LE.so 0755 root bin
+f usr/lib/iconv/UTF-8%UTF-8.so 0755 root bin
+f usr/lib/iconv/alias 0444 root bin
 d usr/lib/iconv/amd64 0755 root bin
 f usr/lib/iconv/amd64/646%UTF-8.so 0755 root bin
 f usr/lib/iconv/amd64/UCS-2%UTF-8.so 0755 root bin
 f usr/lib/iconv/amd64/UCS-2LE%UTF-8.so 0755 root bin
+f usr/lib/iconv/amd64/UCS-4%UTF-8.so 0755 root bin
+f usr/lib/iconv/amd64/UCS-4LE%UTF-8.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-16%UTF-8.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-16LE%UTF-8.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-32%UTF-8.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-32LE%UTF-8.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%646.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%UCS-2.so 0755 root bin
 f usr/lib/iconv/amd64/UTF-8%UCS-2LE.so 0755 root bin
-f usr/lib/iconv/alias 0444 root bin
+f usr/lib/iconv/amd64/UTF-8%UCS-4.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-8%UCS-4LE.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-8%UTF-16.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-8%UTF-16LE.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-8%UTF-32.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-8%UTF-32LE.so 0755 root bin
+f usr/lib/iconv/amd64/UTF-8%UTF-8.so 0755 root bin
 f usr/lib/idmapd 0555 root bin
 d usr/lib/inet 0755 root bin
 d usr/lib/inet/amd64 0755 root bin
@@ -7278,10 +7304,10 @@ s usr/lib/libw.so=../../lib/libw.so.1
 f usr/lib/libwrap.so.1.0 0755 root bin
 s usr/lib/libwrap.so.1=libwrap.so.1.0
 s usr/lib/libwrap.so=libwrap.so.1.0
-f usr/lib/libxpio.so.1 0755 root bin
-s usr/lib/libxpio.so=libxpio.so.1
 s usr/lib/libxnet.so.1=../../lib/libxnet.so.1
 s usr/lib/libxnet.so=../../lib/libxnet.so.1
+f usr/lib/libxpio.so.1 0755 root bin
+s usr/lib/libxpio.so=libxpio.so.1
 f usr/lib/liby.so.1 0755 root bin
 s usr/lib/liby.so=liby.so.1
 s usr/lib/libzdoor.so.1=../../lib/libzdoor.so.1
@@ -11992,8 +12018,8 @@ f usr/share/lib/zoneinfo/Chile/Continental 0644 root bin
 f usr/share/lib/zoneinfo/Chile/EasterIsland 0644 root bin
 f usr/share/lib/zoneinfo/Cuba 0644 root bin
 h usr/share/lib/zoneinfo/EET=usr/share/lib/zoneinfo/Europe/Athens
-h usr/share/lib/zoneinfo/EST=usr/share/lib/zoneinfo/America/Panama
 h usr/share/lib/zoneinfo/EST5EDT=usr/share/lib/zoneinfo/America/New_York
+h usr/share/lib/zoneinfo/EST=usr/share/lib/zoneinfo/America/Panama
 f usr/share/lib/zoneinfo/Egypt 0644 root bin
 f usr/share/lib/zoneinfo/Eire 0644 root bin
 d usr/share/lib/zoneinfo/Etc 0755 root bin
@@ -12127,8 +12153,8 @@ f usr/share/lib/zoneinfo/Japan 0644 root bin
 f usr/share/lib/zoneinfo/Kwajalein 0644 root bin
 f usr/share/lib/zoneinfo/Libya 0644 root bin
 h usr/share/lib/zoneinfo/MET=usr/share/lib/zoneinfo/Europe/Brussels
-h usr/share/lib/zoneinfo/MST=usr/share/lib/zoneinfo/America/Phoenix
 h usr/share/lib/zoneinfo/MST7MDT=usr/share/lib/zoneinfo/America/Denver
+h usr/share/lib/zoneinfo/MST=usr/share/lib/zoneinfo/America/Phoenix
 d usr/share/lib/zoneinfo/Mexico 0755 root bin
 h usr/share/lib/zoneinfo/Mexico/BajaNorte=usr/share/lib/zoneinfo/America/Tijuana
 f usr/share/lib/zoneinfo/Mexico/BajaSur 0644 root bin
@@ -13670,8 +13696,8 @@ s usr/share/man/man3c/memcmp.3c=memory.3c
 s usr/share/man/man3c/memcpy.3c=memory.3c
 s usr/share/man/man3c/memmem.3c=memory.3c
 s usr/share/man/man3c/memmove.3c=memory.3c
-s usr/share/man/man3c/memrchr.3c=memory.3c
 f usr/share/man/man3c/memory.3c 0444 root bin
+s usr/share/man/man3c/memrchr.3c=memory.3c
 s usr/share/man/man3c/memset.3c=memory.3c
 f usr/share/man/man3c/memset_s.3c 0444 root bin
 s usr/share/man/man3c/minor.3c=makedev.3c
@@ -13730,10 +13756,10 @@ s usr/share/man/man3c/ntohl.3c=byteorder.3c
 s usr/share/man/man3c/ntohll.3c=byteorder.3c
 s usr/share/man/man3c/ntohs.3c=byteorder.3c
 f usr/share/man/man3c/offsetof.3c 0444 root bin
-f usr/share/man/man3c/opendir.3c 0444 root bin
-s usr/share/man/man3c/openlog.3c=syslog.3c
 f usr/share/man/man3c/open_memstream.3c 0444 root bin
 s usr/share/man/man3c/open_wmemstream.3c=open_memstream.3c
+f usr/share/man/man3c/opendir.3c 0444 root bin
+s usr/share/man/man3c/openlog.3c=syslog.3c
 s usr/share/man/man3c/pclose.3c=popen.3c
 f usr/share/man/man3c/perror.3c 0444 root bin
 f usr/share/man/man3c/pfmt.3c 0444 root bin
@@ -13897,9 +13923,9 @@ s usr/share/man/man3c/pthread_mutexattr_setpshared.3c=pthread_mutexattr_getpshar
 s usr/share/man/man3c/pthread_mutexattr_setrobust.3c=pthread_mutexattr_getrobust.3c
 s usr/share/man/man3c/pthread_mutexattr_settype.3c=pthread_mutexattr_gettype.3c
 f usr/share/man/man3c/pthread_once.3c 0444 root bin
-s usr/share/man/man3c/pthread_rwlock_destroy.3c=pthread_rwlock_init.3c
 s usr/share/man/man3c/pthread_rwlock_clockrdlock.3c=pthread_rwlock_timedrdlock.3c
 s usr/share/man/man3c/pthread_rwlock_clockwrlock.3c=pthread_rwlock_timedwrlock.3c
+s usr/share/man/man3c/pthread_rwlock_destroy.3c=pthread_rwlock_init.3c
 f usr/share/man/man3c/pthread_rwlock_init.3c 0444 root bin
 f usr/share/man/man3c/pthread_rwlock_rdlock.3c 0444 root bin
 s usr/share/man/man3c/pthread_rwlock_relclockrdlock_np.3c=pthread_rwlock_timedrdlock.3c
@@ -17758,7 +17784,6 @@ f usr/share/man/man3proc/proc_fdinfo_free.3proc 0444 root bin
 f usr/share/man/man3proc/proc_fdinfo_misc.3proc 0444 root bin
 f usr/share/man/man3proc/proc_fdinfowalk.3proc 0444 root bin
 f usr/share/man/man3proc/proc_fdwalk.3proc 0444 root bin
-f usr/share/man/man3proc/proc_get_fdinfo.3proc 0444 root bin
 s usr/share/man/man3proc/proc_finistdio.3proc=proc_initstdio.3proc
 f usr/share/man/man3proc/proc_fltname.3proc 0444 root bin
 f usr/share/man/man3proc/proc_fltset2str.3proc 0444 root bin
@@ -17766,6 +17791,7 @@ s usr/share/man/man3proc/proc_flushstdio.3proc=proc_initstdio.3proc
 s usr/share/man/man3proc/proc_free_priv.3proc=proc_get_priv.3proc
 f usr/share/man/man3proc/proc_get_auxv.3proc 0444 root bin
 f usr/share/man/man3proc/proc_get_cred.3proc 0444 root bin
+f usr/share/man/man3proc/proc_get_fdinfo.3proc 0444 root bin
 s usr/share/man/man3proc/proc_get_ldt.3proc=Pldt.3proc
 f usr/share/man/man3proc/proc_get_lwpsinfo.3proc 0444 root bin
 s usr/share/man/man3proc/proc_get_lwpstatus.3proc=proc_get_lwpsinfo.3proc
@@ -19781,8 +19807,8 @@ f usr/share/man/man7/filesystem.7 0444 root bin
 f usr/share/man/man7/fnmatch.7 0444 root bin
 f usr/share/man/man7/formats.7 0444 root bin
 f usr/share/man/man7/fsattr.7 0444 root bin
-f usr/share/man/man7/gptzfsboot.7 0444 root bin
 f usr/share/man/man7/gpio.7 0444 root bin
+f usr/share/man/man7/gptzfsboot.7 0444 root bin
 f usr/share/man/man7/grub.7 0444 root bin
 f usr/share/man/man7/gss_auth_rules.7 0444 root bin
 f usr/share/man/man7/iconv.7 0444 root bin
@@ -20229,8 +20255,8 @@ f usr/share/man/man8/syslogd.8 0444 root bin
 f usr/share/man/man8/tapes.8 0444 root bin
 f usr/share/man/man8/tcpd.8 0444 root bin
 f usr/share/man/man8/tcpdchk.8 0444 root bin
-f usr/share/man/man8/tcpkey.8 0444 root bin
 f usr/share/man/man8/tcpdmatch.8 0444 root bin
+f usr/share/man/man8/tcpkey.8 0444 root bin
 f usr/share/man/man8/tic.8 0444 root bin
 f usr/share/man/man8/traceroute.8 0444 root bin
 f usr/share/man/man8/trapstat.8 0444 root bin
@@ -20367,6 +20393,7 @@ f usr/share/man/man9e/mgi_start.9e 0444 root bin
 s usr/share/man/man9e/mgi_stop.9e=mgi_start.9e
 s usr/share/man/man9e/mi_disable.9e=mi_enable.9e
 f usr/share/man/man9e/mi_enable.9e 0444 root bin
+f usr/share/man/man9e/mmap.9e 0444 root bin
 f usr/share/man/man9e/mr_gget.9e 0444 root bin
 f usr/share/man/man9e/mr_rget.9e 0444 root bin
 f usr/share/man/man9e/mri_poll.9e 0444 root bin
@@ -20374,7 +20401,6 @@ s usr/share/man/man9e/mri_start.9e=mgi_start.9e
 f usr/share/man/man9e/mri_stat.9e 0444 root bin
 s usr/share/man/man9e/mri_stop.9e=mgi_start.9e
 s usr/share/man/man9e/mri_tx.9e=mc_tx.9e
-f usr/share/man/man9e/mmap.9e 0444 root bin
 f usr/share/man/man9e/open.9e 0444 root bin
 f usr/share/man/man9e/power.9e 0444 root bin
 f usr/share/man/man9e/print.9e 0444 root bin
@@ -20432,7 +20458,6 @@ s usr/share/man/man9f/AVL_PREV.9f=avl.9f
 s usr/share/man/man9f/CRED.9f=credentials.9f
 f usr/share/man/man9f/Intro.9f 0444 root bin
 s usr/share/man/man9f/KT_ASSERT.9f=ktest_result_pass.9f
-s usr/share/man/man9f/KT_ASSERTG.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_ASSERT0.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_ASSERT0G.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_ASSERT3P.9f=ktest_result_pass.9f
@@ -20441,6 +20466,7 @@ s usr/share/man/man9f/KT_ASSERT3S.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_ASSERT3SG.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_ASSERT3U.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_ASSERT3UG.9f=ktest_result_pass.9f
+s usr/share/man/man9f/KT_ASSERTG.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_ERROR.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_FAIL.9f=ktest_result_pass.9f
 s usr/share/man/man9f/KT_PASS.9f=ktest_result_pass.9f
@@ -20635,8 +20661,8 @@ f usr/share/man/man9f/copyb.9f 0444 root bin
 f usr/share/man/man9f/copyin.9f 0444 root bin
 f usr/share/man/man9f/copymsg.9f 0444 root bin
 f usr/share/man/man9f/copyout.9f 0444 root bin
-f usr/share/man/man9f/credentials.9f 0444 root bin
 s usr/share/man/man9f/crdup.9f=credentials.9f
+f usr/share/man/man9f/credentials.9f 0444 root bin
 s usr/share/man/man9f/crfree.9f=credentials.9f
 s usr/share/man/man9f/crget.9f=credentials.9f
 s usr/share/man/man9f/crgetgid.9f=ddi_cred.9f
@@ -20782,8 +20808,8 @@ f usr/share/man/man9f/ddi_dma_addr_bind_handle.9f 0444 root bin
 f usr/share/man/man9f/ddi_dma_alloc_handle.9f 0444 root bin
 f usr/share/man/man9f/ddi_dma_buf_bind_handle.9f 0444 root bin
 f usr/share/man/man9f/ddi_dma_burstsizes.9f 0444 root bin
-f usr/share/man/man9f/ddi_dma_cookie_iter.9f 0444 root bin
 s usr/share/man/man9f/ddi_dma_cookie_get.9f=ddi_dma_cookie_iter.9f
+f usr/share/man/man9f/ddi_dma_cookie_iter.9f 0444 root bin
 s usr/share/man/man9f/ddi_dma_cookie_one.9f=ddi_dma_cookie_iter.9f
 f usr/share/man/man9f/ddi_dma_free_handle.9f 0444 root bin
 f usr/share/man/man9f/ddi_dma_getwin.9f 0444 root bin
@@ -21093,8 +21119,8 @@ f usr/share/man/man9f/dupb.9f 0444 root bin
 f usr/share/man/man9f/dupmsg.9f 0444 root bin
 f usr/share/man/man9f/enableok.9f 0444 root bin
 f usr/share/man/man9f/esballoc.9f 0444 root bin
-f usr/share/man/man9f/esbbcall.9f 0444 root bin
 s usr/share/man/man9f/esballoca.9f=esballoc.9f
+f usr/share/man/man9f/esbbcall.9f 0444 root bin
 f usr/share/man/man9f/firmload.9f 0444 root bin
 s usr/share/man/man9f/firmware_close.9f=firmload.9f
 s usr/share/man/man9f/firmware_free.9f=firmload.9f
@@ -21275,8 +21301,8 @@ s usr/share/man/man9f/mac_prop_info_set_default_uint8.9f=mac_prop_info.9f
 s usr/share/man/man9f/mac_prop_info_set_perm.9f=mac_prop_info.9f
 s usr/share/man/man9f/mac_prop_info_set_range_uint32.9f=mac_prop_info.9f
 f usr/share/man/man9f/mac_register.9f 0444 root bin
-s usr/share/man/man9f/mac_rx_ring.9f=mac_rx.9f
 f usr/share/man/man9f/mac_rx.9f 0444 root bin
+s usr/share/man/man9f/mac_rx_ring.9f=mac_rx.9f
 f usr/share/man/man9f/mac_transceiver_info.9f 0444 root bin
 s usr/share/man/man9f/mac_transceiver_info_set_present.9f=mac_transceiver_info.9f
 s usr/share/man/man9f/mac_transceiver_info_set_usable.9f=mac_transceiver_info.9f
