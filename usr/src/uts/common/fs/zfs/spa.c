@@ -8276,31 +8276,47 @@ spa_sync_upgrades(spa_t *spa, dmu_tx_t *tx)
 		return;
 
 	dsl_pool_t *dp = spa->spa_dsl_pool;
-	rrw_enter(&dp->dp_config_rwlock, RW_WRITER, FTAG);
+	uint64_t oldver = spa->spa_ubsync.ub_version;
+	uint64_t newver = spa->spa_uberblock.ub_version;
 
-	if (spa->spa_ubsync.ub_version < SPA_VERSION_ORIGIN &&
-	    spa->spa_uberblock.ub_version >= SPA_VERSION_ORIGIN) {
-		dsl_pool_create_origin(dp, tx);
+	/*
+	 * Upgrades to change DSL namespace, we need to
+	 * take dp_config_rwlock as RW_WRITER for those.
+	 */
+	boolean_t need_origin = oldver < SPA_VERSION_ORIGIN &&
+	    newver >= SPA_VERSION_ORIGIN;
+	boolean_t need_clones = oldver < SPA_VERSION_NEXT_CLONES &&
+	    newver >= SPA_VERSION_NEXT_CLONES;
+	boolean_t need_dir_clones = oldver < SPA_VERSION_DIR_CLONES &&
+	    newver >= SPA_VERSION_DIR_CLONES;
 
-		/* Keeping the origin open increases spa_minref */
-		spa->spa_minref += 3;
+	if (need_origin || need_clones || need_dir_clones) {
+		rrw_enter(&dp->dp_config_rwlock, RW_WRITER, FTAG);
+
+		if (need_origin) {
+			dsl_pool_create_origin(dp, tx);
+
+			/* Keeping the origin open increases spa_minref */
+			spa->spa_minref += 3;
+		}
+
+		if (need_clones) {
+			dsl_pool_upgrade_clones(dp, tx);
+		}
+
+		if (need_dir_clones) {
+			dsl_pool_upgrade_dir_clones(dp, tx);
+
+			/* Keeping the freedir open increases spa_minref */
+			spa->spa_minref += 3;
+		}
+
+		rrw_exit(&dp->dp_config_rwlock, FTAG);
 	}
 
-	if (spa->spa_ubsync.ub_version < SPA_VERSION_NEXT_CLONES &&
-	    spa->spa_uberblock.ub_version >= SPA_VERSION_NEXT_CLONES) {
-		dsl_pool_upgrade_clones(dp, tx);
-	}
+	/* Remaining upgrades do not need dp_config_rwlock */
 
-	if (spa->spa_ubsync.ub_version < SPA_VERSION_DIR_CLONES &&
-	    spa->spa_uberblock.ub_version >= SPA_VERSION_DIR_CLONES) {
-		dsl_pool_upgrade_dir_clones(dp, tx);
-
-		/* Keeping the freedir open increases spa_minref */
-		spa->spa_minref += 3;
-	}
-
-	if (spa->spa_ubsync.ub_version < SPA_VERSION_FEATURES &&
-	    spa->spa_uberblock.ub_version >= SPA_VERSION_FEATURES) {
+	if (oldver < SPA_VERSION_FEATURES && newver >= SPA_VERSION_FEATURES) {
 		spa_feature_create_zap_objects(spa, tx);
 	}
 
@@ -8310,7 +8326,7 @@ spa_sync_upgrades(spa_t *spa, dmu_tx_t *tx)
 	 * Old pools that have this feature enabled must be upgraded to have
 	 * this feature active
 	 */
-	if (spa->spa_uberblock.ub_version >= SPA_VERSION_FEATURES) {
+	if (newver >= SPA_VERSION_FEATURES) {
 		boolean_t lz4_en = spa_feature_is_enabled(spa,
 		    SPA_FEATURE_LZ4_COMPRESS);
 		boolean_t lz4_ac = spa_feature_is_active(spa,
@@ -8332,8 +8348,6 @@ spa_sync_upgrades(spa_t *spa, dmu_tx_t *tx)
 		    sizeof (spa->spa_cksum_salt.zcs_bytes),
 		    spa->spa_cksum_salt.zcs_bytes, tx));
 	}
-
-	rrw_exit(&dp->dp_config_rwlock, FTAG);
 }
 
 static void
