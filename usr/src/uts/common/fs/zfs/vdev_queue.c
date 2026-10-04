@@ -184,6 +184,7 @@ boolean_t zfs_vdev_queue_bypass_ssd = B_TRUE;
 uint32_t zfs_vdev_queue_bypass_max = 128;
 
 int zfs_vdev_aggregation_limit = 1 << 20;
+int zfs_vdev_aggregation_limit_non_rotating = SPA_OLD_MAXBLOCKSIZE;
 int zfs_vdev_read_gap_limit = 32 << 10;
 int zfs_vdev_write_gap_limit = 4 << 10;
 
@@ -684,6 +685,9 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	boolean_t stretch = B_FALSE;
 	avl_tree_t *t = vdev_queue_type_tree(vq, zio->io_type);
 	enum zio_flag flags = zio->io_flags & ZIO_FLAG_AGG_INHERIT;
+	int limit = vq->vq_vdev->vdev_nonrot ?
+	    zfs_vdev_aggregation_limit_non_rotating :
+	    zfs_vdev_aggregation_limit;
 
 	if (zio->io_flags & ZIO_FLAG_DONT_AGGREGATE)
 		return (NULL);
@@ -721,7 +725,7 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	 */
 	while ((dio = AVL_PREV(t, first)) != NULL &&
 	    (dio->io_flags & ZIO_FLAG_AGG_INHERIT) == flags &&
-	    IO_SPAN(dio, last) <= zfs_vdev_aggregation_limit &&
+	    IO_SPAN(dio, last) <= limit &&
 	    IO_GAP(dio, first) <= maxgap &&
 	    dio->io_type == zio->io_type) {
 		first = dio;
@@ -745,7 +749,7 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	 */
 	while ((dio = AVL_NEXT(t, last)) != NULL &&
 	    (dio->io_flags & ZIO_FLAG_AGG_INHERIT) == flags &&
-	    (IO_SPAN(first, dio) <= zfs_vdev_aggregation_limit ||
+	    (IO_SPAN(first, dio) <= limit ||
 	    (dio->io_flags & ZIO_FLAG_OPTIONAL)) &&
 	    IO_GAP(last, dio) <= maxgap &&
 	    dio->io_type == zio->io_type) {
@@ -813,6 +817,18 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 		nio = AVL_NEXT(t, dio);
 		ASSERT3U(dio->io_type, ==, aio->io_type);
 
+		zio_add_child(dio, aio);
+		vdev_queue_io_remove(vq, dio);
+	} while (dio != last);
+
+	/*
+	 * We need to drop the vdev queue's lock to avoid a deadlock that we
+	 * could encounter since this I/O will complete immediately. The
+	 * constituent I/Os now belong to aio alone, so their data is copied
+	 * into it without the lock held.
+	 */
+	mutex_exit(&vq->vq_lock);
+	while ((dio = zio_walk_parents(aio, &zl)) != NULL) {
 		if (dio->io_flags & ZIO_FLAG_NODATA) {
 			ASSERT3U(dio->io_type, ==, ZIO_TYPE_WRITE);
 			abd_zero_off(aio->io_abd,
@@ -821,16 +837,8 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 			abd_copy_off(aio->io_abd, dio->io_abd,
 			    dio->io_offset - aio->io_offset, 0, dio->io_size);
 		}
-
-		zio_add_child(dio, aio);
-		vdev_queue_io_remove(vq, dio);
-	} while (dio != last);
-
-	/*
-	 * We need to drop the vdev queue's lock to avoid a deadlock that we
-	 * could encounter since this I/O will complete immediately.
-	 */
-	mutex_exit(&vq->vq_lock);
+	}
+	zl = NULL;
 	while ((dio = zio_walk_parents(aio, &zl)) != NULL) {
 		zio_vdev_io_bypass(dio);
 		zio_execute(dio);
