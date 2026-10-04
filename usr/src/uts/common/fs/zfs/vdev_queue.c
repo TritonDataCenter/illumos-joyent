@@ -316,6 +316,59 @@ vdev_queue_fini(vdev_t *vd)
 	mutex_destroy(&vq->vq_lock);
 }
 
+/* Not a valid zone ID; marks a queue whose I/Os may come from several zones. */
+#define	VQ_ZONE_MIXED	((zoneid_t)-1)
+
+/*
+ * Track whether all queued sync I/Os come from one zone, so that zone
+ * scheduling can be skipped when there is no other zone to be fair to. If
+ * the tracked zone's I/Os drain while others remain, the queue is treated as
+ * mixed until it empties.
+ */
+static void
+vdev_queue_zone_add(vdev_queue_t *vq, zio_t *zio)
+{
+	zio_priority_t p = zio->io_priority;
+
+	if (p != ZIO_PRIORITY_SYNC_READ && p != ZIO_PRIORITY_SYNC_WRITE)
+		return;
+
+	if (vq->vq_sync_zone_cnt[p] == 0 && vq->vq_sync_other_cnt[p] == 0)
+		vq->vq_sync_zone[p] = zio->io_zoneid;
+
+	if (zio->io_zoneid == vq->vq_sync_zone[p])
+		vq->vq_sync_zone_cnt[p]++;
+	else
+		vq->vq_sync_other_cnt[p]++;
+}
+
+static void
+vdev_queue_zone_remove(vdev_queue_t *vq, zio_t *zio)
+{
+	zio_priority_t p = zio->io_priority;
+
+	if (p != ZIO_PRIORITY_SYNC_READ && p != ZIO_PRIORITY_SYNC_WRITE)
+		return;
+
+	if (zio->io_zoneid == vq->vq_sync_zone[p]) {
+		ASSERT3U(vq->vq_sync_zone_cnt[p], >, 0);
+		if (--vq->vq_sync_zone_cnt[p] == 0 &&
+		    vq->vq_sync_other_cnt[p] != 0)
+			vq->vq_sync_zone[p] = VQ_ZONE_MIXED;
+	} else {
+		ASSERT3U(vq->vq_sync_other_cnt[p], >, 0);
+		vq->vq_sync_other_cnt[p]--;
+	}
+}
+
+boolean_t
+vdev_queue_one_zone(vdev_queue_t *vq, zio_priority_t p)
+{
+	ASSERT(MUTEX_HELD(&vq->vq_lock));
+	ASSERT(p == ZIO_PRIORITY_SYNC_READ || p == ZIO_PRIORITY_SYNC_WRITE);
+	return (vq->vq_sync_other_cnt[p] == 0);
+}
+
 static void
 vdev_queue_io_add(vdev_queue_t *vq, zio_t *zio)
 {
@@ -323,6 +376,7 @@ vdev_queue_io_add(vdev_queue_t *vq, zio_t *zio)
 
 	ASSERT3U(zio->io_priority, <, ZIO_PRIORITY_NUM_QUEUEABLE);
 	zfs_zone_zio_enqueue(zio);
+	vdev_queue_zone_add(vq, zio);
 	avl_add(vdev_queue_class_tree(vq, zio->io_priority), zio);
 	avl_add(vdev_queue_type_tree(vq, zio->io_type), zio);
 
@@ -340,6 +394,7 @@ vdev_queue_io_remove(vdev_queue_t *vq, zio_t *zio)
 
 	ASSERT3U(zio->io_priority, <, ZIO_PRIORITY_NUM_QUEUEABLE);
 	zfs_zone_zio_dequeue(zio);
+	vdev_queue_zone_remove(vq, zio);
 	avl_remove(vdev_queue_class_tree(vq, zio->io_priority), zio);
 	avl_remove(vdev_queue_type_tree(vq, zio->io_type), zio);
 
@@ -901,9 +956,11 @@ vdev_queue_change_io_priority(zio_t *zio, zio_priority_t priority)
 		zio_priority_t oldpri = zio->io_priority;
 
 		zfs_zone_zio_dequeue(zio);
+		vdev_queue_zone_remove(vq, zio);
 		avl_remove(vdev_queue_class_tree(vq, zio->io_priority), zio);
 		zio->io_priority = priority;
 		avl_add(vdev_queue_class_tree(vq, zio->io_priority), zio);
+		vdev_queue_zone_add(vq, zio);
 		zfs_zone_zio_enqueue(zio);
 
 		mutex_enter(&spa->spa_iokstat_lock);

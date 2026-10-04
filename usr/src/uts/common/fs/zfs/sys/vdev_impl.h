@@ -152,9 +152,19 @@ struct vdev_queue {
 	avl_tree_t	vq_trim_offset_tree;
 	uint64_t	vq_last_offset;
 	zoneid_t	vq_last_zone_id;
+	/*
+	 * For the sync read and write classes: the zone of the I/Os queued so
+	 * far, how many of them are queued, and how many queued I/Os may be
+	 * from other zones. See vdev_queue_zone_add().
+	 */
+	zoneid_t	vq_sync_zone[2];
+	uint32_t	vq_sync_zone_cnt[2];
+	uint32_t	vq_sync_other_cnt[2];
 	hrtime_t	vq_io_complete_ts; /* time last i/o completed */
 	kmutex_t	vq_lock;
 };
+
+extern boolean_t vdev_queue_one_zone(vdev_queue_t *, zio_priority_t);
 
 typedef enum vdev_alloc_bias {
 	VDEV_BIAS_NONE,
