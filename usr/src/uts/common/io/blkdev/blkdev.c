@@ -59,6 +59,8 @@
 #include <sys/taskq.h>
 #include <sys/taskq_impl.h>
 #include <sys/disp.h>
+#include <sys/cpu.h>
+#include <sys/cpuvar.h>
 #include <sys/sysevent/eventdefs.h>
 #include <sys/sysevent/dev.h>
 
@@ -180,6 +182,7 @@ struct bd {
 	kmem_cache_t	*d_cache;
 	bd_queue_t	*d_queues;
 	taskq_t		*d_sched_tq;
+	hrtime_t	d_spin_ns;
 	kstat_t		*d_ksp;
 	kstat_io_t	*d_kiop;
 	kstat_t		*d_errstats;
@@ -275,6 +278,7 @@ static int bd_dump(dev_t, caddr_t, daddr_t, int);
 static int bd_read(dev_t, struct uio *, cred_t *);
 static int bd_write(dev_t, struct uio *, cred_t *);
 static int bd_aread(dev_t, struct aio_req *, cred_t *);
+static int bd_physio_strategy(struct buf *);
 static int bd_awrite(dev_t, struct aio_req *, cred_t *);
 static int bd_prop_op(dev_t, dev_info_t *, ddi_prop_op_t, int, char *,
     caddr_t, int *);
@@ -348,6 +352,15 @@ static struct modlinkage modlinkage = {
 static void *bd_state;
 static krwlock_t bd_lock;
 static taskq_t *bd_taskq;
+
+/*
+ * How long a synchronous read(2) or write(2) of the raw device spins waiting
+ * for its transfer before sleeping in biowait(), in microseconds. Spinning
+ * saves the sleep and wakeup on devices that complete in a few microseconds.
+ * The "spin-wait-usec" property of a blkdev node overrides this at attach.
+ */
+uint_t bd_spin_wait_usec = 0;
+#define	BD_SPIN_WAIT_MAX_USEC	1000
 
 int
 _init(void)
@@ -659,6 +672,7 @@ bd_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	bd_drive_t	drive;
 	uint32_t	i;
 	int		rv;
+	int		spin;
 	char		name[16];
 	char		kcache[32];
 	char		*node_type;
@@ -845,6 +859,11 @@ bd_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 	    ddi_driver_name(dip), inst);
 	bd->d_sched_tq = taskq_create(kcache, MIN(bd->d_qcount, 8),
 	    minclsyspri, 0, 0, 0);
+
+	spin = ddi_prop_get_int(DDI_DEV_T_ANY, dip, DDI_PROP_DONTPASS,
+	    "spin-wait-usec",
+	    (int)MIN(bd_spin_wait_usec, BD_SPIN_WAIT_MAX_USEC));
+	bd->d_spin_ns = USEC2NSEC(MIN(MAX(spin, 0), BD_SPIN_WAIT_MAX_USEC));
 
 	if (*(uint64_t *)drive.d_eui64 != 0 ||
 	    *(uint64_t *)drive.d_guid != 0 ||
@@ -1446,7 +1465,8 @@ bd_read(dev_t dev, struct uio *uio, cred_t *credp)
 	if (ret != 0) {
 		return (ret);
 	}
-	return (physio(bd_strategy, NULL, dev, B_READ, bd_minphys, uio));
+	return (physio(bd_physio_strategy, NULL, dev, B_READ, bd_minphys,
+	    uio));
 }
 
 static int
@@ -1457,7 +1477,8 @@ bd_write(dev_t dev, struct uio *uio, cred_t *credp)
 	if (ret != 0) {
 		return (ret);
 	}
-	return (physio(bd_strategy, NULL, dev, B_WRITE, bd_minphys, uio));
+	return (physio(bd_physio_strategy, NULL, dev, B_WRITE, bd_minphys,
+	    uio));
 }
 
 static int
@@ -1480,6 +1501,43 @@ bd_awrite(dev_t dev, struct aio_req *aio, cred_t *credp)
 		return (ret);
 	}
 	return (aphysio(bd_strategy, anocancel, dev, B_WRITE, bd_minphys, aio));
+}
+
+/*
+ * Strategy routine for physio(9F) on the raw device. physio() waits in
+ * biowait() after this returns, so spinning here until the transfer is done
+ * lets biowait() return without sleeping.
+ */
+static int
+bd_physio_strategy(struct buf *bp)
+{
+	bd_t		*bd;
+	hrtime_t	spin, deadline;
+
+	bd = ddi_get_soft_state(bd_state, BDINST(bp->b_edev));
+	spin = (bd != NULL) ? bd->d_spin_ns : 0;
+
+	/*
+	 * Decide before submitting: once submitted, an asynchronous buf may
+	 * be completed and released before bd_strategy() returns.
+	 */
+	if (spin == 0 || (bp->b_flags & B_ASYNC) != 0 ||
+	    bp->b_iodone != NULL || panicstr != NULL ||
+	    servicing_interrupt() || curthread->t_preempt != 0) {
+		return (bd_strategy(bp));
+	}
+
+	(void) bd_strategy(bp);
+
+	deadline = gethrtime() + spin;
+	while ((*(volatile int *)&bp->b_flags & B_DONE) == 0) {
+		if (CPU->cpu_runrun || CPU->cpu_kprunrun ||
+		    gethrtime() > deadline)
+			break;
+		SMT_PAUSE();
+	}
+
+	return (0);
 }
 
 static int
