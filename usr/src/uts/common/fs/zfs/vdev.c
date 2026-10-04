@@ -4602,6 +4602,24 @@ vdev_deadman(vdev_t *vd)
 			}
 		}
 		mutex_exit(&vq->vq_lock);
+
+		for (int i = 0; i < VDEV_QUEUE_BYPASS_LISTS; i++) {
+			vdev_queue_bypass_t *vqb = &vq->vq_bypass[i];
+			zio_t *fio;
+			uint64_t delta;
+
+			mutex_enter(&vqb->vqb_lock);
+			if ((fio = list_head(&vqb->vqb_list)) != NULL &&
+			    (delta = gethrtime() - fio->io_timestamp) >
+			    spa_deadman_synctime(vd->vdev_spa)) {
+				vdev_dbgmsg(vd, "SLOW IO: unqueued zio "
+				    "timestamp %lluns, delta %lluns",
+				    fio->io_timestamp, (u_longlong_t)delta);
+				fm_panic("I/O to pool '%s' appears to be "
+				    "hung.", spa_name(vd->vdev_spa));
+			}
+			mutex_exit(&vqb->vqb_lock);
+		}
 	}
 }
 
