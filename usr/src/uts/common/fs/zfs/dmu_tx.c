@@ -188,7 +188,8 @@ dmu_tx_add_new_object(dmu_tx_t *tx, dnode_t *dn)
  * fault tolerance noted above).
  */
 static int
-dmu_tx_check_ioerr(zio_t *zio, dnode_t *dn, int level, uint64_t blkid)
+dmu_tx_check_ioerr(zio_t *zio, dnode_t *dn, int level, uint64_t blkid,
+    dmu_tx_hold_t *txh, dmu_buf_impl_t **dbp)
 {
 	int err;
 	dmu_buf_impl_t *db;
@@ -199,6 +200,16 @@ dmu_tx_check_ioerr(zio_t *zio, dnode_t *dn, int level, uint64_t blkid)
 	if (db == NULL)
 		return (SET_ERROR(EIO));
 	err = dbuf_read(db, zio, DB_RF_CANFAIL | DB_RF_NOPREFETCH);
+
+	/*
+	 * Keep the block held until the tx ends so the write finds it in
+	 * memory; without a hold, a dataset with primarycache=metadata
+	 * evicts it and the write reads it from disk again.
+	 */
+	if (dbp != NULL && *dbp == NULL) {
+		dbuf_add_ref(db, txh);
+		*dbp = db;
+	}
 	dbuf_rele(db, FTAG);
 	return (err);
 }
@@ -232,7 +243,8 @@ dmu_tx_count_write(dmu_tx_hold_t *txh, uint64_t off, uint64_t len)
 	if (dn->dn_maxblkid == 0) {
 		if (off < dn->dn_datablksz &&
 		    (off > 0 || len < dn->dn_datablksz)) {
-			err = dmu_tx_check_ioerr(NULL, dn, 0, 0);
+			err = dmu_tx_check_ioerr(NULL, dn, 0, 0, txh,
+			    &txh->txh_dbuf[0]);
 			if (err != 0) {
 				txh->txh_tx->tx_err = err;
 			}
@@ -244,7 +256,8 @@ dmu_tx_count_write(dmu_tx_hold_t *txh, uint64_t off, uint64_t len)
 		/* first level-0 block */
 		uint64_t start = off >> dn->dn_datablkshift;
 		if (P2PHASE(off, dn->dn_datablksz) || len < dn->dn_datablksz) {
-			err = dmu_tx_check_ioerr(zio, dn, 0, start);
+			err = dmu_tx_check_ioerr(zio, dn, 0, start, txh,
+			    &txh->txh_dbuf[0]);
 			if (err != 0) {
 				txh->txh_tx->tx_err = err;
 			}
@@ -254,7 +267,8 @@ dmu_tx_count_write(dmu_tx_hold_t *txh, uint64_t off, uint64_t len)
 		uint64_t end = (off + len - 1) >> dn->dn_datablkshift;
 		if (end != start && end <= dn->dn_maxblkid &&
 		    P2PHASE(off + len, dn->dn_datablksz)) {
-			err = dmu_tx_check_ioerr(zio, dn, 0, end);
+			err = dmu_tx_check_ioerr(zio, dn, 0, end, txh,
+			    &txh->txh_dbuf[1]);
 			if (err != 0) {
 				txh->txh_tx->tx_err = err;
 			}
@@ -265,7 +279,8 @@ dmu_tx_count_write(dmu_tx_hold_t *txh, uint64_t off, uint64_t len)
 			int shft = dn->dn_indblkshift - SPA_BLKPTRSHIFT;
 			for (uint64_t i = (start >> shft) + 1;
 			    i < end >> shft; i++) {
-				err = dmu_tx_check_ioerr(zio, dn, 1, i);
+				err = dmu_tx_check_ioerr(zio, dn, 1, i, NULL,
+				    NULL);
 				if (err != 0) {
 					txh->txh_tx->tx_err = err;
 				}
@@ -425,7 +440,7 @@ dmu_tx_hold_free_impl(dmu_tx_hold_t *txh, uint64_t off, uint64_t len)
 			(void) zfs_refcount_add_many(&txh->txh_memory_tohold,
 			    1 << dn->dn_indblkshift, FTAG);
 
-			err = dmu_tx_check_ioerr(zio, dn, 1, i);
+			err = dmu_tx_check_ioerr(zio, dn, 1, i, NULL, NULL);
 			if (err != 0) {
 				tx->tx_err = err;
 				(void) zio_wait(zio);
@@ -496,7 +511,7 @@ dmu_tx_hold_zap_impl(dmu_tx_hold_t *txh, const char *name)
 		 * This is a microzap (only one block), or we don't know
 		 * the name.  Check the first block for i/o errors.
 		 */
-		err = dmu_tx_check_ioerr(NULL, dn, 0, 0);
+		err = dmu_tx_check_ioerr(NULL, dn, 0, 0, NULL, NULL);
 		if (err != 0) {
 			tx->tx_err = err;
 		}
@@ -1106,6 +1121,10 @@ dmu_tx_destroy(dmu_tx_t *tx)
 		dnode_t *dn = txh->txh_dnode;
 
 		list_remove(&tx->tx_holds, txh);
+		for (int i = 0; i < 2; i++) {
+			if (txh->txh_dbuf[i] != NULL)
+				dbuf_rele(txh->txh_dbuf[i], txh);
+		}
 		zfs_refcount_destroy_many(&txh->txh_space_towrite,
 		    zfs_refcount_count(&txh->txh_space_towrite));
 		zfs_refcount_destroy_many(&txh->txh_memory_tohold,

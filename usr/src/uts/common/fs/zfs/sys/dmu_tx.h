@@ -102,6 +102,8 @@ typedef struct dmu_tx_hold {
 	enum dmu_tx_hold_type txh_type;
 	uint64_t txh_arg1;
 	uint64_t txh_arg2;
+	/* partially written blocks read by dmu_tx_count_write(), held */
+	struct dmu_buf_impl *txh_dbuf[2];
 } dmu_tx_hold_t;
 
 typedef struct dmu_tx_callback {
