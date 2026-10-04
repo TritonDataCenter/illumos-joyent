@@ -5083,10 +5083,12 @@ arc_adapt(int bytes, arc_state_t *state)
 
 	/*
 	 * If we're within (2 * maxblocksize) bytes of the target
-	 * cache size, increment the target cache size
+	 * cache size, increment the target cache size. The upper bound
+	 * avoids aggsum_compare(), which locks every bucket while arc_size
+	 * sits near arc_c, as it does whenever the ARC is full.
 	 */
-	if (aggsum_compare(&arc_size, arc_c - (2ULL << SPA_MAXBLOCKSHIFT)) >
-	    0) {
+	if (aggsum_upper_bound(&arc_size) >
+	    (int64_t)(arc_c - (2ULL << SPA_MAXBLOCKSHIFT))) {
 		atomic_add_64(&arc_c, (int64_t)bytes);
 		if (arc_c > arc_c_max)
 			arc_c = arc_c_max;
@@ -5237,7 +5239,7 @@ arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag,
 		 * If we are growing the cache, and we are adding anonymous
 		 * data, and we have outgrown arc_p, update arc_p
 		 */
-		if (aggsum_compare(&arc_size, arc_c) < 0 &&
+		if (aggsum_upper_bound(&arc_size) < (int64_t)arc_c &&
 		    hdr->b_l1hdr.b_state == arc_anon &&
 		    (zfs_refcount_count(&arc_anon->arcs_size) +
 		    zfs_refcount_count(&arc_mru->arcs_size) > arc_p))
