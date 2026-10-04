@@ -673,6 +673,13 @@ uint32_t nvme_vendor_specific_admin_cmd_size = 1 << 24;
 uint_t nvme_vendor_specific_admin_cmd_max_timeout = 60;
 
 /*
+ * Maximum number of blkdev I/O completions handled in the interrupt thread
+ * per completion queue pass. The rest go to the queue's taskq, as all
+ * completions do when this is 0.
+ */
+uint_t nvme_inline_done_max = 8;
+
+/*
  * This ID space, AVL, and lock are used for keeping track of minor state across
  * opens between different devices.
  */
@@ -771,6 +778,7 @@ static boolean_t nvme_check_dma_hdl(nvme_dma_t *);
 static int nvme_fill_prp(nvme_cmd_t *, ddi_dma_handle_t);
 
 static void nvme_bd_xfer_done(void *);
+static void nvme_bd_xfer_done_inline(nvme_cmd_t *);
 static void nvme_bd_driveinfo(void *, bd_drive_t *);
 static int nvme_bd_mediainfo(void *, bd_media_t *);
 static int nvme_bd_cmd(nvme_namespace_t *, bd_xfer_t *, uint8_t);
@@ -2118,6 +2126,9 @@ nvme_process_iocq(nvme_t *nvme, nvme_cq_t *cq)
 {
 	nvme_reg_cqhdbl_t head = { 0 };
 	nvme_cmd_t *cmd;
+	nvme_cmd_t *inline_head = NULL;
+	nvme_cmd_t **inline_tail = &inline_head;
+	uint_t ninline = 0;
 	uint_t completed = 0;
 
 	if (ddi_dma_sync(cq->ncq_dma->nd_dmah, 0, 0, DDI_DMA_SYNC_FORKERNEL) !=
@@ -2152,8 +2163,18 @@ nvme_process_iocq(nvme_t *nvme, nvme_cq_t *cq)
 		cmd->nc_state = NVME_CMD_QUEUED;
 		if ((cmd->nc_flags & NVME_CMD_F_USELOCK) != 0)
 			mutex_exit(&cmd->nc_mutex);
-		taskq_dispatch_ent(cq->ncq_cmd_taskq, cmd->nc_callback, cmd,
-		    TQ_NOSLEEP, &cmd->nc_tqent);
+
+		if ((cmd->nc_flags & NVME_CMD_F_INLINE) != 0 &&
+		    ninline < nvme_inline_done_max) {
+			ASSERT0(cmd->nc_flags & NVME_CMD_F_USELOCK);
+			cmd->nc_inline_next = NULL;
+			*inline_tail = cmd;
+			inline_tail = &cmd->nc_inline_next;
+			ninline++;
+		} else {
+			taskq_dispatch_ent(cq->ncq_cmd_taskq, cmd->nc_callback,
+			    cmd, TQ_NOSLEEP, &cmd->nc_tqent);
+		}
 
 		completed++;
 	}
@@ -2167,6 +2188,11 @@ nvme_process_iocq(nvme_t *nvme, nvme_cq_t *cq)
 	}
 
 	mutex_exit(&cq->ncq_mutex);
+
+	while ((cmd = inline_head) != NULL) {
+		inline_head = cmd->nc_inline_next;
+		nvme_bd_xfer_done_inline(cmd);
+	}
 
 	return (completed);
 }
@@ -5090,6 +5116,12 @@ nvme_setup_interrupts(nvme_t *nvme, int intr_type, int nqpairs)
 		goto fail;
 	}
 
+	/*
+	 * Completing I/O in the interrupt thread takes adaptive locks in
+	 * blkdev and its consumers, which a high-level interrupt cannot do.
+	 */
+	nvme->n_inline_done = nvme->n_intr_pri < ddi_intr_get_hilevel_pri();
+
 	for (i = 0; i < count; i++) {
 		ret = ddi_intr_add_handler(nvme->n_inth[i], nvme_intr,
 		    (void *)nvme, (void *)(uintptr_t)i);
@@ -5905,6 +5937,8 @@ nvme_create_nvm_cmd(nvme_namespace_t *ns, uint8_t opc, bd_xfer_t *xfer)
 	cmd->nc_sqe.sqe_opc = opc;
 	cmd->nc_callback = nvme_bd_xfer_done;
 	cmd->nc_xfer = xfer;
+	if ((xfer->x_flags & BD_XFER_POLL) == 0 && nvme->n_inline_done)
+		cmd->nc_flags |= NVME_CMD_F_INLINE;
 
 	switch (opc) {
 	case NVME_OPC_NVM_WRITE:
@@ -5955,6 +5989,18 @@ nvme_bd_xfer_done(void *arg)
 	nvme_free_cmd(cmd);
 
 	bd_xfer_done(xfer, error);
+}
+
+static void
+nvme_bd_xfer_done_inline(nvme_cmd_t *cmd)
+{
+	bd_xfer_t *xfer = cmd->nc_xfer;
+	int error;
+
+	error = nvme_check_cmd_status(cmd);
+	nvme_free_cmd(cmd);
+
+	bd_xfer_done_intr(xfer, error);
 }
 
 static void

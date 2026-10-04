@@ -202,6 +202,7 @@ typedef enum {
 typedef enum {
 	NVME_CMD_F_DONTPANIC	= 1 << 0,
 	NVME_CMD_F_USELOCK	= 1 << 1,
+	NVME_CMD_F_INLINE	= 1 << 2,
 } nvme_cmd_flag_t;
 
 /*
@@ -236,6 +237,12 @@ struct nvme_cmd {
 
 	taskq_ent_t nc_tqent;
 	nvme_t *nc_nvme;
+
+	/*
+	 * Links NVME_CMD_F_INLINE commands that nvme_process_iocq() completes
+	 * after dropping the CQ lock.
+	 */
+	struct nvme_cmd *nc_inline_next;
 };
 
 struct nvme_cq {
@@ -375,6 +382,7 @@ struct nvme {
 	ddi_intr_handle_t *n_inth;
 	int n_intr_cnt;
 	uint_t n_intr_pri;
+	boolean_t n_inline_done;
 	int n_intr_cap;
 	int n_intr_type;
 	int n_intr_types;
