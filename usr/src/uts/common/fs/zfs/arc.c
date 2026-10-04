@@ -330,8 +330,27 @@ static arc_buf_hdr_t **arc_state_evict_markers;
 static int arc_state_evict_marker_count;
 
 static kmutex_t		arc_evict_lock;
-static kcondvar_t	arc_evict_waiters_cv;
 static boolean_t	arc_evict_needed = B_FALSE;
+
+/*
+ * Threads that must wait for eviction before allocating. Each waits until
+ * arc_evict_count, the total bytes evicted, reaches its aew_count. Both are
+ * protected by arc_evict_lock.
+ */
+typedef struct arc_evict_waiter {
+	list_node_t	aew_node;
+	kcondvar_t	aew_cv;
+	uint64_t	aew_count;
+} arc_evict_waiter_t;
+
+static list_t		arc_evict_waiters;
+static uint64_t		arc_evict_count;
+
+typedef enum arc_ovf_level {
+	ARC_OVF_NONE,		/* under the target, or within one block */
+	ARC_OVF_SOME,		/* over, but only eviction needs to happen */
+	ARC_OVF_SEVERE		/* allocations must wait for eviction */
+} arc_ovf_level_t;
 
 static taskq_t *arc_evict_taskq;
 static struct evict_arg *arc_evict_arg;
@@ -359,6 +378,13 @@ int arc_kmem_cache_reap_retry_ms = 1000;
 
 /* shift of arc_c for calculating overflow limit in arc_get_data_impl */
 int zfs_arc_overflow_shift = 8;
+
+/*
+ * A thread waiting for eviction before allocating waits for this percentage
+ * of its allocation to be evicted. Above 100, eviction makes net progress
+ * while allocations keep arriving.
+ */
+uint_t zfs_arc_eviction_pct = 200;
 
 /* shift of arc_c for calculating both min and max arc_p */
 int arc_p_min_shift = 4;
@@ -815,7 +841,8 @@ static void arc_free_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag);
 static void arc_hdr_free_pabd(arc_buf_hdr_t *, boolean_t);
 static void arc_hdr_alloc_pabd(arc_buf_hdr_t *, int);
 static void arc_access(arc_buf_hdr_t *, kmutex_t *);
-static boolean_t arc_is_overflowing();
+static arc_ovf_level_t arc_is_overflowing(boolean_t);
+static void arc_evict_wake_waiters(boolean_t);
 static void arc_buf_watch(arc_buf_t *);
 static l2arc_dev_t *l2arc_vdev_get(vdev_t *vd);
 
@@ -3794,7 +3821,7 @@ arc_buf_destroy(arc_buf_t *buf, void* tag)
  *    - arc_mfu_ghost -> deleted
  */
 static int64_t
-arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
+arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock, uint64_t *real_evicted)
 {
 	arc_state_t *evicted_state, *state;
 	int64_t bytes_evicted = 0;
@@ -3804,6 +3831,7 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 	ASSERT(MUTEX_HELD(hash_lock));
 	ASSERT(HDR_HAS_L1HDR(hdr));
 
+	*real_evicted = 0;
 	state = hdr->b_l1hdr.b_state;
 	if (GHOST_STATE(state)) {
 		ASSERT(!HDR_IO_IN_PROGRESS(hdr));
@@ -3865,8 +3893,11 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 			ARCSTAT_BUMP(arcstat_mutex_miss);
 			break;
 		}
-		if (buf->b_data != NULL)
+		if (buf->b_data != NULL) {
 			bytes_evicted += HDR_GET_LSIZE(hdr);
+			if (!ARC_BUF_SHARED(buf))
+				*real_evicted += arc_buf_size(buf);
+		}
 		mutex_exit(&buf->b_evict_lock);
 		arc_buf_destroy_impl(buf);
 	}
@@ -3909,11 +3940,15 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 		 * This ensures that the accounting is updated correctly
 		 * in arc_free_data_impl().
 		 */
-		if (hdr->b_l1hdr.b_pabd != NULL)
+		if (hdr->b_l1hdr.b_pabd != NULL) {
+			*real_evicted += arc_hdr_size(hdr);
 			arc_hdr_free_pabd(hdr, B_FALSE);
+		}
 
-		if (HDR_HAS_RABD(hdr))
+		if (HDR_HAS_RABD(hdr)) {
+			*real_evicted += HDR_GET_PSIZE(hdr);
 			arc_hdr_free_pabd(hdr, B_TRUE);
+		}
 
 		arc_change_state(evicted_state, hdr, hash_lock);
 		ASSERT(HDR_IN_HASH_TABLE(hdr));
@@ -3929,7 +3964,7 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
     uint64_t spa, uint64_t bytes)
 {
 	multilist_sublist_t *mls;
-	uint64_t bytes_evicted = 0;
+	uint64_t bytes_evicted = 0, real_evicted = 0;
 	arc_buf_hdr_t *hdr;
 	kmutex_t *hash_lock;
 	int evict_count = zfs_arc_evict_batch_limit;
@@ -3988,10 +4023,13 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 		ASSERT(!MUTEX_HELD(hash_lock));
 
 		if (mutex_tryenter(hash_lock)) {
-			uint64_t evicted = arc_evict_hdr(hdr, hash_lock);
+			uint64_t revicted;
+			uint64_t evicted = arc_evict_hdr(hdr, hash_lock,
+			    &revicted);
 			mutex_exit(hash_lock);
 
 			bytes_evicted += evicted;
+			real_evicted += revicted;
 
 			/*
 			 * If evicted is zero, arc_evict_hdr() must have
@@ -4000,36 +4038,23 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 			 */
 			if (evicted != 0)
 				evict_count--;
-
-			/*
-			 * If arc_size isn't overflowing, signal any
-			 * threads that might happen to be waiting.
-			 *
-			 * For each header evicted, we wake up a single
-			 * thread. If we used cv_broadcast, we could
-			 * wake up "too many" threads causing arc_size
-			 * to significantly overflow arc_c; since
-			 * arc_get_data_impl() doesn't check for overflow
-			 * when it's woken up (it doesn't because it's
-			 * possible for the ARC to be overflowing while
-			 * full of un-evictable buffers, and the
-			 * function should proceed in this case).
-			 *
-			 * If threads are left sleeping, due to not
-			 * using cv_broadcast here, they will be woken
-			 * up via cv_broadcast in arc_evict_cb() just
-			 * before arc_evict_zthr sleeps.
-			 */
-			mutex_enter(&arc_evict_lock);
-			if (!arc_is_overflowing())
-				cv_signal(&arc_evict_waiters_cv);
-			mutex_exit(&arc_evict_lock);
 		} else {
 			ARCSTAT_BUMP(arcstat_mutex_miss);
 		}
 	}
 
 	multilist_sublist_unlock(mls);
+
+	/*
+	 * Credit the evicted bytes to threads waiting in
+	 * arc_wait_for_eviction(), once per batch.
+	 */
+	if (real_evicted != 0) {
+		mutex_enter(&arc_evict_lock);
+		arc_evict_count += real_evicted;
+		arc_evict_wake_waiters(B_FALSE);
+		mutex_exit(&arc_evict_lock);
+	}
 
 	return (bytes_evicted);
 }
@@ -4897,7 +4922,7 @@ arc_evict_cb_check(void *arg, zthr_t *zthr)
 	 * We have to rely on arc_get_data_impl() to tell us when to adjust,
 	 * rather than checking if we are overflowing here, so that we are
 	 * sure to not leave arc_get_data_impl() waiting on
-	 * arc_evict_waiters_cv.  If we have become "not overflowing" since
+	 * arc_wait_for_eviction().  If we have become "not overflowing" since
 	 * arc_get_data_impl() checked, we need to wake it up.  We could
 	 * broadcast the CV here, but arc_get_data_impl() may have not yet
 	 * gone to sleep.  We would need to use a mutex to ensure that this
@@ -4943,7 +4968,7 @@ arc_evict_cb(void *arg, zthr_t *zthr)
 		 * can't evict anything more, so we should wake
 		 * up any waiters.
 		 */
-		cv_broadcast(&arc_evict_waiters_cv);
+		arc_evict_wake_waiters(B_TRUE);
 	}
 	mutex_exit(&arc_evict_lock);
 }
@@ -5101,16 +5126,13 @@ arc_adapt(int bytes, arc_state_t *state)
 }
 
 /*
- * Check if arc_size has grown past our upper threshold, determined by
- * zfs_arc_overflow_shift.
+ * Check how far arc_size has grown past arc_c. Beyond one block the eviction
+ * thread should run; beyond half of arc_c >> zfs_arc_overflow_shift, or at
+ * all when memory is short (!lax), allocations wait for it.
  */
-static boolean_t
-arc_is_overflowing(void)
+static arc_ovf_level_t
+arc_is_overflowing(boolean_t lax)
 {
-	/* Always allow at least one block of overflow */
-	uint64_t overflow = MAX(SPA_MAXBLOCKSIZE,
-	    arc_c >> zfs_arc_overflow_shift);
-
 	/*
 	 * We just compare the lower bound here for performance reasons. Our
 	 * primary goals are to make sure that the arc never grows without
@@ -5120,7 +5142,75 @@ arc_is_overflowing(void)
 	 * in the ARC. In practice, that's in the tens of MB, which is low
 	 * enough to be safe.
 	 */
-	return (aggsum_lower_bound(&arc_size) >= arc_c + overflow);
+	int64_t over = aggsum_lower_bound(&arc_size) - (int64_t)arc_c -
+	    SPA_MAXBLOCKSIZE;
+
+	if (over < 0)
+		return (ARC_OVF_NONE);
+	if (!lax)
+		return (ARC_OVF_SEVERE);
+	return (over < (int64_t)(arc_c >> zfs_arc_overflow_shift) / 2 ?
+	    ARC_OVF_SOME : ARC_OVF_SEVERE);
+}
+
+/*
+ * Wake the threads waiting in arc_wait_for_eviction() whose share of eviction
+ * has happened, or all of them.
+ */
+static void
+arc_evict_wake_waiters(boolean_t all)
+{
+	arc_evict_waiter_t *aw;
+
+	ASSERT(MUTEX_HELD(&arc_evict_lock));
+	while ((aw = list_head(&arc_evict_waiters)) != NULL &&
+	    (all || aw->aew_count <= arc_evict_count)) {
+		list_remove(&arc_evict_waiters, aw);
+		cv_signal(&aw->aew_cv);
+	}
+}
+
+/*
+ * Before allocating `amount` bytes, make sure the eviction thread is keeping
+ * up. A modest overflow only wakes it; a severe one waits until it has
+ * evicted as much as this and the earlier waiters are allocating.
+ */
+static void
+arc_wait_for_eviction(uint64_t amount)
+{
+	arc_evict_waiter_t aw;
+	arc_evict_waiter_t *last;
+
+	switch (arc_is_overflowing(arc_available_memory() >= 0)) {
+	case ARC_OVF_NONE:
+		return;
+	case ARC_OVF_SOME:
+		if (!arc_evict_needed) {
+			arc_evict_needed = B_TRUE;
+			zthr_wakeup(arc_evict_zthr);
+		}
+		return;
+	case ARC_OVF_SEVERE:
+	default:
+		break;
+	}
+
+	list_link_init(&aw.aew_node);
+	cv_init(&aw.aew_cv, NULL, CV_DEFAULT, NULL);
+
+	mutex_enter(&arc_evict_lock);
+	last = list_tail(&arc_evict_waiters);
+	aw.aew_count = MAX(last != NULL ? last->aew_count : 0,
+	    arc_evict_count) + amount;
+	list_insert_tail(&arc_evict_waiters, &aw);
+	arc_evict_needed = B_TRUE;
+	zthr_wakeup(arc_evict_zthr);
+	do {
+		cv_wait(&aw.aew_cv, &arc_evict_lock);
+	} while (list_link_active(&aw.aew_node));
+	mutex_exit(&arc_evict_lock);
+
+	cv_destroy(&aw.aew_cv);
 }
 
 static abd_t *
@@ -5182,28 +5272,7 @@ arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag,
 	 * In this case, we want to proceed regardless if we're
 	 * overflowing; thus we don't use a while loop here.
 	 */
-	if (arc_is_overflowing()) {
-		mutex_enter(&arc_evict_lock);
-
-		/*
-		 * Now that we've acquired the lock, we may no longer be
-		 * over the overflow limit, lets check.
-		 *
-		 * We're ignoring the case of spurious wake ups. If that
-		 * were to happen, it'd let this thread consume an ARC
-		 * buffer before it should have (i.e. before we're under
-		 * the overflow limit and were signalled by the reclaim
-		 * thread). As long as that is a rare occurrence, it
-		 * shouldn't cause any harm.
-		 */
-		if (arc_is_overflowing()) {
-			arc_evict_needed = B_TRUE;
-			zthr_wakeup(arc_evict_zthr);
-			(void) cv_wait(&arc_evict_waiters_cv,
-			    &arc_evict_lock);
-		}
-		mutex_exit(&arc_evict_lock);
-	}
+	arc_wait_for_eviction(size * zfs_arc_eviction_pct / 100);
 
 	VERIFY3U(hdr->b_type, ==, type);
 	if (type == ARC_BUFC_METADATA) {
@@ -7494,7 +7563,8 @@ arc_init(void)
 	zfs_init_allmem = allmem;
 
 	mutex_init(&arc_evict_lock, NULL, MUTEX_DEFAULT, NULL);
-	cv_init(&arc_evict_waiters_cv, NULL, CV_DEFAULT, NULL);
+	list_create(&arc_evict_waiters, sizeof (arc_evict_waiter_t),
+	    offsetof(arc_evict_waiter_t, aew_node));
 
 	/*
 	 * Set the minimum cache size to 1/64 of all memory, with a hard
@@ -7667,7 +7737,7 @@ arc_fini(void)
 	}
 
 	mutex_destroy(&arc_evict_lock);
-	cv_destroy(&arc_evict_waiters_cv);
+	list_destroy(&arc_evict_waiters);
 
 	/*
 	 * buf_fini() must proceed arc_state_fini() because buf_fin() may
