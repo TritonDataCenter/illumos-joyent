@@ -179,6 +179,7 @@ struct bd {
 
 	kmem_cache_t	*d_cache;
 	bd_queue_t	*d_queues;
+	taskq_t		*d_sched_tq;
 	kstat_t		*d_ksp;
 	kstat_io_t	*d_kiop;
 	kstat_t		*d_errstats;
@@ -223,6 +224,7 @@ struct bd_xfer_impl {
 	uint32_t	i_blkshift;
 	size_t		i_len;
 	size_t		i_resid;
+	taskq_ent_t	i_next_ent;
 };
 
 struct bd_queue {
@@ -231,6 +233,9 @@ struct bd_queue {
 	uint32_t	q_qactive;
 	list_t		q_runq;
 	list_t		q_waitq;
+	bd_t		*q_bd;
+	taskq_ent_t	q_sched_ent;
+	boolean_t	q_sched_pending;
 };
 
 #define	i_dmah		i_public.x_dmah
@@ -629,6 +634,11 @@ bd_queues_free(bd_t *bd)
 {
 	uint32_t i;
 
+	if (bd->d_sched_tq != NULL) {
+		taskq_destroy(bd->d_sched_tq);
+		bd->d_sched_tq = NULL;
+	}
+
 	for (i = 0; i < bd->d_qcount; i++) {
 		bd_queue_t *bq = &bd->d_queues[i];
 
@@ -816,6 +826,9 @@ bd_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 
 		bq->q_qsize = drive.d_qsize;
 		bq->q_qactive = 0;
+		bq->q_bd = bd;
+		bq->q_sched_pending = B_FALSE;
+		bzero(&bq->q_sched_ent, sizeof (bq->q_sched_ent));
 		mutex_init(&bq->q_iomutex, NULL, MUTEX_DRIVER, NULL);
 
 		list_create(&bq->q_waitq, sizeof (bd_xfer_impl_t),
@@ -823,6 +836,15 @@ bd_attach(dev_info_t *dip, ddi_attach_cmd_t cmd)
 		list_create(&bq->q_runq, sizeof (bd_xfer_impl_t),
 		    offsetof(struct bd_xfer_impl, i_linkage));
 	}
+
+	/*
+	 * Runs the queue scheduling and next-window submissions that
+	 * bd_xfer_done_intr() must not do in its caller's context.
+	 */
+	(void) snprintf(kcache, sizeof (kcache), "%s%d_sched",
+	    ddi_driver_name(dip), inst);
+	bd->d_sched_tq = taskq_create(kcache, MIN(bd->d_qcount, 8),
+	    minclsyspri, 0, 0, 0);
 
 	if (*(uint64_t *)drive.d_eui64 != 0 ||
 	    *(uint64_t *)drive.d_guid != 0 ||
@@ -929,6 +951,14 @@ bd_detach(dev_info_t *dip, ddi_detach_cmd_t cmd)
 	}
 
 	hdl->h_bd = NULL;
+
+	/*
+	 * A deferred scheduling task can still be finishing a transfer it
+	 * failed after that transfer's biodone(), so wait for it before
+	 * tearing down what it uses.
+	 */
+	taskq_destroy(bd->d_sched_tq);
+	bd->d_sched_tq = NULL;
 
 	if (bd->d_ksp != NULL) {
 		kstat_delete(bd->d_ksp);
@@ -1916,7 +1946,35 @@ bd_submit(bd_t *bd, bd_xfer_impl_t *xi)
 }
 
 static void
-bd_runq_exit(bd_xfer_impl_t *xi, int err)
+bd_sched_task(void *arg)
+{
+	bd_queue_t	*bq = arg;
+
+	mutex_enter(&bq->q_iomutex);
+	bq->q_sched_pending = B_FALSE;
+	mutex_exit(&bq->q_iomutex);
+
+	bd_sched(bq->q_bd, bq);
+}
+
+/*
+ * Hand scheduling of a queue's waiting transfers to the taskq, for callers
+ * that cannot submit to the driver themselves.
+ */
+static void
+bd_sched_defer(bd_t *bd, bd_queue_t *bq)
+{
+	mutex_enter(&bq->q_iomutex);
+	if (!bq->q_sched_pending && !list_is_empty(&bq->q_waitq)) {
+		bq->q_sched_pending = B_TRUE;
+		taskq_dispatch_ent(bd->d_sched_tq, bd_sched_task, bq, 0,
+		    &bq->q_sched_ent);
+	}
+	mutex_exit(&bq->q_iomutex);
+}
+
+static void
+bd_runq_exit_impl(bd_xfer_impl_t *xi, int err, boolean_t defer)
 {
 	bd_t		*bd = xi->i_bd;
 	buf_t		*bp = xi->i_bp;
@@ -1943,7 +2001,16 @@ bd_runq_exit(bd_xfer_impl_t *xi, int err)
 			    bp->b_bcount - xi->i_resid);
 		}
 	}
-	bd_sched(bd, bq);
+	if (defer)
+		bd_sched_defer(bd, bq);
+	else
+		bd_sched(bd, bq);
+}
+
+static void
+bd_runq_exit(bd_xfer_impl_t *xi, int err)
+{
+	bd_runq_exit_impl(xi, err, B_FALSE);
 }
 
 static void
@@ -2456,8 +2523,35 @@ bd_detach_handle(bd_handle_t hdl)
 	return (rv == NDI_SUCCESS ? DDI_SUCCESS : DDI_FAILURE);
 }
 
-void
-bd_xfer_done(bd_xfer_t *xfer, int err)
+static void
+bd_xfer_next(bd_xfer_impl_t *xi, boolean_t defer)
+{
+	bd_t		*bd = xi->i_bd;
+	buf_t		*bp = xi->i_bp;
+	int		rv;
+
+	/* Submit next window to hardware. */
+	rv = xi->i_func(bd->d_private, &xi->i_public);
+	if (rv != 0) {
+		bd_runq_exit_impl(xi, rv, defer);
+
+		atomic_inc_32(&bd->d_kerr->bd_transerrs.value.ui32);
+
+		bp->b_resid += xi->i_resid;
+		bd_xfer_free(xi);
+		bioerror(bp, rv);
+		biodone(bp);
+	}
+}
+
+static void
+bd_xfer_next_task(void *arg)
+{
+	bd_xfer_next(arg, B_FALSE);
+}
+
+static void
+bd_xfer_done_impl(bd_xfer_t *xfer, int err, boolean_t defer)
 {
 	bd_xfer_impl_t	*xi = (void *)xfer;
 	buf_t		*bp = xi->i_bp;
@@ -2466,7 +2560,7 @@ bd_xfer_done(bd_xfer_t *xfer, int err)
 	size_t		len;
 
 	if (err != 0) {
-		bd_runq_exit(xi, err);
+		bd_runq_exit_impl(xi, err, defer);
 		atomic_inc_32(&bd->d_kerr->bd_harderrs.value.ui32);
 
 		bp->b_resid += xi->i_resid;
@@ -2481,7 +2575,7 @@ bd_xfer_done(bd_xfer_t *xfer, int err)
 
 	if (xi->i_resid == 0) {
 		/* Job completed succcessfully! */
-		bd_runq_exit(xi, 0);
+		bd_runq_exit_impl(xi, 0, defer);
 
 		bd_xfer_free(xi);
 		biodone(bp);
@@ -2504,7 +2598,7 @@ bd_xfer_done(bd_xfer_t *xfer, int err)
 
 	if ((rv != DDI_SUCCESS) ||
 	    (P2PHASE(len, (1U << xi->i_blkshift)) != 0)) {
-		bd_runq_exit(xi, EFAULT);
+		bd_runq_exit_impl(xi, EFAULT, defer);
 
 		bp->b_resid += xi->i_resid;
 		bd_xfer_free(xi);
@@ -2515,18 +2609,29 @@ bd_xfer_done(bd_xfer_t *xfer, int err)
 	xi->i_len = len;
 	xi->i_nblks = len >> xi->i_blkshift;
 
-	/* Submit next window to hardware. */
-	rv = xi->i_func(bd->d_private, &xi->i_public);
-	if (rv != 0) {
-		bd_runq_exit(xi, rv);
-
-		atomic_inc_32(&bd->d_kerr->bd_transerrs.value.ui32);
-
-		bp->b_resid += xi->i_resid;
-		bd_xfer_free(xi);
-		bioerror(bp, rv);
-		biodone(bp);
+	if (defer) {
+		taskq_dispatch_ent(bd->d_sched_tq, bd_xfer_next_task, xi, 0,
+		    &xi->i_next_ent);
+	} else {
+		bd_xfer_next(xi, B_FALSE);
 	}
+}
+
+void
+bd_xfer_done(bd_xfer_t *xfer, int err)
+{
+	bd_xfer_done_impl(xfer, err, B_FALSE);
+}
+
+/*
+ * Like bd_xfer_done(), for callers such as interrupt handlers that must not
+ * block: queued transfers and the next window of this one are submitted from
+ * a taskq instead of from the caller.
+ */
+void
+bd_xfer_done_intr(bd_xfer_t *xfer, int err)
+{
+	bd_xfer_done_impl(xfer, err, B_TRUE);
 }
 
 void
