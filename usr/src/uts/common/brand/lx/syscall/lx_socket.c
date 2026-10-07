@@ -26,6 +26,7 @@
  * Copyright 2022 Joyent, Inc.
  * Copyright 2024 Carlos Neira <cneirabustos@gmail.com>
  * Copyright 2024 MNX Cloud, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/errno.h>
@@ -1489,8 +1490,14 @@ lx_socket_create(int domain, int type, int protocol, int options, file_t **fpp,
 	 * Linux programs do not tolerate errors appearing from asynchronous
 	 * events (such as ICMP messages arriving).  Setting SM_DEFERERR will
 	 * prevent checking/delivery of such errors.
+	 *
+	 * A peer reset or write shutdown sets SS_CANTSENDMORE, causing
+	 * sockfs's X/Open check to reject setsockopt() before handling
+	 * the option. Linux permits keepalive options in these states.
+	 * Set SM_NOSETOPTCHK on LX-created sockets to skip that early
+	 * check; normal option validation still applies.
 	 */
-	so->so_mode |= SM_DEFERERR;
+	so->so_mode |= SM_DEFERERR | SM_NOSETOPTCHK;
 
 	/* Now fill in the entries that falloc reserved */
 	if (options & SOCK_NONBLOCK) {
