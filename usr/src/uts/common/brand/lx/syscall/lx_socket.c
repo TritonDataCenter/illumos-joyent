@@ -3393,10 +3393,11 @@ lx_setsockopt_ip(sonode_t *so, int optname, void *optval, socklen_t optlen)
  * zero the address first and use SS_ISBOUND if no address was returned.
  * Reject a failed or malformed query.
  *
- * Read SS_ISBOUND under so_lock, then release the lock before calling
- * socket_getsockname(), which takes socket locks itself.  A concurrent
- * bind can assign a port between this check and socket_setsockopt(),
- * allowing a late change; the two operations are not atomic.
+ * If getsockname() returns no address, read SS_ISBOUND under so_lock.
+ * Do not hold that lock across socket_getsockname(), which takes socket
+ * locks itself.  A concurrent bind can assign a port before
+ * socket_setsockopt() runs, allowing a late change; the two operations
+ * are not atomic.
  */
 static boolean_t
 lx_v6only_setsockopt_einval(sonode_t *so)
@@ -3414,17 +3415,17 @@ lx_v6only_setsockopt_einval(sonode_t *so)
 	if (so->so_type == SOCK_RAW && so->so_protocol != 0)
 		return (B_TRUE);
 
-	mutex_enter(&so->so_lock);
-	isbound = (so->so_state & SS_ISBOUND) != 0;
-	mutex_exit(&so->so_lock);
-
 	bzero(&addr, sizeof (addr));
 	error = socket_getsockname(so, (struct sockaddr *)&addr, &addrlen,
 	    CRED());
 	if (error != 0 || addrlen < sizeof (addr))
 		return (B_TRUE);
-	if (addr.sin6_family == 0)
+	if (addr.sin6_family == 0) {
+		mutex_enter(&so->so_lock);
+		isbound = (so->so_state & SS_ISBOUND) != 0;
+		mutex_exit(&so->so_lock);
 		return (isbound);
+	}
 	if (addr.sin6_family != AF_INET6)
 		return (B_TRUE);
 
