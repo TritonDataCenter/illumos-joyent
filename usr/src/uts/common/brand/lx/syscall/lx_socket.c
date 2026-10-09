@@ -3407,13 +3407,13 @@ lx_v6only_setsockopt_einval(sonode_t *so)
 	boolean_t isbound;
 	int error;
 
-	/* SCTP already enforces its own bind-time restriction. */
-	if (so->so_protocol == IPPROTO_SCTP)
-		return (B_FALSE);
-
 	/* Linux stores the protocol in inet_num on raw sockets. */
 	if (so->so_type == SOCK_RAW && so->so_protocol != 0)
 		return (B_TRUE);
+
+	/* SCTP already enforces its own bind-time restriction. */
+	if (so->so_protocol == IPPROTO_SCTP)
+		return (B_FALSE);
 
 	bzero(&addr, sizeof (addr));
 	error = socket_getsockname(so, (struct sockaddr *)&addr, &addrlen,
