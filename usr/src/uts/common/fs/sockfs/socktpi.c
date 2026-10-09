@@ -784,8 +784,14 @@ sotpi_bindlisten(struct sonode *so, struct sockaddr *name,
 			}
 		}
 
-		/* X/Open requires this check */
-		if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks) {
+		/*
+		 * Match the direct socket path for LX IPv6 UDP unbind and
+		 * subsequent rebind after AF_UNSPEC disconnect.
+		 */
+		if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks &&
+		    !((so->so_mode & SM_NOSETOPTCHK) != 0 &&
+		    so->so_family == AF_INET6 && so->so_type == SOCK_DGRAM &&
+		    (so->so_protocol == 0 || so->so_protocol == IPPROTO_UDP))) {
 			if (xnet_check_print) {
 				printf("sockfs: X/Open bind state check "
 				    "caused EINVAL\n");

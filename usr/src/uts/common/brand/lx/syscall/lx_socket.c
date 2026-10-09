@@ -1557,6 +1557,7 @@ lx_bind(long sock, uintptr_t name, socklen_t namelen)
 	int error;
 	lx_sun_type_t sun_type;
 	boolean_t not_sock = B_FALSE;
+	boolean_t cant_send;
 
 	if ((so = getsonode(sock, &error, &fp)) == NULL) {
 		return (set_errno(error));
@@ -1568,6 +1569,19 @@ lx_bind(long sock, uintptr_t name, socklen_t namelen)
 		if (error != 0) {
 			releasef(sock);
 			return (set_errno(error));
+		}
+	}
+
+	/* Keep explicit bind(NULL) strict after shutdown. */
+	if (addr == NULL && so->so_family == AF_INET6 &&
+	    so->so_type == SOCK_DGRAM &&
+	    (so->so_protocol == 0 || so->so_protocol == IPPROTO_UDP)) {
+		mutex_enter(&so->so_lock);
+		cant_send = (so->so_state & SS_CANTSENDMORE) != 0;
+		mutex_exit(&so->so_lock);
+		if (cant_send) {
+			releasef(sock);
+			return (set_errno(EINVAL));
 		}
 	}
 
@@ -1652,6 +1666,17 @@ lx_connect(long sock, uintptr_t name, socklen_t namelen)
 
 	error = socket_connect(so, addr, len, fp->f_flag,
 	    _SOCONNECT_XPG4_2, CRED());
+
+	/*
+	 * Linux releases a UDP socket's local port when AF_UNSPEC disconnects
+	 * it.  illumos keeps the port, which would also make a later
+	 * IPV6_V6ONLY change look like a late set on a bound socket.
+	 */
+	if (error == 0 && addr != NULL && addr->sa_family == AF_UNSPEC &&
+	    so->so_family == AF_INET6 && so->so_type == SOCK_DGRAM &&
+	    (so->so_protocol == 0 || so->so_protocol == IPPROTO_UDP)) {
+		error = socket_bind(so, NULL, 0, _SOBIND_XPG4_2, CRED());
+	}
 
 	if (error == EINTR)
 		lx_sock_syscall_restart(so, B_FALSE);
@@ -3464,9 +3489,7 @@ lx_setsockopt_ipv6(sonode_t *so, int optname, void *optval, socklen_t optlen)
 	if (!lx_sockopt_lookup(sockopts_tbl, &optname, &optlen)) {
 		return (ENOPROTOOPT);
 	}
-	/* UDP retains its local port after disconnect, unlike Linux. */
 	if (optname == IPV6_V6ONLY && so->so_family == AF_INET6 &&
-	    so->so_type != SOCK_DGRAM &&
 	    lx_v6only_setsockopt_einval(so))
 		return (EINVAL);
 	error = socket_setsockopt(so, IPPROTO_IPV6, optname, optval, optlen,
