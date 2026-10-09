@@ -1493,11 +1493,15 @@ lx_socket_create(int domain, int type, int protocol, int options, file_t **fpp,
 	 *
 	 * A peer reset or write shutdown sets SS_CANTSENDMORE, causing
 	 * sockfs's X/Open check to reject setsockopt() before handling
-	 * the option. Linux permits keepalive options in these states.
-	 * Set SM_NOSETOPTCHK on LX-created sockets to skip that early
+	 * the option. Linux permits TCP keepalive options in these states.
+	 * Set SM_NOSETOPTCHK only on LX TCP sockets to skip that early
 	 * check; normal option validation still applies.
 	 */
-	so->so_mode |= SM_DEFERERR | SM_NOSETOPTCHK;
+	so->so_mode |= SM_DEFERERR;
+	if ((domain == AF_INET || domain == AF_INET6) &&
+	    type == SOCK_STREAM &&
+	    (protocol == 0 || protocol == IPPROTO_TCP))
+		so->so_mode |= SM_NOSETOPTCHK;
 
 	/* Now fill in the entries that falloc reserved */
 	if (options & SOCK_NONBLOCK) {
@@ -3464,7 +3468,9 @@ lx_setsockopt_ipv6(sonode_t *so, int optname, void *optval, socklen_t optlen)
 	if (!lx_sockopt_lookup(sockopts_tbl, &optname, &optlen)) {
 		return (ENOPROTOOPT);
 	}
+	/* UDP retains its local port after disconnect, unlike Linux. */
 	if (optname == IPV6_V6ONLY && so->so_family == AF_INET6 &&
+	    so->so_type != SOCK_DGRAM &&
 	    lx_v6only_setsockopt_einval(so))
 		return (EINVAL);
 	error = socket_setsockopt(so, IPPROTO_IPV6, optname, optval, optlen,
