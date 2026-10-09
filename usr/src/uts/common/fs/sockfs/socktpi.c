@@ -25,6 +25,7 @@
  * Copyright 2016 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2022 Garrett D'Amore
  * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>
@@ -783,8 +784,14 @@ sotpi_bindlisten(struct sonode *so, struct sockaddr *name,
 			}
 		}
 
-		/* X/Open requires this check */
-		if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks) {
+		/*
+		 * Match the direct socket path for LX IPv6 UDP unbind and
+		 * subsequent rebind after AF_UNSPEC disconnect.
+		 */
+		if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks &&
+		    !((so->so_mode & SM_NOSETOPTCHK) != 0 &&
+		    so->so_family == AF_INET6 && so->so_type == SOCK_DGRAM &&
+		    (so->so_protocol == 0 || so->so_protocol == IPPROTO_UDP))) {
 			if (xnet_check_print) {
 				printf("sockfs: X/Open bind state check "
 				    "caused EINVAL\n");
@@ -5371,7 +5378,8 @@ sotpi_setsockopt(struct sonode *so, int level, int option_name,
 	    pr_state(so->so_state, so->so_mode)));
 
 	/* X/Open requires this check */
-	if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks) {
+	if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks &&
+	    (so->so_mode & SM_NOSETOPTCHK) == 0) {
 		if (xnet_check_print)
 			printf("sockfs: X/Open setsockopt check => EINVAL\n");
 		return (EINVAL);

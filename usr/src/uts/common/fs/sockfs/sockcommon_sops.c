@@ -27,6 +27,7 @@
  * Copyright (c) 2015, Joyent, Inc.  All rights reserved.
  * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2022 Garrett D'Amore
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>
@@ -133,8 +134,15 @@ so_bind(struct sonode *so, struct sockaddr *name, socklen_t namelen,
 
 	ASSERT(flags == _SOBIND_XPG4_2 || flags == _SOBIND_SOCKBSD);
 
-	/* X/Open requires this check */
-	if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks) {
+	/*
+	 * LX releases an IPv6 UDP port after AF_UNSPEC disconnect, even if
+	 * the socket was shut down.  Let that unbind and a later bind reach
+	 * UDP, which still checks whether the socket is already bound.
+	 */
+	if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks &&
+	    !((so->so_mode & SM_NOSETOPTCHK) != 0 &&
+	    so->so_family == AF_INET6 && so->so_type == SOCK_DGRAM &&
+	    (so->so_protocol == 0 || so->so_protocol == IPPROTO_UDP))) {
 		if (xnet_check_print) {
 			printf("sockfs: X/Open bind state check "
 			    "caused EINVAL\n");
@@ -762,7 +770,8 @@ so_setsockopt(struct sonode *so, int level, int option_name,
 	    SOP_SETSOCKOPT(so, level, option_name, optval, optlen, cr));
 
 	/* X/Open requires this check */
-	if (so->so_state & SS_CANTSENDMORE && !xnet_skip_checks) {
+	if ((so->so_state & SS_CANTSENDMORE) && !xnet_skip_checks &&
+	    (so->so_mode & SM_NOSETOPTCHK) == 0) {
 		SO_UNBLOCK_FALLBACK(so);
 		if (xnet_check_print)
 			printf("sockfs: X/Open setsockopt check => EINVAL\n");
