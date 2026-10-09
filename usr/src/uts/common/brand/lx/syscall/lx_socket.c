@@ -1493,15 +1493,11 @@ lx_socket_create(int domain, int type, int protocol, int options, file_t **fpp,
 	 *
 	 * A peer reset or write shutdown sets SS_CANTSENDMORE, causing
 	 * sockfs's X/Open check to reject setsockopt() before handling
-	 * the option. Linux permits TCP keepalive options in these states.
-	 * Set SM_NOSETOPTCHK only on LX TCP sockets to skip that early
-	 * check; normal option validation still applies.
+	 * the option. Linux does not reject setsockopt() solely because of
+	 * these states. Set SM_NOSETOPTCHK on LX-created sockets to skip
+	 * that early check; normal option validation still applies.
 	 */
-	so->so_mode |= SM_DEFERERR;
-	if ((domain == AF_INET || domain == AF_INET6) &&
-	    type == SOCK_STREAM &&
-	    (protocol == 0 || protocol == IPPROTO_TCP))
-		so->so_mode |= SM_NOSETOPTCHK;
+	so->so_mode |= SM_DEFERERR | SM_NOSETOPTCHK;
 
 	/* Now fill in the entries that falloc reserved */
 	if (options & SOCK_NONBLOCK) {
