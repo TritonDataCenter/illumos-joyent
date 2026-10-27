@@ -175,6 +175,7 @@ lx_stat_common(vnode_t *vp, cred_t *cr, void *outp, lx_stat_fmt_t fmt,
 	mode_t mode;
 	int error, flags;
 	char *driver;
+	minor_t nvidia_node;
 
 	/*
 	 * When symlink following is desired, the ATTR_REAL flag is necessary
@@ -203,11 +204,14 @@ lx_stat_common(vnode_t *vp, cred_t *cr, void *outp, lx_stat_fmt_t fmt,
 	 * NVIDIA's Linux userspace expects the frontend character devices at
 	 * major 195.  The native driver may have a different assigned major;
 	 * report the Linux ABI number without changing the device used by VOPs.
+	 * Opened native devices use a clone minor with the original node number
+	 * in its low 16 bits, so stat(path) and fstat(fd) must use the same node.
 	 */
-	if (vp->v_type == VCHR && getminor(vp->v_rdev) <= 255 &&
+	nvidia_node = getminor(vp->v_rdev) & 0xffffU;
+	if (vp->v_type == VCHR && nvidia_node <= 255 &&
 	    (driver = ddi_major_to_name(getmajor(vp->v_rdev))) != NULL &&
 	    strcmp(driver, "nvidia") == 0) {
-		vattr.va_rdev = LX_MAKEDEVICE(195, getminor(vp->v_rdev));
+		vattr.va_rdev = LX_MAKEDEVICE(195, nvidia_node);
 	}
 
 	if (fmt == LXF_STAT32) {
