@@ -6622,7 +6622,7 @@ lxpr_getattr(vnode_t *vp, vattr_t *vap, int flags, cred_t *cr,
 		vap->va_size = (DRIVERDIRFILES + 2) * LXPR_SDSIZE;
 		break;
 	case LXPR_DRIVER_NVIDIADIR:
-		vap->va_nlink = NVIDIADIRFILES + 2;
+		vap->va_nlink = 2;
 		vap->va_size = (NVIDIADIRFILES + 2) * LXPR_SDSIZE;
 		break;
 	case LXPR_PID_TASKDIR:
