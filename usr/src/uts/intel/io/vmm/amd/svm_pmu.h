@@ -48,6 +48,7 @@ struct svm_pmu {
 struct svm_vcpu;
 
 void svm_pmu_init(struct svm_softc *);
+void svm_pmu_vcpu_init(struct svm_vcpu *);
 bool svm_pmu_owned_msr(uint32_t);
 vm_msr_result_t svm_pmu_rdmsr(struct svm_vcpu *, uint32_t, uint64_t *);
 vm_msr_result_t svm_pmu_wrmsr(struct svm_vcpu *, uint32_t, uint64_t);

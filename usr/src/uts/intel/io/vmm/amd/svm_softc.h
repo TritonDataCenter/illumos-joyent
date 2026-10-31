@@ -44,12 +44,12 @@
 /* This must match HOST_MSR_NUM in svm_msr.c (where it is CTASSERTed) */
 #define	SVM_HOST_MSR_NUM	4
 
-/*
- * XXX separate out 'struct vmcb' from 'svm_vcpu' to avoid wasting space
- * due to VMCB alignment requirements.
- */
 struct svm_vcpu {
-	struct vmcb	vmcb;	 /* hardware saved vcpu context */
+	struct svm_softc *sc;	 /* owning softc */
+	struct vcpu	*vcpu;	 /* generic vcpu state */
+	int		vcpuid;	 /* id within the vm */
+	struct vmcb	*vmcb;	 /* hardware saved vcpu context */
+	void		*apic_page;
 	struct svm_regctx swctx; /* software saved vcpu context */
 	uint64_t	vmcb_pa; /* VMCB physical address */
 	uint64_t	nextrip; /* next instruction to be executed by guest */
@@ -59,55 +59,37 @@ struct svm_vcpu {
 	hma_svm_asid_t	hma_asid;
 	boolean_t	flush_req; /* guest TLB flush due at next entry */
 	boolean_t	loaded;
+	uint64_t	host_msrs[SVM_HOST_MSR_NUM];
 	struct svm_pmu_vcpu pmu;
-	struct svm_softc *sc;	 /* owning softc */
-	struct vcpu	*vcpu;	 /* generic vcpu state */
-	int		vcpuid;	 /* id within the vm */
-} __aligned(PAGE_SIZE);
+};
 
 /*
  * SVM softc, one per virtual machine.
  */
 struct svm_softc {
-	uint8_t apic_page[VM_MAXCPU][PAGE_SIZE];
-	struct svm_vcpu vcpu[VM_MAXCPU];
 	uint64_t	nptp;		/* nested page table (host PA) */
 	uint8_t		*iopm_bitmap;	/* shared by all vcpus */
 	uint8_t		*msr_bitmap;	/* shared by all vcpus */
 	struct vm	*vm;
-	uint64_t	host_msrs[VM_MAXCPU][SVM_HOST_MSR_NUM];
 	svm_pmu_flavor_t pmu_flavor;
 };
-
-/*
- * Since the VMCB must be page-aligned, and is the first member of svm_vcpu,
- * which is slated to be page-aligned, this is a belt-and-suspenders check to
- * see that such alignment instructions are being heeded.
- */
-CTASSERT((offsetof(struct svm_softc, nptp) & PAGE_MASK) == 0);
-
-static __inline struct svm_vcpu *
-svm_get_vcpu(struct svm_softc *sc, int vcpu)
-{
-	return (&(sc->vcpu[vcpu]));
-}
 
 static __inline struct vmcb *
 svm_get_vmcb(struct svm_vcpu *vcpu)
 {
-	return (&vcpu->vmcb);
+	return (vcpu->vmcb);
 }
 
 static __inline struct vmcb_state *
 svm_get_vmcb_state(struct svm_vcpu *vcpu)
 {
-	return (&vcpu->vmcb.state);
+	return (&vcpu->vmcb->state);
 }
 
 static __inline struct vmcb_ctrl *
 svm_get_vmcb_ctrl(struct svm_vcpu *vcpu)
 {
-	return (&vcpu->vmcb.ctrl);
+	return (&vcpu->vmcb->ctrl);
 }
 
 static __inline struct svm_regctx *

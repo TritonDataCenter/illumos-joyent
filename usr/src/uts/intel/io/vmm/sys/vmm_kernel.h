@@ -80,9 +80,11 @@ typedef enum {
 } freqratio_res_t;
 
 typedef int	(*vmm_init_func_t)(void);
+typedef void	(*vmm_cleanup_func_t)(void);
 typedef void	(*vmm_resume_func_t)(void);
 typedef void *	(*vmi_init_func_t)(struct vm *vm);
 typedef void *	(*vmi_vcpu_init_t)(void *vmi, struct vcpu *vcpu);
+typedef void	(*vmi_vcpu_cleanup_t)(void *vcpui);
 typedef int	(*vmi_run_func_t)(void *vcpui, uint64_t rip);
 typedef void	(*vmi_cleanup_func_t)(void *vmi);
 typedef int	(*vmi_get_register_t)(void *vcpui, int num, uint64_t *retval);
@@ -105,10 +107,12 @@ typedef freqratio_res_t	(*vmi_freqratio_t)(uint64_t guest_hz,
 
 struct vmm_ops {
 	vmm_init_func_t		init;		/* module wide initialization */
+	vmm_cleanup_func_t	cleanup;	/* module wide cleanup */
 	vmm_resume_func_t	resume;
 
 	vmi_init_func_t		vminit;		/* vm-specific initialization */
 	vmi_vcpu_init_t		vcpu_init;
+	vmi_vcpu_cleanup_t	vcpu_cleanup;
 	vmi_run_func_t		vmrun;
 	vmi_cleanup_func_t	vmcleanup;
 	vmi_get_register_t	vmgetreg;
@@ -140,6 +144,9 @@ void vm_destroy(struct vm *vm);
 int vm_reinit(struct vm *vm, uint64_t);
 uint16_t vm_get_maxcpus(struct vm *vm);
 struct vcpu *vm_vcpu(struct vm *vm, int vcpuid);
+struct vcpu *vm_alloc_vcpu(struct vm *vm, int vcpuid);
+void vm_vcpu_alloc_block(struct vm *vm);
+void vm_vcpu_alloc_unblock(struct vm *vm);
 struct vm *vcpu_vm(struct vcpu *vcpu);
 int vcpu_vcpuid(struct vcpu *vcpu);
 void vm_get_topology(struct vm *vm, uint16_t *sockets, uint16_t *cores,
@@ -291,6 +298,7 @@ void *vcpu_stats(struct vcpu *vcpu);
 void vcpu_notify_event(struct vcpu *vcpu);
 void vcpu_notify_event_type(struct vcpu *vcpu, vcpu_notify_t);
 void *vm_get_cookie(struct vm *);
+void *vcpu_get_cookie(struct vcpu *);
 struct vmspace *vm_get_vmspace(struct vm *vm);
 struct vm_client *vm_get_vmclient(struct vcpu *vcpu);
 struct vatpic *vm_atpic(struct vm *vm);
@@ -554,7 +562,7 @@ typedef struct vmm_data_version_entry {
 
 	/*
 	 * The vdve_vcpu_readf/writef handlers can rely on vcpuid to be within
-	 * the [0, VM_MAXCPU) bounds.  If they also can handle vcpuid == -1 (for
+	 * the [0, maxcpus) bounds.  If they also can handle vcpuid == -1 (for
 	 * VM-wide data), then they can opt into such cases by setting
 	 * vdve_vcpu_wildcard to true.
 	 *

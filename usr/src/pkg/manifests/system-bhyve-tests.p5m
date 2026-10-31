@@ -98,6 +98,7 @@ file path=opt/bhyve-tests/tests/vmm/npt_ops mode=0555
 file path=opt/bhyve-tests/tests/vmm/pause_resume mode=0555
 file path=opt/bhyve-tests/tests/vmm/self_destruct mode=0555
 file path=opt/bhyve-tests/tests/vmm/time_data mode=0555
+file path=opt/bhyve-tests/tests/vmm/vcpu_alloc mode=0555
 dir  path=usr/kernel/drv group=sys
 dir  path=usr/kernel/drv/$(ARCH64) group=sys
 file path=usr/kernel/drv/$(ARCH64)/vmm_drv_test

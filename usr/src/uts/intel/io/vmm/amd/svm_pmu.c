@@ -64,17 +64,20 @@ svm_pmu_init(struct svm_softc *svm_sc)
 	default:
 		/* Exclude unrecognized uarch from perf counter access */
 		svm_sc->pmu_flavor = SPF_NONE;
+		break;
+	}
+}
+
+void
+svm_pmu_vcpu_init(struct svm_vcpu *vcpu)
+{
+	struct svm_pmu_vcpu *pmu = svm_get_pmu(vcpu);
+
+	if (vcpu->sc->pmu_flavor == SPF_NONE)
 		return;
-	}
 
-	/* Turn on base and extended CPCs for all vCPUs */
-	const uint_t maxcpu = vm_get_maxcpus(svm_sc->vm);
-	for (uint_t i = 0; i < maxcpu; i++) {
-		struct svm_pmu_vcpu *pmu_vcpu =
-		    svm_get_pmu(svm_get_vcpu(svm_sc, i));
-
-		pmu_vcpu->spv_hma_state.hscs_flags = HCF_EN_BASE | HCF_EN_EXTD;
-	}
+	/* Turn on base and extended CPCs */
+	pmu->spv_hma_state.hscs_flags = HCF_EN_BASE | HCF_EN_EXTD;
 }
 
 static bool
@@ -375,8 +378,8 @@ svm_pmu_data_read(struct vm *vm, int vcpuid, const vmm_data_req_t *req)
 	if (!vmm_is_svm())
 		return (EINVAL);
 
-	struct svm_softc *svm_sc = vm_get_cookie(vm);
-	struct svm_pmu_vcpu *pmu = svm_get_pmu(svm_get_vcpu(svm_sc, vcpuid));
+	struct svm_vcpu *vcpu = vcpu_get_cookie(vm_vcpu(vm, vcpuid));
+	struct svm_pmu_vcpu *pmu = svm_get_pmu(vcpu);
 	struct vdi_pmu_amd_v1 *out = req->vdr_data;
 
 	if (!svm_pmu_is_active(pmu)) {
@@ -402,8 +405,8 @@ svm_pmu_data_write(struct vm *vm, int vcpuid, const vmm_data_req_t *req)
 	if (!vmm_is_svm())
 		return (EINVAL);
 
-	struct svm_softc *svm_sc = vm_get_cookie(vm);
-	struct svm_pmu_vcpu *pmu = svm_get_pmu(svm_get_vcpu(svm_sc, vcpuid));
+	struct svm_vcpu *vcpu = vcpu_get_cookie(vm_vcpu(vm, vcpuid));
+	struct svm_pmu_vcpu *pmu = svm_get_pmu(vcpu);
 	const struct vdi_pmu_amd_v1 *src = req->vdr_data;
 
 	if (!svm_pmu_is_active(pmu)) {
@@ -417,7 +420,7 @@ svm_pmu_data_write(struct vm *vm, int vcpuid, const vmm_data_req_t *req)
 		return (0);
 	}
 
-	const svm_pmu_flavor_t flavor = svm_sc->pmu_flavor;
+	const svm_pmu_flavor_t flavor = vcpu->sc->pmu_flavor;
 	for (uint_t i = 0; i < SVM_PMU_MAX_COUNTERS; i++) {
 		const uint64_t evtsel = src->vpa_evtsel[i];
 

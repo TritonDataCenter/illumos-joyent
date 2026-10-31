@@ -128,8 +128,13 @@ typedef enum {
 
 struct vmx;
 
-/* per-vCPU state */
+/*
+ * Per-vCPU state. The posted interrupt descriptor must be 64-byte aligned,
+ * which is satisfied by keeping it at an aligned offset in a structure
+ * allocated from a cache with that alignment.
+ */
 struct vmx_vcpu {
+	struct pir_desc	pir_desc;
 	struct vmx	*vmx;		/* owning softc */
 	struct vcpu	*vcpu;		/* generic vcpu state */
 	int		vcpuid;		/* id within the vm */
@@ -138,7 +143,6 @@ struct vmx_vcpu {
 	vmcs_state_t	vmcs_state;
 	struct apic_page *apic_page;
 	uint8_t		*msr_bitmap;
-	struct pir_desc	*pir_desc;
 	uint64_t	guest_msrs[GUEST_MSR_NUM];
 	uint64_t	host_msrs[GUEST_MSR_NUM];
 	uint64_t	tsc_offset_active;
@@ -146,17 +150,19 @@ struct vmx_vcpu {
 	struct vmxcap	cap;
 	struct vmxstate	state;
 };
+CTASSERT((offsetof(struct vmx_vcpu, pir_desc) & 63) == 0);
 
 /* virtual machine softc */
 struct vmx {
-	struct vmcs	vmcs[VM_MAXCPU];	/* one vmcs per virtual cpu */
-	struct apic_page apic_page[VM_MAXCPU];	/* one apic page per vcpu */
-	struct pir_desc	pir_desc[VM_MAXCPU];
 	void		*apic_access_page;
-	struct vmx_vcpu	vcpus[VM_MAXCPU];
 	uint64_t	eptp;
 	enum vmx_caps	vmx_caps;
 	struct vm	*vm;
+	/* VMCS control defaults applied to each vCPU */
+	uint32_t	proc_ctls;
+	uint32_t	proc2_ctls;
+	uint32_t	pin_ctls;
+	int		cap_defaults;
 	/*
 	 * Track the latest vmspace generation as it is run on a given host CPU.
 	 * This allows us to react to modifications to the vmspace (such as
@@ -165,14 +171,6 @@ struct vmx {
 	 */
 	uint64_t	eptgen[MAXCPU];
 };
-CTASSERT((offsetof(struct vmx, vmcs) & PAGE_MASK) == 0);
-CTASSERT((offsetof(struct vmx, pir_desc[0]) & 63) == 0);
-
-static __inline struct vmx_vcpu *
-vmx_get_vcpu(struct vmx *vmx, int vcpuid)
-{
-	return (&vmx->vcpus[vcpuid]);
-}
 
 static __inline bool
 vmx_cap_en(const struct vmx *vmx, enum vmx_caps cap)

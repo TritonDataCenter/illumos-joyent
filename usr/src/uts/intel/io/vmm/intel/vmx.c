@@ -209,6 +209,9 @@ static int pirvec = -1;
 
 static uint_t vpid_alloc_failed;
 
+/* Cache for struct vmx_vcpu, aligned for the posted interrupt descriptor */
+static kmem_cache_t *vmx_vcpu_cache;
+
 int guest_l1d_flush;
 int guest_l1d_flush_sw;
 
@@ -382,74 +385,56 @@ vmx_unshadow_cr4(uint64_t cr4, uint64_t shadow)
 	    (shadow & (cr4_zeros_mask | cr4_ones_mask)));
 }
 
+/*
+ * A vCPU's VPID is 0 while VPIDs are disabled. Otherwise it comes from
+ * HMA (which hands out values above NCPU). Failing that they are allocated
+ * from the fallback range [1, maxcpus], which means that vCPUs of different
+ * VMs end up sharing VPIDs. vpid_free() tells the two apart by range, so the
+ * fallback range must stay within the [1, NCPU] that HMA reserves and never
+ * allocates.
+ */
 static void
-vpid_free(int vpid)
+vpid_free(struct vmx_vcpu *vcpu)
 {
-	if (vpid < 0 || vpid > 0xffff)
-		panic("vpid_free: invalid vpid %d", vpid);
+	const uint16_t vpid = vcpu->state.vpid;
 
-	/*
-	 * VPIDs [0,VM_MAXCPU] are special and are not allocated from
-	 * the unit number allocator.
-	 */
-
-	if (vpid > VM_MAXCPU)
-		hma_vmx_vpid_free((uint16_t)vpid);
+	if (vpid > vm_get_maxcpus(vcpu->vmx->vm))
+		hma_vmx_vpid_free(vpid);
 }
 
-static void
-vpid_alloc(uint16_t *vpid, int num)
+static uint16_t
+vpid_alloc(struct vmx_vcpu *vcpu)
 {
-	int i, x;
-
-	if (num <= 0 || num > VM_MAXCPU)
-		panic("invalid number of vpids requested: %d", num);
+	uint16_t vpid;
 
 	/*
 	 * If the "enable vpid" execution control is not enabled then the
 	 * VPID is required to be 0 for all vcpus.
 	 */
-	if ((procbased_ctls2 & PROCBASED2_ENABLE_VPID) == 0) {
-		for (i = 0; i < num; i++)
-			vpid[i] = 0;
-		return;
-	}
+	if ((procbased_ctls2 & PROCBASED2_ENABLE_VPID) == 0)
+		return (0);
 
 	/*
-	 * Allocate a unique VPID for each vcpu from the unit number allocator.
+	 * Allocate a unique VPID for the vcpu from the unit number allocator.
 	 */
-	for (i = 0; i < num; i++) {
-		uint16_t tmp;
+	vpid = hma_vmx_vpid_alloc();
+	if (vpid != 0)
+		return (vpid);
 
-		tmp = hma_vmx_vpid_alloc();
-		x = (tmp == 0) ? -1 : tmp;
+	atomic_add_int(&vpid_alloc_failed, 1);
 
-		if (x == -1)
-			break;
-		else
-			vpid[i] = x;
-	}
-
-	if (i < num) {
-		atomic_add_int(&vpid_alloc_failed, 1);
-
-		/*
-		 * If the unit number allocator does not have enough unique
-		 * VPIDs then we need to allocate from the [1,VM_MAXCPU] range.
-		 *
-		 * These VPIDs are not be unique across VMs but this does not
-		 * affect correctness because the combined mappings are also
-		 * tagged with the EP4TA which is unique for each VM.
-		 *
-		 * It is still sub-optimal because the invvpid will invalidate
-		 * combined mappings for a particular VPID across all EP4TAs.
-		 */
-		while (i-- > 0)
-			vpid_free(vpid[i]);
-
-		for (i = 0; i < num; i++)
-			vpid[i] = i + 1;
-	}
+	/*
+	 * If the unit number allocator does not have enough unique VPIDs then
+	 * we need to allocate from the [1, maxcpus] range.
+	 *
+	 * These VPIDs are not unique across VMs but this does not affect
+	 * correctness because the combined mappings are also tagged with the
+	 * EP4TA which is unique for each VM.
+	 *
+	 * It is still sub-optimal because the invvpid will invalidate combined
+	 * mappings for a particular VPID across all EP4TAs.
+	 */
+	return (vcpu->vcpuid + 1);
 }
 
 static void
@@ -672,7 +657,17 @@ vmx_init(void)
 
 	vmx_capabilities = avail_caps;
 
+	vmx_vcpu_cache = kmem_cache_create("vmx_vcpu", sizeof (struct vmx_vcpu),
+	    64, NULL, NULL, NULL, NULL, NULL, 0);
+
 	return (0);
+}
+
+static void
+vmx_cleanup(void)
+{
+	kmem_cache_destroy(vmx_vcpu_cache);
+	vmx_vcpu_cache = NULL;
 }
 
 static void
@@ -685,16 +680,11 @@ vmx_trigger_hostintr(int vector)
 static void *
 vmx_vminit(struct vm *vm)
 {
-	uint16_t vpid[VM_MAXCPU];
-	int i, error, datasel;
+	int error;
 	struct vmx *vmx;
-	uint32_t exc_bitmap;
-	uint16_t maxcpus;
 	uint32_t proc_ctls, proc2_ctls, pin_ctls;
-	uint64_t apic_access_pa = UINT64_MAX;
 
 	vmx = kmem_zalloc(sizeof (struct vmx), KM_SLEEP);
-	VERIFY3U((uintptr_t)vmx & PAGE_MASK, ==, 0);
 
 	vmx->vm = vm;
 	vmx->eptp = vmspace_table_root(vm_get_vmspace(vm));
@@ -709,10 +699,6 @@ vmx_vminit(struct vm *vm)
 	 * Combined mappings for this EP4TA are also invalidated for all VPIDs.
 	 */
 	hma_vmx_invept_allcpus((uintptr_t)vmx->eptp);
-
-	vmx_msr_bitmap_initialize(vmx);
-
-	vpid_alloc(vpid, VM_MAXCPU);
 
 	/* Grab the established defaults */
 	proc_ctls = procbased_ctls;
@@ -740,10 +726,9 @@ vmx_vminit(struct vm *vm)
 		 */
 		vmx->apic_access_page = kmem_zalloc(PAGESIZE, KM_SLEEP);
 		VERIFY3U((uintptr_t)vmx->apic_access_page & PAGEOFFSET, ==, 0);
-		apic_access_pa = vtophys(vmx->apic_access_page);
 
 		error = vm_map_mmio(vm, DEFAULT_APIC_BASE, PAGE_SIZE,
-		    apic_access_pa);
+		    vtophys(vmx->apic_access_page));
 		/* XXX this should really return an error to the caller */
 		KASSERT(error == 0, ("vm_map_mmio(apicbase) error %d", error));
 	}
@@ -768,137 +753,10 @@ vmx_vminit(struct vm *vm)
 		cap_defaults |= (1 << VM_CAP_ENABLE_INVPCID);
 	}
 
-	maxcpus = vm_get_maxcpus(vm);
-	datasel = vmm_get_host_datasel();
-	for (i = 0; i < maxcpus; i++) {
-		struct vmx_vcpu *vcpu = vmx_get_vcpu(vmx, i);
-
-		vcpu->vmx = vmx;
-		vcpu->vcpuid = i;
-		vcpu->vmcs = &vmx->vmcs[i];
-		vcpu->apic_page = &vmx->apic_page[i];
-		vcpu->pir_desc = &vmx->pir_desc[i];
-
-		/*
-		 * Cache physical address lookups for various components which
-		 * may be required inside the critical_enter() section implied
-		 * by VMPTRLD() below.
-		 */
-		vm_paddr_t msr_bitmap_pa = vtophys(vcpu->msr_bitmap);
-		vm_paddr_t apic_page_pa = vtophys(vcpu->apic_page);
-		vm_paddr_t pir_desc_pa = vtophys(vcpu->pir_desc);
-
-		vcpu->vmcs_pa = (uintptr_t)vtophys(vcpu->vmcs);
-		vmcs_initialize(vcpu->vmcs, vcpu->vmcs_pa);
-
-		vmx_msr_guest_init(vcpu);
-
-		vmcs_load(vcpu->vmcs_pa);
-
-		vmcs_write(VMCS_HOST_IA32_PAT, vmm_get_host_pat());
-		vmcs_write(VMCS_HOST_IA32_EFER, vmm_get_host_efer());
-
-		/* Load the control registers */
-		vmcs_write(VMCS_HOST_CR0, vmm_get_host_cr0());
-		vmcs_write(VMCS_HOST_CR4, vmm_get_host_cr4() | CR4_VMXE);
-
-		/* Load the segment selectors */
-		vmcs_write(VMCS_HOST_CS_SELECTOR, vmm_get_host_codesel());
-
-		vmcs_write(VMCS_HOST_ES_SELECTOR, datasel);
-		vmcs_write(VMCS_HOST_SS_SELECTOR, datasel);
-		vmcs_write(VMCS_HOST_DS_SELECTOR, datasel);
-
-		vmcs_write(VMCS_HOST_FS_SELECTOR, vmm_get_host_fssel());
-		vmcs_write(VMCS_HOST_GS_SELECTOR, vmm_get_host_gssel());
-		vmcs_write(VMCS_HOST_TR_SELECTOR, vmm_get_host_tsssel());
-
-		/*
-		 * Configure host sysenter MSRs to be restored on VM exit.
-		 * The thread-specific MSR_INTC_SEP_ESP value is loaded in
-		 * vmx_run.
-		 */
-		vmcs_write(VMCS_HOST_IA32_SYSENTER_CS, KCS_SEL);
-		vmcs_write(VMCS_HOST_IA32_SYSENTER_EIP,
-		    rdmsr(MSR_SYSENTER_EIP_MSR));
-
-		/* instruction pointer */
-		vmcs_write(VMCS_HOST_RIP, (uint64_t)vmx_exit_guest);
-
-		/* link pointer */
-		vmcs_write(VMCS_LINK_POINTER, ~0);
-
-		vmcs_write(VMCS_EPTP, vmx->eptp);
-		vmcs_write(VMCS_PIN_BASED_CTLS, pin_ctls);
-		vmcs_write(VMCS_PRI_PROC_BASED_CTLS, proc_ctls);
-
-		uint32_t use_proc2_ctls = proc2_ctls;
-		if (cap_wbinvd_exit && vcpu_trap_wbinvd() != 0)
-			use_proc2_ctls |= PROCBASED2_WBINVD_EXITING;
-		vmcs_write(VMCS_SEC_PROC_BASED_CTLS, use_proc2_ctls);
-
-		vmcs_write(VMCS_EXIT_CTLS, exit_ctls);
-		vmcs_write(VMCS_ENTRY_CTLS, entry_ctls);
-		vmcs_write(VMCS_MSR_BITMAP, msr_bitmap_pa);
-		vmcs_write(VMCS_VPID, vpid[i]);
-
-		if (guest_l1d_flush && !guest_l1d_flush_sw) {
-			vmcs_write(VMCS_ENTRY_MSR_LOAD,
-			    vtophys(&msr_load_list[0]));
-			vmcs_write(VMCS_ENTRY_MSR_LOAD_COUNT,
-			    nitems(msr_load_list));
-			vmcs_write(VMCS_EXIT_MSR_STORE, 0);
-			vmcs_write(VMCS_EXIT_MSR_STORE_COUNT, 0);
-		}
-
-		/* exception bitmap */
-		if (vcpu_trace_exceptions())
-			exc_bitmap = 0xffffffff;
-		else
-			exc_bitmap = 1 << IDT_MC;
-		vmcs_write(VMCS_EXCEPTION_BITMAP, exc_bitmap);
-
-		vcpu->ctx.guest_dr6 = DBREG_DR6_RESERVED1;
-		vmcs_write(VMCS_GUEST_DR7, DBREG_DR7_RESERVED1);
-
-		if (vmx_cap_en(vmx, VMX_CAP_TPR_SHADOW)) {
-			vmcs_write(VMCS_VIRTUAL_APIC, apic_page_pa);
-		}
-
-		if (vmx_cap_en(vmx, VMX_CAP_APICV)) {
-			vmcs_write(VMCS_APIC_ACCESS, apic_access_pa);
-			vmcs_write(VMCS_EOI_EXIT0, 0);
-			vmcs_write(VMCS_EOI_EXIT1, 0);
-			vmcs_write(VMCS_EOI_EXIT2, 0);
-			vmcs_write(VMCS_EOI_EXIT3, 0);
-		}
-		if (vmx_cap_en(vmx, VMX_CAP_APICV_PIR)) {
-			vmcs_write(VMCS_PIR_VECTOR, pirvec);
-			vmcs_write(VMCS_PIR_DESC, pir_desc_pa);
-		}
-
-		/*
-		 * Set up the CR0/4 masks and configure the read shadow state
-		 * to the power-on register value from the Intel Sys Arch.
-		 *  CR0 - 0x60000010
-		 *  CR4 - 0
-		 */
-		vmcs_write(VMCS_CR0_MASK, cr0_ones_mask | cr0_zeros_mask);
-		vmcs_write(VMCS_CR0_SHADOW, 0x60000010);
-		vmcs_write(VMCS_CR4_MASK, cr4_ones_mask | cr4_zeros_mask);
-		vmcs_write(VMCS_CR4_SHADOW, 0);
-
-		vmcs_clear(vcpu->vmcs_pa);
-
-		vcpu->cap.set = cap_defaults;
-		vcpu->cap.proc_ctls = proc_ctls;
-		vcpu->cap.proc_ctls2 = proc2_ctls;
-		vcpu->cap.exc_bitmap = exc_bitmap;
-
-		vcpu->state.nextrip = ~0;
-		vcpu->state.lastcpu = NOCPU;
-		vcpu->state.vpid = vpid[i];
-	}
+	vmx->proc_ctls = proc_ctls;
+	vmx->proc2_ctls = proc2_ctls;
+	vmx->pin_ctls = pin_ctls;
+	vmx->cap_defaults = cap_defaults;
 
 	return (vmx);
 }
@@ -906,10 +764,163 @@ vmx_vminit(struct vm *vm)
 static void *
 vmx_vcpu_init(void *arg, struct vcpu *vcpu1)
 {
-	struct vmx_vcpu *vcpu = vmx_get_vcpu(arg, vcpu_vcpuid(vcpu1));
+	struct vmx *vmx = arg;
+	struct vmx_vcpu *vcpu;
+	uint32_t exc_bitmap, proc2_ctls;
+	int datasel;
 
+	vcpu = kmem_cache_alloc(vmx_vcpu_cache, KM_SLEEP);
+	/* The posted interrupt descriptor must be 64-byte aligned */
+	VERIFY3U((uintptr_t)&vcpu->pir_desc & 63, ==, 0);
+	bzero(vcpu, sizeof (*vcpu));
+	vcpu->vmx = vmx;
 	vcpu->vcpu = vcpu1;
+	vcpu->vcpuid = vcpu_vcpuid(vcpu1);
+
+	/* The VMCS and the APIC page must each be page aligned */
+	vcpu->vmcs = kmem_zalloc(PAGESIZE, KM_SLEEP);
+	VERIFY3U((uintptr_t)vcpu->vmcs & PAGEOFFSET, ==, 0);
+	vcpu->apic_page = kmem_zalloc(PAGESIZE, KM_SLEEP);
+	VERIFY3U((uintptr_t)vcpu->apic_page & PAGEOFFSET, ==, 0);
+	vmx_msr_bitmap_init(vcpu);
+
+	/*
+	 * Cache physical address lookups for various components which may be
+	 * required inside the critical_enter() section implied by VMPTRLD()
+	 * below.
+	 */
+	vm_paddr_t msr_bitmap_pa = vtophys(vcpu->msr_bitmap);
+	vm_paddr_t msr_load_pa = vtophys(&msr_load_list[0]);
+	vm_paddr_t apic_page_pa = vtophys(vcpu->apic_page);
+	vm_paddr_t pir_desc_pa = vtophys(&vcpu->pir_desc);
+	vm_paddr_t apic_access_pa = UINT64_MAX;
+
+	if (vmx_cap_en(vmx, VMX_CAP_APICV)) {
+		apic_access_pa = vtophys(vmx->apic_access_page);
+	}
+
+	vcpu->vmcs_pa = (uintptr_t)vtophys(vcpu->vmcs);
+	vmcs_initialize(vcpu->vmcs, vcpu->vmcs_pa);
+
+	vmx_msr_guest_init(vcpu);
+
+	vcpu->state.nextrip = ~0;
+	vcpu->state.lastcpu = NOCPU;
+	vcpu->state.vpid = vpid_alloc(vcpu);
+
+	vmcs_load(vcpu->vmcs_pa);
+
+	vmcs_write(VMCS_HOST_IA32_PAT, vmm_get_host_pat());
+	vmcs_write(VMCS_HOST_IA32_EFER, vmm_get_host_efer());
+
+	/* Load the control registers */
+	vmcs_write(VMCS_HOST_CR0, vmm_get_host_cr0());
+	vmcs_write(VMCS_HOST_CR4, vmm_get_host_cr4() | CR4_VMXE);
+
+	/* Load the segment selectors */
+	vmcs_write(VMCS_HOST_CS_SELECTOR, vmm_get_host_codesel());
+
+	datasel = vmm_get_host_datasel();
+	vmcs_write(VMCS_HOST_ES_SELECTOR, datasel);
+	vmcs_write(VMCS_HOST_SS_SELECTOR, datasel);
+	vmcs_write(VMCS_HOST_DS_SELECTOR, datasel);
+
+	vmcs_write(VMCS_HOST_FS_SELECTOR, vmm_get_host_fssel());
+	vmcs_write(VMCS_HOST_GS_SELECTOR, vmm_get_host_gssel());
+	vmcs_write(VMCS_HOST_TR_SELECTOR, vmm_get_host_tsssel());
+
+	/*
+	 * Configure host sysenter MSRs to be restored on VM exit.
+	 * The thread-specific MSR_INTC_SEP_ESP value is loaded in
+	 * vmx_run.
+	 */
+	vmcs_write(VMCS_HOST_IA32_SYSENTER_CS, KCS_SEL);
+	vmcs_write(VMCS_HOST_IA32_SYSENTER_EIP, rdmsr(MSR_SYSENTER_EIP_MSR));
+
+	/* instruction pointer */
+	vmcs_write(VMCS_HOST_RIP, (uint64_t)vmx_exit_guest);
+
+	/* link pointer */
+	vmcs_write(VMCS_LINK_POINTER, ~0);
+
+	vmcs_write(VMCS_EPTP, vmx->eptp);
+	vmcs_write(VMCS_PIN_BASED_CTLS, vmx->pin_ctls);
+	vmcs_write(VMCS_PRI_PROC_BASED_CTLS, vmx->proc_ctls);
+
+	proc2_ctls = vmx->proc2_ctls;
+	if (cap_wbinvd_exit && vcpu_trap_wbinvd() != 0)
+		proc2_ctls |= PROCBASED2_WBINVD_EXITING;
+	vmcs_write(VMCS_SEC_PROC_BASED_CTLS, proc2_ctls);
+
+	vmcs_write(VMCS_EXIT_CTLS, exit_ctls);
+	vmcs_write(VMCS_ENTRY_CTLS, entry_ctls);
+	vmcs_write(VMCS_MSR_BITMAP, msr_bitmap_pa);
+	vmcs_write(VMCS_VPID, vcpu->state.vpid);
+
+	if (guest_l1d_flush && !guest_l1d_flush_sw) {
+		vmcs_write(VMCS_ENTRY_MSR_LOAD, msr_load_pa);
+		vmcs_write(VMCS_ENTRY_MSR_LOAD_COUNT, nitems(msr_load_list));
+		vmcs_write(VMCS_EXIT_MSR_STORE, 0);
+		vmcs_write(VMCS_EXIT_MSR_STORE_COUNT, 0);
+	}
+
+	/* exception bitmap */
+	if (vcpu_trace_exceptions())
+		exc_bitmap = 0xffffffff;
+	else
+		exc_bitmap = 1 << IDT_MC;
+	vmcs_write(VMCS_EXCEPTION_BITMAP, exc_bitmap);
+
+	vcpu->ctx.guest_dr6 = DBREG_DR6_RESERVED1;
+	vmcs_write(VMCS_GUEST_DR7, DBREG_DR7_RESERVED1);
+
+	if (vmx_cap_en(vmx, VMX_CAP_TPR_SHADOW)) {
+		vmcs_write(VMCS_VIRTUAL_APIC, apic_page_pa);
+	}
+
+	if (vmx_cap_en(vmx, VMX_CAP_APICV)) {
+		vmcs_write(VMCS_APIC_ACCESS, apic_access_pa);
+		vmcs_write(VMCS_EOI_EXIT0, 0);
+		vmcs_write(VMCS_EOI_EXIT1, 0);
+		vmcs_write(VMCS_EOI_EXIT2, 0);
+		vmcs_write(VMCS_EOI_EXIT3, 0);
+	}
+	if (vmx_cap_en(vmx, VMX_CAP_APICV_PIR)) {
+		vmcs_write(VMCS_PIR_VECTOR, pirvec);
+		vmcs_write(VMCS_PIR_DESC, pir_desc_pa);
+	}
+
+	/*
+	 * Set up the CR0/4 masks and configure the read shadow state
+	 * to the power-on register value from the Intel Sys Arch.
+	 *  CR0 - 0x60000010
+	 *  CR4 - 0
+	 */
+	vmcs_write(VMCS_CR0_MASK, cr0_ones_mask | cr0_zeros_mask);
+	vmcs_write(VMCS_CR0_SHADOW, 0x60000010);
+	vmcs_write(VMCS_CR4_MASK, cr4_ones_mask | cr4_zeros_mask);
+	vmcs_write(VMCS_CR4_SHADOW, 0);
+
+	vmcs_clear(vcpu->vmcs_pa);
+
+	vcpu->cap.set = vmx->cap_defaults;
+	vcpu->cap.proc_ctls = vmx->proc_ctls;
+	vcpu->cap.proc_ctls2 = vmx->proc2_ctls;
+	vcpu->cap.exc_bitmap = exc_bitmap;
+
 	return (vcpu);
+}
+
+static void
+vmx_vcpu_cleanup(void *vcpui)
+{
+	struct vmx_vcpu *vcpu = vcpui;
+
+	vpid_free(vcpu);
+	vmx_msr_bitmap_fini(vcpu);
+	kmem_free(vcpu->apic_page, PAGESIZE);
+	kmem_free(vcpu->vmcs, PAGESIZE);
+	kmem_cache_free(vmx_vcpu_cache, vcpu);
 }
 
 static VMM_STAT_INTEL(VCPU_INVVPID_SAVED, "Number of vpid invalidations saved");
@@ -2993,9 +3004,7 @@ vmx_run(void *vcpui, uint64_t rip)
 static void
 vmx_vmcleanup(void *arg)
 {
-	int i;
 	struct vmx *vmx = arg;
-	uint16_t maxcpus;
 
 	if (vmx_cap_en(vmx, VMX_CAP_APICV)) {
 		(void) vm_unmap_mmio(vmx->vm, DEFAULT_APIC_BASE, PAGE_SIZE);
@@ -3003,12 +3012,6 @@ vmx_vmcleanup(void *arg)
 	} else {
 		VERIFY3P(vmx->apic_access_page, ==, NULL);
 	}
-
-	vmx_msr_bitmap_destroy(vmx);
-
-	maxcpus = vm_get_maxcpus(vmx->vm);
-	for (i = 0; i < maxcpus; i++)
-		vpid_free(vmx_get_vcpu(vmx, i)->state.vpid);
 
 	kmem_free(vmx, sizeof (*vmx));
 }
@@ -3776,7 +3779,7 @@ vmx_vlapic_init(void *vcpui)
 	struct vlapic *vlapic;
 
 	vlapic_vtx = kmem_zalloc(sizeof (struct vlapic_vtx), KM_SLEEP);
-	vlapic_vtx->pir_desc = vcpu->pir_desc;
+	vlapic_vtx->pir_desc = &vcpu->pir_desc;
 	vlapic_vtx->vcpu = vcpu;
 
 	vlapic = &vlapic_vtx->vlapic;
@@ -3878,10 +3881,12 @@ vmx_freq_ratio(uint64_t guest_hz, uint64_t host_hz, uint64_t *mult)
 
 struct vmm_ops vmm_ops_intel = {
 	.init		= vmx_init,
+	.cleanup	= vmx_cleanup,
 	.resume		= vmx_restore,
 
 	.vminit		= vmx_vminit,
 	.vcpu_init	= vmx_vcpu_init,
+	.vcpu_cleanup	= vmx_vcpu_cleanup,
 	.vmrun		= vmx_run,
 	.vmcleanup	= vmx_vmcleanup,
 	.vmgetreg	= vmx_getreg,

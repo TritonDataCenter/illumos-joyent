@@ -40,11 +40,7 @@
 
 struct vcpu;
 
-#ifdef __FreeBSD__
 #define	MAX_VMM_STAT_ELEMS	64			/* arbitrary */
-#else
-#define	MAX_VMM_STAT_ELEMS	(64 + VM_MAXCPU)	/* arbitrary */
-#endif
 
 enum vmm_stat_scope {
 	VMM_STAT_SCOPE_ANY,

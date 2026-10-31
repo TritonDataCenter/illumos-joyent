@@ -89,7 +89,7 @@ void
 svm_msr_guest_enter(struct svm_vcpu *vcpu)
 {
 	struct svm_softc *sc = vcpu->sc;
-	uint64_t *host_msrs = sc->host_msrs[vcpu->vcpuid];
+	uint64_t *host_msrs = vcpu->host_msrs;
 
 	/*
 	 * Save host MSRs (if any) and restore guest MSRs (if any).
@@ -113,7 +113,7 @@ void
 svm_msr_guest_exit(struct svm_vcpu *vcpu)
 {
 	struct svm_softc *sc = vcpu->sc;
-	uint64_t *host_msrs = sc->host_msrs[vcpu->vcpuid];
+	uint64_t *host_msrs = vcpu->host_msrs;
 
 	/*
 	 * Save guest MSRs (if any) and restore host MSRs.

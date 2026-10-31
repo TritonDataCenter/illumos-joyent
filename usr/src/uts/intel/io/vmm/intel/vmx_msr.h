@@ -69,8 +69,8 @@ int vmx_set_ctlreg(int ctl_reg, int true_ctl_reg, uint32_t ones_mask,
 #define	MSR_BITMAP_ACCESS_READ	0x1
 #define	MSR_BITMAP_ACCESS_WRITE	0x2
 #define	MSR_BITMAP_ACCESS_RW	(MSR_BITMAP_ACCESS_READ|MSR_BITMAP_ACCESS_WRITE)
-void vmx_msr_bitmap_initialize(struct vmx *);
-void vmx_msr_bitmap_destroy(struct vmx *);
+void vmx_msr_bitmap_init(struct vmx_vcpu *);
+void vmx_msr_bitmap_fini(struct vmx_vcpu *);
 void vmx_msr_bitmap_change_access(struct vmx_vcpu *, uint_t, int);
 
 #define	guest_msr_rw(vcpu, msr) \
