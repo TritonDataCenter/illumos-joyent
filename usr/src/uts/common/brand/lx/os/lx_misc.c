@@ -540,8 +540,19 @@ lx_initlwp(klwp_t *lwp, void *lwpbd)
 		VFS_HOLD(cgrp);
 		mutex_exit(&lxzdata->lxzd_lock);
 		ASSERT(lx_cgrp_initlwp != NULL);
-		(*lx_cgrp_initlwp)(cgrp, lwpd->br_cgroupid, lwptot(lwp)->t_tid,
-		    lwpd->br_pid);
+		if ((*lx_cgrp_initlwp)(cgrp, lwpd->br_cgroupid,
+		    lwptot(lwp)->t_tid, lwpd->br_pid) != 0) {
+			/*
+			 * The cgroup is frozen (cgroup v2 cgroup.freeze), so
+			 * the new lwp must stop before it runs any user code.
+			 * This is the same as fork does for /proc.
+			 */
+			kthread_t *t = lwptot(lwp);
+
+			t->t_proc_flag |= TP_PRSTOP;
+			t->t_sig_check = 1;
+			aston(t);
+		}
 		VFS_RELE(cgrp);
 	} else {
 		mutex_exit(&lxzdata->lxzd_lock);

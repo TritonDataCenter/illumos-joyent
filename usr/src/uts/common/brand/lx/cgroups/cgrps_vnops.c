@@ -179,6 +179,14 @@ cgrp_thr_move(cgrp_mnt_t *cgm, lx_lwp_data_t *plwpd, cgrp_node_t *ncn,
 	cgrp_task_adjust(cgm, ocn, -1);
 	plwpd->br_cgroupid = cg_id;
 
+	/* Apply the frozen state of the new cgroup (cgroup v2 only). */
+	if (CG_IS_V2(cgm)) {
+		if (cgrp_is_frozen(ncn))
+			cgrp_lwp_freeze(lwptot(plwpd->br_lwp));
+		else if (cgrp_is_frozen(ocn))
+			cgrp_lwp_thaw(lwptot(plwpd->br_lwp));
+	}
+
 	if (!CG_IS_V2(cgm) && ocn->cgn_task_cnt == 0 &&
 	    ocn->cgn_dirents == N_DIRENTS(cgm) && ocn->cgn_notify == 1) {
 		/*
@@ -627,6 +635,104 @@ cgrp_wr_kill(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	return (0);
 }
 
+/*
+ * Freeze or thaw the lwps in the cgroup with ID 'cg_id' and its descendants,
+ * according to the (effective) frozen state of each lwp's cgroup.
+ */
+static void
+cgrp_freeze_scan(cgrp_mnt_t *cgm, uint_t cg_id)
+{
+	int i;
+	zoneid_t zoneid = curproc->p_zone->zone_id;
+	pid_t schedpid = curproc->p_zone->zone_zsched->p_pid;
+
+	for (i = 1; i < v.v_proc; i++) {
+		proc_t *p;
+		kthread_t *t;
+
+		mutex_enter(&pidlock);
+		if ((p = pid_entry(i)) == NULL ||
+		    p->p_stat == SIDL ||
+		    (p->p_flag & SSYS) != 0 ||
+		    p->p_pid == 0 ||
+		    p->p_pid == schedpid ||
+		    p->p_brand != &lx_brand ||
+		    p->p_zone->zone_id != zoneid) {
+			mutex_exit(&pidlock);
+			continue;
+		}
+
+		mutex_enter(&p->p_lock);
+		mutex_exit(&pidlock);
+
+		if ((p->p_flag & SEXITING) != 0 || (t = p->p_tlist) == NULL) {
+			mutex_exit(&p->p_lock);
+			continue;
+		}
+
+		mutex_enter(&cgm->cg_contents);
+		do {
+			lx_lwp_data_t *plwpd = ttolxlwp(t);
+			cgrp_node_t *cn;
+
+			if (plwpd == NULL ||
+			    !cgrp_in_subtree(cgm, plwpd->br_cgroupid, cg_id))
+				continue;
+
+			cn = cgrp_cg_hash_lookup(cgm, plwpd->br_cgroupid);
+			ASSERT(cn != NULL);
+			if (cgrp_is_frozen(cn))
+				cgrp_lwp_freeze(t);
+			else
+				cgrp_lwp_thaw(t);
+		} while ((t = t->t_forw) != p->p_tlist);
+		mutex_exit(&cgm->cg_contents);
+
+		mutex_exit(&p->p_lock);
+	}
+}
+
+/*
+ * Handle a write to cgroup.freeze: "1" freezes the cgroup and all of its
+ * descendants, "0" thaws it (unless an ancestor is frozen).
+ */
+static int
+cgrp_wr_freeze(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
+{
+	char buf[16];
+	int error;
+	boolean_t freeze;
+	cgrp_node_t *dir;
+	/* the cgroup ID is on the containing dir */
+	uint_t cg_id = cn->cgn_parent->cgn_id;
+
+	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
+		return (error);
+	if (strcmp(buf, "1") == 0)
+		freeze = B_TRUE;
+	else if (strcmp(buf, "0") == 0)
+		freeze = B_FALSE;
+	else
+		return (EINVAL);
+
+	/*
+	 * Update the state first, so that lwps created while we scan are
+	 * frozen (or not) by cgrp_lwp_fork_helper().
+	 */
+	mutex_enter(&cgm->cg_contents);
+	if ((dir = cgrp_cg_hash_lookup(cgm, cg_id)) == NULL) {
+		/* The cgroup was removed while the file was open. */
+		mutex_exit(&cgm->cg_contents);
+		return (ENODEV);
+	}
+	cgrp_freeze_set(cgm, dir, freeze);
+	mutex_exit(&cgm->cg_contents);
+
+	cgrp_freeze_scan(cgm, cg_id);
+
+	return (0);
+}
+
 static int
 cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 {
@@ -683,6 +789,9 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	case CG_KILL:
 		error = cgrp_wr_kill(cgm, cn, uio);
 		break;
+	case CG_FREEZE:
+		error = cgrp_wr_freeze(cgm, cn, uio);
+		break;
 	case CG_CONTROLLERS:
 	case CG_EVENTS:
 	case CG_STAT:
@@ -733,8 +842,9 @@ cgrp_rd_v2(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 		len = snprintf(buf, sizeof (buf), "\n");
 		break;
 	case CG_EVENTS:
-		len = snprintf(buf, sizeof (buf), "populated %u\nfrozen 0\n",
-		    dir->cgn_subtree_cnt > 0 ? 1 : 0);
+		len = snprintf(buf, sizeof (buf), "populated %u\nfrozen %u\n",
+		    dir->cgn_subtree_cnt > 0 ? 1 : 0,
+		    cgrp_is_frozen(dir) ? 1 : 0);
 		break;
 	case CG_TYPE:
 		len = snprintf(buf, sizeof (buf), "domain\n");
@@ -747,6 +857,10 @@ cgrp_rd_v2(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 		len = snprintf(buf, sizeof (buf),
 		    "nr_descendants %u\nnr_dying_descendants 0\n",
 		    dir->cgn_ndesc);
+		break;
+	case CG_FREEZE:
+		len = snprintf(buf, sizeof (buf), "%u\n",
+		    dir->cgn_freeze ? 1 : 0);
 		break;
 	default:
 		VERIFY(0);
@@ -1136,6 +1250,7 @@ cgrp_rd(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	case CG_MAX_DEPTH:
 	case CG_MAX_DESC:
 	case CG_STAT:
+	case CG_FREEZE:
 		error = cgrp_rd_v2(cgm, cn, uio);
 		break;
 	case CG_KILL:

@@ -98,6 +98,7 @@ typedef enum cgrp_nodetype {
 	CG_MAX_DESC,		/* cgroup.max.descendants file */
 	CG_STAT,		/* cgroup.stat file */
 	CG_KILL,		/* cgroup.kill file */
+	CG_FREEZE,		/* cgroup.freeze file */
 } cgrp_nodetype_t;
 
 /* cgrp_ssd_flags */
@@ -189,6 +190,7 @@ typedef struct cgrp_node {
 	struct cgrp_node	*cgn_events;	/* D cgroup.events node */
 	struct cgrp_node	*cgn_evnext;	/* F pending event link */
 	boolean_t		cgn_evpend;	/* F on the pending list */
+	boolean_t		cgn_freeze;	/* D cgroup.freeze value */
 } cgrp_node_t;
 
 /*
@@ -257,6 +259,10 @@ void cgrp_rel_agent_event(cgrp_mnt_t *, cgrp_node_t *, boolean_t);
 int cgrp_get_path(cgrp_node_t *, char *, size_t);
 void cgrp_task_adjust(cgrp_mnt_t *, cgrp_node_t *, int);
 void cgrp_ndesc_adjust(cgrp_node_t *, int);
+boolean_t cgrp_is_frozen(cgrp_node_t *);
+void cgrp_freeze_set(cgrp_mnt_t *, cgrp_node_t *, boolean_t);
+void cgrp_lwp_freeze(kthread_t *);
+void cgrp_lwp_thaw(kthread_t *);
 
 #endif /* KERNEL */
 

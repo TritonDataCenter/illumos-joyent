@@ -133,10 +133,11 @@
  * there is no tasks, notify_on_release or release_agent file. Instead each
  * cgroup has the cgroup v2 core interface files (cgroup.procs,
  * cgroup.threads, cgroup.controllers, cgroup.subtree_control, cgroup.events,
- * cgroup.type, cgroup.max.depth, cgroup.max.descendants, cgroup.stat and
- * cgroup.kill). No controllers are available, so cgroup.controllers is always
- * empty. Writing "1" to cgroup.kill sends SIGKILL to every process in the
- * cgroup and its descendants.
+ * cgroup.type, cgroup.max.depth, cgroup.max.descendants, cgroup.stat,
+ * cgroup.kill and cgroup.freeze). No controllers are available, so
+ * cgroup.controllers is always empty. Writing "1" to cgroup.kill sends SIGKILL
+ * to every process in the cgroup and its descendants. cgroup.freeze stops all
+ * lwps in a cgroup subtree; see cgrp_is_frozen() for how.
  *
  * In cgroup v2, a cgroup's "populated" state (reported in cgroup.events)
  * is true when the cgroup or any of its descendants contains a task. We
@@ -266,7 +267,7 @@ static int cgrp_statvfs(struct vfs *, struct statvfs64 *);
 static void cgrp_freevfs(vfs_t *vfsp);
 
 /* Forward declarations for hooks */
-static void cgrp_lwp_fork_helper(vfs_t *, uint_t, id_t, pid_t);
+static int cgrp_lwp_fork_helper(vfs_t *, uint_t, id_t, pid_t);
 static void cgrp_lwp_exit_helper(vfs_t *, uint_t, id_t, pid_t);
 static int cgrp_pid_cgroup_helper(vfs_t *, uint_t, char *, size_t);
 
@@ -1091,20 +1092,28 @@ cgrp_rel_agent_event(cgrp_mnt_t *cgm, cgrp_node_t *cn, boolean_t is_exit)
 	}
 }
 
+/*
+ * Account for a new lwp in cgroup 'cg_id'. Returns non-zero if the cgroup is
+ * frozen (cgroup v2), in which case the caller stops the new lwp.
+ */
 /*ARGSUSED*/
-static void
+static int
 cgrp_lwp_fork_helper(vfs_t *vfsp, uint_t cg_id, id_t tid, pid_t tpid)
 {
 	cgrp_mnt_t *cgm = (cgrp_mnt_t *)VFSTOCGM(vfsp);
 	cgrp_node_t *cn;
+	int frozen = 0;
 
 	mutex_enter(&cgm->cg_contents);
 	cn = cgrp_cg_hash_lookup(cgm, cg_id);
 	ASSERT(cn != NULL);
 	cgrp_task_adjust(cgm, cn, 1);
+	if (CG_IS_V2(cgm) && cgrp_is_frozen(cn))
+		frozen = 1;
 	mutex_exit(&cgm->cg_contents);
 
 	DTRACE_PROBE1(cgrp__lwp__fork, void *, cn);
+	return (frozen);
 }
 
 /*ARGSUSED*/

@@ -283,7 +283,7 @@ typedef enum lx_proc_flags {
 /*
  * Entry points for cgroup integration.
  */
-extern void (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
+extern int (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
 extern void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
 extern int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 

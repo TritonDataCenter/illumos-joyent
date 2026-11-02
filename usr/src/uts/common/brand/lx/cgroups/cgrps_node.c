@@ -28,6 +28,11 @@
 #include <sys/mode.h>
 #include <sys/policy.h>
 #include <sys/sdt.h>
+#include <sys/proc.h>
+#include <sys/thread.h>
+#include <sys/disp.h>
+#include <sys/cpuvar.h>
+#include <sys/procfs.h>
 
 #include "cgrps.h"
 
@@ -63,6 +68,8 @@ static cgrp_subsys_dirent_t cgrp_unified_dir[] = {
 	{ CG_MAX_DESC,		"cgroup.max.descendants", 0644,	0 },
 	{ CG_STAT,		"cgroup.stat",		0444,	0 },
 	{ CG_KILL,		"cgroup.kill",		0200,
+	    CGSD_NONROOT_ONLY },
+	{ CG_FREEZE,		"cgroup.freeze",	0644,
 	    CGSD_NONROOT_ONLY }
 };
 
@@ -1262,4 +1269,144 @@ cgrp_ndesc_adjust(cgrp_node_t *cn, int delta)
 		cn = cn->cgn_parent;
 		cn->cgn_ndesc += delta;
 	}
+}
+
+/*
+ * cgroup v2 freezer support.
+ *
+ * A cgroup is frozen if it, or any of its ancestors, has cgroup.freeze set.
+ * We freeze an lwp using the same mechanism as a /proc requested stop: we set
+ * TP_PRSTOP and the lwp stops (PR_REQUESTED) the next time it checks for
+ * signals. Such a stop does not notify the parent like a job control stop
+ * does, and SIGKILL still terminates a frozen process, as on Linux. Since the
+ * mechanism is shared with /proc, a debugger setting a frozen process running
+ * (e.g. prun(1)) will also thaw it.
+ *
+ * We report the cgroup as frozen in cgroup.events as soon as the freeze has
+ * been requested, rather than waiting for all lwps to have stopped.
+ */
+boolean_t
+cgrp_is_frozen(cgrp_node_t *cn)
+{
+	ASSERT(MUTEX_HELD(&VTOCGM(cn->cgn_vnode)->cg_contents));
+
+	for (; cn != NULL; cn = cn->cgn_parent) {
+		if (cn->cgn_freeze)
+			return (B_TRUE);
+		if (cn->cgn_parent == cn)
+			break;
+	}
+	return (B_FALSE);
+}
+
+static boolean_t
+cgrp_is_subdir(cgrp_dirent_t *dp)
+{
+	return (dp->cgd_cgrp_node->cgn_type == CG_CGROUP_DIR &&
+	    strcmp(dp->cgd_name, ".") != 0 && strcmp(dp->cgd_name, "..") != 0);
+}
+
+/*
+ * Return the next cgroup after 'cn' in a pre-order walk of the subtree rooted
+ * at 'top', or NULL when the walk is done. This is iterative, so that a deep
+ * hierarchy can not overflow the kernel stack.
+ */
+static cgrp_node_t *
+cgrp_subtree_next(cgrp_node_t *top, cgrp_node_t *cn)
+{
+	cgrp_dirent_t *dp;
+
+	/* Descend into the first child cgroup, if any. */
+	for (dp = cn->cgn_dir; dp != NULL; dp = dp->cgd_next) {
+		if (cgrp_is_subdir(dp))
+			return (dp->cgd_cgrp_node);
+	}
+
+	/* Otherwise, move to the next sibling, going up as needed. */
+	while (cn != top) {
+		cgrp_node_t *parent = cn->cgn_parent;
+
+		for (dp = parent->cgn_dir; dp != NULL; dp = dp->cgd_next) {
+			if (dp->cgd_cgrp_node == cn && cgrp_is_subdir(dp))
+				break;
+		}
+		ASSERT(dp != NULL);
+		if (dp == NULL)
+			return (NULL);
+
+		for (dp = dp->cgd_next; dp != NULL; dp = dp->cgd_next) {
+			if (cgrp_is_subdir(dp))
+				return (dp->cgd_cgrp_node);
+		}
+		cn = parent;
+	}
+	return (NULL);
+}
+
+/*
+ * Set the cgroup.freeze value of 'dir', and post a cgroup.events notification
+ * for every cgroup in the subtree whose frozen state may have changed. The
+ * caller is responsible for actually freezing or thawing the lwps.
+ */
+void
+cgrp_freeze_set(cgrp_mnt_t *cgm, cgrp_node_t *dir, boolean_t freeze)
+{
+	cgrp_node_t *cn;
+
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
+	ASSERT(dir->cgn_type == CG_CGROUP_DIR);
+
+	if (dir->cgn_freeze == freeze)
+		return;
+
+	dir->cgn_freeze = freeze;
+
+	/* An ancestor is frozen, so the effective state does not change. */
+	if (dir->cgn_parent != NULL && dir->cgn_parent != dir &&
+	    cgrp_is_frozen(dir->cgn_parent))
+		return;
+
+	for (cn = dir; cn != NULL; cn = cgrp_subtree_next(dir, cn))
+		cgrp_events_post(cgm, cn);
+}
+
+/*
+ * Freeze an lwp: make it stop (PR_REQUESTED) as soon as possible. This is
+ * modeled on pauselwps() and pr_stop() in /proc. The caller holds p_lock.
+ */
+void
+cgrp_lwp_freeze(kthread_t *t)
+{
+	ASSERT(MUTEX_HELD(&ttoproc(t)->p_lock));
+
+	thread_lock(t);
+	t->t_proc_flag |= TP_PRSTOP;
+	t->t_sig_check = 1;	/* do ISSIG */
+	aston(t);
+	if ((ISWAKEABLE(t) && t->t_wchan0 == NULL) || ISWAITING(t)) {
+		/* It will stop within cv_wait_sig() */
+		setrun_locked(t);
+	} else if (t != curthread && t->t_state == TS_ONPROC &&
+	    t->t_cpu != CPU) {
+		poke_cpu(t->t_cpu->cpu_id);
+	}
+	thread_unlock(t);
+}
+
+/*
+ * Thaw an lwp frozen by cgrp_lwp_freeze(). The caller holds p_lock.
+ */
+void
+cgrp_lwp_thaw(kthread_t *t)
+{
+	ASSERT(MUTEX_HELD(&ttoproc(t)->p_lock));
+
+	thread_lock(t);
+	t->t_proc_flag &= ~(TP_PRSTOP | TP_PRVSTOP);
+	if (t->t_state == TS_STOPPED && t->t_whystop == PR_REQUESTED) {
+		t->t_schedflag |= TS_PSTART;
+		t->t_dtrace_stop = 0;
+		setrun_locked(t);
+	}
+	thread_unlock(t);
 }

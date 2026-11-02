@@ -227,7 +227,7 @@ static int lx_systrace_enabled;
 /*
  * cgroup file system maintenance functions which are set when cgroups loads.
  */
-void (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
+int (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
 void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
 int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 
