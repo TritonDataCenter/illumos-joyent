@@ -23,6 +23,7 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <assert.h>
@@ -342,10 +343,19 @@ lx_clone(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4, uintptr_t p5)
 		lx_unsupported("clone(2) no namespace support "
 		    "(flags:0x%08X)\n", flags);
 		/*
-		 * When the "kernel" does not support namespaces, applications
-		 * (e.g. chromium) expect EINVAL, not ENOTSUP.
+		 * When the "kernel" does not support user namespaces,
+		 * applications (e.g. chromium) expect EINVAL, not ENOTSUP.
 		 */
-		return (-EINVAL);
+		if ((flags & (LX_CLONE_NEWUSER | LX_CLONE_IO)) != 0)
+			return (-EINVAL);
+		/*
+		 * The other namespaces require CAP_SYS_ADMIN, and Linux
+		 * returns EPERM to an unprivileged container. Applications
+		 * (e.g. systemd) treat that as "namespaces not available" and
+		 * fall back, whereas EINVAL is a hard failure for them.
+		 * This also matches what we return from unshare(2).
+		 */
+		return (-EPERM);
 	}
 
 	ucp = lx_syscall_regs();
