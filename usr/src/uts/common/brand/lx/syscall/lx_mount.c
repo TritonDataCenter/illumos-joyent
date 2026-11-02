@@ -757,19 +757,46 @@ lx_umount(char *path)
 /*
  * The Linux umount2() system call is identical to illumos but has a different
  * value for MNT_FORCE (the logical equivalent to MS_FORCE).
+ *
+ * We have no lazy unmount, so MNT_DETACH is treated as a regular unmount.
+ * This works when the file system is not busy (e.g. systemd's credentials
+ * setup), otherwise the caller gets EBUSY rather than a deferred detach.
+ *
+ * With UMOUNT_NOFOLLOW, a symlink is not followed. Since a symlink can not
+ * be a mount point, that is EINVAL, as on Linux.
+ *
+ * MNT_EXPIRE is not supported.
  */
-#define	LX_MNT_FORCE	0x1
+#define	LX_MNT_FORCE		0x1
+#define	LX_MNT_DETACH		0x2
+#define	LX_MNT_EXPIRE		0x4
+#define	LX_UMOUNT_NOFOLLOW	0x8
 
 long
 lx_umount2(char *path, int flg)
 {
 	int flags = 0;
 
-	if (flg & ~LX_MNT_FORCE)
+	if (flg & ~(LX_MNT_FORCE | LX_MNT_DETACH | LX_UMOUNT_NOFOLLOW))
 		return (set_errno(EINVAL));
 
 	if (flg & LX_MNT_FORCE)
 		flags |= MS_FORCE;
+
+	if (flg & LX_UMOUNT_NOFOLLOW) {
+		vnode_t *vp;
+		int error;
+
+		error = lookupname(path, UIO_USERSPACE, NO_FOLLOW, NULLVPP,
+		    &vp);
+		if (error != 0)
+			return (set_errno(error));
+		if (vp->v_type == VLNK) {
+			VN_RELE(vp);
+			return (set_errno(EINVAL));
+		}
+		VN_RELE(vp);
+	}
 
 	return (umount2(path, flags));
 }
