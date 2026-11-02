@@ -271,8 +271,16 @@ restart:
 
 	mutex_enter(&cgm->cg_contents);
 
+	/*
+	 * The cgroup may have been removed while the writer still had its
+	 * cgroup.procs or tasks file open.
+	 */
 	ncn = cgrp_cg_hash_lookup(cgm, cg_id);
-	VERIFY(ncn != NULL);
+	if (ncn == NULL) {
+		mutex_exit(&cgm->cg_contents);
+		mutex_exit(&p->p_lock);
+		return (ENODEV);
+	}
 
 	do {
 		lx_lwp_data_t *plwpd = ttolxlwp(t);

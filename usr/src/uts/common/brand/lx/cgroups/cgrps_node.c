@@ -606,6 +606,14 @@ cgrp_dirdelete(cgrp_node_t *dir, cgrp_node_t *cn, char *nm, enum dr_op op,
 
 		ASSERT(cn->cgn_type == CG_CGROUP_DIR);
 
+		/*
+		 * Removing the pseudo files below requires write access to
+		 * the cgroup dir itself. Check that up front, so that we
+		 * don't fail half way through the removal.
+		 */
+		if ((error = cgrp_taccess(cn, VEXEC|VWRITE, cred)) != 0)
+			return (error);
+
 		/* The cgroup.events node is about to go away */
 		cn->cgn_events = NULL;
 
@@ -626,11 +634,16 @@ cgrp_dirdelete(cgrp_node_t *dir, cgrp_node_t *cn, char *nm, enum dr_op op,
 			cgnode_hold(pseudo_node);
 			error = cgrp_dirdelete(cn, pseudo_node,
 			    cdp->cgd_name, DR_REMOVE, cred);
+			/*
+			 * Drop cg_contents while releasing the node, since
+			 * cgrp_inactive() takes it. Our caller expects it to
+			 * be held on return, even on error.
+			 */
 			mutex_exit(&cgm->cg_contents);
 			cgnode_rele(pseudo_node);
+			mutex_enter(&cgm->cg_contents);
 			if (error != 0)
 				return (error);
-			mutex_enter(&cgm->cg_contents);
 
 			cdp = nextp;
 		}
