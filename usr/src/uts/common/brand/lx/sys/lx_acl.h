@@ -11,6 +11,7 @@
 
 /*
  * Copyright (c) 2017 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _LX_ACL_H
@@ -36,7 +37,7 @@ extern int lx_acl_setxattr(vnode_t *, enum lx_acl_type, void *, size_t);
 extern int lx_acl_getxattr(vnode_t *, enum lx_acl_type, void *, size_t,
     ssize_t *);
 extern int lx_acl_removexattr(vnode_t *, enum lx_acl_type);
-extern int lx_acl_listxattr(vnode_t *, uio_t *);
+extern int lx_acl_listxattr(vnode_t *, uio_t *, size_t *);
 
 #ifdef	__cplusplus
 }

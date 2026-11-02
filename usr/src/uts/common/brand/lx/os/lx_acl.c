@@ -210,7 +210,8 @@ lx_acl_flavor(vnode_t *vp, cred_t *cr)
  * default ones.
  */
 static int
-lx_acl_get_aent(vnode_t *vp, int flavor, cred_t *cr, acl_t **aclpp)
+lx_acl_get_aent(vnode_t *vp, int flavor, boolean_t want_trivial, cred_t *cr,
+    acl_t **aclpp)
 {
 	const boolean_t is_dir = (vp->v_type == VDIR);
 	vsecattr_t vsa;
@@ -235,6 +236,17 @@ lx_acl_get_aent(vnode_t *vp, int flavor, cred_t *cr, acl_t **aclpp)
 			if (vsa.vsa_aclentp != NULL)
 				kmem_free(vsa.vsa_aclentp, vsa.vsa_aclentsz);
 			return (EOPNOTSUPP);
+		}
+
+		/*
+		 * A trivial ACL only reflects the file mode and carries no
+		 * inheritable entries, so callers which only care about
+		 * extended ACLs need not translate it.
+		 */
+		if (!want_trivial &&
+		    ace_trivial(vsa.vsa_aclentp, vsa.vsa_aclcnt) == 0) {
+			kmem_free(vsa.vsa_aclentp, vsa.vsa_aclentsz);
+			return (ENODATA);
 		}
 
 		acl = acl_alloc(ACE_T);
@@ -418,7 +430,8 @@ lx_acl_replace(vnode_t *vp, int flavor, enum lx_acl_type atype,
 	 * is given a complete new access ACL.
 	 */
 	if (vp->v_type == VDIR || cnt == 0) {
-		if ((err = lx_acl_get_aent(vp, flavor, cr, &cur)) != 0)
+		err = lx_acl_get_aent(vp, flavor, B_TRUE, cr, &cur);
+		if (err != 0)
 			return (err);
 	}
 
@@ -570,7 +583,7 @@ lx_acl_getxattr(vnode_t *vp, enum lx_acl_type atype, void *data, size_t slen,
 	if ((flavor = lx_acl_flavor(vp, cr)) == 0)
 		return (ENODATA);
 
-	if ((err = lx_acl_get_aent(vp, flavor, cr, &acl)) != 0)
+	if ((err = lx_acl_get_aent(vp, flavor, B_FALSE, cr, &acl)) != 0)
 		return ((err == ENOENT) ? ENODATA : err);
 
 	/*
@@ -632,9 +645,48 @@ lx_acl_removexattr(vnode_t *vp, enum lx_acl_type atype)
 	return (lx_acl_replace(vp, flavor, atype, NULL, 0, B_TRUE, cr));
 }
 
-/* ARGSUSED */
-int
-lx_acl_listxattr(vnode_t *vp, uio_t *uio)
+static int
+lx_acl_listname(const char *name, uio_t *uio, size_t *needp)
 {
-	return (0);
+	size_t len = strlen(name) + 1;
+
+	*needp += len;
+	if (uio->uio_resid < len)
+		return (0);
+	return (uiomove((void *)name, len, UIO_READ, uio));
+}
+
+/*
+ * List the ACL attributes present on a vnode.  The size of the names is
+ * added to *needp whether or not they fit in the buffer described by uio.
+ */
+int
+lx_acl_listxattr(vnode_t *vp, uio_t *uio, size_t *needp)
+{
+	cred_t *cr = CRED();
+	acl_t *acl;
+	int flavor, err = 0;
+
+	if (vp->v_type == VLNK || (flavor = lx_acl_flavor(vp, cr)) == 0)
+		return (0);
+
+	/*
+	 * Anything which can't be read back through getxattr, such as an
+	 * NFSv4 ACL without a POSIX equivalent, isn't listed.
+	 */
+	if (lx_acl_get_aent(vp, flavor, B_FALSE, cr, &acl) != 0)
+		return (0);
+
+	if (lx_acl_access_extended(acl)) {
+		err = lx_acl_listname("system." LX_XATTR_POSIX_ACL_ACCESS,
+		    uio, needp);
+	}
+	if (err == 0 && vp->v_type == VDIR &&
+	    lx_acl_count(acl, LX_ACL_DEFAULT) != 0) {
+		err = lx_acl_listname("system." LX_XATTR_POSIX_ACL_DEFAULT,
+		    uio, needp);
+	}
+	acl_free(acl);
+
+	return (err);
 }
