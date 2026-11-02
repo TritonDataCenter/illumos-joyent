@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/ctype.h>
@@ -626,6 +627,36 @@ lx_mount(const char *sourcep, const char *targetp, const char *fstypep,
 		 * Currently don't verify Linux mount options since we can
 		 * have a subsystem string provided.
 		 */
+	} else if (strcmp(fstype, "cgroup2") == 0) {
+		/*
+		 * We only support a single cgroup mount per zone, so we
+		 * cannot support the systemd "hybrid" layout where cgroup2 is
+		 * mounted on /sys/fs/cgroup/unified alongside a cgroup v1
+		 * hierarchy. Only allow the unified layout, where cgroup2 is
+		 * mounted on /sys/fs/cgroup, so that systemd falls back to the
+		 * cgroup v1 hierarchy in the hybrid case, as it did before
+		 * cgroup2 was supported.
+		 */
+		if (strcmp(target, "/sys/fs/cgroup") != 0 &&
+		    strcmp(target, "/sys/fs/cgroup/") != 0) {
+			rv = ENODEV;
+			goto out;
+		}
+
+		/*
+		 * Translate cgroup2 mount requests to lx_cgroup requests with
+		 * the internal "cgroup2" option. Linux cgroup2 mount options
+		 * (e.g. nsdelegate) are accepted and ignored.
+		 */
+		(void) strcpy(fstype, "lx_cgroup");
+		if ((rv = lx_mnt_add_opt("cgroup2", options, optionsl)) != 0)
+			goto out;
+
+		/*
+		 * Allow mounting over /sys/fs/cgroup in lx sysfs, as Linux
+		 * does.
+		 */
+		sflags |= MS_OVERLAY;
 	} else if (strcmp(fstype, "autofs") == 0) {
 		/* Translate autofs mount requests to lxautofs requests. */
 		(void) strcpy(fstype, LX_AUTOFS_NAME);

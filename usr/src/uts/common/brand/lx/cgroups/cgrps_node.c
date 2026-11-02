@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2021 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>
@@ -34,10 +35,33 @@ static int cgrp_dirmakecgnode(cgrp_node_t *, cgrp_mnt_t *, struct vattr *,
 	enum de_op, cgrp_node_t **, struct cred *);
 static int cgrp_diraddentry(cgrp_node_t *, cgrp_node_t *, char *);
 
+/*
+ * cgroup v1 files. Note that the top-level release_agent file is handled
+ * separately in cgrp_dirinit() so that N_DIRENTS() remains the number of
+ * entries in a non-root cgroup.
+ */
 static cgrp_subsys_dirent_t cgrp_generic_dir[] = {
-	{ CG_PROCS,		"cgroup.procs" },
-	{ CG_NOTIFY,		"notify_on_release" },
-	{ CG_TASKS,		"tasks" }
+	{ CG_PROCS,		"cgroup.procs",		0644,	0 },
+	{ CG_NOTIFY,		"notify_on_release",	0644,	0 },
+	{ CG_TASKS,		"tasks",		0644,	0 }
+};
+
+/*
+ * cgroup v2 core interface files. We do not currently emulate any
+ * controllers, so only the cgroup.* files exist.
+ */
+static cgrp_subsys_dirent_t cgrp_unified_dir[] = {
+	{ CG_PROCS,		"cgroup.procs",		0644,	0 },
+	{ CG_THREADS,		"cgroup.threads",	0644,	0 },
+	{ CG_CONTROLLERS,	"cgroup.controllers",	0444,	0 },
+	{ CG_SUBTREE_CTL,	"cgroup.subtree_control", 0644,	0 },
+	{ CG_EVENTS,		"cgroup.events",	0444,
+	    CGSD_NONROOT_ONLY },
+	{ CG_TYPE,		"cgroup.type",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MAX_DEPTH,		"cgroup.max.depth",	0644,	0 },
+	{ CG_MAX_DESC,		"cgroup.max.descendants", 0644,	0 },
+	{ CG_STAT,		"cgroup.stat",		0444,	0 }
 };
 
 typedef struct cgrp_ssde {
@@ -56,6 +80,9 @@ static cgrp_ssde_t cg_ssde_dir[] = {
 
 	/* CG_SSID_GENERIC */
 	{cgrp_generic_dir, CGDIRLISTSZ(cgrp_generic_dir)},
+
+	/* CG_SSID_UNIFIED */
+	{cgrp_unified_dir, CGDIRLISTSZ(cgrp_unified_dir)},
 };
 
 
@@ -265,6 +292,7 @@ cgrp_cg_hash_init(cgrp_node_t *cn)
 	 */
 	ASSERT(cnt > 0);
 	cn->cgn_task_cnt = cnt;
+	cn->cgn_subtree_cnt = cnt;
 
 	DTRACE_PROBE2(cgrp__grp__init, void *, cn, int, cnt);
 
@@ -317,8 +345,16 @@ int
 cgrp_num_pseudo_ents(cgrp_ssid_t ssid)
 {
 	cgrp_ssde_t *ssdp = &cg_ssde_dir[ssid];
+	int i, n = 0;
 
-	return (ssdp->cg_ssde_nfiles);
+	/* Count the entries in a non-root cgroup */
+	for (i = 0; i < ssdp->cg_ssde_nfiles; i++) {
+		if ((ssdp->cg_ssde_files[i].cgrp_ssd_flags &
+		    CGSD_ROOT_ONLY) == 0)
+			n++;
+	}
+
+	return (n);
 }
 
 int
@@ -570,6 +606,9 @@ cgrp_dirdelete(cgrp_node_t *dir, cgrp_node_t *cn, char *nm, enum dr_op op,
 
 		ASSERT(cn->cgn_type == CG_CGROUP_DIR);
 
+		/* The cgroup.events node is about to go away */
+		cn->cgn_events = NULL;
+
 		cdp = cn->cgn_dir;
 		while (cdp) {
 			cgrp_node_t *pseudo_node;
@@ -728,6 +767,8 @@ cgrp_addnode(cgrp_mnt_t *cgm, cgrp_node_t *dir, char *name,
 	 */
 	ncn->cgn_nodeid = cgrp_inode(type, dir->cgn_nodeid);
 	ncn->cgn_type = type;
+	if (type == CG_EVENTS)
+		dir->cgn_events = ncn;
 
 	/*
 	 * Since we're creating these entries here and not via the
@@ -825,17 +866,26 @@ cgrp_dirinit(cgrp_node_t *parent, cgrp_node_t *dir, cred_t *cr)
 	nattr.va_rdev = 0;
 
 	/*
-	 * If this is the top-level dir in the file system then it always
-	 * has a release_agent pseudo file. Only the top-level dir has this
-	 * file.
+	 * If this is the top-level dir of a cgroup v1 file system then it
+	 * always has a release_agent pseudo file. Only the top-level dir has
+	 * this file. There is no release agent in cgroup v2; cgroup.events
+	 * is used to notify about empty cgroups instead.
 	 */
-	if (parent == dir) {
+	if (parent == dir && !CG_IS_V2(cgm)) {
 		cgrp_addnode(cgm, dir, "release_agent", CG_REL_AGENT, &nattr,
 		    cr);
 	}
 
 	pseudo_files = ssdp->cg_ssde_files;
 	for (i = 0; i < ssdp->cg_ssde_nfiles; i++) {
+		uint_t flags = pseudo_files[i].cgrp_ssd_flags;
+
+		if (parent == dir && (flags & CGSD_NONROOT_ONLY) != 0)
+			continue;
+		if (parent != dir && (flags & CGSD_ROOT_ONLY) != 0)
+			continue;
+
+		nattr.va_mode = pseudo_files[i].cgrp_ssd_mode;
 		cgrp_addnode(cgm, dir, pseudo_files[i].cgrp_ssd_name,
 		    pseudo_files[i].cgrp_ssd_type, &nattr, cr);
 	}
@@ -1020,4 +1070,181 @@ cgrp_dirmakecgnode(cgrp_node_t *dir, cgrp_mnt_t *cgm, struct vattr *va,
 
 	*newnode = cn;
 	return (0);
+}
+
+/*
+ * Construct the path of the cgroup 'cn', relative to the mount point of the
+ * file system (e.g. "/system.slice/foo.service"). The top-level cgroup is "/".
+ *
+ * Returns 0 on success, or ENAMETOOLONG if the path won't fit.
+ */
+int
+cgrp_get_path(cgrp_node_t *cn, char *buf, size_t blen)
+{
+	size_t off;
+
+	ASSERT(MUTEX_HELD(&VTOCGM(cn->cgn_vnode)->cg_contents));
+	ASSERT(cn->cgn_type == CG_CGROUP_DIR);
+	ASSERT(blen >= 2);
+
+	/* Build the path backwards from the end of the buffer. */
+	off = blen - 1;
+	buf[off] = '\0';
+
+	while (cn->cgn_parent != NULL && cn->cgn_parent != cn) {
+		cgrp_node_t *parent = cn->cgn_parent;
+		cgrp_dirent_t *dp;
+		size_t len;
+
+		for (dp = parent->cgn_dir; dp != NULL; dp = dp->cgd_next) {
+			if (dp->cgd_cgrp_node == cn &&
+			    strcmp(dp->cgd_name, ".") != 0 &&
+			    strcmp(dp->cgd_name, "..") != 0)
+				break;
+		}
+		if (dp == NULL)
+			return (ENOENT);
+
+		len = strlen(dp->cgd_name);
+		if (len + 1 > off)
+			return (ENAMETOOLONG);
+		off -= len;
+		bcopy(dp->cgd_name, &buf[off], len);
+		buf[--off] = '/';
+
+		cn = parent;
+	}
+
+	if (off == blen - 1) {
+		/* top-level cgroup */
+		(void) strlcpy(buf, "/", blen);
+	} else {
+		ovbcopy(&buf[off], buf, blen - off);
+	}
+
+	return (0);
+}
+
+/*
+ * Taskq callback to deliver cgroup.events notifications. We generate a
+ * VE_RESIZE vnode event on the cgroup.events vnode, which the inotify driver
+ * reports as IN_MODIFY. This is how systemd (and others) learn that a cgroup
+ * has become empty (or populated) in cgroup v2.
+ *
+ * This is done asynchronously since the populated state changes in contexts
+ * (e.g. lwp creation with p_lock held) where calling into the vnode event
+ * framework is not safe.
+ */
+static void
+cgrp_events_notify(void *arg)
+{
+	cgrp_mnt_t *cgm = arg;
+	cgrp_node_t *cn;
+
+	for (;;) {
+		/*
+		 * Take nodes off the list one at a time, since a node can be
+		 * queued again as soon as it is no longer marked as pending.
+		 */
+		mutex_enter(&cgm->cg_contents);
+		if ((cn = cgm->cg_evlist) == NULL) {
+			cgm->cg_evsched = B_FALSE;
+			mutex_exit(&cgm->cg_contents);
+			/* cgm must not be referenced after this point */
+			return;
+		}
+		cgm->cg_evlist = cn->cgn_evnext;
+		cn->cgn_evnext = NULL;
+		cn->cgn_evpend = B_FALSE;
+		mutex_exit(&cgm->cg_contents);
+
+		vnevent_resize(CGNTOV(cn), NULL);
+		/* Drop the hold taken in cgrp_events_post */
+		cgnode_rele(cn);
+	}
+}
+
+/*
+ * Queue a change notification for the cgroup.events file of cgroup 'dir'.
+ */
+static void
+cgrp_events_post(cgrp_mnt_t *cgm, cgrp_node_t *dir)
+{
+	cgrp_node_t *ev = dir->cgn_events;
+
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
+
+	if (ev == NULL || ev->cgn_evpend)
+		return;
+
+	/*
+	 * The hold keeps the node around until the notification has been
+	 * delivered, even if the cgroup is removed in the meantime.
+	 */
+	cgnode_hold(ev);
+	ev->cgn_evpend = B_TRUE;
+	ev->cgn_evnext = cgm->cg_evlist;
+	cgm->cg_evlist = ev;
+
+	if (!cgm->cg_evsched) {
+		cgm->cg_evsched = B_TRUE;
+		taskq_dispatch_ent(cgrp_evtq, cgrp_events_notify, cgm, 0,
+		    &cgm->cg_evtqent);
+	}
+}
+
+/*
+ * Adjust the number of threads in cgroup 'cn' by 'delta', maintaining the
+ * per-subtree thread count used for the cgroup v2 "populated" state, and
+ * queueing a cgroup.events notification for every cgroup whose populated state
+ * changes.
+ */
+void
+cgrp_task_adjust(cgrp_mnt_t *cgm, cgrp_node_t *cn, int delta)
+{
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
+	ASSERT(delta == 1 || delta == -1);
+
+	if (delta > 0) {
+		cn->cgn_task_cnt++;
+	} else {
+		ASSERT(cn->cgn_task_cnt > 0);
+		cn->cgn_task_cnt--;
+	}
+
+	if (!CG_IS_V2(cgm))
+		return;
+
+	for (;;) {
+		boolean_t changed;
+
+		if (delta > 0) {
+			changed = (cn->cgn_subtree_cnt++ == 0);
+		} else {
+			ASSERT(cn->cgn_subtree_cnt > 0);
+			changed = (--cn->cgn_subtree_cnt == 0);
+		}
+
+		if (changed)
+			cgrp_events_post(cgm, cn);
+
+		if (cn->cgn_parent == NULL || cn->cgn_parent == cn)
+			break;
+		cn = cn->cgn_parent;
+	}
+}
+
+/*
+ * Adjust the descendant count of all ancestors of the cgroup 'cn'. Used for
+ * cgroup.stat.
+ */
+void
+cgrp_ndesc_adjust(cgrp_node_t *cn, int delta)
+{
+	ASSERT(MUTEX_HELD(&VTOCGM(cn->cgn_vnode)->cg_contents));
+
+	while (cn->cgn_parent != NULL && cn->cgn_parent != cn) {
+		cn = cn->cgn_parent;
+		cn->cgn_ndesc += delta;
+	}
 }

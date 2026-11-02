@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>
@@ -170,12 +171,16 @@ cgrp_thr_move(cgrp_mnt_t *cgm, lx_lwp_data_t *plwpd, cgrp_node_t *ncn,
 	VERIFY(ocn != NULL);
 
 	ASSERT(ocn->cgn_task_cnt > 0);
-	atomic_dec_32(&ocn->cgn_task_cnt);
-	atomic_inc_32(&ncn->cgn_task_cnt);
+	/*
+	 * Add to the new cgroup first so that the populated state of common
+	 * ancestors does not flap in cgroup v2.
+	 */
+	cgrp_task_adjust(cgm, ncn, 1);
+	cgrp_task_adjust(cgm, ocn, -1);
 	plwpd->br_cgroupid = cg_id;
 
-	if (ocn->cgn_task_cnt == 0 && ocn->cgn_dirents == N_DIRENTS(cgm) &&
-	    ocn->cgn_notify == 1) {
+	if (!CG_IS_V2(cgm) && ocn->cgn_task_cnt == 0 &&
+	    ocn->cgn_dirents == N_DIRENTS(cgm) && ocn->cgn_notify == 1) {
 		/*
 		 * We want to drop p_lock before queuing the event since
 		 * that might sleep. Dropping p_lock might cause the caller to
@@ -202,8 +207,20 @@ cgrp_proc_set_id(cgrp_mnt_t *cgm, uint_t cg_id, pid_t pid, cgrp_wr_type_t typ)
 	int error;
 	cgrp_node_t *ncn;
 
-	if (pid == 1)
+	if (pid == 1) {
 		pid = curproc->p_zone->zone_proc_initpid;
+	} else if (pid == 0) {
+		/* Linux interprets 0 as the writing process or thread */
+		if (typ == CG_WR_PROCS) {
+			pid = curproc->p_pid;
+		} else {
+			lx_lwp_data_t *lwpd = ttolxlwp(curthread);
+
+			if (lwpd == NULL)
+				return (ESRCH);
+			pid = lwpd->br_pid;
+		}
+	}
 
 	/*
 	 * Move one or all threads to this cgroup.
@@ -400,6 +417,93 @@ cgrp_wr_proc_or_task(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio,
 	return (0);
 }
 
+/*
+ * Copy in a (short) string written to a cgroup v2 pseudo file. Trailing
+ * whitespace is removed.
+ */
+static int
+cgrp_get_wr_str(struct uio *uio, char *buf, size_t blen)
+{
+	size_t len = uio->uio_resid;
+	int error;
+
+	if (len >= blen)
+		return (EINVAL);
+
+	error = uiomove(buf, len, UIO_WRITE, uio);
+	if (error != 0)
+		return (error);
+	buf[len] = '\0';
+
+	while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == ' ' ||
+	    buf[len - 1] == '\t'))
+		buf[--len] = '\0';
+
+	return (0);
+}
+
+/*
+ * Handle a write to cgroup.subtree_control. The input is a space separated
+ * list of "+<controller>" or "-<controller>" tokens. Since we do not emulate
+ * any controllers, any controller name is an error, just as it is on Linux
+ * for a controller which is not available.
+ */
+static int
+cgrp_wr_subtree_ctl(struct uio *uio)
+{
+	char buf[256];
+	char *p;
+	int error;
+
+	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
+		return (error);
+
+	for (p = buf; *p != '\0'; p++) {
+		if (*p != ' ' && *p != '\t' && *p != '\n')
+			return (ENOENT);
+	}
+
+	return (0);
+}
+
+/*
+ * Handle a write to cgroup.type. Only "domain" cgroups are supported; we do
+ * not support threaded cgroups.
+ */
+static int
+cgrp_wr_type(struct uio *uio)
+{
+	char buf[32];
+	int error;
+
+	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
+		return (error);
+
+	if (strcmp(buf, "domain") == 0)
+		return (0);
+	if (strcmp(buf, "threaded") == 0)
+		return (EOPNOTSUPP);
+	return (EINVAL);
+}
+
+/*
+ * Handle a write to cgroup.max.depth or cgroup.max.descendants. Limits are
+ * not currently enforced, so only "max" (unlimited) is accepted.
+ */
+static int
+cgrp_wr_max(struct uio *uio)
+{
+	char buf[32];
+	int error;
+
+	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
+		return (error);
+
+	if (strcmp(buf, "max") == 0)
+		return (0);
+	return (EOPNOTSUPP);
+}
+
 static int
 cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 {
@@ -436,11 +540,94 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	case CG_TASKS:
 		error = cgrp_wr_proc_or_task(cgm, cn, uio, CG_WR_TASKS);
 		break;
+	case CG_THREADS:
+		/*
+		 * Threads can only be migrated individually within a threaded
+		 * subtree, which we do not support.
+		 */
+		error = EOPNOTSUPP;
+		break;
+	case CG_SUBTREE_CTL:
+		error = cgrp_wr_subtree_ctl(uio);
+		break;
+	case CG_TYPE:
+		error = cgrp_wr_type(uio);
+		break;
+	case CG_MAX_DEPTH:
+	case CG_MAX_DESC:
+		error = cgrp_wr_max(uio);
+		break;
+	case CG_CONTROLLERS:
+	case CG_EVENTS:
+	case CG_STAT:
+		/* read-only files */
+		error = EACCES;
+		break;
 	default:
 		VERIFY(0);
 	}
 
 	return (error);
+}
+
+/*
+ * Copy the portion of the generated pseudo file contents in 'buf' which
+ * corresponds to the uio offset out to the reader.
+ */
+static int
+cgrp_rd_buf(const char *buf, size_t len, struct uio *uio)
+{
+	if (uio->uio_offset >= (offset_t)len)
+		return (0);
+
+	len -= uio->uio_offset;
+	if (uio->uio_resid < len)
+		len = uio->uio_resid;
+
+	return (uiomove((void *)&buf[uio->uio_offset], len, UIO_READ, uio));
+}
+
+/*
+ * Read one of the cgroup v2 pseudo files whose contents are generated from
+ * the state of the cgroup.
+ */
+static int
+cgrp_rd_v2(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
+{
+	char buf[128];
+	size_t len = 0;
+	/* the state is on the containing dir */
+	cgrp_node_t *dir = cn->cgn_parent;
+
+	mutex_enter(&cgm->cg_contents);
+	switch (cn->cgn_type) {
+	case CG_CONTROLLERS:
+	case CG_SUBTREE_CTL:
+		/* no controllers are available */
+		len = snprintf(buf, sizeof (buf), "\n");
+		break;
+	case CG_EVENTS:
+		len = snprintf(buf, sizeof (buf), "populated %u\nfrozen 0\n",
+		    dir->cgn_subtree_cnt > 0 ? 1 : 0);
+		break;
+	case CG_TYPE:
+		len = snprintf(buf, sizeof (buf), "domain\n");
+		break;
+	case CG_MAX_DEPTH:
+	case CG_MAX_DESC:
+		len = snprintf(buf, sizeof (buf), "max\n");
+		break;
+	case CG_STAT:
+		len = snprintf(buf, sizeof (buf),
+		    "nr_descendants %u\nnr_dying_descendants 0\n",
+		    dir->cgn_ndesc);
+		break;
+	default:
+		VERIFY(0);
+	}
+	mutex_exit(&cgm->cg_contents);
+
+	return (cgrp_rd_buf(buf, MIN(len, sizeof (buf) - 1), uio));
 }
 
 /*
@@ -813,7 +1000,17 @@ cgrp_rd(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 		error = cgrp_rd_rel_agent(cgm, uio);
 		break;
 	case CG_TASKS:
+	case CG_THREADS:
 		error = cgrp_rd_tasks(cgm, cn, uio);
+		break;
+	case CG_CONTROLLERS:
+	case CG_SUBTREE_CTL:
+	case CG_EVENTS:
+	case CG_TYPE:
+	case CG_MAX_DEPTH:
+	case CG_MAX_DESC:
+	case CG_STAT:
+		error = cgrp_rd_v2(cgm, cn, uio);
 		break;
 	default:
 		VERIFY(0);
@@ -1232,6 +1429,8 @@ cgrp_mkdir(struct vnode *dvp, char *nm, struct vattr *va, struct vnode **vpp,
 			cgnode_rele(self);
 		return (error);
 	}
+	if (CG_IS_V2(cgm))
+		cgrp_ndesc_adjust(self, 1);
 	mutex_exit(&cgm->cg_contents);
 	*vpp = CGNTOV(self);
 	return (0);
@@ -1279,8 +1478,13 @@ cgrp_rmdir(struct vnode *dvp, char *nm, struct vnode *cdir, struct cred *cred,
 
 	/*
 	 * Check for the existence of any sub-cgroup directories or tasks in
-	 * the cgroup.
+	 * the cgroup. cgroup v2 reports EBUSY in this case.
 	 */
+	if (CG_IS_V2(cgm) &&
+	    (self->cgn_subtree_cnt > 0 || CGN_HAS_SUBDIRS(self))) {
+		error = EBUSY;
+		goto done;
+	}
 	if (self->cgn_task_cnt > 0 || self->cgn_dirents > N_DIRENTS(cgm)) {
 		error = EEXIST;
 		/*
@@ -1299,11 +1503,14 @@ cgrp_rmdir(struct vnode *dvp, char *nm, struct vnode *cdir, struct cred *cred,
 		error = EBUSY;
 	} else {
 		error = cgrp_dirdelete(parent, self, nm, DR_RMDIR, cred);
+		/* self->cgn_parent is still valid after the removal */
+		if (error == 0 && CG_IS_V2(cgm))
+			cgrp_ndesc_adjust(self, -1);
 	}
 
 	vn_vfsunlock(vp);
 
-	if (parent->cgn_task_cnt == 0 &&
+	if (!CG_IS_V2(cgm) && parent->cgn_task_cnt == 0 &&
 	    parent->cgn_dirents == N_DIRENTS(cgm) && parent->cgn_notify == 1) {
 		cgrp_rel_agent_event(cgm, parent, B_FALSE);
 		ASSERT(MUTEX_NOT_HELD(&cgm->cg_contents));

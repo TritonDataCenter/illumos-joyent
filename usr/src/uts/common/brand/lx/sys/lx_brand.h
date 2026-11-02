@@ -25,7 +25,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2025 Edgecast Cloud LLC.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _LX_BRAND_H
@@ -285,6 +285,7 @@ typedef enum lx_proc_flags {
  */
 extern void (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
 extern void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
+extern int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 
 #define	LX_RLFAKE_LOCKS		0
 #define	LX_RLFAKE_NICE		1

@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -123,6 +124,27 @@
  * those is held. To prevent deadlock we always take cg_contents after pidlock
  * and p_lock.
  *
+ * CGROUP V2
+ *
+ * When mounted as "cgroup2" (the lx mount code translates that into an
+ * lx_cgroup mount with the internal "cgroup2" option), the file system
+ * emulates the cgroup v2 unified hierarchy (CG_SSID_UNIFIED) instead. The
+ * process hierarchy implementation is shared, but the pseudo files differ:
+ * there is no tasks, notify_on_release or release_agent file. Instead each
+ * cgroup has the cgroup v2 core interface files (cgroup.procs,
+ * cgroup.threads, cgroup.controllers, cgroup.subtree_control, cgroup.events,
+ * cgroup.type, cgroup.max.depth, cgroup.max.descendants and cgroup.stat).
+ * No controllers are available, so cgroup.controllers is always empty.
+ *
+ * In cgroup v2, a cgroup's "populated" state (reported in cgroup.events)
+ * is true when the cgroup or any of its descendants contains a task. We
+ * track this with a per-cgroup subtree thread count (cgn_subtree_cnt) which
+ * is updated along the path to the root whenever a thread enters or leaves a
+ * cgroup (see cgrp_task_adjust). When the populated state of a cgroup
+ * changes, a VE_RESIZE vnode event is generated (from a taskq) on its
+ * cgroup.events vnode. The inotify driver turns that into IN_MODIFY, which
+ * is what systemd waits for to learn that a unit's cgroup has become empty.
+ *
  * EXTENDING THE FILE SYSTEM
  *
  * When adding support for a new subsystem, be sure to also update the
@@ -205,6 +227,11 @@ static dev_t	cgrp_dev;
 static uint32_t cgrp_mountcount;
 
 /*
+ * Taskq used to deliver cgroup v2 cgroup.events notifications.
+ */
+taskq_t *cgrp_evtq;
+
+/*
  * cgrp_minfree is the minimum amount of swap space that cgroups leaves for
  * the rest of the zone. In other words, if the amount of free swap space
  * in the zone drops below cgrp_minfree, cgroup anon allocations will fail.
@@ -239,6 +266,7 @@ static void cgrp_freevfs(vfs_t *vfsp);
 /* Forward declarations for hooks */
 static void cgrp_lwp_fork_helper(vfs_t *, uint_t, id_t, pid_t);
 static void cgrp_lwp_exit_helper(vfs_t *, uint_t, id_t, pid_t);
+static int cgrp_pid_cgroup_helper(vfs_t *, uint_t, char *, size_t);
 
 /*
  * Loadable module wrapper
@@ -284,6 +312,10 @@ _fini()
 	/* Disable hooks used by the lx brand module. */
 	lx_cgrp_initlwp = NULL;
 	lx_cgrp_freelwp = NULL;
+	lx_cgrp_pidcgroup = NULL;
+
+	taskq_destroy(cgrp_evtq);
+	cgrp_evtq = NULL;
 
 	/*
 	 * Tear down the operations vectors
@@ -319,6 +351,8 @@ cgrp_init(int fstype, char *name)
 	major_t dev;
 
 	cgrp_hash_init();
+	cgrp_evtq = taskq_create("lx_cgroup_events", 1, minclsyspri, 1,
+	    INT_MAX, TASKQ_PREPOPULATE);
 	cgrp_fstype = fstype;
 	ASSERT(cgrp_fstype != 0);
 
@@ -358,6 +392,7 @@ cgrp_init(int fstype, char *name)
 	/* Install the hooks used by the lx brand module. */
 	lx_cgrp_initlwp = cgrp_lwp_fork_helper;
 	lx_cgrp_freelwp = cgrp_lwp_exit_helper;
+	lx_cgrp_pidcgroup = cgrp_pid_cgroup_helper;
 
 	return (0);
 }
@@ -397,15 +432,26 @@ cgrp_mount(vfs_t *vfsp, vnode_t *mvp, struct mounta *uap, cred_t *cr)
 	}
 	mutex_exit(&mvp->v_lock);
 
-	/*
-	 * Having the resource be anything but "swap" doesn't make sense.
-	 */
-	vfs_setresource(vfsp, "swap", 0);
-
 	/* cgroups don't support read-only mounts */
 	if (vfs_optionisset(vfsp, MNTOPT_RO, NULL)) {
 		error = EINVAL;
 		goto out;
+	}
+
+	/*
+	 * The lx mount code translates a "cgroup2" mount into an lx_cgroup
+	 * mount with the "cgroup2" option set. We use the resource name to
+	 * let lx procfs report the correct file system type.
+	 */
+	if (vfs_optionisset(vfsp, "cgroup2", NULL)) {
+		ssid = CG_SSID_UNIFIED;
+		vfs_setresource(vfsp, "cgroup2", 0);
+	} else {
+		/*
+		 * Having the resource be anything but "swap" doesn't make
+		 * sense.
+		 */
+		vfs_setresource(vfsp, "swap", 0);
 	}
 
 	/*
@@ -435,6 +481,7 @@ cgrp_mount(vfs_t *vfsp, vnode_t *mvp, struct mounta *uap, cred_t *cr)
 	mutex_enter(&lxzdata->lxzd_lock);
 	if (lxzdata->lxzd_cgroup != NULL) {
 		mutex_exit(&lxzdata->lxzd_lock);
+		pn_free(&dpn);
 		return (EINVAL);
 	}
 
@@ -526,6 +573,9 @@ cgrp_unmount(struct vfs *vfsp, int flag, struct cred *cr)
 
 	if ((error = secpolicy_fs_unmount(cr, vfsp)) != 0)
 		return (error);
+
+	/* Let any pending cgroup.events notifications drop their holds */
+	taskq_wait(cgrp_evtq);
 
 retry:
 	mutex_enter(&cgm->cg_contents);
@@ -640,6 +690,9 @@ cgrp_freevfs(vfs_t *vfsp)
 	 * we're tearing down.
 	 */
 	vfsp->vfs_flag &= ~VFS_UNMOUNTED;
+
+	/* Make sure no notification task still references this mount */
+	taskq_wait(cgrp_evtq);
 
 	/*
 	 * Remove all directory entries
@@ -793,7 +846,16 @@ cgrp_statvfs(struct vfs *vfsp, struct statvfs64 *sbp)
 	sbp->f_favail = (fsfilcnt64_t)(sbp->f_ffree);
 	(void) cmpldev(&d32, vfsp->vfs_dev);
 	sbp->f_fsid = d32;
-	(void) strcpy(sbp->f_basetype, vfssw[cgrp_fstype].vsw_name);
+	/*
+	 * The lx brand statfs emulation uses the base type to determine the
+	 * Linux file system magic number, so distinguish cgroup v2.
+	 */
+	if (CG_IS_V2(cgm)) {
+		(void) strlcpy(sbp->f_basetype, "lx_cgroup2",
+		    sizeof (sbp->f_basetype));
+	} else {
+		(void) strcpy(sbp->f_basetype, vfssw[cgrp_fstype].vsw_name);
+	}
 	(void) strncpy(sbp->f_fstr, cgm->cg_mntpath, sizeof (sbp->f_fstr));
 	/* ensure null termination */
 	sbp->f_fstr[sizeof (sbp->f_fstr) - 1] = '\0';
@@ -1037,7 +1099,7 @@ cgrp_lwp_fork_helper(vfs_t *vfsp, uint_t cg_id, id_t tid, pid_t tpid)
 	mutex_enter(&cgm->cg_contents);
 	cn = cgrp_cg_hash_lookup(cgm, cg_id);
 	ASSERT(cn != NULL);
-	cn->cgn_task_cnt++;
+	cgrp_task_adjust(cgm, cn, 1);
 	mutex_exit(&cgm->cg_contents);
 
 	DTRACE_PROBE1(cgrp__lwp__fork, void *, cn);
@@ -1058,14 +1120,55 @@ cgrp_lwp_exit_helper(vfs_t *vfsp, uint_t cg_id, id_t tid, pid_t tpid)
 		mutex_exit(&cgm->cg_contents);
 		return;
 	}
-	cn->cgn_task_cnt--;
+	cgrp_task_adjust(cgm, cn, -1);
 	DTRACE_PROBE1(cgrp__lwp__exit, void *, cn);
 
-	if (cn->cgn_task_cnt == 0 && cn->cgn_dirents == N_DIRENTS(cgm) &&
-	    cn->cgn_notify == 1) {
+	if (!CG_IS_V2(cgm) && cn->cgn_task_cnt == 0 &&
+	    cn->cgn_dirents == N_DIRENTS(cgm) && cn->cgn_notify == 1) {
 		cgrp_rel_agent_event(cgm, cn, B_TRUE);
 		ASSERT(MUTEX_NOT_HELD(&cgm->cg_contents));
 	} else {
 		mutex_exit(&cgm->cg_contents);
 	}
+}
+
+/*
+ * Format the /proc/<pid>/cgroup line for a thread in cgroup 'cg_id' into
+ * 'buf'. Called by lx procfs.
+ */
+static int
+cgrp_pid_cgroup_helper(vfs_t *vfsp, uint_t cg_id, char *buf, size_t blen)
+{
+	cgrp_mnt_t *cgm = (cgrp_mnt_t *)VFSTOCGM(vfsp);
+	cgrp_node_t *cn;
+	char *path;
+	int error;
+
+	if (!CG_IS_V2(cgm)) {
+		/*
+		 * For cgroup v1 we continue to report every thread as being
+		 * in the top-level cgroup of the systemd hierarchy.
+		 */
+		(void) snprintf(buf, blen, "1:name=systemd:/\n");
+		return (0);
+	}
+
+	path = kmem_alloc(MAXPATHLEN, KM_SLEEP);
+
+	mutex_enter(&cgm->cg_contents);
+	cn = cgrp_cg_hash_lookup(cgm, cg_id);
+	if (cn == NULL) {
+		/* The cgroup may have just been removed. */
+		(void) strlcpy(path, "/", MAXPATHLEN);
+		error = 0;
+	} else {
+		error = cgrp_get_path(cn, path, MAXPATHLEN);
+	}
+	mutex_exit(&cgm->cg_contents);
+
+	if (error == 0)
+		(void) snprintf(buf, blen, "0::%s\n", path);
+
+	kmem_free(path, MAXPATHLEN);
+	return (error);
 }
