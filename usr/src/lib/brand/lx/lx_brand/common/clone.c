@@ -28,6 +28,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <unistd.h>
@@ -39,6 +40,7 @@
 #include <sys/syscall.h>
 #include <sys/inttypes.h>
 #include <sys/param.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <sys/segments.h>
 #include <signal.h>
@@ -282,8 +284,9 @@ ptrace_clone_event(int flags)
  * and the Linux kernel/fork.c code for the various ways arguments can be passed
  * to the clone syscall (CONFIG_CLONE_BACKWARDS, et al).
  */
-long
-lx_clone(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4, uintptr_t p5)
+static long
+lx_clone_common(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4,
+    uintptr_t p5, boolean_t clear_sighand)
 {
 	struct clone_state *cs;
 	int flags = (int)p1;
@@ -567,6 +570,13 @@ lx_clone(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4, uintptr_t p5)
 			}
 
 			/*
+			 * clone3(2) CLONE_CLEAR_SIGHAND. The parent restores
+			 * its own handlers after the vfork, see above.
+			 */
+			if (clear_sighand)
+				lx_sighandlers_clear();
+
+			/*
 			 * Re-enable signal delivery in the child process.
 			 */
 			lx_unblock_all_signals();
@@ -594,6 +604,10 @@ lx_clone(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4, uintptr_t p5)
 			lx_debug("\tcldstk %p", cldstk);
 			LX_REG(ucp, REG_SP) = (uintptr_t)cldstk;
 		}
+
+		/* clone3(2) CLONE_CLEAR_SIGHAND */
+		if (clear_sighand)
+			lx_sighandlers_clear();
 
 		/*
 		 * Re-enable signal delivery in the child process.
@@ -731,4 +745,142 @@ lx_clone(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4, uintptr_t p5)
 		 */
 		return (-rval);
 	}
+}
+
+long
+lx_clone(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4, uintptr_t p5)
+{
+	return (lx_clone_common(p1, p2, p3, p4, p5, B_FALSE));
+}
+
+/*
+ * clone3(2) arguments, see the Linux <linux/sched.h>.
+ */
+typedef struct lx_clone_args {
+	uint64_t	lxca_flags;
+	uint64_t	lxca_pidfd;
+	uint64_t	lxca_child_tid;
+	uint64_t	lxca_parent_tid;
+	uint64_t	lxca_exit_signal;
+	uint64_t	lxca_stack;
+	uint64_t	lxca_stack_size;
+	uint64_t	lxca_tls;
+	uint64_t	lxca_set_tid;
+	uint64_t	lxca_set_tid_size;
+	uint64_t	lxca_cgroup;
+} lx_clone_args_t;
+
+#define	LX_CLONE_ARGS_SIZE_VER0	64	/* without set_tid and cgroup */
+
+#define	LX_CLONE_PIDFD		0x00001000ULL	/* was CLONE_PID */
+#define	LX_CLONE_CLEAR_SIGHAND	0x100000000ULL
+#define	LX_CLONE_INTO_CGROUP	0x200000000ULL
+#define	LX_CLONE3_FLAGS		(0xffffffffULL | LX_CLONE_CLEAR_SIGHAND | \
+	LX_CLONE_INTO_CGROUP)
+
+/*
+ * clone3(2) is implemented on top of clone(2), with these additions:
+ *
+ *  - CLONE_CLEAR_SIGHAND resets the signal handlers in the child.
+ *  - CLONE_INTO_CGROUP creates the child in the cgroup v2 cgroup referred to
+ *    by the cgroup fd; see lx_clone_into_cgroup() in the kernel.
+ *
+ * We have no pidfd support, so CLONE_PIDFD fails with EOPNOTSUPP, as does
+ * glibc's pidfd_spawn(3) itself in that case. Setting the child's tid
+ * (set_tid) requires privileges in a pid namespace, so fails with EPERM.
+ */
+long
+lx_clone3(uintptr_t p1, uintptr_t p2)
+{
+	lx_clone_args_t args;
+	size_t size = (size_t)p2;
+	uint64_t flags;
+	uintptr_t stack = 0;
+	boolean_t into_cgroup;
+	long rval;
+
+	if (size < LX_CLONE_ARGS_SIZE_VER0)
+		return (-EINVAL);
+	if (size > PAGESIZE)
+		return (-E2BIG);
+
+	bzero(&args, sizeof (args));
+	if (uucopy((void *)p1, &args, MIN(size, sizeof (args))) != 0)
+		return (-EFAULT);
+
+	/* Any bytes beyond the structure we know about must be zero. */
+	if (size > sizeof (args)) {
+		size_t off;
+		uint8_t c;
+
+		for (off = sizeof (args); off < size; off++) {
+			if (uucopy((uint8_t *)p1 + off, &c, 1) != 0)
+				return (-EFAULT);
+			if (c != 0)
+				return (-E2BIG);
+		}
+	}
+
+	flags = args.lxca_flags;
+
+	/* The same checks as in the Linux clone3_args_valid(). */
+	if ((flags & ~LX_CLONE3_FLAGS) != 0 || (flags & LX_CSIGNAL) != 0)
+		return (-EINVAL);
+	if (args.lxca_exit_signal > LX_NSIG)
+		return (-EINVAL);
+	if ((flags & (LX_CLONE_THREAD | LX_CLONE_PARENT)) != 0 &&
+	    args.lxca_exit_signal != 0)
+		return (-EINVAL);
+	if ((flags & (LX_CLONE_SIGHAND | LX_CLONE_CLEAR_SIGHAND)) ==
+	    (LX_CLONE_SIGHAND | LX_CLONE_CLEAR_SIGHAND))
+		return (-EINVAL);
+	if ((args.lxca_stack == 0) != (args.lxca_stack_size == 0))
+		return (-EINVAL);
+
+	if (args.lxca_set_tid_size != 0)
+		return (-EPERM);
+	if (args.lxca_set_tid != 0)
+		return (-EINVAL);
+
+	if ((flags & LX_CLONE_PIDFD) != 0) {
+		lx_unsupported("clone3(2) CLONE_PIDFD is not supported");
+		return (-EOPNOTSUPP);
+	}
+
+	into_cgroup = (flags & LX_CLONE_INTO_CGROUP) != 0;
+	if (into_cgroup) {
+		/* All threads of a process are in the same cgroup. */
+		if ((flags & LX_CLONE_THREAD) != 0)
+			return (-EINVAL);
+		if (args.lxca_cgroup > INT_MAX)
+			return (-EBADF);
+		if (syscall(SYS_brand, B_CLONE_INTO_CGROUP,
+		    (int)args.lxca_cgroup) != 0)
+			return (-errno);
+	}
+
+	/* clone3 takes the stack base and size; the stack grows down. */
+	if (args.lxca_stack != 0)
+		stack = (uintptr_t)(args.lxca_stack + args.lxca_stack_size);
+
+#if defined(_LP64)
+	rval = lx_clone_common((flags & 0xffffffffULL) | args.lxca_exit_signal,
+	    stack, (uintptr_t)args.lxca_parent_tid,
+	    (uintptr_t)args.lxca_child_tid, (uintptr_t)args.lxca_tls,
+	    (flags & LX_CLONE_CLEAR_SIGHAND) != 0);
+#else
+	rval = lx_clone_common((flags & 0xffffffffULL) | args.lxca_exit_signal,
+	    stack, (uintptr_t)args.lxca_parent_tid,
+	    (uintptr_t)args.lxca_tls, (uintptr_t)args.lxca_child_tid,
+	    (flags & LX_CLONE_CLEAR_SIGHAND) != 0);
+#endif
+
+	/*
+	 * In the parent, stop creating lwps in the target cgroup. This also
+	 * runs in a (non-vfork) child, where it is a no-op.
+	 */
+	if (into_cgroup)
+		(void) syscall(SYS_brand, B_CLONE_INTO_CGROUP, -1);
+
+	return (rval);
 }

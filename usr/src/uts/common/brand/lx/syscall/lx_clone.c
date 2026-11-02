@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2016 Joyent, Inc.
  * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -515,4 +516,55 @@ lx_set_tid_address(int *tidp)
 	}
 
 	return (rv);
+}
+
+/*
+ * Support for clone3(2) with CLONE_INTO_CGROUP. The user-level brand library
+ * calls this (B_CLONE_INTO_CGROUP) with the cgroup directory fd before it
+ * creates the child, and with -1 afterwards. While set, lx_initlwp() places
+ * lwps created by this thread into the target cgroup instead of the cgroup
+ * of the creating thread. The fd must refer to a cgroup of the zone's cgroup
+ * v2 file system.
+ */
+int
+lx_clone_into_cgroup(int fd)
+{
+	lx_lwp_data_t *lwpd = ttolxlwp(curthread);
+	lx_zone_data_t *lxzd = ztolxzd(curproc->p_zone);
+	file_t *fp;
+	vfs_t *cgrp;
+	uint_t id;
+	int error;
+
+	if (fd == -1) {
+		lwpd->br_clone_cgroup = B_FALSE;
+		lwpd->br_clone_cgroupid = 0;
+		return (0);
+	}
+
+	if ((fp = getf(fd)) == NULL)
+		return (set_errno(EBADF));
+
+	mutex_enter(&lxzd->lxzd_lock);
+	if ((cgrp = lxzd->lxzd_cgroup) != NULL)
+		VFS_HOLD(cgrp);
+	mutex_exit(&lxzd->lxzd_lock);
+
+	if (cgrp == NULL || fp->f_vnode->v_vfsp != cgrp) {
+		error = EBADF;
+	} else {
+		ASSERT(lx_cgrp_vp_to_id != NULL);
+		error = (*lx_cgrp_vp_to_id)(cgrp, fp->f_vnode, CRED(), &id);
+	}
+
+	if (cgrp != NULL)
+		VFS_RELE(cgrp);
+	releasef(fd);
+
+	if (error != 0)
+		return (set_errno(error));
+
+	lwpd->br_clone_cgroup = B_TRUE;
+	lwpd->br_clone_cgroupid = id;
+	return (0);
 }

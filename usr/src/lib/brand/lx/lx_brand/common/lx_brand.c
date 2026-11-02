@@ -26,6 +26,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>
@@ -1338,8 +1339,121 @@ static lx_syscall_handler_t lx_handlers[] = {
 	NULL,				/* 320: kexec_file_load */
 	NULL,				/* 321: bpf */
 	NULL,				/* 322: execveat */
+	NULL,				/* 323 */
+	NULL,				/* 324 */
+	NULL,				/* 325 */
+	NULL,				/* 326 */
+	NULL,				/* 327 */
+	NULL,				/* 328 */
+	NULL,				/* 329 */
+	NULL,				/* 330 */
+	NULL,				/* 331 */
+	NULL,				/* 332 */
+	NULL,				/* 333 */
+	NULL,				/* 334 */
+	NULL,				/* 335 */
+	NULL,				/* 336 */
+	NULL,				/* 337 */
+	NULL,				/* 338 */
+	NULL,				/* 339 */
+	NULL,				/* 340 */
+	NULL,				/* 341 */
+	NULL,				/* 342 */
+	NULL,				/* 343 */
+	NULL,				/* 344 */
+	NULL,				/* 345 */
+	NULL,				/* 346 */
+	NULL,				/* 347 */
+	NULL,				/* 348 */
+	NULL,				/* 349 */
+	NULL,				/* 350 */
+	NULL,				/* 351 */
+	NULL,				/* 352 */
+	NULL,				/* 353 */
+	NULL,				/* 354 */
+	NULL,				/* 355 */
+	NULL,				/* 356 */
+	NULL,				/* 357 */
+	NULL,				/* 358 */
+	NULL,				/* 359 */
+	NULL,				/* 360 */
+	NULL,				/* 361 */
+	NULL,				/* 362 */
+	NULL,				/* 363 */
+	NULL,				/* 364 */
+	NULL,				/* 365 */
+	NULL,				/* 366 */
+	NULL,				/* 367 */
+	NULL,				/* 368 */
+	NULL,				/* 369 */
+	NULL,				/* 370 */
+	NULL,				/* 371 */
+	NULL,				/* 372 */
+	NULL,				/* 373 */
+	NULL,				/* 374 */
+	NULL,				/* 375 */
+	NULL,				/* 376 */
+	NULL,				/* 377 */
+	NULL,				/* 378 */
+	NULL,				/* 379 */
+	NULL,				/* 380 */
+	NULL,				/* 381 */
+	NULL,				/* 382 */
+	NULL,				/* 383 */
+	NULL,				/* 384 */
+	NULL,				/* 385 */
+	NULL,				/* 386 */
+	NULL,				/* 387 */
+	NULL,				/* 388 */
+	NULL,				/* 389 */
+	NULL,				/* 390 */
+	NULL,				/* 391 */
+	NULL,				/* 392 */
+	NULL,				/* 393 */
+	NULL,				/* 394 */
+	NULL,				/* 395 */
+	NULL,				/* 396 */
+	NULL,				/* 397 */
+	NULL,				/* 398 */
+	NULL,				/* 399 */
+	NULL,				/* 400 */
+	NULL,				/* 401 */
+	NULL,				/* 402 */
+	NULL,				/* 403 */
+	NULL,				/* 404 */
+	NULL,				/* 405 */
+	NULL,				/* 406 */
+	NULL,				/* 407 */
+	NULL,				/* 408 */
+	NULL,				/* 409 */
+	NULL,				/* 410 */
+	NULL,				/* 411 */
+	NULL,				/* 412 */
+	NULL,				/* 413 */
+	NULL,				/* 414 */
+	NULL,				/* 415 */
+	NULL,				/* 416 */
+	NULL,				/* 417 */
+	NULL,				/* 418 */
+	NULL,				/* 419 */
+	NULL,				/* 420 */
+	NULL,				/* 421 */
+	NULL,				/* 422 */
+	NULL,				/* 423 */
+	NULL,				/* 424 */
+	NULL,				/* 425 */
+	NULL,				/* 426 */
+	NULL,				/* 427 */
+	NULL,				/* 428 */
+	NULL,				/* 429 */
+	NULL,				/* 430 */
+	NULL,				/* 431 */
+	NULL,				/* 432 */
+	NULL,				/* 433 */
+	NULL,				/* 434 */
+	lx_clone3,			/* 435: clone3 */
 
-	/* XXX TBD gap then x32 syscalls from 512 - 544 */
+	/* XXX TBD x32 syscalls from 512 - 544 */
 };
 
 #else

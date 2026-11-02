@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _SYS__LX_MISC_H
@@ -112,6 +113,7 @@ extern int lx_ptrace_issig_stop(proc_t *, klwp_t *);
 extern boolean_t lx_ptrace_sig_ignorable(proc_t *, klwp_t *, int);
 
 extern int lx_helper_clone(int64_t *, int, void *, void *, void *);
+extern int lx_clone_into_cgroup(int);
 extern int lx_helper_setgroups(int, gid_t *);
 extern int lx_helper_rt_sigqueueinfo(pid_t, int, siginfo_t *);
 extern int lx_helper_rt_tgsigqueueinfo(pid_t, pid_t, int, siginfo_t *);

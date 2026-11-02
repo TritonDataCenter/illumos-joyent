@@ -228,6 +228,7 @@ static int lx_systrace_enabled;
  * cgroup file system maintenance functions which are set when cgroups loads.
  */
 int (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
+int (*lx_cgrp_vp_to_id)(vfs_t *, vnode_t *, cred_t *, uint_t *);
 void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
 int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 
@@ -1634,6 +1635,9 @@ lx_brandsys(int cmd, int64_t *rval, uintptr_t arg1, uintptr_t arg2,
 
 	case B_HELPER_SETGROUPS:
 		return (lx_helper_setgroups(arg1, (gid_t *)arg2));
+
+	case B_CLONE_INTO_CGROUP:
+		return (lx_clone_into_cgroup((int)arg1));
 
 	case B_HELPER_SIGQUEUE:
 		return (lx_helper_rt_sigqueueinfo(arg1, arg2,

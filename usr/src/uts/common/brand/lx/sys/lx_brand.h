@@ -80,7 +80,7 @@ extern "C" {
 /*
  * This must be large enough for both the 32-bit table and 64-bit table.
  */
-#define	LX_NSYSCALLS		358
+#define	LX_NSYSCALLS		436
 
 /* Highest capability we know about */
 #define	LX_CAP_MAX_VALID	36
@@ -118,6 +118,7 @@ extern "C" {
 #define	B_OVERRIDE_KERN_VER	149
 #define	B_PTRACE_SIG_RETURN	150
 #define	B_GET_PERSONALITY	151
+#define	B_CLONE_INTO_CGROUP	152
 
 #ifndef _ASM
 /*
@@ -284,6 +285,7 @@ typedef enum lx_proc_flags {
  * Entry points for cgroup integration.
  */
 extern int (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
+extern int (*lx_cgrp_vp_to_id)(vfs_t *, vnode_t *, cred_t *, uint_t *);
 extern void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
 extern int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 
@@ -602,6 +604,13 @@ struct lx_lwp_data {
 	 * ID of the cgroup this thread belongs to.
 	 */
 	uint_t br_cgroupid;
+
+	/*
+	 * Target cgroup for lwps created by this thread, for the duration of
+	 * a clone3(2) call with CLONE_INTO_CGROUP (see B_CLONE_INTO_CGROUP).
+	 */
+	boolean_t br_clone_cgroup;
+	uint_t br_clone_cgroupid;
 
 	/*
 	 * When the zone is running under FSS (which is the common case) then

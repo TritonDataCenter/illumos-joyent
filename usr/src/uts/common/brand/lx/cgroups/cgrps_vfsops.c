@@ -270,6 +270,7 @@ static void cgrp_freevfs(vfs_t *vfsp);
 static int cgrp_lwp_fork_helper(vfs_t *, uint_t, id_t, pid_t);
 static void cgrp_lwp_exit_helper(vfs_t *, uint_t, id_t, pid_t);
 static int cgrp_pid_cgroup_helper(vfs_t *, uint_t, char *, size_t);
+static int cgrp_vp_to_id_helper(vfs_t *, vnode_t *, cred_t *, uint_t *);
 
 /*
  * Loadable module wrapper
@@ -316,6 +317,7 @@ _fini()
 	lx_cgrp_initlwp = NULL;
 	lx_cgrp_freelwp = NULL;
 	lx_cgrp_pidcgroup = NULL;
+	lx_cgrp_vp_to_id = NULL;
 
 	taskq_destroy(cgrp_evtq);
 	cgrp_evtq = NULL;
@@ -396,6 +398,7 @@ cgrp_init(int fstype, char *name)
 	lx_cgrp_initlwp = cgrp_lwp_fork_helper;
 	lx_cgrp_freelwp = cgrp_lwp_exit_helper;
 	lx_cgrp_pidcgroup = cgrp_pid_cgroup_helper;
+	lx_cgrp_vp_to_id = cgrp_vp_to_id_helper;
 
 	return (0);
 }
@@ -1093,8 +1096,10 @@ cgrp_rel_agent_event(cgrp_mnt_t *cgm, cgrp_node_t *cn, boolean_t is_exit)
 }
 
 /*
- * Account for a new lwp in cgroup 'cg_id'. Returns non-zero if the cgroup is
- * frozen (cgroup v2), in which case the caller stops the new lwp.
+ * Account for a new lwp in cgroup 'cg_id'. Returns 1 if the cgroup is frozen
+ * (cgroup v2), in which case the caller stops the new lwp, and -1 if there is
+ * no such cgroup. The latter can only happen for the target cgroup of a
+ * clone3(2) CLONE_INTO_CGROUP call, if it was removed in the meantime.
  */
 /*ARGSUSED*/
 static int
@@ -1105,8 +1110,10 @@ cgrp_lwp_fork_helper(vfs_t *vfsp, uint_t cg_id, id_t tid, pid_t tpid)
 	int frozen = 0;
 
 	mutex_enter(&cgm->cg_contents);
-	cn = cgrp_cg_hash_lookup(cgm, cg_id);
-	ASSERT(cn != NULL);
+	if ((cn = cgrp_cg_hash_lookup(cgm, cg_id)) == NULL) {
+		mutex_exit(&cgm->cg_contents);
+		return (-1);
+	}
 	cgrp_task_adjust(cgm, cn, 1);
 	if (CG_IS_V2(cgm) && cgrp_is_frozen(cn))
 		frozen = 1;
@@ -1181,5 +1188,33 @@ cgrp_pid_cgroup_helper(vfs_t *vfsp, uint_t cg_id, char *buf, size_t blen)
 		(void) snprintf(buf, blen, "0::%s\n", path);
 
 	kmem_free(path, MAXPATHLEN);
+	return (error);
+}
+
+/*
+ * Return the ID of the cgroup v2 directory 'vp', for clone3(2) with
+ * CLONE_INTO_CGROUP. Like moving a process via cgroup.procs, this requires
+ * write access to the target cgroup.
+ */
+static int
+cgrp_vp_to_id_helper(vfs_t *vfsp, vnode_t *vp, cred_t *cr, uint_t *idp)
+{
+	cgrp_mnt_t *cgm = (cgrp_mnt_t *)VFSTOCGM(vfsp);
+	cgrp_node_t *cn = VTOCGN(vp);
+	int error;
+
+	if (!CG_IS_V2(cgm) || vp->v_type != VDIR ||
+	    cn->cgn_type != CG_CGROUP_DIR)
+		return (EBADF);
+
+	mutex_enter(&cgm->cg_contents);
+	if (cn->cgn_nlink == 0) {
+		/* The cgroup has been removed. */
+		error = ENODEV;
+	} else if ((error = cgrp_taccess(cn, VWRITE, cr)) == 0) {
+		*idp = cn->cgn_id;
+	}
+	mutex_exit(&cgm->cg_contents);
+
 	return (error);
 }

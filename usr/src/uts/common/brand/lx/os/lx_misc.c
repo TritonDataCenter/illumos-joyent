@@ -25,6 +25,7 @@
 
 /*
  * Copyright 2022 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/errno.h>
@@ -447,6 +448,7 @@ lx_initlwp(klwp_t *lwp, void *lwpbd)
 	proc_t *p = lwptoproc(lwp);
 	lx_zone_data_t *lxzdata;
 	vfs_t *cgrp;
+	int frozen;
 
 	VERIFY(MUTEX_HELD(&p->p_lock));
 	VERIFY(lwp->lwp_brand == NULL);
@@ -517,10 +519,12 @@ lx_initlwp(klwp_t *lwp, void *lwpbd)
 	lwp->lwp_brand_syscall = lx_syscall_enter;
 
 	/*
-	 * The new LWP inherits the parent LWP cgroup ID.
+	 * The new LWP inherits the parent LWP cgroup ID, unless the parent is
+	 * in a clone3(2) call with CLONE_INTO_CGROUP.
 	 */
 	if (plwpd != NULL) {
-		lwpd->br_cgroupid = plwpd->br_cgroupid;
+		lwpd->br_cgroupid = plwpd->br_clone_cgroup ?
+		    plwpd->br_clone_cgroupid : plwpd->br_cgroupid;
 	}
 	/*
 	 * The new LWP inherits the parent LWP emulated scheduling info.
@@ -540,8 +544,18 @@ lx_initlwp(klwp_t *lwp, void *lwpbd)
 		VFS_HOLD(cgrp);
 		mutex_exit(&lxzdata->lxzd_lock);
 		ASSERT(lx_cgrp_initlwp != NULL);
-		if ((*lx_cgrp_initlwp)(cgrp, lwpd->br_cgroupid,
-		    lwptot(lwp)->t_tid, lwpd->br_pid) != 0) {
+		frozen = (*lx_cgrp_initlwp)(cgrp, lwpd->br_cgroupid,
+		    lwptot(lwp)->t_tid, lwpd->br_pid);
+		if (frozen < 0 && plwpd != NULL && plwpd->br_clone_cgroup) {
+			/*
+			 * The CLONE_INTO_CGROUP target cgroup was removed
+			 * after it was set; fall back to the parent's.
+			 */
+			lwpd->br_cgroupid = plwpd->br_cgroupid;
+			frozen = (*lx_cgrp_initlwp)(cgrp, lwpd->br_cgroupid,
+			    lwptot(lwp)->t_tid, lwpd->br_pid);
+		}
+		if (frozen > 0) {
 			/*
 			 * The cgroup is frozen (cgroup v2 cgroup.freeze), so
 			 * the new lwp must stop before it runs any user code.

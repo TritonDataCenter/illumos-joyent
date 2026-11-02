@@ -27,6 +27,7 @@
 /*
  * Copyright 2019 Joyent, Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>
@@ -2189,6 +2190,27 @@ void
 lx_sighandlers_restore(lx_sighandlers_t *saved)
 {
 	bcopy(saved, &lx_sighandlers, sizeof (lx_sighandlers_t));
+}
+
+/*
+ * Reset all signal handlers to SIG_DFL, leaving ignored signals ignored, for
+ * clone3(2) with CLONE_CLEAR_SIGHAND. This is called in the child.
+ */
+void
+lx_sighandlers_clear(void)
+{
+	struct lx_sigaction lxsa;
+	int lx_sig;
+
+	bzero(&lxsa, sizeof (lxsa));
+	lxsa.lxsa_handler = SIG_DFL;
+
+	for (lx_sig = 1; lx_sig <= LX_NSIG; lx_sig++) {
+		void (*handler)() = lx_sighandlers.lx_sa[lx_sig].lxsa_handler;
+
+		if (handler != SIG_DFL && handler != SIG_IGN)
+			(void) lx_sigaction_common(lx_sig, &lxsa, NULL);
+	}
 }
 
 int

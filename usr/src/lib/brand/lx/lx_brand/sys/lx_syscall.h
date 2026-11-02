@@ -26,6 +26,7 @@
 
 /*
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _SYS_LX_SYSCALL_H
@@ -99,6 +100,7 @@ extern long lx_query_module(uintptr_t, uintptr_t, uintptr_t, uintptr_t,
 extern long lx_setitimer(uintptr_t, uintptr_t, uintptr_t);
 
 extern long lx_clone(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+extern long lx_clone3(uintptr_t, uintptr_t);
 extern long lx_exit(uintptr_t);
 extern long lx_group_exit(uintptr_t);
 

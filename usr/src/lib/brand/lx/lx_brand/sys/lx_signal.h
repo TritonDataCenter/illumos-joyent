@@ -22,6 +22,7 @@
  * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2015 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _SYS_LX_SIGNAL_H
@@ -276,6 +277,7 @@ extern void setsigacthandler(void (*)(int, siginfo_t *, void *),
 extern int lx_siginit(void);
 extern void lx_sighandlers_save(lx_sighandlers_t *);
 extern void lx_sighandlers_restore(lx_sighandlers_t *);
+extern void lx_sighandlers_clear(void);
 
 extern int stol_siginfo(siginfo_t *siginfop, lx_siginfo_t *lx_siginfop);
 extern int stol_status(int);
