@@ -11,6 +11,7 @@
 
 /*
  * Copyright (c) 2017 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/errno.h>
@@ -136,6 +137,7 @@ lx_setxattr_common(vnode_t *vp, char *name, void *value, size_t sz, int flags)
 		} else if (strcmp(key, LX_XATTR_POSIX_ACL_DEFAULT) == 0) {
 			error = lx_acl_setxattr(vp, LX_ACL_DEFAULT, buf, sz);
 		}
+		break;
 	default:
 		break;
 	}
@@ -258,11 +260,12 @@ lx_removexattr_common(vnode_t *vp, char *name)
 		} else if (strcmp(key, LX_XATTR_POSIX_ACL_DEFAULT) == 0) {
 			error = lx_acl_removexattr(vp, LX_ACL_DEFAULT);
 		}
+		break;
 	default:
 		break;
 	}
 
-	return (EOPNOTSUPP);
+	return (error);
 }
 
 
