@@ -97,6 +97,7 @@ typedef enum cgrp_nodetype {
 	CG_MAX_DEPTH,		/* cgroup.max.depth file */
 	CG_MAX_DESC,		/* cgroup.max.descendants file */
 	CG_STAT,		/* cgroup.stat file */
+	CG_KILL,		/* cgroup.kill file */
 } cgrp_nodetype_t;
 
 /* cgrp_ssd_flags */

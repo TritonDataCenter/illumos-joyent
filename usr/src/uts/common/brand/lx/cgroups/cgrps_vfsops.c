@@ -133,8 +133,10 @@
  * there is no tasks, notify_on_release or release_agent file. Instead each
  * cgroup has the cgroup v2 core interface files (cgroup.procs,
  * cgroup.threads, cgroup.controllers, cgroup.subtree_control, cgroup.events,
- * cgroup.type, cgroup.max.depth, cgroup.max.descendants and cgroup.stat).
- * No controllers are available, so cgroup.controllers is always empty.
+ * cgroup.type, cgroup.max.depth, cgroup.max.descendants, cgroup.stat and
+ * cgroup.kill). No controllers are available, so cgroup.controllers is always
+ * empty. Writing "1" to cgroup.kill sends SIGKILL to every process in the
+ * cgroup and its descendants.
  *
  * In cgroup v2, a cgroup's "populated" state (reported in cgroup.events)
  * is true when the cgroup or any of its descendants contains a task. We

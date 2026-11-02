@@ -512,6 +512,121 @@ cgrp_wr_max(struct uio *uio)
 	return (EOPNOTSUPP);
 }
 
+/*
+ * Return B_TRUE if the cgroup with ID 'id' is the cgroup with ID 'top_id', or
+ * one of its descendants.
+ */
+static boolean_t
+cgrp_in_subtree(cgrp_mnt_t *cgm, uint_t id, uint_t top_id)
+{
+	cgrp_node_t *cn;
+
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
+
+	for (cn = cgrp_cg_hash_lookup(cgm, id); cn != NULL;
+	    cn = cn->cgn_parent) {
+		if (cn->cgn_id == top_id)
+			return (B_TRUE);
+		if (cn->cgn_parent == cn)
+			break;
+	}
+	return (B_FALSE);
+}
+
+/*
+ * Maximum number of passes over the process table for a cgroup.kill write.
+ * A process which is forking while we scan may create a child in the cgroup
+ * after we have looked at its slot, so we repeat the scan until a pass does
+ * not find anything left to kill.
+ */
+#define	CGRP_KILL_MAXPASS	16
+
+/*
+ * Handle a write to cgroup.kill. Writing "1" sends SIGKILL to all processes
+ * in the cgroup and all of its descendants.
+ */
+static int
+cgrp_wr_kill(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
+{
+	char buf[16];
+	int error, i, pass;
+	uint_t nkilled;
+	zoneid_t zoneid = curproc->p_zone->zone_id;
+	pid_t schedpid = curproc->p_zone->zone_zsched->p_pid;
+	/* the cgroup ID is on the containing dir */
+	uint_t cg_id = cn->cgn_parent->cgn_id;
+
+	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
+		return (error);
+	if (strcmp(buf, "1") != 0)
+		return (EINVAL);
+
+	/* The cgroup may have been removed while the file was open. */
+	mutex_enter(&cgm->cg_contents);
+	if (cgrp_cg_hash_lookup(cgm, cg_id) == NULL) {
+		mutex_exit(&cgm->cg_contents);
+		return (ENODEV);
+	}
+	mutex_exit(&cgm->cg_contents);
+
+	for (pass = 0; pass < CGRP_KILL_MAXPASS; pass++) {
+		nkilled = 0;
+
+		for (i = 1; i < v.v_proc; i++) {
+			proc_t *p;
+			kthread_t *t;
+			boolean_t in_cg = B_FALSE;
+
+			mutex_enter(&pidlock);
+			if ((p = pid_entry(i)) == NULL ||
+			    p->p_stat == SIDL ||
+			    (p->p_flag & SSYS) != 0 ||
+			    p->p_pid == 0 ||
+			    p->p_pid == schedpid ||
+			    p->p_brand != &lx_brand ||
+			    p->p_zone->zone_id != zoneid) {
+				mutex_exit(&pidlock);
+				continue;
+			}
+
+			mutex_enter(&p->p_lock);
+			mutex_exit(&pidlock);
+
+			/* Skip processes which are exiting or already killed */
+			if ((p->p_flag & SEXITING) != 0 ||
+			    (t = p->p_tlist) == NULL ||
+			    sigismember(&p->p_sig, SIGKILL)) {
+				mutex_exit(&p->p_lock);
+				continue;
+			}
+
+			mutex_enter(&cgm->cg_contents);
+			do {
+				lx_lwp_data_t *plwpd = ttolxlwp(t);
+
+				if (plwpd != NULL && cgrp_in_subtree(cgm,
+				    plwpd->br_cgroupid, cg_id)) {
+					in_cg = B_TRUE;
+					break;
+				}
+				t = t->t_forw;
+			} while (t != p->p_tlist);
+			mutex_exit(&cgm->cg_contents);
+
+			if (in_cg) {
+				sigtoproc(p, NULL, SIGKILL);
+				nkilled++;
+			}
+			mutex_exit(&p->p_lock);
+		}
+
+		if (nkilled == 0)
+			break;
+	}
+
+	return (0);
+}
+
 static int
 cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 {
@@ -564,6 +679,9 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	case CG_MAX_DEPTH:
 	case CG_MAX_DESC:
 		error = cgrp_wr_max(uio);
+		break;
+	case CG_KILL:
+		error = cgrp_wr_kill(cgm, cn, uio);
 		break;
 	case CG_CONTROLLERS:
 	case CG_EVENTS:
@@ -1019,6 +1137,10 @@ cgrp_rd(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	case CG_MAX_DESC:
 	case CG_STAT:
 		error = cgrp_rd_v2(cgm, cn, uio);
+		break;
+	case CG_KILL:
+		/* write-only file */
+		error = EINVAL;
 		break;
 	default:
 		VERIFY(0);

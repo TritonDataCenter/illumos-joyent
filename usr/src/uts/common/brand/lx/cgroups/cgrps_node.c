@@ -61,7 +61,9 @@ static cgrp_subsys_dirent_t cgrp_unified_dir[] = {
 	    CGSD_NONROOT_ONLY },
 	{ CG_MAX_DEPTH,		"cgroup.max.depth",	0644,	0 },
 	{ CG_MAX_DESC,		"cgroup.max.descendants", 0644,	0 },
-	{ CG_STAT,		"cgroup.stat",		0444,	0 }
+	{ CG_STAT,		"cgroup.stat",		0444,	0 },
+	{ CG_KILL,		"cgroup.kill",		0200,
+	    CGSD_NONROOT_ONLY }
 };
 
 typedef struct cgrp_ssde {
