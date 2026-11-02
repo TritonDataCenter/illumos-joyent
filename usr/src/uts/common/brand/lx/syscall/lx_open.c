@@ -57,8 +57,16 @@ ltos_open_flags(int input)
 {
 	int flags;
 
-	if (input & LX_O_PATH)
+	/*
+	 * An O_PATH open on Linux never opens the underlying device, so it can
+	 * never acquire a controlling terminal. We emulate O_PATH with a real
+	 * (read-only) open, so make sure that it does not either; e.g. systemd
+	 * (pid 1) opens the console with O_PATH to chown it.
+	 */
+	if (input & LX_O_PATH) {
 		input &= (LX_O_DIRECTORY | LX_O_NOFOLLOW | LX_O_CLOEXEC);
+		input |= LX_O_NOCTTY;
+	}
 
 	/*
 	 * The illumos O_ACCMODE also includes O_SEARCH|O_EXEC
