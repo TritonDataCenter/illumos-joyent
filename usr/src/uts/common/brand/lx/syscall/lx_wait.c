@@ -23,6 +23,7 @@
  * Copyright 2007 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2019 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -99,6 +100,7 @@ extern int rusagesys(int, void *, void *, void *, void *);
 #define	LX_P_ALL	0x0
 #define	LX_P_PID	0x1
 #define	LX_P_GID	0x2
+#define	LX_P_PIDFD	0x3
 
 /*
  * Split the passed waitpid/waitid options into two separate variables:
@@ -331,6 +333,7 @@ lx_waitid(uintptr_t idtype, uintptr_t id, uintptr_t infop, uintptr_t opt)
 	int error;
 	int native_options, extra_options;
 	k_siginfo_t info = { 0 };
+	boolean_t pidfd_nonblock = B_FALSE;
 
 	if (ltos_options(opt, &native_options, &extra_options) == -1) {
 		return (set_errno(EINVAL));
@@ -350,6 +353,25 @@ lx_waitid(uintptr_t idtype, uintptr_t id, uintptr_t infop, uintptr_t opt)
 	case LX_P_GID:
 		idtype = P_PGID;
 		break;
+	case LX_P_PIDFD: {
+		pid_t pid;
+
+		/*
+		 * Wait for the process referred to by the pidfd. With a
+		 * non-blocking pidfd, fail with EAGAIN rather than block.
+		 */
+		if ((error = lx_pidfd_waitid_pid((int)id, &pid,
+		    &pidfd_nonblock)) != 0)
+			return (set_errno(error));
+		idtype = P_PID;
+		id = pid;
+		if (pidfd_nonblock && (native_options & WNOHANG) == 0) {
+			native_options |= WNOHANG;
+		} else {
+			pidfd_nonblock = B_FALSE;
+		}
+		break;
+	}
 	default:
 		return (set_errno(EINVAL));
 	}
@@ -363,8 +385,14 @@ lx_waitid(uintptr_t idtype, uintptr_t id, uintptr_t infop, uintptr_t opt)
 	 * If the WNOHANG flag was specified and no child was found return 0.
 	 */
 	if ((native_options & WNOHANG) && info.si_pid == 0) {
+		if (pidfd_nonblock)
+			return (set_errno(EAGAIN));
 		return (0);
 	}
+
+	/* Linux allows a NULL infop. */
+	if (infop == 0)
+		return (0);
 
 #if defined(_SYSCALL32_IMPL)
 	if (get_udatamodel() != DATAMODEL_NATIVE) {

@@ -524,7 +524,7 @@ lx_set_tid_address(int *tidp)
  * creates the child, and with -1 afterwards. While set, lx_initlwp() places
  * lwps created by this thread into the target cgroup instead of the cgroup
  * of the creating thread. The fd must refer to a cgroup of the zone's cgroup
- * v2 file system.
+ * v2 file system. Like all brand calls, this returns an errno value.
  */
 int
 lx_clone_into_cgroup(int fd)
@@ -543,7 +543,7 @@ lx_clone_into_cgroup(int fd)
 	}
 
 	if ((fp = getf(fd)) == NULL)
-		return (set_errno(EBADF));
+		return (EBADF);
 
 	mutex_enter(&lxzd->lxzd_lock);
 	if ((cgrp = lxzd->lxzd_cgroup) != NULL)
@@ -562,7 +562,7 @@ lx_clone_into_cgroup(int fd)
 	releasef(fd);
 
 	if (error != 0)
-		return (set_errno(error));
+		return (error);
 
 	lwpd->br_clone_cgroup = B_TRUE;
 	lwpd->br_clone_cgroupid = id;

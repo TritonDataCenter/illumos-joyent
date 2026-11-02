@@ -114,6 +114,14 @@ extern boolean_t lx_ptrace_sig_ignorable(proc_t *, klwp_t *, int);
 
 extern int lx_helper_clone(int64_t *, int, void *, void *, void *);
 extern int lx_clone_into_cgroup(int);
+extern int lx_helper_pidfd_open(pid_t, int64_t *);
+extern void lx_pidfd_init(void);
+extern void lx_pidfd_fini(void);
+extern int lx_pidfd_create(pid_t, boolean_t, boolean_t, int *);
+extern void lx_pidfd_proc_exit(proc_t *);
+extern int lx_pidfd_waitid_pid(int, pid_t *, boolean_t *);
+extern boolean_t lx_pidfd_vnode(vnode_t *);
+extern boolean_t lx_pidfd_getpid(vnode_t *, pid_t *);
 extern int lx_helper_setgroups(int, gid_t *);
 extern int lx_helper_rt_sigqueueinfo(pid_t, int, siginfo_t *);
 extern int lx_helper_rt_tgsigqueueinfo(pid_t, pid_t, int, siginfo_t *);

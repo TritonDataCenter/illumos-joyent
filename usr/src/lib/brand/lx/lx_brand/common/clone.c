@@ -284,9 +284,15 @@ ptrace_clone_event(int flags)
  * and the Linux kernel/fork.c code for the various ways arguments can be passed
  * to the clone syscall (CONFIG_CLONE_BACKWARDS, et al).
  */
+/*
+ * The implementation of clone(2) and clone3(2). If 'clear_sighand' is set,
+ * the signal handlers are reset in the child (CLONE_CLEAR_SIGHAND). If
+ * 'pidfdp' is not NULL, a pidfd for the child is stored there (CLONE_PIDFD);
+ * this is only supported when creating a process.
+ */
 static long
 lx_clone_common(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4,
-    uintptr_t p5, boolean_t clear_sighand)
+    uintptr_t p5, boolean_t clear_sighand, int *pidfdp)
 {
 	struct clone_state *cs;
 	int flags = (int)p1;
@@ -374,6 +380,12 @@ lx_clone_common(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4,
 		if (uucopy(ctidp, &pid, sizeof (int)) != 0)
 			return (-EFAULT);
 		if (uucopy(&pid, ctidp, sizeof (int)) != 0)
+			return (-EFAULT);
+	}
+	if (pidfdp != NULL) {
+		if (uucopy(pidfdp, &pid, sizeof (int)) != 0)
+			return (-EFAULT);
+		if (uucopy(&pid, pidfdp, sizeof (int)) != 0)
 			return (-EFAULT);
 	}
 
@@ -484,6 +496,20 @@ lx_clone_common(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4,
 			if (rval > 0) {
 				lx_ptrace_stop_if_option(ptrace_event, B_FALSE,
 				    (ulong_t)rval, NULL);
+			}
+
+			/*
+			 * CLONE_PIDFD. Unlike Linux, we can only create the
+			 * pidfd once the child exists; if that fails (e.g.
+			 * EMFILE), the child has been created regardless.
+			 */
+			if (rval > 0 && pidfdp != NULL) {
+				int pidfd;
+
+				if ((pidfd = syscall(SYS_brand, B_PIDFD_OPEN,
+				    rval)) < 0)
+					return (-errno);
+				(void) uucopy(&pidfd, pidfdp, sizeof (int));
 			}
 
 			return ((rval < 0) ? -errno : rval);
@@ -750,7 +776,23 @@ lx_clone_common(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4,
 long
 lx_clone(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4, uintptr_t p5)
 {
-	return (lx_clone_common(p1, p2, p3, p4, p5, B_FALSE));
+	int flags = (int)p1;
+	int *pidfdp = NULL;
+
+	/*
+	 * CLONE_PIDFD (formerly CLONE_PID): the pidfd is returned via the
+	 * parent_tid argument, so it can't be combined with
+	 * CLONE_PARENT_SETTID.
+	 */
+	if ((flags & LX_CLONE_PID) != 0) {
+		if ((flags & (LX_CLONE_PARENT_SETTID | LX_CLONE_THREAD |
+		    LX_CLONE_DETACH)) != 0)
+			return (-EINVAL);
+		pidfdp = (int *)p3;
+		p1 &= ~(uintptr_t)LX_CLONE_PID;
+	}
+
+	return (lx_clone_common(p1, p2, p3, p4, p5, B_FALSE, pidfdp));
 }
 
 /*
@@ -785,9 +827,10 @@ typedef struct lx_clone_args {
  *  - CLONE_INTO_CGROUP creates the child in the cgroup v2 cgroup referred to
  *    by the cgroup fd; see lx_clone_into_cgroup() in the kernel.
  *
- * We have no pidfd support, so CLONE_PIDFD fails with EOPNOTSUPP, as does
- * glibc's pidfd_spawn(3) itself in that case. Setting the child's tid
- * (set_tid) requires privileges in a pid namespace, so fails with EPERM.
+ *  - CLONE_PIDFD returns a pidfd for the child via the pidfd argument.
+ *
+ * Setting the child's tid (set_tid) requires privileges in a pid namespace,
+ * so fails with EPERM.
  */
 long
 lx_clone3(uintptr_t p1, uintptr_t p2)
@@ -797,6 +840,7 @@ lx_clone3(uintptr_t p1, uintptr_t p2)
 	uint64_t flags;
 	uintptr_t stack = 0;
 	boolean_t into_cgroup;
+	int *pidfdp = NULL;
 	long rval;
 
 	if (size < LX_CLONE_ARGS_SIZE_VER0)
@@ -843,8 +887,11 @@ lx_clone3(uintptr_t p1, uintptr_t p2)
 		return (-EINVAL);
 
 	if ((flags & LX_CLONE_PIDFD) != 0) {
-		lx_unsupported("clone3(2) CLONE_PIDFD is not supported");
-		return (-EOPNOTSUPP);
+		/* A pidfd can only refer to a process. */
+		if ((flags & (LX_CLONE_THREAD | LX_CLONE_DETACH)) != 0)
+			return (-EINVAL);
+		pidfdp = (int *)(uintptr_t)args.lxca_pidfd;
+		flags &= ~LX_CLONE_PIDFD;
 	}
 
 	into_cgroup = (flags & LX_CLONE_INTO_CGROUP) != 0;
@@ -867,12 +914,12 @@ lx_clone3(uintptr_t p1, uintptr_t p2)
 	rval = lx_clone_common((flags & 0xffffffffULL) | args.lxca_exit_signal,
 	    stack, (uintptr_t)args.lxca_parent_tid,
 	    (uintptr_t)args.lxca_child_tid, (uintptr_t)args.lxca_tls,
-	    (flags & LX_CLONE_CLEAR_SIGHAND) != 0);
+	    (flags & LX_CLONE_CLEAR_SIGHAND) != 0, pidfdp);
 #else
 	rval = lx_clone_common((flags & 0xffffffffULL) | args.lxca_exit_signal,
 	    stack, (uintptr_t)args.lxca_parent_tid,
 	    (uintptr_t)args.lxca_tls, (uintptr_t)args.lxca_child_tid,
-	    (flags & LX_CLONE_CLEAR_SIGHAND) != 0);
+	    (flags & LX_CLONE_CLEAR_SIGHAND) != 0, pidfdp);
 #endif
 
 	/*

@@ -1326,7 +1326,7 @@ lx_sysent_t lx_sysent64[] = {
 	{"unused421",	NULL,			NOSYS_NULL,	0}, /* 421 */
 	{"unused422",	NULL,			NOSYS_NULL,	0}, /* 422 */
 	{"unused423",	NULL,			NOSYS_NULL,	0}, /* 423 */
-	{"pidfd_send_signal", NULL,		NOSYS_NULL,	0}, /* 424 */
+	{"pidfd_send_signal", lx_pidfd_send_signal, 0,	4}, /* 424 */
 	{"io_uring_setup", NULL,		NOSYS_NULL,	0}, /* 425 */
 	{"io_uring_enter", NULL,		NOSYS_NULL,	0}, /* 426 */
 	{"io_uring_register", NULL,		NOSYS_NULL,	0}, /* 427 */
@@ -1336,7 +1336,7 @@ lx_sysent_t lx_sysent64[] = {
 	{"fsconfig",	NULL,			NOSYS_NULL,	0}, /* 431 */
 	{"fsmount",	NULL,			NOSYS_NULL,	0}, /* 432 */
 	{"fspick",	NULL,			NOSYS_NULL,	0}, /* 433 */
-	{"pidfd_open",	NULL,			NOSYS_NULL,	0}, /* 434 */
+	{"pidfd_open",	lx_pidfd_open,		0,		2}, /* 434 */
 	{"clone3",	NULL,			0,		2}, /* 435 */
 
 	/* XXX TBD x32 syscalls from 512 - 544 */

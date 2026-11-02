@@ -6451,6 +6451,7 @@ lxpr_read_fdinfo(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 	offset_t off;
 	short uf_flag;
 	int fd;
+	pid_t pidfd_pid;
 
 	ASSERT(lxpnp->lxpr_type == LXPR_PID_FDINFO_FD);
 
@@ -6497,8 +6498,17 @@ lxpr_read_fdinfo(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 
 	/* Could show additional fields based on vp->v_type */
 
+	VN_HOLD(vp);
 	lxpr_releasef(p, fd);
 	lxpr_unlock(p);
+
+	/*
+	 * For a pidfd, show the pid of the process it refers to. This must be
+	 * done without the process lock held.
+	 */
+	if (lx_pidfd_getpid(vp, &pidfd_pid))
+		lxpr_uiobuf_printf(uiobuf, "Pid:\t%d\n", pidfd_pid);
+	VN_RELE(vp);
 }
 
 /*

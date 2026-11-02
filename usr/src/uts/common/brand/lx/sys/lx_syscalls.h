@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2018 Joyent, Inc.
  * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _SYS_LINUX_SYSCALLS_H
@@ -131,6 +132,8 @@ extern long lx_ioctl();
 extern long lx_ioprio_get();
 extern long lx_ioprio_set();
 extern long lx_kill();
+extern long lx_pidfd_open();
+extern long lx_pidfd_send_signal();
 extern long lx_lchown();
 extern long lx_lchown16();
 extern long lx_lgetxattr();

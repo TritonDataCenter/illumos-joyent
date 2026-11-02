@@ -24,6 +24,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2024 MNX Cloud, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -39,6 +40,7 @@
 #include <sys/brand.h>
 #include <sys/fcntl.h>
 #include <sys/lx_brand.h>
+#include <sys/lx_misc.h>
 #include <sys/lx_fcntl.h>
 
 #include "lx_proc.h"
@@ -828,6 +830,13 @@ lxpr_readlink_fdnode(lxpr_node_t *lxpnp, char *bp, size_t len)
 	const char *format;
 	vnode_t *rvp = lxpnp->lxpr_realvp;
 	vattr_t attr;
+
+	if (lx_pidfd_vnode(rvp)) {
+		/* Linux anonymous inodes have no inode number in the link */
+		if (bp != NULL)
+			(void) strlcpy(bp, "anon_inode:[pidfd]", len);
+		return (0);
+	}
 
 	switch (rvp->v_type) {
 	case VSOCK:

@@ -119,6 +119,7 @@ extern "C" {
 #define	B_PTRACE_SIG_RETURN	150
 #define	B_GET_PERSONALITY	151
 #define	B_CLONE_INTO_CGROUP	152
+#define	B_PIDFD_OPEN		153
 
 #ifndef _ASM
 /*
@@ -267,7 +268,8 @@ typedef enum lx_proc_flags {
 	LX_PROC_STRICT_MODE	= 0x02,
 	/* internal flags */
 	LX_PROC_CHILD_DEATHSIG	= 0x04,
-	LX_PROC_NO_DUMP		= 0x08	/* for lx_prctl LX_PR_[GS]ET_DUMPABLE */
+	LX_PROC_NO_DUMP		= 0x08,	/* for lx_prctl LX_PR_[GS]ET_DUMPABLE */
+	LX_PROC_EXITED		= 0x10	/* exited, for pidfds */
 } lx_proc_flags_t;
 
 #define	LX_PROC_ALL	(LX_PROC_INSTALL_MODE | LX_PROC_STRICT_MODE)

@@ -362,6 +362,8 @@ lx_proc_exit(proc_t *p)
 	lx_clone_grp_exit(p, B_FALSE);
 	/* Cleanup any outstanding aio contexts */
 	lx_io_cleanup(p);
+	/* Notify any pidfds referring to this process */
+	lx_pidfd_proc_exit(p);
 
 	mutex_enter(&p->p_lock);
 	VERIFY((lxpd = ptolxproc(p)) != NULL);
@@ -1639,6 +1641,9 @@ lx_brandsys(int cmd, int64_t *rval, uintptr_t arg1, uintptr_t arg2,
 	case B_CLONE_INTO_CGROUP:
 		return (lx_clone_into_cgroup((int)arg1));
 
+	case B_PIDFD_OPEN:
+		return (lx_helper_pidfd_open((pid_t)arg1, rval));
+
 	case B_HELPER_SIGQUEUE:
 		return (lx_helper_rt_sigqueueinfo(arg1, arg2,
 		    (siginfo_t *)arg3));
@@ -1992,6 +1997,9 @@ lx_copy_procdata(proc_t *cp, proc_t *pp)
 	 * out.  If it is to be inherited, the attach will occur later.
 	 */
 	cpd->l_ptrace = 0;
+
+	/* The child has not exited, as far as pidfds are concerned. */
+	cpd->l_flags &= ~LX_PROC_EXITED;
 
 	cpd->l_fake_limits[LX_RLFAKE_LOCKS].rlim_cur = LX_RLIM64_INFINITY;
 	cpd->l_fake_limits[LX_RLFAKE_LOCKS].rlim_max = LX_RLIM64_INFINITY;
@@ -2657,6 +2665,7 @@ _init(void)
 	lx_ptrace_init();
 	lx_socket_init();
 	lx_audit_ld();
+	lx_pidfd_init();
 
 	err = mod_install(&modlinkage);
 	if (err != 0) {
@@ -2671,6 +2680,7 @@ _init(void)
 		 */
 		lx_pid_fini();
 		lx_ioctl_fini();
+		lx_pidfd_fini();
 		if (lx_futex_fini())
 			panic("lx brand module cannot be loaded or unloaded.");
 	}
@@ -2708,6 +2718,8 @@ _fini(void)
 	futex_done = 1;
 
 	err = mod_remove(&modlinkage);
+	if (err == 0)
+		lx_pidfd_fini();
 
 done:
 	if (err) {
