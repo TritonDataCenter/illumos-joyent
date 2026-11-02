@@ -1107,10 +1107,13 @@ cgrp_setattr(struct vnode *vp, struct vattr *vap, int flags, struct cred *cred,
 	long mask;
 
 	/*
-	 * Cannot set these attributes
+	 * Cannot set these attributes. Note that va_mode is only valid when
+	 * AT_MODE is set; e.g. chown(2) leaves it uninitialized.
 	 */
 	if ((vap->va_mask & AT_NOSET) || (vap->va_mask & AT_XVATTR) ||
-	    (vap->va_mode & (S_ISUID | S_ISGID)) || (vap->va_mask & AT_SIZE))
+	    ((vap->va_mask & AT_MODE) &&
+	    (vap->va_mode & (S_ISUID | S_ISGID))) ||
+	    (vap->va_mask & AT_SIZE))
 		return (EINVAL);
 
 	cgm = VTOCGM(cn->cgn_vnode);
