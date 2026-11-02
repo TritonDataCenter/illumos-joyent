@@ -389,6 +389,13 @@ lx_clone_common(uintptr_t p1, uintptr_t p2, uintptr_t p3, uintptr_t p4,
 			return (-EFAULT);
 	}
 
+	/*
+	 * Fail like Linux, with EAGAIN, if creating the process or thread
+	 * would exceed a cgroup v2 pids.max limit.
+	 */
+	if (syscall(SYS_brand, B_CGROUP_PIDS_CHECK) != 0)
+		return (-errno);
+
 	ptrace_event = ptrace_clone_event(flags);
 
 	/*

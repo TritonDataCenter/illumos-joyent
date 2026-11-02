@@ -568,3 +568,68 @@ lx_clone_into_cgroup(int fd)
 	lwpd->br_clone_cgroupid = id;
 	return (0);
 }
+
+/*
+ * Return the zone's cgroup file system, held, or NULL if there is none.
+ */
+static vfs_t *
+lx_cgroup_vfs_hold(void)
+{
+	lx_zone_data_t *lxzd = ztolxzd(curproc->p_zone);
+	vfs_t *cgrp;
+
+	mutex_enter(&lxzd->lxzd_lock);
+	if ((cgrp = lxzd->lxzd_cgroup) != NULL)
+		VFS_HOLD(cgrp);
+	mutex_exit(&lxzd->lxzd_lock);
+	return (cgrp);
+}
+
+/*
+ * B_CGROUP_PIDS_CHECK: called by the user-level clone emulation before it
+ * creates a process or thread. Fails with EAGAIN if that would exceed a
+ * cgroup v2 pids.max limit. Like all brand calls, this returns an errno value.
+ */
+int
+lx_cgroup_pids_check(void)
+{
+	lx_lwp_data_t *lwpd = ttolxlwp(curthread);
+	vfs_t *cgrp;
+	uint_t id;
+	int error;
+
+	if ((cgrp = lx_cgroup_vfs_hold()) == NULL)
+		return (0);
+
+	id = lwpd->br_clone_cgroup ? lwpd->br_clone_cgroupid :
+	    lwpd->br_cgroupid;
+	ASSERT(lx_cgrp_pids_check != NULL);
+	error = (*lx_cgrp_pids_check)(cgrp, id);
+	VFS_RELE(cgrp);
+
+	return (error);
+}
+
+/*
+ * Called from lx_proc_exit(), on the last lwp of the exiting process, to
+ * account its CPU time to its cgroup (cgroup v2 cpu.stat).
+ */
+void
+lx_cgroup_proc_exit(proc_t *p)
+{
+	lx_lwp_data_t *lwpd = ttolxlwp(curthread);
+	clock_t utime, stime;
+	vfs_t *cgrp;
+
+	if (lwpd == NULL || (cgrp = lx_cgroup_vfs_hold()) == NULL)
+		return;
+
+	mutex_enter(&p->p_lock);
+	utime = p->p_utime;
+	stime = p->p_stime;
+	mutex_exit(&p->p_lock);
+
+	ASSERT(lx_cgrp_proc_exit != NULL);
+	(*lx_cgrp_proc_exit)(cgrp, lwpd->br_cgroupid, utime, stime);
+	VFS_RELE(cgrp);
+}

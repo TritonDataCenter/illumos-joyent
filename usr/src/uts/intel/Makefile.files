@@ -100,6 +100,7 @@ CORE_OBJS +=		\
 	prmachdep.o
 
 LX_CGROUP_OBJS +=	\
+	cgrps_ctl.o	\
 	cgrps_node.o	\
 	cgrps_vfsops.o	\
 	cgrps_vnops.o

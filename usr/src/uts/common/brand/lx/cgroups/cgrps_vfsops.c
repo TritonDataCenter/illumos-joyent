@@ -271,6 +271,8 @@ static int cgrp_lwp_fork_helper(vfs_t *, uint_t, id_t, pid_t);
 static void cgrp_lwp_exit_helper(vfs_t *, uint_t, id_t, pid_t);
 static int cgrp_pid_cgroup_helper(vfs_t *, uint_t, char *, size_t);
 static int cgrp_vp_to_id_helper(vfs_t *, vnode_t *, cred_t *, uint_t *);
+static int cgrp_pids_check_helper(vfs_t *, uint_t);
+static void cgrp_proc_exit_helper(vfs_t *, uint_t, clock_t, clock_t);
 
 /*
  * Loadable module wrapper
@@ -318,6 +320,8 @@ _fini()
 	lx_cgrp_freelwp = NULL;
 	lx_cgrp_pidcgroup = NULL;
 	lx_cgrp_vp_to_id = NULL;
+	lx_cgrp_pids_check = NULL;
+	lx_cgrp_proc_exit = NULL;
 
 	taskq_destroy(cgrp_evtq);
 	cgrp_evtq = NULL;
@@ -399,6 +403,8 @@ cgrp_init(int fstype, char *name)
 	lx_cgrp_freelwp = cgrp_lwp_exit_helper;
 	lx_cgrp_pidcgroup = cgrp_pid_cgroup_helper;
 	lx_cgrp_vp_to_id = cgrp_vp_to_id_helper;
+	lx_cgrp_pids_check = cgrp_pids_check_helper;
+	lx_cgrp_proc_exit = cgrp_proc_exit_helper;
 
 	return (0);
 }
@@ -1211,10 +1217,32 @@ cgrp_vp_to_id_helper(vfs_t *vfsp, vnode_t *vp, cred_t *cr, uint_t *idp)
 	if (cn->cgn_nlink == 0) {
 		/* The cgroup has been removed. */
 		error = ENODEV;
+	} else if (cn->cgn_subtree_ctl != 0 && !cgrp_is_root(cn)) {
+		/* "No internal processes", see cgrps_ctl.c */
+		error = EBUSY;
 	} else if ((error = cgrp_taccess(cn, VWRITE, cr)) == 0) {
 		*idp = cn->cgn_id;
 	}
 	mutex_exit(&cgm->cg_contents);
 
 	return (error);
+}
+
+/*
+ * B_CGROUP_PIDS_CHECK: check pids.max before creating a task in cgroup
+ * 'cg_id'; see cgrp_pids_check().
+ */
+static int
+cgrp_pids_check_helper(vfs_t *vfsp, uint_t cg_id)
+{
+	return (cgrp_pids_check((cgrp_mnt_t *)VFSTOCGM(vfsp), cg_id));
+}
+
+/*
+ * Called from lx_proc_exit() to account the CPU time of an exiting process.
+ */
+static void
+cgrp_proc_exit_helper(vfs_t *vfsp, uint_t cg_id, clock_t utime, clock_t stime)
+{
+	cgrp_ctl_proc_exit((cgrp_mnt_t *)VFSTOCGM(vfsp), cg_id, utime, stime);
 }

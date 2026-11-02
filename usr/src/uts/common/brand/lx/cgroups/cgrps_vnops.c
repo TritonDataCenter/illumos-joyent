@@ -290,6 +290,17 @@ restart:
 		return (ENODEV);
 	}
 
+	/*
+	 * cgroup v2 "no internal processes" rule: a process can't be moved
+	 * into a non-root cgroup which has controllers enabled for its
+	 * children.
+	 */
+	if (CG_IS_V2(cgm) && ncn->cgn_subtree_ctl != 0 && !cgrp_is_root(ncn)) {
+		mutex_exit(&cgm->cg_contents);
+		mutex_exit(&p->p_lock);
+		return (EBUSY);
+	}
+
 	do {
 		lx_lwp_data_t *plwpd = ttolxlwp(t);
 		if (plwpd != NULL && plwpd->br_cgroupid != cg_id) {
@@ -437,7 +448,7 @@ cgrp_wr_proc_or_task(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio,
  * Copy in a (short) string written to a cgroup v2 pseudo file. Trailing
  * whitespace is removed.
  */
-static int
+int
 cgrp_get_wr_str(struct uio *uio, char *buf, size_t blen)
 {
 	size_t len = uio->uio_resid;
@@ -454,30 +465,6 @@ cgrp_get_wr_str(struct uio *uio, char *buf, size_t blen)
 	while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == ' ' ||
 	    buf[len - 1] == '\t'))
 		buf[--len] = '\0';
-
-	return (0);
-}
-
-/*
- * Handle a write to cgroup.subtree_control. The input is a space separated
- * list of "+<controller>" or "-<controller>" tokens. Since we do not emulate
- * any controllers, any controller name is an error, just as it is on Linux
- * for a controller which is not available.
- */
-static int
-cgrp_wr_subtree_ctl(struct uio *uio)
-{
-	char buf[256];
-	char *p;
-	int error;
-
-	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
-		return (error);
-
-	for (p = buf; *p != '\0'; p++) {
-		if (*p != ' ' && *p != '\t' && *p != '\n')
-			return (ENOENT);
-	}
 
 	return (0);
 }
@@ -524,7 +511,7 @@ cgrp_wr_max(struct uio *uio)
  * Return B_TRUE if the cgroup with ID 'id' is the cgroup with ID 'top_id', or
  * one of its descendants.
  */
-static boolean_t
+boolean_t
 cgrp_in_subtree(cgrp_mnt_t *cgm, uint_t id, uint_t top_id)
 {
 	cgrp_node_t *cn;
@@ -777,7 +764,7 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 		error = EOPNOTSUPP;
 		break;
 	case CG_SUBTREE_CTL:
-		error = cgrp_wr_subtree_ctl(uio);
+		error = cgrp_wr_subtree_ctl(cgm, cn, uio);
 		break;
 	case CG_TYPE:
 		error = cgrp_wr_type(uio);
@@ -791,6 +778,26 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 		break;
 	case CG_FREEZE:
 		error = cgrp_wr_freeze(cgm, cn, uio);
+		break;
+	case CG_CPU_STAT:
+	case CG_CPU_WEIGHT:
+	case CG_CPU_WEIGHT_NICE:
+	case CG_CPU_MAX:
+	case CG_CPU_IDLE:
+	case CG_MEM_CURRENT:
+	case CG_MEM_MIN:
+	case CG_MEM_LOW:
+	case CG_MEM_HIGH:
+	case CG_MEM_MAX:
+	case CG_MEM_EVENTS:
+	case CG_MEM_STAT:
+	case CG_MEM_SWAP_CURRENT:
+	case CG_MEM_SWAP_MAX:
+	case CG_MEM_OOM_GROUP:
+	case CG_PIDS_CURRENT:
+	case CG_PIDS_MAX:
+	case CG_PIDS_EVENTS:
+		error = cgrp_ctl_write(cgm, cn, uio);
 		break;
 	case CG_CONTROLLERS:
 	case CG_EVENTS:
@@ -809,7 +816,7 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
  * Copy the portion of the generated pseudo file contents in 'buf' which
  * corresponds to the uio offset out to the reader.
  */
-static int
+int
 cgrp_rd_buf(const char *buf, size_t len, struct uio *uio)
 {
 	if (uio->uio_offset >= (offset_t)len)
@@ -837,9 +844,11 @@ cgrp_rd_v2(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	mutex_enter(&cgm->cg_contents);
 	switch (cn->cgn_type) {
 	case CG_CONTROLLERS:
+		len = cgrp_ctl_names(cgrp_ctl_available(dir), buf,
+		    sizeof (buf));
+		break;
 	case CG_SUBTREE_CTL:
-		/* no controllers are available */
-		len = snprintf(buf, sizeof (buf), "\n");
+		len = cgrp_ctl_names(dir->cgn_subtree_ctl, buf, sizeof (buf));
 		break;
 	case CG_EVENTS:
 		len = snprintf(buf, sizeof (buf), "populated %u\nfrozen %u\n",
@@ -1256,6 +1265,26 @@ cgrp_rd(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	case CG_KILL:
 		/* write-only file */
 		error = EINVAL;
+		break;
+	case CG_CPU_STAT:
+	case CG_CPU_WEIGHT:
+	case CG_CPU_WEIGHT_NICE:
+	case CG_CPU_MAX:
+	case CG_CPU_IDLE:
+	case CG_MEM_CURRENT:
+	case CG_MEM_MIN:
+	case CG_MEM_LOW:
+	case CG_MEM_HIGH:
+	case CG_MEM_MAX:
+	case CG_MEM_EVENTS:
+	case CG_MEM_STAT:
+	case CG_MEM_SWAP_CURRENT:
+	case CG_MEM_SWAP_MAX:
+	case CG_MEM_OOM_GROUP:
+	case CG_PIDS_CURRENT:
+	case CG_PIDS_MAX:
+	case CG_PIDS_EVENTS:
+		error = cgrp_ctl_read(cgm, cn, uio);
 		break;
 	default:
 		VERIFY(0);
@@ -1752,8 +1781,15 @@ cgrp_rmdir(struct vnode *dvp, char *nm, struct vnode *cdir, struct cred *cred,
 	} else {
 		error = cgrp_dirdelete(parent, self, nm, DR_RMDIR, cred);
 		/* self->cgn_parent is still valid after the removal */
-		if (error == 0 && CG_IS_V2(cgm))
+		if (error == 0 && CG_IS_V2(cgm)) {
 			cgrp_ndesc_adjust(self, -1);
+			/*
+			 * Keep the CPU time of exited processes accounted in
+			 * the parent, as Linux does.
+			 */
+			parent->cgn_dead_utime += self->cgn_dead_utime;
+			parent->cgn_dead_stime += self->cgn_dead_stime;
+		}
 	}
 
 	vn_vfsunlock(vp);

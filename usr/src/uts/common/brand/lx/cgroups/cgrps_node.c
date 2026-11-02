@@ -70,6 +70,42 @@ static cgrp_subsys_dirent_t cgrp_unified_dir[] = {
 	{ CG_KILL,		"cgroup.kill",		0200,
 	    CGSD_NONROOT_ONLY },
 	{ CG_FREEZE,		"cgroup.freeze",	0644,
+	    CGSD_NONROOT_ONLY },
+	/* controller interface files, see cgrps_ctl.c */
+	{ CG_CPU_STAT,		"cpu.stat",		0444,	0 },
+	{ CG_CPU_WEIGHT,	"cpu.weight",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_CPU_WEIGHT_NICE,	"cpu.weight.nice",	0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_CPU_MAX,		"cpu.max",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_CPU_IDLE,		"cpu.idle",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_CURRENT,	"memory.current",	0444,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_MIN,		"memory.min",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_LOW,		"memory.low",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_HIGH,		"memory.high",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_MAX,		"memory.max",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_EVENTS,	"memory.events",	0444,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_STAT,		"memory.stat",		0444,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_SWAP_CURRENT,	"memory.swap.current",	0444,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_SWAP_MAX,	"memory.swap.max",	0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_OOM_GROUP,	"memory.oom.group",	0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_PIDS_CURRENT,	"pids.current",		0444,
+	    CGSD_NONROOT_ONLY },
+	{ CG_PIDS_MAX,		"pids.max",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_PIDS_EVENTS,	"pids.events",		0444,
 	    CGSD_NONROOT_ONLY }
 };
 
@@ -838,6 +874,8 @@ cgrp_dirinit(cgrp_node_t *parent, cgrp_node_t *dir, cred_t *cr)
 	 */
 	dir->cgn_id = cgm->cg_grp_gen++;
 	cgrp_cg_hash_insert(cgm, dir);
+	if (CG_IS_V2(cgm))
+		cgrp_ctl_node_init(dir);
 	/* Initialise the first cgroup if this is top-level group */
 	if (parent == dir)
 		cgrp_cg_hash_init(dir);
@@ -1311,7 +1349,7 @@ cgrp_is_subdir(cgrp_dirent_t *dp)
  * at 'top', or NULL when the walk is done. This is iterative, so that a deep
  * hierarchy can not overflow the kernel stack.
  */
-static cgrp_node_t *
+cgrp_node_t *
 cgrp_subtree_next(cgrp_node_t *top, cgrp_node_t *cn)
 {
 	cgrp_dirent_t *dp;

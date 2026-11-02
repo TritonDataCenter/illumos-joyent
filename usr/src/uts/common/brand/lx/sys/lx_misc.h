@@ -114,6 +114,8 @@ extern boolean_t lx_ptrace_sig_ignorable(proc_t *, klwp_t *, int);
 
 extern int lx_helper_clone(int64_t *, int, void *, void *, void *);
 extern int lx_clone_into_cgroup(int);
+extern int lx_cgroup_pids_check(void);
+extern void lx_cgroup_proc_exit(proc_t *);
 extern int lx_helper_pidfd_open(pid_t, int64_t *);
 extern void lx_pidfd_init(void);
 extern void lx_pidfd_fini(void);

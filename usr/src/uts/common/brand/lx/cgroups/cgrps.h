@@ -99,7 +99,55 @@ typedef enum cgrp_nodetype {
 	CG_STAT,		/* cgroup.stat file */
 	CG_KILL,		/* cgroup.kill file */
 	CG_FREEZE,		/* cgroup.freeze file */
+	/* cgroup v2 controller files, see cgrps_ctl.c */
+	CG_CPU_STAT,		/* cpu.stat file */
+	CG_CPU_WEIGHT,		/* cpu.weight file */
+	CG_CPU_WEIGHT_NICE,	/* cpu.weight.nice file */
+	CG_CPU_MAX,		/* cpu.max file */
+	CG_CPU_IDLE,		/* cpu.idle file */
+	CG_MEM_CURRENT,		/* memory.current file */
+	CG_MEM_MIN,		/* memory.min file */
+	CG_MEM_LOW,		/* memory.low file */
+	CG_MEM_HIGH,		/* memory.high file */
+	CG_MEM_MAX,		/* memory.max file */
+	CG_MEM_EVENTS,		/* memory.events file */
+	CG_MEM_STAT,		/* memory.stat file */
+	CG_MEM_SWAP_CURRENT,	/* memory.swap.current file */
+	CG_MEM_SWAP_MAX,	/* memory.swap.max file */
+	CG_MEM_OOM_GROUP,	/* memory.oom.group file */
+	CG_PIDS_CURRENT,	/* pids.current file */
+	CG_PIDS_MAX,		/* pids.max file */
+	CG_PIDS_EVENTS,		/* pids.events file */
 } cgrp_nodetype_t;
+
+/*
+ * cgroup v2 controllers (a bit mask). The order of these determines the order
+ * in which they are listed in cgroup.controllers and cgroup.subtree_control.
+ */
+#define	CGC_CPU		0x1
+#define	CGC_MEMORY	0x2
+#define	CGC_PIDS	0x4
+#define	CGC_ALL		(CGC_CPU | CGC_MEMORY | CGC_PIDS)
+
+/*
+ * cgroup v2 controller settings stored in each cgroup (cgn_settings).
+ */
+typedef enum cgrp_setting {
+	CGS_CPU_WEIGHT = 0,
+	CGS_CPU_MAX_QUOTA,
+	CGS_CPU_MAX_PERIOD,
+	CGS_CPU_IDLE,
+	CGS_MEM_MIN,
+	CGS_MEM_LOW,
+	CGS_MEM_HIGH,
+	CGS_MEM_MAX,
+	CGS_MEM_SWAP_MAX,
+	CGS_MEM_OOM_GROUP,
+	CGS_PIDS_MAX,
+	CGS_NUM
+} cgrp_setting_t;
+
+#define	CG_UNLIMITED	UINT64_MAX	/* "max" */
 
 /* cgrp_ssd_flags */
 #define	CGSD_ROOT_ONLY		0x1	/* only in the top-level cgroup */
@@ -191,6 +239,11 @@ typedef struct cgrp_node {
 	struct cgrp_node	*cgn_evnext;	/* F pending event link */
 	boolean_t		cgn_evpend;	/* F on the pending list */
 	boolean_t		cgn_freeze;	/* D cgroup.freeze value */
+	uint_t			cgn_subtree_ctl; /* D cgroup.subtree_control */
+	uint64_t		cgn_settings[CGS_NUM]; /* D ctl settings */
+	uint64_t		cgn_pids_events; /* D failed forks */
+	uint64_t		cgn_dead_utime;	/* D user ticks, exited procs */
+	uint64_t		cgn_dead_stime;	/* D sys ticks, exited procs */
 } cgrp_node_t;
 
 /*
@@ -263,6 +316,20 @@ boolean_t cgrp_is_frozen(cgrp_node_t *);
 void cgrp_freeze_set(cgrp_mnt_t *, cgrp_node_t *, boolean_t);
 void cgrp_lwp_freeze(kthread_t *);
 void cgrp_lwp_thaw(kthread_t *);
+cgrp_node_t *cgrp_subtree_next(cgrp_node_t *, cgrp_node_t *);
+boolean_t cgrp_is_root(cgrp_node_t *);
+boolean_t cgrp_in_subtree(cgrp_mnt_t *, uint_t, uint_t);
+int cgrp_get_wr_str(struct uio *, char *, size_t);
+int cgrp_rd_buf(const char *, size_t, struct uio *);
+/* cgrps_ctl.c */
+void cgrp_ctl_node_init(cgrp_node_t *);
+size_t cgrp_ctl_names(uint_t, char *, size_t);
+uint_t cgrp_ctl_available(cgrp_node_t *);
+int cgrp_wr_subtree_ctl(cgrp_mnt_t *, cgrp_node_t *, struct uio *);
+int cgrp_ctl_read(cgrp_mnt_t *, cgrp_node_t *, struct uio *);
+int cgrp_ctl_write(cgrp_mnt_t *, cgrp_node_t *, struct uio *);
+int cgrp_pids_check(cgrp_mnt_t *, uint_t);
+void cgrp_ctl_proc_exit(cgrp_mnt_t *, uint_t, clock_t, clock_t);
 
 #endif /* KERNEL */
 

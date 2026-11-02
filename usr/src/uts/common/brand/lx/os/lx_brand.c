@@ -229,6 +229,8 @@ static int lx_systrace_enabled;
  */
 int (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
 int (*lx_cgrp_vp_to_id)(vfs_t *, vnode_t *, cred_t *, uint_t *);
+int (*lx_cgrp_pids_check)(vfs_t *, uint_t);
+void (*lx_cgrp_proc_exit)(vfs_t *, uint_t, clock_t, clock_t);
 void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
 int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 
@@ -362,6 +364,8 @@ lx_proc_exit(proc_t *p)
 	lx_clone_grp_exit(p, B_FALSE);
 	/* Cleanup any outstanding aio contexts */
 	lx_io_cleanup(p);
+	/* Account the CPU time of this process to its cgroup */
+	lx_cgroup_proc_exit(p);
 	/* Notify any pidfds referring to this process */
 	lx_pidfd_proc_exit(p);
 
@@ -1643,6 +1647,9 @@ lx_brandsys(int cmd, int64_t *rval, uintptr_t arg1, uintptr_t arg2,
 
 	case B_PIDFD_OPEN:
 		return (lx_helper_pidfd_open((pid_t)arg1, rval));
+
+	case B_CGROUP_PIDS_CHECK:
+		return (lx_cgroup_pids_check());
 
 	case B_HELPER_SIGQUEUE:
 		return (lx_helper_rt_sigqueueinfo(arg1, arg2,

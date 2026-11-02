@@ -120,6 +120,7 @@ extern "C" {
 #define	B_GET_PERSONALITY	151
 #define	B_CLONE_INTO_CGROUP	152
 #define	B_PIDFD_OPEN		153
+#define	B_CGROUP_PIDS_CHECK	154
 
 #ifndef _ASM
 /*
@@ -288,6 +289,8 @@ typedef enum lx_proc_flags {
  */
 extern int (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
 extern int (*lx_cgrp_vp_to_id)(vfs_t *, vnode_t *, cred_t *, uint_t *);
+extern int (*lx_cgrp_pids_check)(vfs_t *, uint_t);
+extern void (*lx_cgrp_proc_exit)(vfs_t *, uint_t, clock_t, clock_t);
 extern void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
 extern int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 
