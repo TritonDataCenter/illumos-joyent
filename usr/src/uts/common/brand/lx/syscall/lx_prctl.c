@@ -11,6 +11,7 @@
 
 /*
  * Copyright (c) 2018, Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/systm.h>
@@ -145,8 +146,12 @@ lx_prctl(int opt, uintptr_t arg2, uintptr_t arg3)
 		kthread_t *t = curthread;
 
 		mutex_enter(&ttoproc(t)->p_lock);
-		if (t->t_name != NULL) {
+		if (t->t_name != NULL && t->t_name[0] != '\0') {
 			(void) strlcpy(name, t->t_name, sizeof (name));
+		} else {
+			/* No name set, or cleared by exec: use the command */
+			(void) strlcpy(name, ttoproc(t)->p_user.u_comm,
+			    sizeof (name));
 		}
 		mutex_exit(&ttoproc(t)->p_lock);
 

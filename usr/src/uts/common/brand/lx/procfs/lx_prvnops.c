@@ -1662,10 +1662,11 @@ lxpr_read_pid_tid_comm(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 	ASSERT(MUTEX_HELD(&p->p_lock));
 
 	/*
-	 * If a thread name has not been set, use the process command name.
-	 * This also covers the /proc/{pid}/comm case.
+	 * If a thread name has not been set, or has been cleared by exec,
+	 * use the process command name.  This also covers the
+	 * /proc/{pid}/comm case.
 	 */
-	if (t->t_name == NULL) {
+	if (t->t_name == NULL || t->t_name[0] == '\0') {
 		pnm = p->p_user.u_comm;
 	} else {
 		pnm = t->t_name;

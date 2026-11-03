@@ -109,6 +109,15 @@ lx_exec()
 	}
 
 	/*
+	 * On Linux, execve(2) resets the thread name (comm) to the name of the
+	 * new program.  Clear any name set by prctl(PR_SET_NAME) or a write
+	 * to /proc/<pid>/comm, so that u_comm, which exec has already updated,
+	 * is reported again.  systemd, for example, names its children
+	 * "(agetty)" and the like before executing the service binary.
+	 */
+	(void) thread_setname(curthread, NULL);
+
+	/*
 	 * Inform ptrace(2) that we are processing an execve(2) call so that if
 	 * we are traced we can post either the PTRACE_EVENT_EXEC event or the
 	 * legacy SIGTRAP.
