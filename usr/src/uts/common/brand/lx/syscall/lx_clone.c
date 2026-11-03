@@ -143,6 +143,8 @@
 #include <lx_syscall.h>
 #include <sys/x86_archext.h>
 #include <sys/controlregs.h>
+#include <vm/as.h>
+#include <vm/rm.h>
 
 /*
  * We currently only support a single clone-group (CLONE_FS) but the design
@@ -612,13 +614,16 @@ lx_cgroup_pids_check(void)
 
 /*
  * Called from lx_proc_exit(), on the last lwp of the exiting process, to
- * account its CPU time to its cgroup (cgroup v2 cpu.stat).
+ * account its CPU time to its cgroup (cgroup v2 cpu.stat) and its final
+ * resident size to memory.peak.  The address space is still attached here,
+ * since b_proc_exit runs before relvm().
  */
 void
 lx_cgroup_proc_exit(proc_t *p)
 {
 	lx_lwp_data_t *lwpd = ttolxlwp(curthread);
 	clock_t utime, stime;
+	uint64_t rss = 0;
 	vfs_t *cgrp;
 
 	if (lwpd == NULL || (cgrp = lx_cgroup_vfs_hold()) == NULL)
@@ -627,9 +632,11 @@ lx_cgroup_proc_exit(proc_t *p)
 	mutex_enter(&p->p_lock);
 	utime = p->p_utime;
 	stime = p->p_stime;
+	if (p->p_as != NULL && p->p_as != &kas)
+		rss = (uint64_t)rm_asrss(p->p_as) * PAGESIZE;
 	mutex_exit(&p->p_lock);
 
 	ASSERT(lx_cgrp_proc_exit != NULL);
-	(*lx_cgrp_proc_exit)(cgrp, lwpd->br_cgroupid, utime, stime);
+	(*lx_cgrp_proc_exit)(cgrp, lwpd->br_cgroupid, utime, stime, rss);
 	VFS_RELE(cgrp);
 }

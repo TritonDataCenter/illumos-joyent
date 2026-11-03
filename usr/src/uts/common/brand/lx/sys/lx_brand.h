@@ -290,7 +290,8 @@ typedef enum lx_proc_flags {
 extern int (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
 extern int (*lx_cgrp_vp_to_id)(vfs_t *, vnode_t *, cred_t *, uint_t *);
 extern int (*lx_cgrp_pids_check)(vfs_t *, uint_t);
-extern void (*lx_cgrp_proc_exit)(vfs_t *, uint_t, clock_t, clock_t);
+extern void (*lx_cgrp_proc_exit)(vfs_t *, uint_t, clock_t, clock_t,
+    uint64_t);
 extern void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
 extern int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 

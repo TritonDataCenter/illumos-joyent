@@ -272,7 +272,8 @@ static void cgrp_lwp_exit_helper(vfs_t *, uint_t, id_t, pid_t);
 static int cgrp_pid_cgroup_helper(vfs_t *, uint_t, char *, size_t);
 static int cgrp_vp_to_id_helper(vfs_t *, vnode_t *, cred_t *, uint_t *);
 static int cgrp_pids_check_helper(vfs_t *, uint_t);
-static void cgrp_proc_exit_helper(vfs_t *, uint_t, clock_t, clock_t);
+static void cgrp_proc_exit_helper(vfs_t *, uint_t, clock_t, clock_t,
+    uint64_t);
 
 /*
  * Loadable module wrapper
@@ -1242,7 +1243,9 @@ cgrp_pids_check_helper(vfs_t *vfsp, uint_t cg_id)
  * Called from lx_proc_exit() to account the CPU time of an exiting process.
  */
 static void
-cgrp_proc_exit_helper(vfs_t *vfsp, uint_t cg_id, clock_t utime, clock_t stime)
+cgrp_proc_exit_helper(vfs_t *vfsp, uint_t cg_id, clock_t utime, clock_t stime,
+    uint64_t rss)
 {
-	cgrp_ctl_proc_exit((cgrp_mnt_t *)VFSTOCGM(vfsp), cg_id, utime, stime);
+	cgrp_ctl_proc_exit((cgrp_mnt_t *)VFSTOCGM(vfsp), cg_id, utime, stime,
+	    rss);
 }

@@ -83,6 +83,8 @@ static cgrp_subsys_dirent_t cgrp_unified_dir[] = {
 	    CGSD_NONROOT_ONLY },
 	{ CG_MEM_CURRENT,	"memory.current",	0444,
 	    CGSD_NONROOT_ONLY },
+	{ CG_MEM_PEAK,		"memory.peak",		0444,
+	    CGSD_NONROOT_ONLY },
 	{ CG_MEM_MIN,		"memory.min",		0644,
 	    CGSD_NONROOT_ONLY },
 	{ CG_MEM_LOW,		"memory.low",		0644,

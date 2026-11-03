@@ -106,6 +106,7 @@ typedef enum cgrp_nodetype {
 	CG_CPU_MAX,		/* cpu.max file */
 	CG_CPU_IDLE,		/* cpu.idle file */
 	CG_MEM_CURRENT,		/* memory.current file */
+	CG_MEM_PEAK,		/* memory.peak file */
 	CG_MEM_MIN,		/* memory.min file */
 	CG_MEM_LOW,		/* memory.low file */
 	CG_MEM_HIGH,		/* memory.high file */
@@ -244,6 +245,7 @@ typedef struct cgrp_node {
 	uint64_t		cgn_pids_events; /* D failed forks */
 	uint64_t		cgn_dead_utime;	/* D user ticks, exited procs */
 	uint64_t		cgn_dead_stime;	/* D sys ticks, exited procs */
+	uint64_t		cgn_mem_peak;	/* D memory.peak, bytes */
 } cgrp_node_t;
 
 /*
@@ -329,7 +331,7 @@ int cgrp_wr_subtree_ctl(cgrp_mnt_t *, cgrp_node_t *, struct uio *);
 int cgrp_ctl_read(cgrp_mnt_t *, cgrp_node_t *, struct uio *);
 int cgrp_ctl_write(cgrp_mnt_t *, cgrp_node_t *, struct uio *);
 int cgrp_pids_check(cgrp_mnt_t *, uint_t);
-void cgrp_ctl_proc_exit(cgrp_mnt_t *, uint_t, clock_t, clock_t);
+void cgrp_ctl_proc_exit(cgrp_mnt_t *, uint_t, clock_t, clock_t, uint64_t);
 
 #endif /* KERNEL */
 

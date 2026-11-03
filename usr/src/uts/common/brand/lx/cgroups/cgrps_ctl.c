@@ -36,7 +36,11 @@
  *		pids.events counts the failures.
  *
  * memory:	memory.current and memory.stat report the resident memory of
- *		the processes in the subtree. The limits (memory.min, low,
+ *		the processes in the subtree. memory.peak is the highest
+ *		value seen: it is sampled whenever memory.current, peak or
+ *		stat are read, and when a process exits (its own final
+ *		resident size), so short spikes between samples are missed.
+ *		The limits (memory.min, low,
  *		high, max, swap.max) and memory.oom.group can be set and read
  *		back, but are not enforced.
  *
@@ -331,6 +335,41 @@ cgrp_ctl_usage(cgrp_mnt_t *cgm, uint_t cg_id, uint64_t *rssp,
 	return (0);
 }
 
+/*
+ * Raise memory.peak of a cgroup and of its ancestors, whose usage includes
+ * it, to at least 'rss' bytes.
+ */
+static void
+cgrp_ctl_mem_peak(cgrp_node_t *cn, uint64_t rss)
+{
+	for (; cn != NULL; cn = cn->cgn_parent) {
+		if (cn->cgn_mem_peak < rss)
+			cn->cgn_mem_peak = rss;
+		if (cn->cgn_parent == cn)
+			break;
+	}
+}
+
+/*
+ * Record a memory usage sample for a cgroup and return its peak.
+ */
+static int
+cgrp_ctl_mem_sample(cgrp_mnt_t *cgm, uint_t cg_id, uint64_t rss,
+    uint64_t *peakp)
+{
+	cgrp_node_t *dir;
+
+	mutex_enter(&cgm->cg_contents);
+	if ((dir = cgrp_cg_hash_lookup(cgm, cg_id)) == NULL) {
+		mutex_exit(&cgm->cg_contents);
+		return (ENODEV);
+	}
+	cgrp_ctl_mem_peak(dir, rss);
+	*peakp = dir->cgn_mem_peak;
+	mutex_exit(&cgm->cg_contents);
+	return (0);
+}
+
 static int
 cgrp_ctl_fmt_max(uint64_t val, char *buf, size_t blen)
 {
@@ -374,7 +413,7 @@ cgrp_ctl_read(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	size_t len = 0;
 	uint_t cg_id = cn->cgn_parent->cgn_id;
 	cgrp_node_t *dir;
-	uint64_t rss, utime, stime, *set;
+	uint64_t rss, utime, stime, peak, *set;
 	int error;
 
 	switch (cn->cgn_type) {
@@ -391,15 +430,19 @@ cgrp_ctl_read(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 		return (cgrp_rd_buf(buf, MIN(len, sizeof (buf) - 1), uio));
 
 	case CG_MEM_CURRENT:
+	case CG_MEM_PEAK:
 		if ((error = cgrp_ctl_usage(cgm, cg_id, &rss, &utime,
-		    &stime)) != 0)
+		    &stime)) != 0 ||
+		    (error = cgrp_ctl_mem_sample(cgm, cg_id, rss, &peak)) != 0)
 			return (error);
-		len = snprintf(buf, sizeof (buf), "%llu\n", (u_longlong_t)rss);
+		len = snprintf(buf, sizeof (buf), "%llu\n", (u_longlong_t)
+		    (cn->cgn_type == CG_MEM_PEAK ? peak : rss));
 		return (cgrp_rd_buf(buf, MIN(len, sizeof (buf) - 1), uio));
 
 	case CG_MEM_STAT:
 		if ((error = cgrp_ctl_usage(cgm, cg_id, &rss, &utime,
-		    &stime)) != 0)
+		    &stime)) != 0 ||
+		    (error = cgrp_ctl_mem_sample(cgm, cg_id, rss, &peak)) != 0)
 			return (error);
 		len = snprintf(buf, sizeof (buf),
 		    "anon %llu\nfile 0\nkernel 0\nkernel_stack 0\n"
@@ -564,6 +607,7 @@ cgrp_ctl_write(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	switch (cn->cgn_type) {
 	case CG_CPU_STAT:
 	case CG_MEM_CURRENT:
+	case CG_MEM_PEAK:
 	case CG_MEM_EVENTS:
 	case CG_MEM_STAT:
 	case CG_MEM_SWAP_CURRENT:
@@ -727,11 +771,12 @@ cgrp_pids_check(cgrp_mnt_t *cgm, uint_t cg_id)
 }
 
 /*
- * Account the CPU time (in ticks) of an exiting process to its cgroup.
+ * Account the CPU time (in ticks) of an exiting process to its cgroup, and
+ * its final resident size (in bytes) to memory.peak.
  */
 void
 cgrp_ctl_proc_exit(cgrp_mnt_t *cgm, uint_t cg_id, clock_t utime,
-    clock_t stime)
+    clock_t stime, uint64_t rss)
 {
 	cgrp_node_t *cn;
 
@@ -742,6 +787,7 @@ cgrp_ctl_proc_exit(cgrp_mnt_t *cgm, uint_t cg_id, clock_t utime,
 	if ((cn = cgrp_cg_hash_lookup(cgm, cg_id)) != NULL) {
 		cn->cgn_dead_utime += (uint64_t)MAX(utime, 0);
 		cn->cgn_dead_stime += (uint64_t)MAX(stime, 0);
+		cgrp_ctl_mem_peak(cn, rss);
 	}
 	mutex_exit(&cgm->cg_contents);
 }

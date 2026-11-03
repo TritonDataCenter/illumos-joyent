@@ -785,6 +785,7 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	case CG_CPU_MAX:
 	case CG_CPU_IDLE:
 	case CG_MEM_CURRENT:
+	case CG_MEM_PEAK:
 	case CG_MEM_MIN:
 	case CG_MEM_LOW:
 	case CG_MEM_HIGH:
@@ -1272,6 +1273,7 @@ cgrp_rd(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	case CG_CPU_MAX:
 	case CG_CPU_IDLE:
 	case CG_MEM_CURRENT:
+	case CG_MEM_PEAK:
 	case CG_MEM_MIN:
 	case CG_MEM_LOW:
 	case CG_MEM_HIGH:
