@@ -472,6 +472,19 @@ lxpr_inode(lxpr_nodetype_t type, pid_t pid, int desc)
 		return (maxpid + 2 +
 		    (pid * (LXPR_FD_PERPROC + LXPR_NFILES)) +
 		    LXPR_NFILES + desc);
+	case LXPR_SYS_NET_IPV6_CONF_IFDIR:
+	case LXPR_SYS_NET_IPV6_CONF_IF_ACCEPT_RA:
+	case LXPR_SYS_NET_IPV6_CONF_IF_AUTOCONF:
+	case LXPR_SYS_NET_IPV6_CONF_IF_DISABLE:
+	case LXPR_SYS_NET_IPV6_CONF_IF_FORWARDING:
+	case LXPR_SYS_NET_IPV6_CONF_IF_HOP_LIMIT:
+		/*
+		 * Per-interface nodes carry the interface index in desc.
+		 * Place them above the range used by all per-process nodes.
+		 */
+		return ((ino_t)maxpid + 2 +
+		    ((ino_t)maxpid + 1) * (LXPR_FD_PERPROC + LXPR_NFILES) +
+		    (ino_t)desc * LXPR_NFILES + type);
 	default:
 		return (maxpid + 2 +
 		    (pid * (LXPR_FD_PERPROC + LXPR_NFILES)) +
@@ -539,7 +552,7 @@ lxpr_getnode(vnode_t *dp, lxpr_nodetype_t type, proc_t *p, int desc)
 		lxpnp->lxpr_pid = 0;
 		lxpnp->lxpr_time = now;
 		lxpnp->lxpr_uid = lxpnp->lxpr_gid = 0;
-		lxpnp->lxpr_ino = lxpr_inode(type, 0, 0);
+		lxpnp->lxpr_ino = lxpr_inode(type, 0, desc);
 	}
 
 	/* initialize the vnode data */
@@ -677,6 +690,11 @@ lxpr_getnode(vnode_t *dp, lxpr_nodetype_t type, proc_t *p, int desc)
 	case LXPR_SYS_NETDIR:
 	case LXPR_SYS_NET_COREDIR:
 	case LXPR_SYS_NET_IPV4DIR:
+	case LXPR_SYS_NET_IPV6DIR:
+	case LXPR_SYS_NET_IPV6_CONFDIR:
+	case LXPR_SYS_NET_IPV6_CONF_ALLDIR:
+	case LXPR_SYS_NET_IPV6_CONF_DEFDIR:
+	case LXPR_SYS_NET_IPV6_CONF_IFDIR:
 	case LXPR_SYS_VMDIR:
 		vp->v_type = VDIR;
 		lxpnp->lxpr_mode = 0555;	/* read-search by all */

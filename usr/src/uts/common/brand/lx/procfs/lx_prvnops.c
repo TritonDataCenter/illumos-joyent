@@ -142,6 +142,11 @@ static vnode_t *lxpr_lookup_sys_kdir_randdir(vnode_t *, char *);
 static vnode_t *lxpr_lookup_sys_netdir(vnode_t *, char *);
 static vnode_t *lxpr_lookup_sys_net_coredir(vnode_t *, char *);
 static vnode_t *lxpr_lookup_sys_net_ipv4dir(vnode_t *, char *);
+static vnode_t *lxpr_lookup_sys_net_ipv6dir(vnode_t *, char *);
+static vnode_t *lxpr_lookup_sys_net_ipv6_confdir(vnode_t *, char *);
+static vnode_t *lxpr_lookup_sys_net_ipv6_conf_alldir(vnode_t *, char *);
+static vnode_t *lxpr_lookup_sys_net_ipv6_conf_defdir(vnode_t *, char *);
+static vnode_t *lxpr_lookup_sys_net_ipv6_conf_ifdir(vnode_t *, char *);
 static vnode_t *lxpr_lookup_sys_vmdir(vnode_t *, char *);
 static vnode_t *lxpr_lookup_taskdir(vnode_t *, char *);
 static vnode_t *lxpr_lookup_task_tid_dir(vnode_t *, char *);
@@ -160,6 +165,14 @@ static int lxpr_readdir_sys_kdir_randdir(lxpr_node_t *, uio_t *, int *);
 static int lxpr_readdir_sys_netdir(lxpr_node_t *, uio_t *, int *);
 static int lxpr_readdir_sys_net_coredir(lxpr_node_t *, uio_t *, int *);
 static int lxpr_readdir_sys_net_ipv4dir(lxpr_node_t *, uio_t *, int *);
+static int lxpr_readdir_sys_net_ipv6dir(lxpr_node_t *, uio_t *, int *);
+static int lxpr_readdir_sys_net_ipv6_confdir(lxpr_node_t *, uio_t *, int *);
+static int lxpr_readdir_sys_net_ipv6_conf_alldir(lxpr_node_t *, uio_t *,
+    int *);
+static int lxpr_readdir_sys_net_ipv6_conf_defdir(lxpr_node_t *, uio_t *,
+    int *);
+static int lxpr_readdir_sys_net_ipv6_conf_ifdir(lxpr_node_t *, uio_t *,
+    int *);
 static int lxpr_readdir_sys_vmdir(lxpr_node_t *, uio_t *, int *);
 static int lxpr_readdir_taskdir(lxpr_node_t *, uio_t *, int *);
 static int lxpr_readdir_task_tid_dir(lxpr_node_t *, uio_t *, int *);
@@ -275,6 +288,12 @@ static void lxpr_read_sys_net_ipv4_tcp_retry2(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_net_ipv4_tcp_rwmem(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_net_ipv4_tcp_sack(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_net_ipv4_tcp_winscale(lxpr_node_t *, lxpr_uiobuf_t *);
+static void lxpr_read_sys_net_ipv6_zero(lxpr_node_t *, lxpr_uiobuf_t *);
+static void lxpr_read_sys_net_ipv6_one(lxpr_node_t *, lxpr_uiobuf_t *);
+static void lxpr_read_sys_net_ipv6_forwarding(lxpr_node_t *,
+    lxpr_uiobuf_t *);
+static void lxpr_read_sys_net_ipv6_hop_limit(lxpr_node_t *, lxpr_uiobuf_t *);
+static void lxpr_read_sys_net_ipv6_conf_if(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_vm_dirty(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_vm_max_map_cnt(lxpr_node_t *, lxpr_uiobuf_t *);
 static void lxpr_read_sys_vm_minfr_kb(lxpr_node_t *, lxpr_uiobuf_t *);
@@ -321,6 +340,10 @@ static int lxpr_write_sys_net_ipv4_tcp_rwmem(lxpr_node_t *, uio_t *,
 static int lxpr_write_sys_net_ipv4_tcp_sack(lxpr_node_t *, uio_t *,
     cred_t *, caller_context_t *);
 static int lxpr_write_sys_net_ipv4_tcp_winscale(lxpr_node_t *, uio_t *,
+    cred_t *, caller_context_t *);
+static int lxpr_write_sys_net_ipv6_fixed(lxpr_node_t *, uio_t *,
+    cred_t *, caller_context_t *);
+static int lxpr_write_sys_net_ipv6_hop_limit(lxpr_node_t *, uio_t *,
     cred_t *, caller_context_t *);
 static int lxpr_write_sys_kernel_corepatt(lxpr_node_t *, uio_t *, cred_t *,
     caller_context_t *);
@@ -624,6 +647,7 @@ static lxpr_dirent_t sys_randdir[] = {
 static lxpr_dirent_t sys_netdir[] = {
 	{ LXPR_SYS_NET_COREDIR,		"core" },
 	{ LXPR_SYS_NET_IPV4DIR,		"ipv4" },
+	{ LXPR_SYS_NET_IPV6DIR,		"ipv6" },
 };
 
 #define	SYS_NETDIRFILES (sizeof (sys_netdir) / sizeof (sys_netdir[0]))
@@ -667,6 +691,67 @@ static lxpr_dirent_t sys_net_ipv4dir[] = {
 
 #define	SYS_NET_IPV4DIRFILES \
 	(sizeof (sys_net_ipv4dir) / sizeof (sys_net_ipv4dir[0]))
+
+/*
+ * contents of /proc/sys/net/ipv6 directory
+ * Only the global "all" and "default" interface configurations are provided;
+ * there are no per-interface conf directories.
+ */
+static lxpr_dirent_t sys_net_ipv6dir[] = {
+	{ LXPR_SYS_NET_IPV6_BINDV6ONLY,	"bindv6only" },
+	{ LXPR_SYS_NET_IPV6_CONFDIR,	"conf" },
+};
+
+#define	SYS_NET_IPV6DIRFILES \
+	(sizeof (sys_net_ipv6dir) / sizeof (sys_net_ipv6dir[0]))
+
+static lxpr_dirent_t sys_net_ipv6_confdir[] = {
+	{ LXPR_SYS_NET_IPV6_CONF_ALLDIR,	"all" },
+	{ LXPR_SYS_NET_IPV6_CONF_DEFDIR,	"default" },
+};
+
+#define	SYS_NET_IPV6_CONFDIRFILES \
+	(sizeof (sys_net_ipv6_confdir) / sizeof (sys_net_ipv6_confdir[0]))
+
+static lxpr_dirent_t sys_net_ipv6_conf_alldir[] = {
+	{ LXPR_SYS_NET_IPV6_CONF_ALL_ACCEPT_RA,	"accept_ra" },
+	{ LXPR_SYS_NET_IPV6_CONF_ALL_AUTOCONF,	"autoconf" },
+	{ LXPR_SYS_NET_IPV6_CONF_ALL_DISABLE,	"disable_ipv6" },
+	{ LXPR_SYS_NET_IPV6_CONF_ALL_FORWARDING, "forwarding" },
+	{ LXPR_SYS_NET_IPV6_CONF_ALL_HOP_LIMIT,	"hop_limit" },
+};
+
+#define	SYS_NET_IPV6_CONF_ALLDIRFILES \
+	(sizeof (sys_net_ipv6_conf_alldir) / \
+	sizeof (sys_net_ipv6_conf_alldir[0]))
+
+static lxpr_dirent_t sys_net_ipv6_conf_defdir[] = {
+	{ LXPR_SYS_NET_IPV6_CONF_DEF_ACCEPT_RA,	"accept_ra" },
+	{ LXPR_SYS_NET_IPV6_CONF_DEF_AUTOCONF,	"autoconf" },
+	{ LXPR_SYS_NET_IPV6_CONF_DEF_DISABLE,	"disable_ipv6" },
+	{ LXPR_SYS_NET_IPV6_CONF_DEF_FORWARDING, "forwarding" },
+	{ LXPR_SYS_NET_IPV6_CONF_DEF_HOP_LIMIT,	"hop_limit" },
+};
+
+#define	SYS_NET_IPV6_CONF_DEFDIRFILES \
+	(sizeof (sys_net_ipv6_conf_defdir) / \
+	sizeof (sys_net_ipv6_conf_defdir[0]))
+
+/*
+ * contents of a /proc/sys/net/ipv6/conf/<interface> directory; the node's
+ * lxpr_desc holds the interface index.
+ */
+static lxpr_dirent_t sys_net_ipv6_conf_ifdir[] = {
+	{ LXPR_SYS_NET_IPV6_CONF_IF_ACCEPT_RA,	"accept_ra" },
+	{ LXPR_SYS_NET_IPV6_CONF_IF_AUTOCONF,	"autoconf" },
+	{ LXPR_SYS_NET_IPV6_CONF_IF_DISABLE,	"disable_ipv6" },
+	{ LXPR_SYS_NET_IPV6_CONF_IF_FORWARDING, "forwarding" },
+	{ LXPR_SYS_NET_IPV6_CONF_IF_HOP_LIMIT,	"hop_limit" },
+};
+
+#define	SYS_NET_IPV6_CONF_IFDIRFILES \
+	(sizeof (sys_net_ipv6_conf_ifdir) / \
+	sizeof (sys_net_ipv6_conf_ifdir[0]))
 
 /*
  * contents of /proc/sys/vm directory
@@ -737,6 +822,24 @@ static wftab_t wr_tab[] = {
 	{LXPR_SYS_NET_IPV4_TCP_SACK, lxpr_write_sys_net_ipv4_tcp_sack},
 	{LXPR_SYS_NET_IPV4_TCP_WINSCALE, lxpr_write_sys_net_ipv4_tcp_winscale},
 	{LXPR_SYS_NET_IPV4_TCP_WMEM, lxpr_write_sys_net_ipv4_tcp_rwmem},
+	{LXPR_SYS_NET_IPV6_BINDV6ONLY, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_ALL_ACCEPT_RA, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_ALL_AUTOCONF, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_ALL_DISABLE, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_ALL_FORWARDING, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_ALL_HOP_LIMIT,
+	    lxpr_write_sys_net_ipv6_hop_limit},
+	{LXPR_SYS_NET_IPV6_CONF_DEF_ACCEPT_RA, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_DEF_AUTOCONF, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_DEF_DISABLE, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_DEF_FORWARDING, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_DEF_HOP_LIMIT,
+	    lxpr_write_sys_net_ipv6_hop_limit},
+	{LXPR_SYS_NET_IPV6_CONF_IF_ACCEPT_RA, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_IF_AUTOCONF, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_IF_DISABLE, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_IF_FORWARDING, lxpr_write_sys_net_ipv6_fixed},
+	{LXPR_SYS_NET_IPV6_CONF_IF_HOP_LIMIT, lxpr_write_sys_net_ipv6_fixed},
 	{LXPR_SYS_VM_DIRTY_BG_BYTES, NULL},
 	{LXPR_SYS_VM_DIRTY_BG_RATIO, NULL},
 	{LXPR_SYS_VM_DIRTY_BYTES, NULL},
@@ -1005,6 +1108,27 @@ static void (*lxpr_read_function[])() = {
 	lxpr_read_sys_net_ipv4_tcp_sack, /* .../ipv4/tcp_sack */
 	lxpr_read_sys_net_ipv4_tcp_winscale, /* .../ipv4/tcp_window_scaling */
 	lxpr_read_sys_net_ipv4_tcp_rwmem, /* .../ipv4/tcp_wmem */
+	lxpr_read_invalid,		/* /proc/sys/net/ipv6 */
+	lxpr_read_sys_net_ipv6_zero,	/* .../ipv6/bindv6only */
+	lxpr_read_invalid,		/* /proc/sys/net/ipv6/conf */
+	lxpr_read_invalid,		/* /proc/sys/net/ipv6/conf/all */
+	lxpr_read_sys_net_ipv6_one,	/* .../conf/all/accept_ra */
+	lxpr_read_sys_net_ipv6_one,	/* .../conf/all/autoconf */
+	lxpr_read_sys_net_ipv6_zero,	/* .../conf/all/disable_ipv6 */
+	lxpr_read_sys_net_ipv6_forwarding, /* .../conf/all/forwarding */
+	lxpr_read_sys_net_ipv6_hop_limit, /* .../conf/all/hop_limit */
+	lxpr_read_invalid,		/* /proc/sys/net/ipv6/conf/default */
+	lxpr_read_sys_net_ipv6_one,	/* .../conf/default/accept_ra */
+	lxpr_read_sys_net_ipv6_one,	/* .../conf/default/autoconf */
+	lxpr_read_sys_net_ipv6_zero,	/* .../conf/default/disable_ipv6 */
+	lxpr_read_sys_net_ipv6_forwarding, /* .../conf/default/forwarding */
+	lxpr_read_sys_net_ipv6_hop_limit, /* .../conf/default/hop_limit */
+	lxpr_read_invalid,		/* /proc/sys/net/ipv6/conf/<if> */
+	lxpr_read_sys_net_ipv6_one,	/* .../conf/<if>/accept_ra */
+	lxpr_read_sys_net_ipv6_one,	/* .../conf/<if>/autoconf */
+	lxpr_read_sys_net_ipv6_zero,	/* .../conf/<if>/disable_ipv6 */
+	lxpr_read_sys_net_ipv6_conf_if,	/* .../conf/<if>/forwarding */
+	lxpr_read_sys_net_ipv6_conf_if,	/* .../conf/<if>/hop_limit */
 	lxpr_read_invalid,		/* /proc/sys/vm	*/
 	lxpr_read_sys_vm_dirty,		/* .../vm/dirty_background_bytes */
 	lxpr_read_sys_vm_dirty,		/* .../vm/dirty_background_ratio */
@@ -1187,6 +1311,27 @@ static vnode_t *(*lxpr_lookup_function[])() = {
 	lxpr_lookup_not_a_dir,		/* .../net/ipv4/tcp_sack */
 	lxpr_lookup_not_a_dir,		/* .../net/ipv4/tcp_window_scaling */
 	lxpr_lookup_not_a_dir,		/* .../net/ipv4/tcp_wmem */
+	lxpr_lookup_sys_net_ipv6dir,	/* /proc/sys/net/ipv6 */
+	lxpr_lookup_not_a_dir,		/* .../ipv6/bindv6only */
+	lxpr_lookup_sys_net_ipv6_confdir, /* /proc/sys/net/ipv6/conf */
+	lxpr_lookup_sys_net_ipv6_conf_alldir, /* .../ipv6/conf/all */
+	lxpr_lookup_not_a_dir,		/* .../conf/all/accept_ra */
+	lxpr_lookup_not_a_dir,		/* .../conf/all/autoconf */
+	lxpr_lookup_not_a_dir,		/* .../conf/all/disable_ipv6 */
+	lxpr_lookup_not_a_dir,		/* .../conf/all/forwarding */
+	lxpr_lookup_not_a_dir,		/* .../conf/all/hop_limit */
+	lxpr_lookup_sys_net_ipv6_conf_defdir, /* .../ipv6/conf/default */
+	lxpr_lookup_not_a_dir,		/* .../conf/default/accept_ra */
+	lxpr_lookup_not_a_dir,		/* .../conf/default/autoconf */
+	lxpr_lookup_not_a_dir,		/* .../conf/default/disable_ipv6 */
+	lxpr_lookup_not_a_dir,		/* .../conf/default/forwarding */
+	lxpr_lookup_not_a_dir,		/* .../conf/default/hop_limit */
+	lxpr_lookup_sys_net_ipv6_conf_ifdir, /* .../ipv6/conf/<if> */
+	lxpr_lookup_not_a_dir,		/* .../conf/<if>/accept_ra */
+	lxpr_lookup_not_a_dir,		/* .../conf/<if>/autoconf */
+	lxpr_lookup_not_a_dir,		/* .../conf/<if>/disable_ipv6 */
+	lxpr_lookup_not_a_dir,		/* .../conf/<if>/forwarding */
+	lxpr_lookup_not_a_dir,		/* .../conf/<if>/hop_limit */
 	lxpr_lookup_sys_vmdir,		/* /proc/sys/vm */
 	lxpr_lookup_not_a_dir,		/* .../vm/dirty_background_bytes */
 	lxpr_lookup_not_a_dir,		/* .../vm/dirty_background_ratio */
@@ -1369,6 +1514,27 @@ static int (*lxpr_readdir_function[])() = {
 	lxpr_readdir_not_a_dir,		/* .../net/ipv4/tcp_sack */
 	lxpr_readdir_not_a_dir,		/* .../net/ipv4/tcp_window_scaling */
 	lxpr_readdir_not_a_dir,		/* .../net/ipv4/tcp_wmem */
+	lxpr_readdir_sys_net_ipv6dir,	/* /proc/sys/net/ipv6 */
+	lxpr_readdir_not_a_dir,		/* .../ipv6/bindv6only */
+	lxpr_readdir_sys_net_ipv6_confdir, /* /proc/sys/net/ipv6/conf */
+	lxpr_readdir_sys_net_ipv6_conf_alldir, /* .../ipv6/conf/all */
+	lxpr_readdir_not_a_dir,		/* .../conf/all/accept_ra */
+	lxpr_readdir_not_a_dir,		/* .../conf/all/autoconf */
+	lxpr_readdir_not_a_dir,		/* .../conf/all/disable_ipv6 */
+	lxpr_readdir_not_a_dir,		/* .../conf/all/forwarding */
+	lxpr_readdir_not_a_dir,		/* .../conf/all/hop_limit */
+	lxpr_readdir_sys_net_ipv6_conf_defdir, /* .../ipv6/conf/default */
+	lxpr_readdir_not_a_dir,		/* .../conf/default/accept_ra */
+	lxpr_readdir_not_a_dir,		/* .../conf/default/autoconf */
+	lxpr_readdir_not_a_dir,		/* .../conf/default/disable_ipv6 */
+	lxpr_readdir_not_a_dir,		/* .../conf/default/forwarding */
+	lxpr_readdir_not_a_dir,		/* .../conf/default/hop_limit */
+	lxpr_readdir_sys_net_ipv6_conf_ifdir, /* .../ipv6/conf/<if> */
+	lxpr_readdir_not_a_dir,		/* .../conf/<if>/accept_ra */
+	lxpr_readdir_not_a_dir,		/* .../conf/<if>/autoconf */
+	lxpr_readdir_not_a_dir,		/* .../conf/<if>/disable_ipv6 */
+	lxpr_readdir_not_a_dir,		/* .../conf/<if>/forwarding */
+	lxpr_readdir_not_a_dir,		/* .../conf/<if>/hop_limit */
 	lxpr_readdir_sys_vmdir,		/* /proc/sys/vm */
 	lxpr_readdir_not_a_dir,		/* .../vm/dirty_background_bytes */
 	lxpr_readdir_not_a_dir,		/* .../vm/dirty_background_ratio */
@@ -5523,6 +5689,229 @@ lxpr_read_sys_net_ipv4_ip_lport_range(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 	netstack_rele(ns);
 }
 
+/*
+ * /proc/sys/net/ipv6
+ *
+ * bindv6only: AF_INET6 sockets are dual-stack by default (IPV6_V6ONLY is
+ * off), which is the Linux default of 0.
+ *
+ * conf/{all,default}/accept_ra, autoconf: router advertisements and stateless
+ * address autoconfiguration are handled by in.ndpd, so these report the
+ * Linux defaults (1).
+ *
+ * conf/{all,default}/disable_ipv6: IPv6 is always available, so this is 0.
+ *
+ * conf/{all,default}/forwarding: illumos: ipadm ipv6 forwarding.
+ * As with ipv4/ip_forward, we do not support changing it from lx.
+ *
+ * None of the above can be changed from lx. Writing the current value
+ * succeeds, writing the other value fails with EPERM (rather than being
+ * silently ignored); see lxpr_write_sys_net_ipv6_fixed().
+ *
+ * conf/{all,default}/hop_limit: illumos: ipadm ipv6 hoplimit.
+ * There is a single, stack-wide value, so both nodes map to it.
+ *
+ * conf/<interface>/: one directory per IPv6 interface in the zone's stack,
+ * with the same files. forwarding reports the interface's IFF_ROUTER flag
+ * and hop_limit the stack-wide hop limit (see lxpr_ipv6_if_info()); neither
+ * can be changed from lx, and the remaining files report the same values as
+ * all/default.
+ */
+typedef struct lxpr_ipv6_if {
+	char	lxi_name[LIFNAMSIZ];	/* Linux interface name */
+	uint_t	lxi_index;		/* interface index */
+} lxpr_ipv6_if_t;
+
+/*
+ * Look up an IPv6 interface in the zone's stack, either by its Linux name
+ * (lxname != NULL) or by its interface index. On success, optionally return
+ * its index, flags and hop limit.
+ *
+ * The hop limit returned is the stack-wide ipv6 hoplimit: ill_max_hops is
+ * only set from router advertisements (by in.ndpd), is 0 otherwise, and is
+ * used for MIB reporting only; outbound packets always use
+ * ips_ipv6_def_hops.
+ */
+static int
+lxpr_ipv6_if_info(lxpr_node_t *lxpnp, const char *lxname, uint_t index,
+    uint_t *indexp, uint64_t *flagsp, uint_t *hopsp)
+{
+	netstack_t *ns;
+	ip_stack_t *ipst;
+	ill_t *ill;
+	ill_walk_context_t ctx;
+	char name[LIFNAMSIZ];
+	int error = ENOENT;
+
+	if (lxname != NULL) {
+		if (strlcpy(name, lxname, sizeof (name)) >= sizeof (name))
+			return (ENOENT);
+		lx_ifname_convert(name, LX_IF_TONATIVE);
+	}
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL)
+		return (ENXIO);
+	ipst = ns->netstack_ip;
+
+	rw_enter(&ipst->ips_ill_g_lock, RW_READER);
+	ill = ILL_START_WALK_V6(&ctx, ipst);
+	for (; ill != NULL; ill = ill_next(&ctx, ill)) {
+		if (lxname != NULL ? strcmp(ill->ill_name, name) != 0 :
+		    ill->ill_phyint->phyint_ifindex != index)
+			continue;
+
+		if (indexp != NULL)
+			*indexp = ill->ill_phyint->phyint_ifindex;
+		if (flagsp != NULL)
+			*flagsp = ill->ill_flags;
+		if (hopsp != NULL)
+			*hopsp = ipst->ips_ipv6_def_hops;
+		error = 0;
+		break;
+	}
+	rw_exit(&ipst->ips_ill_g_lock);
+	netstack_rele(ns);
+
+	return (error);
+}
+
+/*
+ * Snapshot the zone's IPv6 interfaces. The caller frees *ifsp, which holds
+ * *nallocp entries of which the first *nifsp are valid.
+ */
+static void
+lxpr_ipv6_ifs_get(lxpr_node_t *lxpnp, lxpr_ipv6_if_t **ifsp, int *nallocp,
+    int *nifsp)
+{
+	netstack_t *ns;
+	ip_stack_t *ipst;
+	ill_t *ill;
+	ill_walk_context_t ctx;
+	lxpr_ipv6_if_t *ifs;
+	int nalloc = 0, n = 0;
+
+	*ifsp = NULL;
+	*nallocp = *nifsp = 0;
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL)
+		return;
+	ipst = ns->netstack_ip;
+
+	rw_enter(&ipst->ips_ill_g_lock, RW_READER);
+	ill = ILL_START_WALK_V6(&ctx, ipst);
+	for (; ill != NULL; ill = ill_next(&ctx, ill))
+		nalloc++;
+	rw_exit(&ipst->ips_ill_g_lock);
+
+	if (nalloc == 0) {
+		netstack_rele(ns);
+		return;
+	}
+
+	ifs = kmem_zalloc(nalloc * sizeof (lxpr_ipv6_if_t), KM_SLEEP);
+
+	/* Interfaces may have come or gone; take at most nalloc. */
+	rw_enter(&ipst->ips_ill_g_lock, RW_READER);
+	ill = ILL_START_WALK_V6(&ctx, ipst);
+	for (; ill != NULL && n < nalloc; ill = ill_next(&ctx, ill)) {
+		(void) strlcpy(ifs[n].lxi_name, ill->ill_name,
+		    sizeof (ifs[n].lxi_name));
+		lx_ifname_convert(ifs[n].lxi_name, LX_IF_FROMNATIVE);
+		ifs[n].lxi_index = ill->ill_phyint->phyint_ifindex;
+		n++;
+	}
+	rw_exit(&ipst->ips_ill_g_lock);
+	netstack_rele(ns);
+
+	*ifsp = ifs;
+	*nallocp = nalloc;
+	*nifsp = n;
+}
+
+static void
+lxpr_read_sys_net_ipv6_zero(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_BINDV6ONLY ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_ALL_DISABLE ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_DEF_DISABLE ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_IF_DISABLE);
+	lxpr_uiobuf_printf(uiobuf, "0\n");
+}
+
+static void
+lxpr_read_sys_net_ipv6_one(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_ALL_ACCEPT_RA ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_ALL_AUTOCONF ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_DEF_ACCEPT_RA ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_DEF_AUTOCONF ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_IF_ACCEPT_RA ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_IF_AUTOCONF);
+	lxpr_uiobuf_printf(uiobuf, "1\n");
+}
+
+static void
+lxpr_read_sys_net_ipv6_forwarding(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	netstack_t *ns;
+
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_ALL_FORWARDING ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_DEF_FORWARDING);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL) {
+		lxpr_uiobuf_printf(uiobuf, "0\n");
+		return;
+	}
+
+	lxpr_uiobuf_printf(uiobuf, "%d\n",
+	    ns->netstack_ip->ips_ipv6_forwarding ? 1 : 0);
+	netstack_rele(ns);
+}
+
+static void
+lxpr_read_sys_net_ipv6_hop_limit(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	netstack_t *ns;
+
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_ALL_HOP_LIMIT ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_DEF_HOP_LIMIT);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL) {
+		lxpr_uiobuf_printf(uiobuf, "%d\n", IPV6_MAX_HOPS);
+		return;
+	}
+
+	lxpr_uiobuf_printf(uiobuf, "%u\n",
+	    (uint_t)ns->netstack_ip->ips_ipv6_def_hops);
+	netstack_rele(ns);
+}
+
+static void
+lxpr_read_sys_net_ipv6_conf_if(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
+{
+	uint64_t flags;
+	uint_t hops;
+
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_IF_FORWARDING ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_IF_HOP_LIMIT);
+
+	if (lxpr_ipv6_if_info(lxpnp, NULL, lxpnp->lxpr_desc, NULL, &flags,
+	    &hops) != 0) {
+		lxpr_uiobuf_seterr(uiobuf, ENXIO);
+		return;
+	}
+
+	if (lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_IF_FORWARDING)
+		lxpr_uiobuf_printf(uiobuf, "%d\n",
+		    (flags & ILLF_ROUTER) != 0 ? 1 : 0);
+	else
+		lxpr_uiobuf_printf(uiobuf, "%u\n", hops);
+}
+
 static void
 lxpr_read_sys_net_ipv4_tcp_cc_allow(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 {
@@ -7148,6 +7537,69 @@ lxpr_lookup_sys_net_ipv4dir(vnode_t *dp, char *comp)
 }
 
 static vnode_t *
+lxpr_lookup_sys_net_ipv6dir(vnode_t *dp, char *comp)
+{
+	ASSERT(VTOLXP(dp)->lxpr_type == LXPR_SYS_NET_IPV6DIR);
+	return (lxpr_lookup_common(dp, comp, NULL, sys_net_ipv6dir,
+	    SYS_NET_IPV6DIRFILES));
+}
+
+static vnode_t *
+lxpr_lookup_sys_net_ipv6_confdir(vnode_t *dp, char *comp)
+{
+	vnode_t *vp;
+	lxpr_node_t *lxpnp;
+	uint_t index;
+
+	ASSERT(VTOLXP(dp)->lxpr_type == LXPR_SYS_NET_IPV6_CONFDIR);
+	vp = lxpr_lookup_common(dp, comp, NULL, sys_net_ipv6_confdir,
+	    SYS_NET_IPV6_CONFDIRFILES);
+	if (vp != NULL)
+		return (vp);
+
+	if (lxpr_ipv6_if_info(VTOLXP(dp), comp, 0, &index, NULL, NULL) != 0)
+		return (NULL);
+
+	lxpnp = lxpr_getnode(dp, LXPR_SYS_NET_IPV6_CONF_IFDIR, NULL, index);
+	return (LXPTOV(lxpnp));
+}
+
+static vnode_t *
+lxpr_lookup_sys_net_ipv6_conf_ifdir(vnode_t *dp, char *comp)
+{
+	lxpr_node_t *lxpnp;
+	int i;
+
+	ASSERT(VTOLXP(dp)->lxpr_type == LXPR_SYS_NET_IPV6_CONF_IFDIR);
+	for (i = 0; i < SYS_NET_IPV6_CONF_IFDIRFILES; i++) {
+		if (strcmp(sys_net_ipv6_conf_ifdir[i].d_name, comp) == 0) {
+			/* The leaves carry the interface index as well. */
+			lxpnp = lxpr_getnode(dp,
+			    sys_net_ipv6_conf_ifdir[i].d_type, NULL,
+			    VTOLXP(dp)->lxpr_desc);
+			return (LXPTOV(lxpnp));
+		}
+	}
+	return (NULL);
+}
+
+static vnode_t *
+lxpr_lookup_sys_net_ipv6_conf_alldir(vnode_t *dp, char *comp)
+{
+	ASSERT(VTOLXP(dp)->lxpr_type == LXPR_SYS_NET_IPV6_CONF_ALLDIR);
+	return (lxpr_lookup_common(dp, comp, NULL, sys_net_ipv6_conf_alldir,
+	    SYS_NET_IPV6_CONF_ALLDIRFILES));
+}
+
+static vnode_t *
+lxpr_lookup_sys_net_ipv6_conf_defdir(vnode_t *dp, char *comp)
+{
+	ASSERT(VTOLXP(dp)->lxpr_type == LXPR_SYS_NET_IPV6_CONF_DEFDIR);
+	return (lxpr_lookup_common(dp, comp, NULL, sys_net_ipv6_conf_defdir,
+	    SYS_NET_IPV6_CONF_DEFDIRFILES));
+}
+
+static vnode_t *
 lxpr_lookup_sys_vmdir(vnode_t *dp, char *comp)
 {
 	ASSERT(VTOLXP(dp)->lxpr_type == LXPR_SYS_VMDIR);
@@ -7225,8 +7677,8 @@ lxpr_readdir_not_a_dir(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp)
  * This has the common logic for returning directory entries
  */
 static int
-lxpr_readdir_common(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp,
-    lxpr_dirent_t *dirtab, int dirtablen)
+lxpr_readdir_common_desc(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp,
+    lxpr_dirent_t *dirtab, int dirtablen, int desc)
 {
 	/* bp holds one dirent64 structure */
 	longlong_t bp[DIRENT64_RECLEN(LXPNSIZ) / sizeof (longlong_t)];
@@ -7270,7 +7722,7 @@ lxpr_readdir_common(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp,
 			int slen = strlen(dirtab[dirindex].d_name);
 
 			dirent->d_ino = lxpr_inode(dirtab[dirindex].d_type,
-			    lxpnp->lxpr_pid, 0);
+			    lxpnp->lxpr_pid, desc);
 
 			VERIFY(slen < LXPNSIZ);
 			(void) strcpy(dirent->d_name, dirtab[dirindex].d_name);
@@ -7321,6 +7773,14 @@ lxpr_readdir_common(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp,
 		    (uiop->uio_offset >= ((dirtablen+2) * LXPR_SDSIZE)) ? 1 : 0;
 	}
 	return (0);
+}
+
+static int
+lxpr_readdir_common(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp,
+    lxpr_dirent_t *dirtab, int dirtablen)
+{
+	return (lxpr_readdir_common_desc(lxpnp, uiop, eofp, dirtab, dirtablen,
+	    0));
 }
 
 
@@ -7840,6 +8300,109 @@ lxpr_readdir_sys_net_ipv4dir(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp)
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV4DIR);
 	return (lxpr_readdir_common(lxpnp, uiop, eofp, sys_net_ipv4dir,
 	    SYS_NET_IPV4DIRFILES));
+}
+
+static int
+lxpr_readdir_sys_net_ipv6dir(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp)
+{
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6DIR);
+	return (lxpr_readdir_common(lxpnp, uiop, eofp, sys_net_ipv6dir,
+	    SYS_NET_IPV6DIRFILES));
+}
+
+static int
+lxpr_readdir_sys_net_ipv6_confdir(lxpr_node_t *lxpnp, uio_t *uiop, int *eofp)
+{
+	/* bp holds one dirent64 structure */
+	longlong_t bp[DIRENT64_RECLEN(LXPNSIZ) / sizeof (longlong_t)];
+	dirent64_t *dirent = (dirent64_t *)bp;
+	ssize_t oresid = uiop->uio_resid;
+	ssize_t uresid;
+	lxpr_ipv6_if_t *ifs;
+	int nalloc, nifs, ceof, error;
+
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONFDIR);
+
+	/* Do the fixed entries: ".", "..", "all" and "default" */
+	error = lxpr_readdir_common(lxpnp, uiop, &ceof, sys_net_ipv6_confdir,
+	    SYS_NET_IPV6_CONFDIRFILES);
+	if (error != 0 || ceof == 0) {
+		if (eofp != NULL)
+			*eofp = 0;
+		return (error);
+	}
+
+	/* Then one directory per IPv6 interface */
+	lxpr_ipv6_ifs_get(lxpnp, &ifs, &nalloc, &nifs);
+	if (eofp != NULL)
+		*eofp = 0;
+	bzero(bp, sizeof (bp));
+
+	while ((uresid = uiop->uio_resid) > 0) {
+		off_t uoffset = uiop->uio_offset;
+		int i = (uoffset / LXPR_SDSIZE) - 2 - SYS_NET_IPV6_CONFDIRFILES;
+		int len, reclen;
+
+		if (i < 0 || i >= nifs) {
+			if (eofp != NULL)
+				*eofp = 1;
+			break;
+		}
+
+		dirent->d_ino = lxpr_inode(LXPR_SYS_NET_IPV6_CONF_IFDIR, 0,
+		    ifs[i].lxi_index);
+		len = strlen(ifs[i].lxi_name);
+		ASSERT(len < LXPNSIZ);
+		(void) strcpy(dirent->d_name, ifs[i].lxi_name);
+		reclen = DIRENT64_RECLEN(len);
+		dirent->d_off = (off64_t)(uoffset + LXPR_SDSIZE);
+		dirent->d_reclen = (ushort_t)reclen;
+
+		if (reclen > uresid) {
+			/* Error if no entries have been returned yet. */
+			if (uresid == oresid)
+				error = EINVAL;
+			break;
+		}
+
+		/* See lxpr_readdir_common() for why uio_offset is set here. */
+		if ((error = uiomove((caddr_t)dirent, reclen, UIO_READ,
+		    uiop)) != 0)
+			break;
+		uiop->uio_offset = uoffset + LXPR_SDSIZE;
+	}
+
+	if (ifs != NULL)
+		kmem_free(ifs, nalloc * sizeof (lxpr_ipv6_if_t));
+	return (error);
+}
+
+static int
+lxpr_readdir_sys_net_ipv6_conf_ifdir(lxpr_node_t *lxpnp, uio_t *uiop,
+    int *eofp)
+{
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_IFDIR);
+	return (lxpr_readdir_common_desc(lxpnp, uiop, eofp,
+	    sys_net_ipv6_conf_ifdir, SYS_NET_IPV6_CONF_IFDIRFILES,
+	    lxpnp->lxpr_desc));
+}
+
+static int
+lxpr_readdir_sys_net_ipv6_conf_alldir(lxpr_node_t *lxpnp, uio_t *uiop,
+    int *eofp)
+{
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_ALLDIR);
+	return (lxpr_readdir_common(lxpnp, uiop, eofp, sys_net_ipv6_conf_alldir,
+	    SYS_NET_IPV6_CONF_ALLDIRFILES));
+}
+
+static int
+lxpr_readdir_sys_net_ipv6_conf_defdir(lxpr_node_t *lxpnp, uio_t *uiop,
+    int *eofp)
+{
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_DEFDIR);
+	return (lxpr_readdir_common(lxpnp, uiop, eofp, sys_net_ipv6_conf_defdir,
+	    SYS_NET_IPV6_CONF_DEFDIRFILES));
 }
 
 static int
@@ -8619,6 +9182,145 @@ lxpr_write_sys_net_ipv4_tcp_winscale(lxpr_node_t *lxpnp, struct uio *uio,
 	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV4_TCP_WINSCALE);
 	return (lxpr_write_tcp_property(lxpnp, uio, cr, ct, "_wscale_always",
 	    NULL));
+}
+
+/*
+ * Write handler for the /proc/sys/net/ipv6 boolean nodes whose value we
+ * cannot change. Writing the current value is accepted, so that configuration
+ * which matches the zone's state applies cleanly. Writing the other value
+ * fails with EPERM, which systemd-sysctl (like a read-only /proc/sys in a
+ * Linux container) logs and ignores instead of treating as a failure.
+ */
+static int
+lxpr_write_sys_net_ipv6_fixed(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct)
+{
+	int error;
+	size_t olen;
+	char val[16];	/* big enough for a uint numeric string */
+	long flag, cur;
+	char *ep;
+	netstack_t *ns;
+	uint64_t ifflags;
+	uint_t hops;
+
+	if (uio->uio_loffset != 0)
+		return (EINVAL);
+
+	if (uio->uio_resid == 0)
+		return (0);
+
+	olen = uio->uio_resid;
+	if (olen > sizeof (val) - 1)
+		return (EINVAL);
+
+	bzero(val, sizeof (val));
+	error = uiomove(val, olen, UIO_WRITE, uio);
+	if (error != 0)
+		return (error);
+
+	if (val[olen - 1] == '\n')
+		val[olen - 1] = '\0';
+
+	if (val[0] == '\0') /* no input */
+		return (EINVAL);
+
+	if (lxpr_tokenize_num(val, &flag, &ep) != 0 || *ep != '\0')
+		return (EINVAL);
+
+	switch (lxpnp->lxpr_type) {
+	case LXPR_SYS_NET_IPV6_CONF_IF_HOP_LIMIT:
+		if (flag < 1 || flag > 255)
+			return (EINVAL);
+		if (lxpr_ipv6_if_info(lxpnp, NULL, lxpnp->lxpr_desc, NULL,
+		    NULL, &hops) != 0)
+			return (ENXIO);
+		return (flag == hops ? 0 : EPERM);
+	case LXPR_SYS_NET_IPV6_CONF_IF_FORWARDING:
+		if (lxpr_ipv6_if_info(lxpnp, NULL, lxpnp->lxpr_desc, NULL,
+		    &ifflags, NULL) != 0)
+			return (ENXIO);
+		cur = (ifflags & ILLF_ROUTER) != 0 ? 1 : 0;
+		break;
+	case LXPR_SYS_NET_IPV6_BINDV6ONLY:
+	case LXPR_SYS_NET_IPV6_CONF_ALL_DISABLE:
+	case LXPR_SYS_NET_IPV6_CONF_DEF_DISABLE:
+	case LXPR_SYS_NET_IPV6_CONF_IF_DISABLE:
+		cur = 0;
+		break;
+	case LXPR_SYS_NET_IPV6_CONF_ALL_ACCEPT_RA:
+	case LXPR_SYS_NET_IPV6_CONF_ALL_AUTOCONF:
+	case LXPR_SYS_NET_IPV6_CONF_DEF_ACCEPT_RA:
+	case LXPR_SYS_NET_IPV6_CONF_DEF_AUTOCONF:
+	case LXPR_SYS_NET_IPV6_CONF_IF_ACCEPT_RA:
+	case LXPR_SYS_NET_IPV6_CONF_IF_AUTOCONF:
+		cur = 1;
+		break;
+	case LXPR_SYS_NET_IPV6_CONF_ALL_FORWARDING:
+	case LXPR_SYS_NET_IPV6_CONF_DEF_FORWARDING:
+		ns = lxpr_netstack(lxpnp);
+		if (ns == NULL)
+			return (EINVAL);
+		cur = ns->netstack_ip->ips_ipv6_forwarding ? 1 : 0;
+		netstack_rele(ns);
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	if (flag != 0 && flag != 1)
+		return (EINVAL);
+
+	return (flag == cur ? 0 : EPERM);
+}
+
+static int
+lxpr_write_sys_net_ipv6_hop_limit(lxpr_node_t *lxpnp, struct uio *uio,
+    struct cred *cr, caller_context_t *ct)
+{
+	int error;
+	int res = 0;
+	size_t olen;
+	char val[16];	/* big enough for a uint numeric string */
+	netstack_t *ns;
+	mod_prop_info_t *pinfo;
+
+	ASSERT(lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_ALL_HOP_LIMIT ||
+	    lxpnp->lxpr_type == LXPR_SYS_NET_IPV6_CONF_DEF_HOP_LIMIT);
+
+	if (uio->uio_loffset != 0)
+		return (EINVAL);
+
+	if (uio->uio_resid == 0)
+		return (0);
+
+	olen = uio->uio_resid;
+	if (olen > sizeof (val) - 1)
+		return (EINVAL);
+
+	bzero(val, sizeof (val));
+	error = uiomove(val, olen, UIO_WRITE, uio);
+	if (error != 0)
+		return (error);
+
+	if (val[olen - 1] == '\n')
+		val[olen - 1] = '\0';
+
+	if (val[0] == '\0') /* no input */
+		return (EINVAL);
+
+	ns = lxpr_netstack(lxpnp);
+	if (ns == NULL)
+		return (EINVAL);
+
+	/* mod_set_uint32 does the 1-255 range check. */
+	pinfo = mod_prop_lookup(ns->netstack_ip->ips_propinfo_tbl, "hoplimit",
+	    MOD_PROTO_IPV6);
+	if (pinfo == NULL || pinfo->mpi_setf(ns, cr, pinfo, NULL, val, 0) != 0)
+		res = EINVAL;
+
+	netstack_rele(ns);
+	return (res);
 }
 
 static int

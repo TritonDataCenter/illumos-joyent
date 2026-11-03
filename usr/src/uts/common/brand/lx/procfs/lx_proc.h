@@ -23,7 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2025 Edgecast Cloud LLC.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef	_LX_PROC_H
@@ -278,6 +278,27 @@ typedef enum lxpr_nodetype {
 	LXPR_SYS_NET_IPV4_TCP_SACK,	/* /proc/sys/net/ipv4/tcp_sack */
 	LXPR_SYS_NET_IPV4_TCP_WINSCALE,	/* .../net/ipv4/tcp_window_scaling */
 	LXPR_SYS_NET_IPV4_TCP_WMEM,	/* /proc/sys/net/ipv4/tcp_wmem */
+	LXPR_SYS_NET_IPV6DIR,		/* /proc/sys/net/ipv6		*/
+	LXPR_SYS_NET_IPV6_BINDV6ONLY,	/* /proc/sys/net/ipv6/bindv6only */
+	LXPR_SYS_NET_IPV6_CONFDIR,	/* /proc/sys/net/ipv6/conf	*/
+	LXPR_SYS_NET_IPV6_CONF_ALLDIR,	/* /proc/sys/net/ipv6/conf/all	*/
+	LXPR_SYS_NET_IPV6_CONF_ALL_ACCEPT_RA,	/* .../conf/all/accept_ra */
+	LXPR_SYS_NET_IPV6_CONF_ALL_AUTOCONF,	/* .../conf/all/autoconf */
+	LXPR_SYS_NET_IPV6_CONF_ALL_DISABLE,	/* .../conf/all/disable_ipv6 */
+	LXPR_SYS_NET_IPV6_CONF_ALL_FORWARDING,	/* .../conf/all/forwarding */
+	LXPR_SYS_NET_IPV6_CONF_ALL_HOP_LIMIT,	/* .../conf/all/hop_limit */
+	LXPR_SYS_NET_IPV6_CONF_DEFDIR,	/* /proc/sys/net/ipv6/conf/default */
+	LXPR_SYS_NET_IPV6_CONF_DEF_ACCEPT_RA,	/* .../default/accept_ra */
+	LXPR_SYS_NET_IPV6_CONF_DEF_AUTOCONF,	/* .../default/autoconf */
+	LXPR_SYS_NET_IPV6_CONF_DEF_DISABLE,	/* .../default/disable_ipv6 */
+	LXPR_SYS_NET_IPV6_CONF_DEF_FORWARDING,	/* .../default/forwarding */
+	LXPR_SYS_NET_IPV6_CONF_DEF_HOP_LIMIT,	/* .../default/hop_limit */
+	LXPR_SYS_NET_IPV6_CONF_IFDIR,	/* /proc/sys/net/ipv6/conf/<if> */
+	LXPR_SYS_NET_IPV6_CONF_IF_ACCEPT_RA,	/* .../conf/<if>/accept_ra */
+	LXPR_SYS_NET_IPV6_CONF_IF_AUTOCONF,	/* .../conf/<if>/autoconf */
+	LXPR_SYS_NET_IPV6_CONF_IF_DISABLE,	/* .../conf/<if>/disable_ipv6 */
+	LXPR_SYS_NET_IPV6_CONF_IF_FORWARDING,	/* .../conf/<if>/forwarding */
+	LXPR_SYS_NET_IPV6_CONF_IF_HOP_LIMIT,	/* .../conf/<if>/hop_limit */
 	LXPR_SYS_VMDIR,			/* /proc/sys/vm			*/
 	LXPR_SYS_VM_DIRTY_BG_BYTES,	/* .../vm/dirty_background_bytes */
 	LXPR_SYS_VM_DIRTY_BG_RATIO,	/* .../vm/dirty_background_ratio */
