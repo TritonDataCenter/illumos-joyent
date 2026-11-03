@@ -184,13 +184,30 @@ lx_open_postprocess(int fd, int fmode)
  */
 static major_t lx_zcons_major = DDI_MAJOR_T_NONE;
 
+/*
+ * Return B_TRUE if the vnode is the zone console.
+ */
+boolean_t
+lx_vp_is_console(vnode_t *vp)
+{
+	if (vp->v_type != VCHR)
+		return (B_FALSE);
+
+	if (lx_zcons_major == DDI_MAJOR_T_NONE)
+		lx_zcons_major = ddi_name_to_major("zcons");
+	if (lx_zcons_major == DDI_MAJOR_T_NONE)
+		return (B_FALSE);
+
+	return (getmajor(vp->v_rdev) == lx_zcons_major);
+}
+
 static boolean_t
 lx_open_acquires_console(int atfd, char *path)
 {
 	proc_t *p = curproc;
 	sess_t *sp;
 	boolean_t can_acquire;
-	boolean_t rv = B_FALSE;
+	boolean_t rv;
 	vnode_t *vp;
 
 	mutex_enter(&p->p_splock);
@@ -201,19 +218,37 @@ lx_open_acquires_console(int atfd, char *path)
 	if (!can_acquire)
 		return (B_FALSE);
 
-	if (lx_zcons_major == DDI_MAJOR_T_NONE)
-		lx_zcons_major = ddi_name_to_major("zcons");
-	if (lx_zcons_major == DDI_MAJOR_T_NONE)
-		return (B_FALSE);
-
 	if (lx_vp_at(atfd, path, &vp, 0) != 0)
 		return (B_FALSE);
 
-	if (vp->v_type == VCHR && getmajor(vp->v_rdev) == lx_zcons_major)
-		rv = B_TRUE;
+	rv = lx_vp_is_console(vp);
 
 	VN_RELE(vp);
 	return (rv);
+}
+
+/*
+ * In an lx zone /dev/kmsg is a symlink to the console, so that messages
+ * written to the kernel log end up on the console.  Reading it, though,
+ * reads console input: systemd-journald keeps /dev/kmsg open for reading
+ * and stole keystrokes from whoever was logged in on the console.
+ *
+ * Make /dev/kmsg behave like it did on Linux before 3.5: it can be opened
+ * for reading, but the descriptor is write-only and read(2) fails with
+ * EINVAL (see lx_read()).  journald handles EINVAL by never reading
+ * /dev/kmsg again.
+ */
+#define	LX_DEV_KMSG	"/dev/kmsg"
+
+static boolean_t
+lx_open_is_kmsg(char *path)
+{
+	char buf[sizeof (LX_DEV_KMSG) + 1];
+
+	if (copyinstr(path, buf, sizeof (buf), NULL) != 0)
+		return (B_FALSE);
+
+	return (strcmp(buf, LX_DEV_KMSG) == 0);
 }
 
 long
@@ -230,6 +265,11 @@ lx_openat(int atfd, char *path, int fmode, int cmode)
 	if ((fmode & (LX_O_NOCTTY | LX_O_PATH)) == 0 &&
 	    lx_open_acquires_console(atfd, path)) {
 		flags |= O_NOCTTY;
+	}
+
+	if ((fmode & LX_O_PATH) == 0 &&
+	    (fmode & LX_O_ACCMODE) != LX_O_WRONLY && lx_open_is_kmsg(path)) {
+		flags = (flags & ~(O_RDONLY | O_WRONLY | O_RDWR)) | O_WRONLY;
 	}
 
 	if ((fmode & (LX_O_NOFOLLOW|LX_O_PATH|__FLXPATH)) ==

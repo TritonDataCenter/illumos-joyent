@@ -23,6 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2015 Joyent, Inc.
  * Copyright 2024 MNX Cloud, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _SYS_LX_FCNTL_H
@@ -95,6 +96,7 @@ extern "C" {
 #define	LX_IS_O_PATH(f)		(((f)->f_flag & (FREAD|FWRITE)) == 0)
 
 extern int lx_vp_at(int, char *, vnode_t **, int);
+extern boolean_t lx_vp_is_console(vnode_t *);
 
 /*
  * Lx flock codes.

@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2017 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/errno.h>
@@ -20,6 +21,7 @@
 #include <sys/brand.h>
 #include <sys/lx_brand.h>
 #include <sys/lx_types.h>
+#include <sys/lx_fcntl.h>
 #include <sys/nbmlock.h>
 #include <sys/limits.h>
 
@@ -338,7 +340,12 @@ lx_read(int fdes, void *cbuf, size_t ccount)
 	if ((fp = getf(fdes)) == NULL)
 		return (set_errno(EBADF));
 	if (((fflag = fp->f_flag) & FREAD) == 0) {
-		error = EBADF;
+		/*
+		 * A write-only console descriptor is what an open of
+		 * /dev/kmsg yields (see lx_open_is_kmsg()); reading it
+		 * fails with EINVAL as on Linux before 3.5.
+		 */
+		error = lx_vp_is_console(fp->f_vnode) ? EINVAL : EBADF;
 		goto out;
 	}
 	if (fp->f_vnode->v_type == VREG && count == 0) {
