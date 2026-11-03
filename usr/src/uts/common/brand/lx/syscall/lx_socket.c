@@ -1705,6 +1705,7 @@ lx_connect(long sock, uintptr_t name, socklen_t namelen)
 	socklen_t len = 0;
 	file_t *fp;
 	int error;
+	lx_sun_type_t sun_type = LX_SUN_NORMAL;
 
 	if ((so = getsonode(sock, &error, &fp)) == NULL) {
 		return (set_errno(error));
@@ -1717,7 +1718,7 @@ lx_connect(long sock, uintptr_t name, socklen_t namelen)
 	 */
 	if (namelen != 0) {
 		error = ltos_sockaddr_copyin((struct sockaddr *)name, namelen,
-		    &addr, &len, NULL);
+		    &addr, &len, &sun_type);
 		if (error != 0) {
 			releasef(sock);
 			return (set_errno(error));
@@ -1726,6 +1727,17 @@ lx_connect(long sock, uintptr_t name, socklen_t namelen)
 
 	error = socket_connect(so, addr, len, fp->f_flag,
 	    _SOCONNECT_XPG4_2, CRED());
+
+	/*
+	 * Abstract namespace sockets are emulated with files under ABST_PRFX
+	 * (see ltos_sockaddr_ux), so connecting to a name nobody has bound
+	 * fails the path lookup with ENOENT. On Linux, an abstract name with
+	 * no listener gives ECONNREFUSED, and callers rely on that: agetty,
+	 * for example, probes for plymouth and stays quiet only on
+	 * ECONNREFUSED.
+	 */
+	if (error == ENOENT && sun_type == LX_SUN_ABSTRACT)
+		error = ECONNREFUSED;
 
 	if (error == EINTR)
 		lx_sock_syscall_restart(so, B_FALSE);
@@ -2424,6 +2436,7 @@ lx_send_common(int sock, struct nmsghdr *msg, struct uio *uiop, int flags)
 	ssize_t len = 0;
 	int error;
 	boolean_t nosig;
+	lx_sun_type_t sun_type = LX_SUN_NORMAL;
 
 	if ((so = getsonode(sock, &error, &fp)) == NULL) {
 		return (set_errno(error));
@@ -2436,7 +2449,7 @@ lx_send_common(int sock, struct nmsghdr *msg, struct uio *uiop, int flags)
 		ASSERT(MUTEX_NOT_HELD(&so->so_lock));
 
 		error = ltos_sockaddr_copyin((struct sockaddr *)msg->msg_name,
-		    msg->msg_namelen, &name, &namelen, NULL);
+		    msg->msg_namelen, &name, &namelen, &sun_type);
 		if (error != 0) {
 			goto done;
 		}
@@ -2477,6 +2490,10 @@ lx_send_common(int sock, struct nmsghdr *msg, struct uio *uiop, int flags)
 	error = lx_socket_sendmsg(so, msg, uiop, CRED(), nosig);
 	if (error == EINTR)
 		lx_sock_syscall_restart(so, B_FALSE);
+
+	/* An unbound abstract name gives ECONNREFUSED; see lx_connect. */
+	if (error == ENOENT && sun_type == LX_SUN_ABSTRACT)
+		error = ECONNREFUSED;
 done:
 	if (control != NULL) {
 		kmem_free(control, controllen);
