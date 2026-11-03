@@ -42,6 +42,7 @@
 #include <sys/un.h>
 #include <sys/sunddi.h>
 #include <sys/cred.h>
+#include <sys/policy.h>
 #include <sys/ucred.h>
 #include <sys/model.h>
 #include <sys/brand.h>
@@ -925,6 +926,56 @@ lx_xlate_cmsg(struct cmsghdr *inmsg, struct cmsghdr *omsg, lx_xlate_dir_t dir)
 	return (-EOPNOTSUPP);
 }
 
+/*
+ * Linux lets a sender attach SCM_CREDENTIALS to a message, which the kernel
+ * checks (see scm_check_creds()) and then delivers to receivers which set
+ * SO_PASSCRED.  On illumos the kernel attaches the credentials itself for
+ * receivers with SO_RECVUCRED (our SO_PASSCRED), so passing the sender's
+ * cmsg through would give such receivers two credentials, which made
+ * systemd-journald abort with "Assertion '!ucred' failed".
+ *
+ * Check the credentials the way Linux does, failing the send with EPERM
+ * if the sender may not claim them, and then drop the cmsg.  A privileged
+ * sender claiming another process's credentials is not supported; the
+ * receiver sees the sender's real ones.
+ */
+static boolean_t
+lx_cmsg_is_ucred(const struct cmsghdr *cmsg)
+{
+	return (cmsg->cmsg_level == LX_SOL_SOCKET &&
+	    cmsg->cmsg_type == LX_SCM_CRED);
+}
+
+static int
+lx_cmsg_check_ucred(const struct cmsghdr *cmsg)
+{
+	const cred_t *cr = CRED();
+	lx_ucred_t lc;
+	pid_t spid;
+	id_t stid;
+
+	if (cmsg->cmsg_len < sizeof (struct cmsghdr) + sizeof (lx_ucred_t))
+		return (EINVAL);
+	bcopy(CMSG_CONTENT(cmsg), &lc, sizeof (lc));
+
+	if ((lx_lpid_to_spair(lc.lxu_pid, &spid, &stid) != 0 ||
+	    spid != curproc->p_pid) &&
+	    secpolicy_allow_setid(cr, -1, B_FALSE) != 0) {
+		return (EPERM);
+	}
+	if (lc.lxu_uid != crgetruid(cr) && lc.lxu_uid != crgetuid(cr) &&
+	    lc.lxu_uid != crgetsuid(cr) &&
+	    secpolicy_allow_setid(cr, lc.lxu_uid, B_FALSE) != 0) {
+		return (EPERM);
+	}
+	if (lc.lxu_gid != crgetrgid(cr) && lc.lxu_gid != crgetgid(cr) &&
+	    lc.lxu_gid != crgetsgid(cr) &&
+	    secpolicy_allow_setid(cr, -1, B_FALSE) != 0) {
+		return (EPERM);
+	}
+	return (0);
+}
+
 static long
 ltos_cmsgs_copyin(void *addr, socklen_t inlen, void **outmsg,
     socklen_t *outlenp)
@@ -1010,6 +1061,17 @@ ltos_cmsgs_copyin(void *addr, socklen_t inlen, void **outmsg,
 	    inmsg = CMSG_NEXT(inmsg)) {
 		int sz;
 
+		if (lx_cmsg_is_ucred(inmsg)) {
+			int err;
+
+			/* Checked, then dropped: see lx_cmsg_check_ucred() */
+			if ((err = lx_cmsg_check_ucred(inmsg)) != 0) {
+				kmem_free(inbuf, inlen);
+				return (err);
+			}
+			continue;
+		}
+
 		if ((sz = lx_xlate_cmsg(inmsg, NULL, LX_TO_SUNOS)) < 0) {
 			/* unsupported msg */
 			kmem_free(inbuf, inlen);
@@ -1019,15 +1081,27 @@ ltos_cmsgs_copyin(void *addr, socklen_t inlen, void **outmsg,
 		slen += ROUNDUP_cmsglen(sz);
 	}
 
+	if (slen == 0) {
+		/* Only credentials were passed */
+		kmem_free(inbuf, inlen);
+		*outmsg = NULL;
+		*outlenp = 0;
+		return (0);
+	}
+
 	obuf = kmem_zalloc(slen, KM_SLEEP);
 
 	/*
 	 * Now do the conversion.
 	 */
-	for (inmsg = (struct cmsghdr *)inbuf, omsg = (struct cmsghdr *)obuf;
+	omsg = (struct cmsghdr *)obuf;
+	for (inmsg = (struct cmsghdr *)inbuf;
 	    CMSG_VALID(inmsg, inbuf, (uintptr_t)inbuf + inlen) != 0;
-	    inmsg = CMSG_NEXT(inmsg), omsg = CMSG_NEXT(omsg)) {
+	    inmsg = CMSG_NEXT(inmsg)) {
+		if (lx_cmsg_is_ucred(inmsg))
+			continue;
 		VERIFY(lx_xlate_cmsg(inmsg, omsg, LX_TO_SUNOS) >= 0);
+		omsg = CMSG_NEXT(omsg);
 	}
 
 	kmem_free(inbuf, inlen);
