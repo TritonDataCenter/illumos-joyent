@@ -26,6 +26,7 @@
  * Copyright 2020 Joyent, Inc.
  * Copyright 2020 Tintri by DDN, Inc. All rights reserved.
  * Copyright 2015-2024 RackTop Systems, Inc.
+ * Copyright 2026 Oxide Computer Company
  */
 
 /* Portions Copyright 2007 Jeremy Teo */
@@ -1236,10 +1237,13 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, struct lwb *lwb, zio_t *zio)
 	ASSERT3U(size, !=, 0);
 
 	/*
-	 * Nothing to do if the file has been removed
+	 * Nothing to do if the file has been removed.  Any other failure
+	 * to get the znode is an I/O error, not a sign that the file is
+	 * gone: the ZIL waits for the txg to sync instead.
 	 */
-	if (zfs_zget(zfsvfs, object, &zp) != 0)
-		return (SET_ERROR(ENOENT));
+	error = zfs_zget(zfsvfs, object, &zp);
+	if (error != 0)
+		return (SET_ERROR(error == ENOENT ? ENOENT : EIO));
 	if (zp->z_unlinked) {
 		/*
 		 * Release the vnode asynchronously as we currently have the
@@ -1325,19 +1329,6 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, struct lwb *lwb, zio_t *zio)
 			 */
 			if (error == 0)
 				return (0);
-
-			if (error == EALREADY) {
-				lr->lr_common.lrc_txtype = TX_WRITE2;
-				/*
-				 * TX_WRITE2 relies on the data previously
-				 * written by the TX_WRITE that caused
-				 * EALREADY.  We zero out the BP because
-				 * it is the old, currently-on-disk BP.
-				 */
-				zgd->zgd_bp = NULL;
-				BP_ZERO(bp);
-				error = 0;
-			}
 		}
 	}
 

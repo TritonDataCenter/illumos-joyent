@@ -1035,9 +1035,9 @@ vmspace_client_alloc(vmspace_t *vms)
 	vmc->vmc_cpu_active = -1;
 	list_create(&vmc->vmc_held_pages, sizeof (vm_page_t),
 	    offsetof(vm_page_t, vmp_node));
-	vmc->vmc_track_dirty = vms->vms_track_dirty;
 
 	mutex_enter(&vms->vms_lock);
+	vmc->vmc_track_dirty = vms->vms_track_dirty;
 	list_insert_tail(&vms->vms_clients, vmc);
 	mutex_exit(&vms->vms_lock);
 
