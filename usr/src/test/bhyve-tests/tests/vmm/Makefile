@@ -9,7 +9,7 @@
 # http://www.illumos.org/license/CDDL.
 #
 
-# Copyright 2023 Oxide Computer Company
+# Copyright 2026 Oxide Computer Company
 
 include $(SRC)/cmd/Makefile.cmd
 include $(SRC)/cmd/Makefile.cmd.64
@@ -35,7 +35,8 @@ PROG =	mem_partial \
 	import_vlapic \
 	time_data \
 	maxcpu \
-	npt_ops
+	npt_ops \
+	vcpu_alloc
 
 COMMON_OBJS =	common.o
 CLEAN_OBJS =	$(PROG:%=%.o)
@@ -54,6 +55,7 @@ CPPFLAGS =	-I$(COMPAT)/bhyve -I$(CONTRIB)/bhyve \
 		-I$(SRC)/uts/intel \
 		-I../common
 $(PROG) :=	LDLIBS += -lvmmapi
+vcpu_alloc :=	LDLIBS += -lkstat
 
 all: $(PROG)
 

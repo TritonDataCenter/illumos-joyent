@@ -22,6 +22,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2014 Integros [integros.com]
+ * Copyright 2026 Oxide Computer Company
  */
 
 /* Portions Copyright 2010 Robert Milkowski */
@@ -162,7 +163,7 @@ typedef enum zil_create {
 #define	TX_MKDIR_ACL		17	/* mkdir with ACL */
 #define	TX_MKDIR_ATTR		18	/* mkdir with attr */
 #define	TX_MKDIR_ACL_ATTR	19	/* mkdir with ACL + attrs */
-#define	TX_WRITE2		20	/* dmu_sync EALREADY write */
+#define	TX_WRITE2		20	/* dmu_sync EALREADY write (old) */
 #define	TX_MAX_TYPE		21	/* Max transaction type */
 
 /*
@@ -311,10 +312,22 @@ typedef struct {
 	uint64_t	lr_foid;	/* file object to write */
 	uint64_t	lr_offset;	/* offset to write to */
 	uint64_t	lr_length;	/* user data length to write */
-	uint64_t	lr_blkoff;	/* no longer used */
+	uint64_t	lr_flags;	/* LR_WRITE_* flags, see below */
 	blkptr_t	lr_blkptr;	/* spa block pointer for replay */
 	/* write data will follow for small writes */
 } lr_write_t;
+
+/*
+ * A TX_WRITE record that carries data (WR_NEED_COPY) may be split across log
+ * blocks.  Its pieces are marked in lr_flags so that replay will apply the
+ * write only once all pieces are present, except that a write larger than
+ * replay can gather (32M) may be applied in parts that end at multiples of
+ * SPA_MAXBLOCKSIZE (block boundaries).  Older software (before 2026) named
+ * the field lr_blkoff.  Software from 2007 to 2009 set it to the offset
+ * within the block; other software ignored it.
+ */
+#define	LR_WRITE_MORE	(1ULL << 63)	/* next record continues this write */
+#define	LR_WRITE_CONT	(1ULL << 62)	/* continues the previous record */
 
 typedef struct {
 	lr_t		lr_common;	/* common portion of log record */
@@ -423,6 +436,7 @@ extern void	zil_close(zilog_t *zilog);
 extern void	zil_replay(objset_t *os, void *arg,
     zil_replay_func_t *replay_func[TX_MAX_TYPE]);
 extern boolean_t zil_replaying(zilog_t *zilog, dmu_tx_t *tx);
+extern boolean_t zil_replay_whole_blocks(zilog_t *zilog);
 extern void	zil_destroy(zilog_t *zilog, boolean_t keep_first);
 extern void	zil_destroy_sync(zilog_t *zilog, dmu_tx_t *tx);
 extern void	zil_rollback_destroy(zilog_t *zilog, dmu_tx_t *tx);

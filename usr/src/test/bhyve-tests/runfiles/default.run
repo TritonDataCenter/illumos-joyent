@@ -40,7 +40,8 @@ tests = [
 	'mem_seg_map',
 	'npt_ops',
 	'pause_resume',
-	'self_destruct'
+	'self_destruct',
+	'vcpu_alloc'
 	]
 
 [/opt/bhyve-tests/tests/kdev]

@@ -44,12 +44,12 @@
 /* This must match HOST_MSR_NUM in svm_msr.c (where it is CTASSERTed) */
 #define	SVM_HOST_MSR_NUM	4
 
-/*
- * XXX separate out 'struct vmcb' from 'svm_vcpu' to avoid wasting space
- * due to VMCB alignment requirements.
- */
 struct svm_vcpu {
-	struct vmcb	vmcb;	 /* hardware saved vcpu context */
+	struct svm_softc *sc;	 /* owning softc */
+	struct vcpu	*vcpu;	 /* generic vcpu state */
+	int		vcpuid;	 /* id within the vm */
+	struct vmcb	*vmcb;	 /* hardware saved vcpu context */
+	void		*apic_page;
 	struct svm_regctx swctx; /* software saved vcpu context */
 	uint64_t	vmcb_pa; /* VMCB physical address */
 	uint64_t	nextrip; /* next instruction to be executed by guest */
@@ -59,97 +59,79 @@ struct svm_vcpu {
 	hma_svm_asid_t	hma_asid;
 	boolean_t	flush_req; /* guest TLB flush due at next entry */
 	boolean_t	loaded;
+	uint64_t	host_msrs[SVM_HOST_MSR_NUM];
 	struct svm_pmu_vcpu pmu;
-} __aligned(PAGE_SIZE);
+};
 
 /*
  * SVM softc, one per virtual machine.
  */
 struct svm_softc {
-	uint8_t apic_page[VM_MAXCPU][PAGE_SIZE];
-	struct svm_vcpu vcpu[VM_MAXCPU];
 	uint64_t	nptp;		/* nested page table (host PA) */
 	uint8_t		*iopm_bitmap;	/* shared by all vcpus */
 	uint8_t		*msr_bitmap;	/* shared by all vcpus */
 	struct vm	*vm;
-	uint64_t	host_msrs[VM_MAXCPU][SVM_HOST_MSR_NUM];
 	svm_pmu_flavor_t pmu_flavor;
 };
 
-/*
- * Since the VMCB must be page-aligned, and is the first member of svm_vcpu,
- * which is slated to be page-aligned, this is a belt-and-suspenders check to
- * see that such alignment instructions are being heeded.
- */
-CTASSERT((offsetof(struct svm_softc, nptp) & PAGE_MASK) == 0);
-
-static __inline struct svm_vcpu *
-svm_get_vcpu(struct svm_softc *sc, int vcpu)
-{
-	return (&(sc->vcpu[vcpu]));
-}
-
 static __inline struct vmcb *
-svm_get_vmcb(struct svm_softc *sc, int vcpu)
+svm_get_vmcb(struct svm_vcpu *vcpu)
 {
-	return (&(sc->vcpu[vcpu].vmcb));
+	return (vcpu->vmcb);
 }
 
 static __inline struct vmcb_state *
-svm_get_vmcb_state(struct svm_softc *sc, int vcpu)
+svm_get_vmcb_state(struct svm_vcpu *vcpu)
 {
-	return (&(sc->vcpu[vcpu].vmcb.state));
+	return (&vcpu->vmcb->state);
 }
 
 static __inline struct vmcb_ctrl *
-svm_get_vmcb_ctrl(struct svm_softc *sc, int vcpu)
+svm_get_vmcb_ctrl(struct svm_vcpu *vcpu)
 {
-	return (&(sc->vcpu[vcpu].vmcb.ctrl));
+	return (&vcpu->vmcb->ctrl);
 }
 
 static __inline struct svm_regctx *
-svm_get_guest_regctx(struct svm_softc *sc, int vcpu)
+svm_get_guest_regctx(struct svm_vcpu *vcpu)
 {
-	return (&(sc->vcpu[vcpu].swctx));
+	return (&vcpu->swctx);
 }
 
 static __inline struct svm_pmu_vcpu *
-svm_get_pmu(struct svm_softc *sc, int vcpu)
+svm_get_pmu(struct svm_vcpu *vcpu)
 {
-	return (&(sc->vcpu[vcpu].pmu));
+	return (&vcpu->pmu);
 }
 
 static __inline void
-svm_set_dirty(struct svm_softc *sc, int vcpu, uint32_t dirtybits)
+svm_set_dirty(struct svm_vcpu *vcpu, uint32_t dirtybits)
 {
-	struct svm_vcpu *vcpustate = svm_get_vcpu(sc, vcpu);
-
-	vcpustate->dirty |= dirtybits;
+	vcpu->dirty |= dirtybits;
 }
 
 static __inline void
-svm_apply_dirty(struct svm_softc *sc, int vcpu)
+svm_apply_dirty(struct svm_vcpu *vcpu)
 {
-	struct svm_vcpu *vcpustate = svm_get_vcpu(sc, vcpu);
-	struct vmcb_ctrl *ctrl = svm_get_vmcb_ctrl(sc, vcpu);
+	struct vmcb_ctrl *ctrl = svm_get_vmcb_ctrl(vcpu);
 
-	ctrl->vmcb_clean = ~vcpustate->dirty;
-	vcpustate->dirty = 0;
+	ctrl->vmcb_clean = ~vcpu->dirty;
+	vcpu->dirty = 0;
 }
 
-int svm_get_intercept(struct svm_softc *, int, int, uint32_t);
-void svm_set_intercept(struct svm_softc *, int, int, uint32_t, int);
+int svm_get_intercept(struct svm_vcpu *, int, uint32_t);
+void svm_set_intercept(struct svm_vcpu *, int, uint32_t, int);
 
 static __inline void
-svm_disable_intercept(struct svm_softc *sc, int vcpu, int off, uint32_t bitmask)
+svm_disable_intercept(struct svm_vcpu *vcpu, int off, uint32_t bitmask)
 {
-	svm_set_intercept(sc, vcpu, off, bitmask, 0);
+	svm_set_intercept(vcpu, off, bitmask, 0);
 }
 
 static __inline void
-svm_enable_intercept(struct svm_softc *sc, int vcpu, int off, uint32_t bitmask)
+svm_enable_intercept(struct svm_vcpu *vcpu, int off, uint32_t bitmask)
 {
-	svm_set_intercept(sc, vcpu, off, bitmask, 1);
+	svm_set_intercept(vcpu, off, bitmask, 1);
 }
 
 #endif /* _SVM_SOFTC_H_ */
