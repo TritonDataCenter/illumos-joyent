@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2017 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -63,6 +64,8 @@ static int lxsys_lookup(vnode_t *, char *, vnode_t **,
     pathname_t *);
 static int lxsys_readdir(vnode_t *, uio_t *, cred_t *, int *,
     caller_context_t *, int);
+static int lxsys_mkdir(vnode_t *, char *, vattr_t *, vnode_t **, cred_t *,
+    caller_context_t *, int, vsecattr_t *);
 static int lxsys_readlink(vnode_t *, uio_t *, cred_t *, caller_context_t *);
 static int lxsys_cmp(vnode_t *, vnode_t *, caller_context_t *);
 static int lxsys_sync(void);
@@ -107,6 +110,7 @@ const fs_operation_def_t lxsys_vnodeops_template[] = {
 	VOPNAME_LOOKUP,		{ .vop_lookup = lxsys_lookup },
 	VOPNAME_READDIR,	{ .vop_readdir = lxsys_readdir },
 	VOPNAME_READLINK,	{ .vop_readlink = lxsys_readlink },
+	VOPNAME_MKDIR,		{ .vop_mkdir = lxsys_mkdir },
 	VOPNAME_FSYNC,		{ .error = lxsys_sync },
 	VOPNAME_SEEK,		{ .error = lxsys_sync },
 	VOPNAME_INACTIVE,	{ .vop_inactive = lxsys_inactive },
@@ -641,6 +645,34 @@ lxsys_lookup(vnode_t *dp, char *comp, vnode_t **vpp, pathname_t *pathp,
 
 	*vpp = (lxsys_lookup_function[type](lxsnp, comp));
 	return ((*vpp == NULL) ? ENOENT : 0);
+}
+
+/*
+ * lxsys_mkdir(): Vnode operation for VOP_MKDIR()
+ *
+ * Directories cannot be created in sysfs, but Linux returns EEXIST (rather
+ * than EPERM) when the name already exists. This matters for things like
+ * systemd's mkdir_parents(), which walks every path component calling
+ * mkdir() and ignores EEXIST, e.g. for /sys/fs/cgroup when a cgroup2 file
+ * system is mounted there.
+ */
+/* ARGSUSED */
+static int
+lxsys_mkdir(vnode_t *dvp, char *nm, vattr_t *va, vnode_t **vpp, cred_t *cr,
+    caller_context_t *ct, int flags, vsecattr_t *vsecp)
+{
+	vnode_t *vp;
+	int error;
+
+	error = lxsys_lookup(dvp, nm, &vp, NULL, 0, NULL, cr, ct, NULL, NULL);
+	if (error == 0) {
+		VN_RELE(vp);
+		return (EEXIST);
+	}
+	if (error != ENOENT)
+		return (error);
+
+	return (EPERM);
 }
 
 static lxsys_node_t *

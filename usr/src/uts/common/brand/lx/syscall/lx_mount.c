@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/ctype.h>
@@ -348,6 +349,29 @@ lx_mnt_opt_rm(char *opts, char *rmopt, char *retstr, int retlen)
 	return (1);
 }
 
+/*
+ * Return B_TRUE if the option 'name' (with or without a value) is present in
+ * the comma separated option string 'opts'.
+ */
+static boolean_t
+lx_mnt_opt_present(const char *opts, const char *name)
+{
+	size_t nlen = strlen(name);
+	const char *opt = opts;
+
+	while (*opt != '\0') {
+		if (strncmp(opt, name, nlen) == 0 &&
+		    (opt[nlen] == '\0' || opt[nlen] == ',' ||
+		    opt[nlen] == '='))
+			return (B_TRUE);
+		while (*opt != ',' && *opt != '\0')
+			opt++;
+		if (*opt == ',')
+			opt++;
+	}
+	return (B_FALSE);
+}
+
 static int
 lx_mnt_opt_val(char *opt, int *valp)
 {
@@ -624,8 +648,46 @@ lx_mount(const char *sourcep, const char *targetp, const char *fstypep,
 
 		/*
 		 * Currently don't verify Linux mount options since we can
-		 * have a subsystem string provided.
+		 * have a subsystem string provided. However, "cgroup2" is
+		 * the internal option we use to select a cgroup v2 hierarchy
+		 * (see below), so don't let it be passed in here, which would
+		 * get around the cgroup2 mount point restriction. Like Linux
+		 * does for an unknown cgroup v1 option, fail with EINVAL.
 		 */
+		if (lx_mnt_opt_present(options, "cgroup2")) {
+			rv = EINVAL;
+			goto out;
+		}
+	} else if (strcmp(fstype, "cgroup2") == 0) {
+		/*
+		 * We only support a single cgroup mount per zone, so we
+		 * cannot support the systemd "hybrid" layout where cgroup2 is
+		 * mounted on /sys/fs/cgroup/unified alongside a cgroup v1
+		 * hierarchy. Only allow the unified layout, where cgroup2 is
+		 * mounted on /sys/fs/cgroup, so that systemd falls back to the
+		 * cgroup v1 hierarchy in the hybrid case, as it did before
+		 * cgroup2 was supported.
+		 */
+		if (strcmp(target, "/sys/fs/cgroup") != 0 &&
+		    strcmp(target, "/sys/fs/cgroup/") != 0) {
+			rv = ENODEV;
+			goto out;
+		}
+
+		/*
+		 * Translate cgroup2 mount requests to lx_cgroup requests with
+		 * the internal "cgroup2" option. Linux cgroup2 mount options
+		 * (e.g. nsdelegate) are accepted and ignored.
+		 */
+		(void) strcpy(fstype, "lx_cgroup");
+		if ((rv = lx_mnt_add_opt("cgroup2", options, optionsl)) != 0)
+			goto out;
+
+		/*
+		 * Allow mounting over /sys/fs/cgroup in lx sysfs, as Linux
+		 * does.
+		 */
+		sflags |= MS_OVERLAY;
 	} else if (strcmp(fstype, "autofs") == 0) {
 		/* Translate autofs mount requests to lxautofs requests. */
 		(void) strcpy(fstype, LX_AUTOFS_NAME);

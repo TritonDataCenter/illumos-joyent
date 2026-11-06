@@ -23,7 +23,7 @@
  * Use is subject to license terms.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2025 Edgecast Cloud LLC.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -1557,19 +1557,47 @@ static void
 lxpr_read_pid_cgroup(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 {
 	proc_t *p;
+	kthread_t *t;
+	pid_t tid;
+	uint_t cgid = 0;
+	lx_zone_data_t *lxzd = ztolxzd(LXPTOZ(lxpnp));
+	vfs_t *cgvfs;
+	char *buf;
+	int error;
 
 	ASSERT(lxpnp->lxpr_type == LXPR_PID_CGROUP ||
 	    lxpnp->lxpr_type == LXPR_PID_TID_CGROUP);
 
-	p = lxpr_lock(lxpnp, ZOMB_OK);
+	tid = (lxpnp->lxpr_desc == 0) ? lxpnp->lxpr_pid : lxpnp->lxpr_desc;
+	p = lxpr_lock_pid(lxpnp, tid, ZOMB_OK, &t);
 	if (p == NULL) {
 		lxpr_uiobuf_seterr(uiobuf, EINVAL);
 		return;
 	}
+	if (t != NULL && ttolxlwp(t) != NULL)
+		cgid = ttolxlwp(t)->br_cgroupid;
 	lxpr_unlock(p);
 
-	/* basic stub, 3rd field will need to be populated */
-	lxpr_uiobuf_printf(uiobuf, "1:name=systemd:/\n");
+	mutex_enter(&lxzd->lxzd_lock);
+	cgvfs = lxzd->lxzd_cgroup;
+	if (cgvfs == NULL || lx_cgrp_pidcgroup == NULL) {
+		mutex_exit(&lxzd->lxzd_lock);
+		/* No cgroup file system is mounted */
+		lxpr_uiobuf_printf(uiobuf, "1:name=systemd:/\n");
+		return;
+	}
+	VFS_HOLD(cgvfs);
+	mutex_exit(&lxzd->lxzd_lock);
+
+	buf = kmem_alloc(MAXPATHLEN + 32, KM_SLEEP);
+	error = (*lx_cgrp_pidcgroup)(cgvfs, cgid, buf, MAXPATHLEN + 32);
+	if (error == 0) {
+		lxpr_uiobuf_printf(uiobuf, "%s", buf);
+	} else {
+		lxpr_uiobuf_seterr(uiobuf, error);
+	}
+	kmem_free(buf, MAXPATHLEN + 32);
+	VFS_RELE(cgvfs);
 }
 
 /*
@@ -1798,7 +1826,7 @@ lxpr_read_pid_coredump_filter(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
  */
 static int
 lxpr_write_pid_coredump_filter(lxpr_node_t *lxpnp, uio_t *uiop, cred_t *cr,
-	caller_context_t *ct)
+    caller_context_t *ct)
 {
 	lx_proc_data_t *pd;
 	ulong_t filter;
@@ -2155,7 +2183,11 @@ lxpr_clean_mntent(char **mntpt, char **fstype, char **resource)
 	} else if (strcmp(*fstype, "lx_devfs") == 0) {
 		*resource = *fstype = "devtmpfs";
 	} else if (strcmp(*fstype, "lx_cgroup") == 0) {
-		*resource = *fstype = "cgroup";
+		/* cgroup v2 mounts have a resource of "cgroup2" */
+		if (strcmp(*resource, "cgroup2") == 0)
+			*fstype = "cgroup2";
+		else
+			*resource = *fstype = "cgroup";
 	} else if (strcmp(*fstype, "lxautofs") == 0) {
 		*fstype = "autofs";
 	}
@@ -2186,6 +2218,7 @@ static int lxpr_zfs_fstype = -1;
 /* List of native, non-Linux mount options we should omit. */
 static const char *lx_invalid_mnt_opts[] = {
 	"xattr",
+	"cgroup2",	/* internal lx_cgroup option */
 	NULL
 };
 
@@ -6480,6 +6513,7 @@ lxpr_read_filesystems(lxpr_node_t *lxpnp, lxpr_uiobuf_t *uiobuf)
 {
 	lxpr_uiobuf_printf(uiobuf, "%s\t%s\n", "nodev", "autofs");
 	lxpr_uiobuf_printf(uiobuf, "%s\t%s\n", "nodev", "cgroup");
+	lxpr_uiobuf_printf(uiobuf, "%s\t%s\n", "nodev", "cgroup2");
 	lxpr_uiobuf_printf(uiobuf, "%s\t%s\n", "nodev", "nfs");
 	lxpr_uiobuf_printf(uiobuf, "%s\t%s\n", "nodev", "proc");
 	lxpr_uiobuf_printf(uiobuf, "%s\t%s\n", "nodev", "sysfs");
