@@ -6796,6 +6796,7 @@ f usr/lib/help/profiles/locale/RtZoneMngmnt.html 0444 root bin
 f usr/lib/help/profiles/locale/RtZoneSecurity.html 0444 root bin
 f usr/lib/hotplugd 0555 root bin
 d usr/lib/iconv 0755 root bin
+f usr/lib/iconv/646%UTF-32LE.so 0755 root bin
 f usr/lib/iconv/646%UTF-8.so 0755 root bin
 f usr/lib/iconv/UCS-2%UTF-8.so 0755 root bin
 f usr/lib/iconv/UCS-2LE%UTF-8.so 0755 root bin
@@ -6803,6 +6804,7 @@ f usr/lib/iconv/UTF-8%646.so 0755 root bin
 f usr/lib/iconv/UTF-8%UCS-2.so 0755 root bin
 f usr/lib/iconv/UTF-8%UCS-2LE.so 0755 root bin
 d usr/lib/iconv/amd64 0755 root bin
+f usr/lib/iconv/amd64/646%UTF-32LE.so 0755 root bin
 f usr/lib/iconv/amd64/646%UTF-8.so 0755 root bin
 f usr/lib/iconv/amd64/UCS-2%UTF-8.so 0755 root bin
 f usr/lib/iconv/amd64/UCS-2LE%UTF-8.so 0755 root bin
