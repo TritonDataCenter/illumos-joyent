@@ -866,6 +866,9 @@ file \
     path=opt/zfs-tests/tests/functional/cli_root/zfs_load-key/zfs_load-key_common.kshlib \
     mode=0444
 file \
+    path=opt/zfs-tests/tests/functional/cli_root/zfs_load-key/zfs_load-key_concurrent_use \
+    mode=0555
+file \
     path=opt/zfs-tests/tests/functional/cli_root/zfs_load-key/zfs_load-key_file \
     mode=0555
 file \
@@ -2439,6 +2442,7 @@ dir  path=opt/zfs-tests/tests/functional/fault
 file path=opt/zfs-tests/tests/functional/fault/auto_spare_sorted_001_pos \
     mode=0555
 file path=opt/zfs-tests/tests/functional/fault/cleanup mode=0555
+file path=opt/zfs-tests/tests/functional/fault/deadlist_read_error mode=0555
 file path=opt/zfs-tests/tests/functional/fault/fault.cfg mode=0444
 file path=opt/zfs-tests/tests/functional/fault/objset_open_prop_error mode=0555
 file path=opt/zfs-tests/tests/functional/fault/setup mode=0555
@@ -3022,6 +3026,7 @@ file path=opt/zfs-tests/tests/functional/rsend/send_encrypted_truncated_files \
 file path=opt/zfs-tests/tests/functional/rsend/send_freeobjects mode=0555
 file path=opt/zfs-tests/tests/functional/rsend/send_holds mode=0555
 file path=opt/zfs-tests/tests/functional/rsend/send_mixed_raw mode=0555
+file path=opt/zfs-tests/tests/functional/rsend/send_raw_large_blocks mode=0555
 file path=opt/zfs-tests/tests/functional/rsend/send_realloc_dnode_size mode=0555
 file path=opt/zfs-tests/tests/functional/rsend/send_realloc_encrypted_files \
     mode=0555
@@ -3064,6 +3069,7 @@ file path=opt/zfs-tests/tests/functional/slog/slog_013_pos mode=0555
 file path=opt/zfs-tests/tests/functional/slog/slog_014_pos mode=0555
 file path=opt/zfs-tests/tests/functional/slog/slog_015_neg mode=0555
 file path=opt/zfs-tests/tests/functional/slog/slog_lwb_write_error mode=0555
+file path=opt/zfs-tests/tests/functional/slog/slog_record_pad mode=0555
 file path=opt/zfs-tests/tests/functional/slog/slog_replay_fs_001 mode=0555
 file path=opt/zfs-tests/tests/functional/slog/slog_replay_fs_002 mode=0555
 file path=opt/zfs-tests/tests/functional/slog/slog_replay_fs_split_truncate \
@@ -3244,6 +3250,8 @@ file path=opt/zfs-tests/tests/functional/zvol/zvol_dump/zvol_dump_raidz \
 dir  path=opt/zfs-tests/tests/functional/zvol/zvol_misc
 file path=opt/zfs-tests/tests/functional/zvol/zvol_misc/cleanup mode=0555
 file path=opt/zfs-tests/tests/functional/zvol/zvol_misc/setup mode=0555
+file path=opt/zfs-tests/tests/functional/zvol/zvol_misc/zvol_free_offset \
+    mode=0555
 file path=opt/zfs-tests/tests/functional/zvol/zvol_misc/zvol_misc_001_neg \
     mode=0555
 file path=opt/zfs-tests/tests/functional/zvol/zvol_misc/zvol_misc_002_pos \

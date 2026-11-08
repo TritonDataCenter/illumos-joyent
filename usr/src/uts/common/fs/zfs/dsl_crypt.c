@@ -705,7 +705,7 @@ spa_keystore_dsl_key_hold_dd(spa_t *spa, dsl_dir_t *dd, void *tag,
 		avl_insert(&spa->spa_keystore.sk_dsl_keys, dck_io, where);
 		*dck_out = dck_io;
 	} else {
-		dsl_crypto_key_free(dck_io);
+		dsl_crypto_key_rele(dck_io, tag);
 		*dck_out = dck_ks;
 	}
 
@@ -2161,9 +2161,6 @@ dsl_crypto_recv_raw_objset_sync(dsl_dataset_t *ds, dmu_objset_type_t ostype,
 		zio = zio_root(dp->dp_spa, NULL, NULL, ZIO_FLAG_MUSTSUCCEED);
 		dsl_dataset_sync(ds, zio, tx);
 		VERIFY0(zio_wait(zio));
-
-		/* dsl_dataset_sync_done will drop this reference. */
-		dmu_buf_add_ref(ds->ds_dbuf, ds);
 		dsl_dataset_sync_done(ds, tx);
 	}
 }

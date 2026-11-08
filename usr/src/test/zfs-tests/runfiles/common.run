@@ -188,8 +188,9 @@ tests = ['zfs_inherit_001_neg', 'zfs_inherit_002_neg', 'zfs_inherit_003_pos']
 tags = ['functional', 'cli_root', 'zfs_inherit']
 
 [tests/functional/cli_root/zfs_load-key]
-tests = ['zfs_load-key', 'zfs_load-key_all', 'zfs_load-key_file',
-    'zfs_load-key_location', 'zfs_load-key_noop', 'zfs_load-key_recursive']
+tests = ['zfs_load-key', 'zfs_load-key_all', 'zfs_load-key_concurrent_use',
+    'zfs_load-key_file', 'zfs_load-key_location', 'zfs_load-key_noop',
+    'zfs_load-key_recursive']
 tags = ['functional', 'cli_root', 'zfs_load-key']
 
 [tests/functional/cli_root/zfs_mount]
@@ -564,7 +565,8 @@ tags = ['functional', 'async_destroy']
 
 [tests/functional/fault]
 tests = ['zpool_status_-s', 'auto_spare_sorted_001_pos',
-    'objset_open_prop_error', 'zil_get_data_error', 'write_error_throttle']
+    'objset_open_prop_error', 'zil_get_data_error', 'write_error_throttle',
+    'deadlist_read_error']
 tags = ['functional', 'fault']
 
 [tests/functional/grow_pool]
@@ -780,7 +782,7 @@ tests = ['rsend_001_pos', 'rsend_002_pos', 'rsend_003_pos', 'rsend_004_pos',
     'send_encrypted_hierarchy', 'send_encrypted_props',
     'send_encrypted_truncated_files', 'send_realloc_files',
     'send_realloc_encrypted_files', 'send_holds',
-    'send_mixed_raw', 'send-wDR_encrypted_zvol']
+    'send_mixed_raw', 'send_raw_large_blocks', 'send-wDR_encrypted_zvol']
 tags = ['functional', 'rsend']
 
 [tests/functional/scrub_mirror]
@@ -792,7 +794,7 @@ tags = ['functional', 'scrub_mirror']
 tests = ['slog_001_pos', 'slog_002_pos', 'slog_003_pos', 'slog_004_pos',
     'slog_005_pos', 'slog_006_pos', 'slog_007_pos', 'slog_008_neg',
     'slog_009_neg', 'slog_010_neg', 'slog_011_neg', 'slog_012_neg',
-    'slog_013_pos', 'slog_014_pos', 'slog_lwb_write_error',
+    'slog_013_pos', 'slog_014_pos', 'slog_lwb_write_error', 'slog_record_pad',
     'slog_replay_fs_001', 'slog_replay_fs_002',
     'slog_replay_fs_split_truncate', 'slog_replay_fs_split_write',
     'slog_replay_indirect_eof', 'slog_replay_indirect_order',
@@ -886,8 +888,9 @@ pre =
 post =
 
 [tests/functional/zvol/zvol_misc]
-tests = ['zvol_misc_001_neg', 'zvol_misc_002_pos', 'zvol_misc_003_neg',
-    'zvol_misc_004_pos', 'zvol_misc_005_neg', 'zvol_misc_006_pos']
+tests = ['zvol_free_offset', 'zvol_misc_001_neg', 'zvol_misc_002_pos',
+    'zvol_misc_003_neg', 'zvol_misc_004_pos', 'zvol_misc_005_neg',
+    'zvol_misc_006_pos']
 tags = ['functional', 'zvol', 'zvol_misc']
 
 [tests/functional/zvol/zvol_swap]
