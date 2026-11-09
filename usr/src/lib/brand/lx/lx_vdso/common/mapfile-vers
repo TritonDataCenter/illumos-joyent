@@ -57,3 +57,15 @@ LOAD_SEGMENT bss {
         disable;
 };
 
+#
+# The i386 assembly trampoline has CFI in .eh_frame.  GNU as marks that
+# section writable, which would put it in the disabled data segment.  Keep
+# the unwind records in the vDSO's single load segment instead.
+#
+$if _ELF32
+LOAD_SEGMENT text {
+        ASSIGN_SECTION {
+                IS_NAME = .eh_frame;
+        };
+};
+$endif

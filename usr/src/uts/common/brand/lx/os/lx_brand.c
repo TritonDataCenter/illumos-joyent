@@ -2099,7 +2099,8 @@ lx_map_vdso(struct uarg *args, struct cred *cred, uintptr_t *sysinfo)
 		 * vDSO file rather than assuming a fixed offset.  execmap maps
 		 * this file from offset zero, so e_entry is also the file offset
 		 * of the trampoline.  Only advertise the entry if it contains
-		 * the int 0x80; ret sequence implemented by this vDSO.
+		 * the int 0x80; ret sequence implemented by this vDSO.  A different
+		 * entry sequence suppresses AT_SYSINFO, not the vDSO mapping.
 		 */
 		if (attr.va_size < (off_t)sizeof (ehdr) ||
 		    vn_rdwr(UIO_READ, vp, (caddr_t)&ehdr, sizeof (ehdr), 0,
@@ -2111,19 +2112,19 @@ lx_map_vdso(struct uarg *args, struct cred *cred, uintptr_t *sysinfo)
 		    ehdr.e_ident[EI_MAG3] != ELFMAG3 ||
 		    ehdr.e_ident[EI_CLASS] != ELFCLASS32 ||
 		    ehdr.e_type != ET_DYN ||
-		    ehdr.e_machine != EM_386 ||
-		    ehdr.e_entry == 0 ||
-		    ehdr.e_entry > attr.va_size - sizeof (vsyscall) ||
-		    vn_rdwr(UIO_READ, vp, (caddr_t)vsyscall,
-		    sizeof (vsyscall), ehdr.e_entry, UIO_SYSSPACE, 0, 0,
-		    cred, &resid) != 0 ||
-		    resid != 0 ||
-		    vsyscall[0] != 0xcd || vsyscall[1] != 0x80 ||
-		    vsyscall[2] != 0xc3) {
+		    ehdr.e_machine != EM_386) {
 			VN_RELE(vp);
 			return ((uintptr_t)NULL);
 		}
-		entry = (uintptr_t)addr + ehdr.e_entry;
+		if (ehdr.e_entry != 0 &&
+		    ehdr.e_entry <= attr.va_size - sizeof (vsyscall) &&
+		    vn_rdwr(UIO_READ, vp, (caddr_t)vsyscall,
+		    sizeof (vsyscall), ehdr.e_entry, UIO_SYSSPACE, 0, 0,
+		    cred, &resid) == 0 && resid == 0 &&
+		    vsyscall[0] == 0xcd && vsyscall[1] == 0x80 &&
+		    vsyscall[2] == 0xc3) {
+			entry = (uintptr_t)addr + ehdr.e_entry;
+		}
 	}
 #endif
 
@@ -2339,9 +2340,9 @@ lx_elfexec(struct vnode *vp, struct execa *uap, struct uarg *args,
 	/*
 	 * After execing the brand library (which should have implicitly mapped
 	 * in the comm page), map the VDSO into the appropriate place in the AS.
-	 * Keep the i386 vDSO optional: if mapping or validation fails,
-	 * AT_SYSINFO_EHDR is zero and AT_SYSINFO is omitted, allowing libc
-	 * to use its int 0x80 fallback.
+	 * Keep the i386 vDSO optional: if mapping or ELF validation fails,
+	 * AT_SYSINFO_EHDR is zero.  AT_SYSINFO is omitted when the syscall
+	 * entry is unsuitable, allowing libc to use its int 0x80 fallback.
 	 */
 	lxpd->l_vdso = lx_map_vdso(args, cred,
 	    &lxpd->l_vdso_sysinfo);
