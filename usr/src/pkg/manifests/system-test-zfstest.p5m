@@ -3180,6 +3180,15 @@ file path=opt/zfs-tests/tests/functional/userquota/userquota_common.kshlib \
 file path=opt/zfs-tests/tests/functional/userquota/userspace_001_pos mode=0555
 file path=opt/zfs-tests/tests/functional/userquota/userspace_002_pos mode=0555
 file path=opt/zfs-tests/tests/functional/userquota/userspace_003_pos mode=0555
+file path=opt/zfs-tests/tests/functional/userquota/userspace_encrypted mode=0555
+file \
+    path=opt/zfs-tests/tests/functional/userquota/userspace_encrypted_incomplete_mac \
+    mode=0555
+file path=opt/zfs-tests/tests/functional/userquota/userspace_send_encrypted \
+    mode=0555
+file \
+    path=opt/zfs-tests/tests/functional/userquota/userspace_send_encrypted_changes \
+    mode=0555
 dir  path=opt/zfs-tests/tests/functional/utils_test
 file path=opt/zfs-tests/tests/functional/utils_test/cleanup mode=0555
 file path=opt/zfs-tests/tests/functional/utils_test/setup mode=0555
@@ -3226,6 +3235,7 @@ file path=opt/zfs-tests/tests/functional/xattr/xattr_010_neg mode=0555
 file path=opt/zfs-tests/tests/functional/xattr/xattr_011_pos mode=0555
 file path=opt/zfs-tests/tests/functional/xattr/xattr_012_pos mode=0555
 file path=opt/zfs-tests/tests/functional/xattr/xattr_013_pos mode=0555
+file path=opt/zfs-tests/tests/functional/xattr/xattr_014_pos mode=0555
 file path=opt/zfs-tests/tests/functional/xattr/xattr_common.kshlib mode=0444
 dir  path=opt/zfs-tests/tests/functional/zvol
 file path=opt/zfs-tests/tests/functional/zvol/zvol.cfg mode=0444
