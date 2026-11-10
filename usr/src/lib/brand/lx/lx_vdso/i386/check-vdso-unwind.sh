@@ -95,15 +95,40 @@ if [ "$bytes" != cd80c3 ]; then
 fi
 
 "$elfdump" -u "$vdso" | "$awk" -v entry="$entry" '
+	function hexid(v) {
+		gsub(/[\[\]]/, "", v)
+		v = tolower(v)
+		sub(/^0x0*/, "", v)
+		return (v == "" ? "0" : v)
+	}
+	/^Unwind Section:/ { table = 0 }
+	$1 == "FdeCntEnc:" {
+		for (i = 1; i < NF; i++) {
+			if ($i == "FdeCnt:" && $(i + 1) == "1")
+				hdr_count++
+		}
+	}
+	$1 == "Binary" && $2 == "Search" && $3 == "Table:" {
+		table = 1
+		next
+	}
+	table && $1 ~ /^0x[[:xdigit:]]+$/ &&
+	    $2 ~ /^0x[[:xdigit:]]+$/ {
+		rows++
+		table_entry = hexid($1)
+		table_fde = hexid($2)
+	}
 	/^CIE:/ { cies++ }
-	/^[[:space:]]*FDE:/ { fdes++ }
+	/^[[:space:]]*FDE:/ { fdes++; fde_addr = hexid($2) }
 	$1 == "initloc:" && $2 == entry && $4 == "0x3" { fde++ }
 	/DW_CFA_def_cfa: r4 .*offset=4/ { cfa++ }
 	/DW_CFA_offset: r8, cfa-4/ { retaddr++ }
 	END {
-		if (fdes != 1 || cies != 1 || fde != 1 ||
+		if (hdr_count != 1 || rows != 1 ||
+		    table_entry != hexid(entry) || table_fde != fde_addr ||
+		    fdes != 1 || cies != 1 || fde != 1 ||
 		    cfa != 1 || retaddr != 1) {
-			print "i386 vDSO entry lacks the expected unwind frame"
+			print "i386 vDSO entry lacks an indexed unwind frame"
 			exit 1
 		}
 	}'
