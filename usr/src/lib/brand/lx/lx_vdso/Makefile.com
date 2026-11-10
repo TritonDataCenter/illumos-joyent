@@ -58,6 +58,7 @@ ROOTLIBDIR =	$(ROOT)/usr/lib/brand/lx
 ROOTLIBDIR64 =	$(ROOT)/usr/lib/brand/lx/$(MACH64)
 
 VDSO_TOOL =	../tools/vdso_tool
+VDSO_VERIFY =	:
 
 .KEEP_STATE:
 
@@ -72,6 +73,7 @@ all: $(LIBS)
 	    -e 'shdr:dump .SUNW_versym' $(DYNLIB) | \
 	    $(AWK) '{ if ($$1 == "sh_addr:") { print $$2 } }')" $(DYNLIB)
 	$(VDSO_TOOL) -f $(DYNLIB)
+	@$(VDSO_VERIFY)
 
 lint: $(LINTLIB) lintcheck
 
