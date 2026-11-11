@@ -2571,6 +2571,13 @@ ztest_zil_remount(ztest_ds_t *zd, uint64_t id)
 	objset_t *os = zd->zd_os;
 
 	/*
+	 * We hold the ztest_vdev_lock so we don't cause problems with
+	 * other threads that wish to remove a log device, such as
+	 * ztest_device_removal().
+	 */
+	mutex_enter(&ztest_vdev_lock);
+
+	/*
 	 * We grab the zd_dirobj_lock to ensure that no other thread is
 	 * updating the zil (i.e. adding in-memory log records) and the
 	 * zd_zilog_lock to block any I/O.
@@ -2587,6 +2594,7 @@ ztest_zil_remount(ztest_ds_t *zd, uint64_t id)
 
 	rw_exit(&zd->zd_zilog_lock);
 	mutex_exit(&zd->zd_dirobj_lock);
+	mutex_exit(&ztest_vdev_lock);
 }
 
 /*
@@ -3444,7 +3452,7 @@ ztest_device_removal(ztest_ds_t *zd, uint64_t id)
 		ztest_device_removal_active = B_TRUE;
 		mutex_exit(&ztest_vdev_lock);
 
-		while (spa->spa_vdev_removal != NULL)
+		while (spa->spa_removing_phys.sr_state == DSS_SCANNING)
 			txg_wait_synced(spa_get_dsl(spa), 0);
 	} else {
 		mutex_exit(&ztest_vdev_lock);
@@ -5786,14 +5794,23 @@ ztest_fault_inject(ztest_ds_t *zd, uint64_t id)
 			 * grab a reference on the dataset which may cause
 			 * dmu_objset_destroy() to fail with EBUSY thus
 			 * leaving the dataset in an inconsistent state.
+			 *
+			 * Offlining a slog also resets the logs of every
+			 * dataset (spa_reset_logs()), so hold the
+			 * ztest_vdev_lock to keep ztest_zil_remount() from
+			 * closing a ZIL while it is being suspended.
 			 */
-			if (islog)
+			if (islog) {
+				mutex_enter(&ztest_vdev_lock);
 				rw_enter(&ztest_name_lock, RW_WRITER);
+			}
 
 			VERIFY(vdev_offline(spa, guid0, flags) != EBUSY);
 
-			if (islog)
+			if (islog) {
 				rw_exit(&ztest_name_lock);
+				mutex_exit(&ztest_vdev_lock);
+			}
 		} else {
 			/*
 			 * Ideally we would like to be able to randomly
@@ -6728,6 +6745,26 @@ ztest_run(ztest_shared_t *zs)
 	}
 	zs->zs_enospc_count = 0;
 
+	/*
+	 * If we were in the middle of ztest_device_removal() and were killed
+	 * we need to ensure the removal and scrub complete before running
+	 * any tests that check ztest_device_removal_active. The removal will
+	 * be restarted automatically when the spa is opened, but we need to
+	 * initate the scrub manually if it is not already in progress. Note
+	 * that we always run the scrub whenever an indirect vdev exists
+	 * because we have no way of knowing for sure if ztest_device_removal()
+	 * fully completed its scrub before the pool was reimported.
+	 */
+	if (spa->spa_removing_phys.sr_state == DSS_SCANNING ||
+	    spa->spa_removing_phys.sr_prev_indirect_vdev != -1) {
+		while (spa->spa_removing_phys.sr_state == DSS_SCANNING)
+			txg_wait_synced(spa_get_dsl(spa), 0);
+
+		(void) spa_scan(spa, POOL_SCAN_SCRUB);
+		while (dsl_scan_scrubbing(spa_get_dsl(spa)))
+			txg_wait_synced(spa_get_dsl(spa), 0);
+	}
+
 	tid = umem_zalloc(ztest_opts.zo_threads * sizeof (thread_t),
 	    UMEM_NOFAIL);
 
@@ -6746,11 +6783,17 @@ ztest_run(ztest_shared_t *zs)
 	}
 
 	/*
-	 * Wait for all of the tests to complete.  We go in reverse order
-	 * so we don't close datasets while threads are still using them.
+	 * Wait for all of the tests to complete.
 	 */
-	for (int t = ztest_opts.zo_threads - 1; t >= 0; t--) {
+	for (int t = 0; t < ztest_opts.zo_threads; t++)
 		VERIFY(thr_join(tid[t], NULL, NULL) == 0);
+
+	/*
+	 * Close all datasets. This must be done after all the threads
+	 * are joined so we can be sure none of the datasets are in-use
+	 * by any of the threads.
+	 */
+	for (int t = 0; t < ztest_opts.zo_threads; t++) {
 		if (t < ztest_opts.zo_datasets)
 			ztest_dataset_close(t);
 	}
