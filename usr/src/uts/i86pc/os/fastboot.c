@@ -447,6 +447,48 @@ fastboot_elf32_find_loadables(void *img, off_t imgsz, fastboot_section_t *sectp,
 }
 
 /*
+ * Allocate memory below 1G for the new multiboot info structure (mbi),
+ * zero it, and record its physical address in fi_new_mbi_pa.  If we have
+ * reserved memory for mbi but it's not enough, free it and reallocate.
+ */
+static int
+fastboot_alloc_mbi(fastboot_info_t *nk, size_t size)
+{
+	if (nk->fi_mbi_size && nk->fi_mbi_size < size) {
+		contig_free((void *)nk->fi_new_mbi_va, nk->fi_mbi_size);
+		nk->fi_mbi_size = 0;
+	}
+
+	if (nk->fi_mbi_size == 0) {
+		if ((nk->fi_new_mbi_va =
+		    (uintptr_t)contig_alloc(size, &fastboot_below_1G_dma_attr,
+		    PAGESIZE, 0)) == 0) {
+			cmn_err(CE_NOTE, fastboot_enomem_msg,
+			    (uint64_t)size, "1G");
+			return (-1);
+		}
+		/*
+		 * fi_mbi_size must be set after the allocation succeeds
+		 * as it's used to determine how much memory to free.
+		 */
+		nk->fi_mbi_size = size;
+	}
+
+	/*
+	 * Initalize memory
+	 */
+	bzero((void *)nk->fi_new_mbi_va, nk->fi_mbi_size);
+
+	/*
+	 * Get PA for the new mbi
+	 */
+	nk->fi_new_mbi_pa = mmu_ptob((uint64_t)hat_getpfnum(kas.a_hat,
+	    (caddr_t)nk->fi_new_mbi_va));
+
+	return (0);
+}
+
+/*
  * Create multiboot info structure (mbi) base on the saved mbi.
  * Recalculate values of the pointer type fields in the data
  * structure based on the new starting physical address of the
@@ -478,42 +520,13 @@ fastboot_build_mbi(char *mdep, fastboot_info_t *nk)
 
 	/*
 	 * Allocate memory for the new multiboot info structure (mbi).
-	 * If we have reserved memory for mbi but it's not enough,
-	 * free it and reallocate.
 	 */
 	size = PAGESIZE + P2ROUNDUP(arglen, PAGESIZE);
-	if (nk->fi_mbi_size && nk->fi_mbi_size < size) {
-		contig_free((void *)nk->fi_new_mbi_va, nk->fi_mbi_size);
-		nk->fi_mbi_size = 0;
-	}
+	if (fastboot_alloc_mbi(nk, size) != 0)
+		return (-1);
 
-	if (nk->fi_mbi_size == 0) {
-		if ((nk->fi_new_mbi_va =
-		    (uintptr_t)contig_alloc(size, &fastboot_below_1G_dma_attr,
-		    PAGESIZE, 0)) == 0) {
-			cmn_err(CE_NOTE, fastboot_enomem_msg,
-			    (uint64_t)size, "1G");
-			return (-1);
-		}
-		/*
-		 * fi_mbi_size must be set after the allocation succeeds
-		 * as it's used to determine how much memory to free.
-		 */
-		nk->fi_mbi_size = size;
-	}
-
-	/*
-	 * Initalize memory
-	 */
-	bzero((void *)nk->fi_new_mbi_va, nk->fi_mbi_size);
-
-	/*
-	 * Get PA for the new mbi
-	 */
 	start_addr_va = nk->fi_new_mbi_va;
-	start_addr_pa = mmu_ptob((uint64_t)hat_getpfnum(kas.a_hat,
-	    (caddr_t)start_addr_va));
-	nk->fi_new_mbi_pa = (paddr_t)start_addr_pa;
+	start_addr_pa = nk->fi_new_mbi_pa;
 
 	/*
 	 * Populate the rest of the fields in the data structure
