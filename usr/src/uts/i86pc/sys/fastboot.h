@@ -75,6 +75,14 @@ extern "C" {
 
 #define	FASTBOOT_SAVED_CMDLINE_LEN	MMU_PAGESIZE
 
+/*
+ * With Multiboot 2 the whole information structure is saved, along with
+ * a copy of each boot module other than the boot archive and its hash
+ * (those two are read again from disk at reboot time).
+ */
+#define	FASTBOOT_SAVED_MB2_SIZE		(64 * 1024)
+#define	FASTBOOT_SAVED_MODS_SIZE	(64 * 1024)
+
 
 /*
  * dboot entry address comes from
@@ -104,6 +112,18 @@ typedef struct fastboot_section
 	uint32_t		fb_sec_size;	/* size */
 	uint32_t		fb_sec_bss_size;	/* section bss size */
 } fastboot_section_t;
+
+/*
+ * A boot module from the current (Multiboot 2) boot.  The index into the
+ * saved module array matches the order of the module tags in the saved
+ * Multiboot 2 information.  For modules that are replayed, fsm_offset is
+ * where the saved contents start in saved_mod_data.
+ */
+typedef struct fastboot_saved_mod {
+	uint32_t		fsm_type;	/* BMT_* */
+	uint32_t		fsm_offset;	/* offset of saved contents */
+	uint32_t		fsm_size;	/* module size */
+} fastboot_saved_mod_t;
 
 /*
  * Data structure for describing each file that needs to be relocated from high
