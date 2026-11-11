@@ -23,7 +23,7 @@
  * Copyright (c) 2012, 2017 by Delphix. All rights reserved.
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2018, Joyent, Inc.
- * Copyright 2023 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 /*
@@ -889,6 +889,7 @@ struct kmem_cache_kstat {
 	kstat_named_t	kmc_move_hunt_found; /* ... but found in mag layer */
 	kstat_named_t	kmc_move_slabs_freed; /* slabs freed by consolidator */
 	kstat_named_t	kmc_move_reclaimable; /* buffers, if consolidator ran */
+	kstat_named_t	kmc_move_deadlist_stopped;
 } kmem_cache_kstat = {
 	{ "buf_size",		KSTAT_DATA_UINT64 },
 	{ "align",		KSTAT_DATA_UINT64 },
@@ -928,6 +929,7 @@ struct kmem_cache_kstat {
 	{ "move_hunt_found",	KSTAT_DATA_UINT64 },
 	{ "move_slabs_freed",	KSTAT_DATA_UINT64 },
 	{ "move_reclaimable",	KSTAT_DATA_UINT64 },
+	{ "move_deadlist_stopped",	KSTAT_DATA_UINT64 },
 };
 
 static kmutex_t kmem_cache_kstat_lock;
@@ -3542,6 +3544,7 @@ kmem_cache_kstat_update(kstat_t *ksp, int rw)
 		kmcp->kmc_defrag.value.ui64		= 0;
 		kmcp->kmc_scan.value.ui64		= 0;
 		kmcp->kmc_move_reclaimable.value.ui64	= 0;
+		kmcp->kmc_move_deadlist_stopped.value.ui64	= 0;
 	} else {
 		int64_t reclaimable;
 
@@ -3561,6 +3564,8 @@ kmem_cache_kstat_update(kstat_t *ksp, int rw)
 		reclaimable = MAX(reclaimable, 0);
 		reclaimable += ((uint64_t)reap * cp->cache_magtype->mt_magsize);
 		kmcp->kmc_move_reclaimable.value.ui64	= reclaimable;
+		kmcp->kmc_move_deadlist_stopped.value.ui64	=
+		    kd->kmd_deadlist_stopped;
 	}
 
 	mutex_exit(&cp->cache_lock);
@@ -4380,8 +4385,6 @@ kmem_init(void)
 	kmem_oversize_arena = vmem_create("kmem_oversize", NULL, 0, PAGESIZE,
 	    segkmem_alloc, segkmem_free, heap_arena, 0, VM_SLEEP);
 
-	kmem_reap_interval = 15 * hz;
-
 	/*
 	 * Read /etc/system.  This is a chicken-and-egg problem because
 	 * kmem_flags may be set in /etc/system, but mod_read_system_file()
@@ -4555,6 +4558,14 @@ void
 kmem_thread_init(void)
 {
 	kmem_move_init();
+
+	/*
+	 * hz is not final until param_init() has run, which is after
+	 * kmem_init(), so the reap interval is calculated here. A value set
+	 * via system(5) is left alone.
+	 */
+	if (kmem_reap_interval == 0)
+		kmem_reap_interval = 15 * hz;
 
 	/*
 	 * This taskq is used for various kmem maintenance functions, including
@@ -4974,8 +4985,16 @@ kmem_move_end(kmem_cache_t *cp, kmem_move_t *callback)
 		 * kmem deferred unmapping the buffers on these slabs in order
 		 * to guarantee that buffers passed to the move callback have
 		 * been touched only by kmem or by the client itself.
+		 *
+		 * This loop gives up cache_lock around each
+		 * kmem_slab_destroy(), so a new move can be registered while it
+		 * runs. The slab that move refers to can then be freed and
+		 * placed at the head of the dead list. Stop as soon as a move
+		 * is pending again; anything that's left is released when the
+		 * pending tree is next empty.
 		 */
-		while ((sp = list_remove_head(deadlist)) != NULL) {
+		while (avl_is_empty(&cp->cache_defrag->kmd_moves_pending) &&
+		    (sp = list_remove_head(deadlist)) != NULL) {
 			if (sp->slab_flags & KMEM_SLAB_MOVE_PENDING) {
 				list_insert_tail(deadlist, sp);
 				break;
@@ -4986,6 +5005,14 @@ kmem_move_end(kmem_cache_t *cp, kmem_move_t *callback)
 			kmem_slab_destroy(cp, sp);
 			mutex_enter(&cp->cache_lock);
 		}
+
+		/*
+		 * The tree was empty on entry so if it is populated now the
+		 * loop was stopped by a new move while the lock was dropped.
+		 * Keep a count of those.
+		 */
+		if (!avl_is_empty(&cp->cache_defrag->kmd_moves_pending))
+			cp->cache_defrag->kmd_deadlist_stopped++;
 	}
 	mutex_exit(&cp->cache_lock);
 	kmem_cache_free(kmem_move_cache, callback);
