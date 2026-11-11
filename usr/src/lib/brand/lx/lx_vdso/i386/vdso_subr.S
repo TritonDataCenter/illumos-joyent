@@ -72,6 +72,8 @@ __vdso_sys_time(timespec_t *tp)
 	SET_SIZE(__vdso_sys_time)
 
 	ENTRY_NP(__vsyscall)
+	/* A signal can interrupt this frame while the syscall is in flight. */
+	.cfi_startproc
 	/*
 	 * On 32-bit Linux, the VDSO entry point (specified by e_entry)
 	 * provides a potentially accelerated means to vector into the kernel.
@@ -87,6 +89,7 @@ __vdso_sys_time(timespec_t *tp)
 	 */
 	int	$0x80
 	ret
+	.cfi_endproc
 	SET_SIZE(__vsyscall)
 
 #endif /* lint */

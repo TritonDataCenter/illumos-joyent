@@ -19,6 +19,8 @@ TARGET_ARCH=$(MACH)
 include ../Makefile.com
 
 ASFLAGS += -D__$(MACH)
+VDSO_VERIFY =	/bin/sh ./check-vdso-unwind.sh $(DYNLIB) \
+    $(ELFDUMP) $(ELFEDIT) $(AWK)
 
 SONAME = linux-gate.so.1
 
@@ -32,11 +34,20 @@ ASSYMDEP_OBJS = lx_vdso.o
 
 CLOBBERFILES	= $(ROOTLIBDIR)/$(DYNLIB) $(ROOTLIBDIR)/$(LINTLIB)
 
-# Set the object entry point for __vsyscall-ers
+# Set the object entry point for __vsyscall-ers.  The link-editor emits
+# PT_SUNW_UNWIND for .eh_frame_hdr; Linux unwinders require the equivalent
+# PT_GNU_EH_FRAME program header (0x6474e550).
 entryfix: $(DYNLIB)
 	$(ELFEDIT) -e "ehdr:e_entry \
 	    $$($(ELFEDIT) -re 'sym:st_value -osimple __vsyscall' $(DYNLIB))" \
 	    $(DYNLIB)
+	@if $(ELFEDIT) -re 'phdr:p_type 0x6464e550' $(DYNLIB) \
+	    >/dev/null 2>&1; then \
+	    $(ELFEDIT) -e 'phdr:p_type 0x6464e550 0x6474e550' $(DYNLIB); \
+	else \
+	    $(ELFEDIT) -re 'phdr:p_type 0x6474e550' $(DYNLIB) \
+	    >/dev/null; \
+	fi
 
 all: entryfix
 
