@@ -21,6 +21,7 @@
 
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -582,6 +583,8 @@ fastboot_build_mbi(char *mdep, fastboot_info_t *nk)
 	    sizeof (*mbi) - offsetof(multiboot_info_t, config_table));
 	mbi->flags &= ~(MB_INFO_CONFIG_TABLE | MB_INFO_BOOT_LOADER_NAME |
 	    MB_INFO_APM_TABLE | MB_INFO_VIDEO_INFO);
+
+	nk->fi_mb_magic = MB_BOOTLOADER_MAGIC;
 
 	return (0);
 }

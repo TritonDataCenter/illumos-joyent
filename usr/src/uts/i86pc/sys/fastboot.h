@@ -22,6 +22,7 @@
 /*
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef	_SYS_FASTBOOT_H
@@ -137,6 +138,7 @@ typedef struct _fastboot_info {
 	paddr_t			fi_pagetable_pa;
 	paddr_t			fi_last_table_pa;
 	paddr_t			fi_new_mbi_pa;	/* new multiboot info PA */
+	uint32_t		fi_mb_magic;	/* multiboot magic for dboot */
 	int			fi_valid;	/* is the new kernel valid */
 	uintptr_t		fi_next_table_va;
 	paddr_t			fi_next_table_pa;
