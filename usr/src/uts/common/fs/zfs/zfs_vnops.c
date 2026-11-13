@@ -1107,8 +1107,13 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 				xuio_stat_wbuf_copied();
 			} else {
 				ASSERT(xuio || tx_bytes == max_blksz);
-				dmu_assign_arcbuf_by_dbuf(
+				error = dmu_assign_arcbuf_by_dbuf(
 				    sa_get_db(zp->z_sa_hdl), woff, abuf, tx);
+				if (error != 0) {
+					dmu_return_arcbuf(abuf);
+					dmu_tx_commit(tx);
+					break;
+				}
 			}
 			ASSERT(tx_bytes <= uio->uio_resid);
 			uioskip(uio, tx_bytes);
@@ -1220,7 +1225,8 @@ static int zil_fault_io = 0;
  * Get data to generate a TX_WRITE intent log record.
  */
 int
-zfs_get_data(void *arg, lr_write_t *lr, char *buf, struct lwb *lwb, zio_t *zio)
+zfs_get_data(void *arg, uint64_t gen, lr_write_t *lr, char *buf,
+    struct lwb *lwb, zio_t *zio)
 {
 	zfsvfs_t *zfsvfs = arg;
 	objset_t *os = zfsvfs->z_os;
@@ -1231,6 +1237,7 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, struct lwb *lwb, zio_t *zio)
 	dmu_buf_t *db;
 	zgd_t *zgd;
 	int error = 0;
+	uint64_t zp_gen;
 
 	ASSERT3P(lwb, !=, NULL);
 	ASSERT3P(zio, !=, NULL);
@@ -1249,6 +1256,18 @@ zfs_get_data(void *arg, lr_write_t *lr, char *buf, struct lwb *lwb, zio_t *zio)
 		 * Release the vnode asynchronously as we currently have the
 		 * txg stopped from syncing.
 		 */
+		VN_RELE_ASYNC(ZTOV(zp),
+		    dsl_pool_vnrele_taskq(dmu_objset_pool(os)));
+		return (SET_ERROR(ENOENT));
+	}
+	/* check if generation number matches */
+	if (sa_lookup(zp->z_sa_hdl, SA_ZPL_GEN(zfsvfs), &zp_gen,
+	    sizeof (zp_gen)) != 0) {
+		VN_RELE_ASYNC(ZTOV(zp),
+		    dsl_pool_vnrele_taskq(dmu_objset_pool(os)));
+		return (SET_ERROR(EIO));
+	}
+	if (zp_gen != gen) {
 		VN_RELE_ASYNC(ZTOV(zp),
 		    dsl_pool_vnrele_taskq(dmu_objset_pool(os)));
 		return (SET_ERROR(ENOENT));

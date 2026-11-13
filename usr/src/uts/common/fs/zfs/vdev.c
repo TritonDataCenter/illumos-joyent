@@ -28,6 +28,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2017, Intel Corporation.
  * Copyright (c) 2019, Datto Inc. All rights reserved.
+ * Copyright [2021] Hewlett Packard Enterprise Development LP
  */
 
 #include <sys/zfs_context.h>
@@ -340,10 +341,15 @@ int
 vdev_count_leaves(spa_t *spa)
 {
 	int rc;
+	boolean_t held;
 
-	spa_config_enter(spa, SCL_VDEV, FTAG, RW_READER);
+	held = (spa_config_held(spa, SCL_VDEV, RW_WRITER) == SCL_VDEV);
+
+	if (!held)
+		spa_config_enter(spa, SCL_VDEV, FTAG, RW_READER);
 	rc = vdev_count_leaves_impl(spa->spa_root_vdev);
-	spa_config_exit(spa, SCL_VDEV, FTAG);
+	if (!held)
+		spa_config_exit(spa, SCL_VDEV, FTAG);
 
 	return (rc);
 }
@@ -1848,7 +1854,7 @@ vdev_validate(vdev_t *vd)
 		txg = spa_last_synced_txg(spa);
 
 	if ((label = vdev_label_read_config(vd, txg)) == NULL) {
-		vdev_set_state(vd, B_TRUE, VDEV_STATE_CANT_OPEN,
+		vdev_set_state(vd, B_FALSE, VDEV_STATE_CANT_OPEN,
 		    VDEV_AUX_BAD_LABEL);
 		vdev_dbgmsg(vd, "vdev_validate: failed reading config for "
 		    "txg %llu", (u_longlong_t)txg);

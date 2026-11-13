@@ -26,6 +26,7 @@
  * Copyright (c) 2014 Integros [integros.com]
  * Copyright (c) 2017, Intel Corporation.
  * Copyright 2020 Joyent, Inc.
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <sys/sysmacros.h>
@@ -2004,6 +2005,14 @@ zio_reexecute(zio_t *pio)
 	for (int c = 0; c < ZIO_CHILD_TYPES; c++)
 		pio->io_child_error[c] = 0;
 
+	/*
+	 * Start a fresh allocation trace.  A write that keeps failing is
+	 * reexecuted indefinitely, and each attempt would otherwise add to
+	 * the same list until it reaches its limit.
+	 */
+	metaslab_trace_fini(&pio->io_alloc_list);
+	metaslab_trace_init(&pio->io_alloc_list);
+
 	if (IO_IS_ALLOCATING(pio))
 		BP_ZERO(pio->io_bp);
 
@@ -2028,10 +2037,23 @@ zio_reexecute(zio_t *pio)
 
 	/*
 	 * Now that all children have been reexecuted, execute the parent.
-	 * We don't reexecute "The Godfather" I/O here as it's the
-	 * responsibility of the caller to wait on it.
+	 *
+	 * A "Godfather" I/O is never a child, so we get here with one only
+	 * at the top of a reexecution, in one of two ways:
+	 *
+	 * - zio_resume() reexecutes the pool's suspend root.  That has never
+	 *   been executed, so io_executor is NULL.  zio_resume() executes it
+	 *   with zio_wait() next, so we must not execute it here.
+	 *
+	 * - zio_done() reexecutes a Godfather because some of its children
+	 *   must be reexecuted at once.  It has been executed but has not
+	 *   completed, so io_executor is set, and its waiter will wait
+	 *   forever unless we execute it again here.
+	 *
+	 * We don't need io_lock to read io_executor: nothing else executes
+	 * or completes the Godfather until we execute it below.
 	 */
-	if (!(pio->io_flags & ZIO_FLAG_GODFATHER)) {
+	if (!(pio->io_flags & ZIO_FLAG_GODFATHER) || pio->io_executor != NULL) {
 		pio->io_queued_timestamp = gethrtime();
 		zio_execute(pio);
 	}
@@ -3580,14 +3602,17 @@ zio_vdev_io_done(zio_t *zio)
 	}
 
 	ASSERT(zio->io_type == ZIO_TYPE_READ ||
-	    zio->io_type == ZIO_TYPE_WRITE || zio->io_type == ZIO_TYPE_TRIM);
+	    zio->io_type == ZIO_TYPE_WRITE ||
+	    zio->io_type == ZIO_TYPE_IOCTL ||
+	    zio->io_type == ZIO_TYPE_TRIM);
 
 	if (zio->io_delay)
 		zio->io_delay = gethrtime() - zio->io_delay;
 
 	if (vd != NULL && vd->vdev_ops->vdev_op_leaf) {
 
-		vdev_queue_io_done(zio);
+		if (zio->io_type != ZIO_TYPE_IOCTL)
+			vdev_queue_io_done(zio);
 
 		if (zio->io_type == ZIO_TYPE_WRITE)
 			vdev_cache_write(zio);
@@ -3599,7 +3624,8 @@ zio_vdev_io_done(zio_t *zio)
 		if (zio_injection_enabled && zio->io_error == 0)
 			zio->io_error = zio_handle_label_injection(zio, EIO);
 
-		if (zio->io_error && zio->io_type != ZIO_TYPE_TRIM) {
+		if (zio->io_error && zio->io_type != ZIO_TYPE_IOCTL &&
+		    zio->io_type != ZIO_TYPE_TRIM) {
 			if (!vdev_accessible(vd, zio)) {
 				zio->io_error = SET_ERROR(ENXIO);
 			} else {
