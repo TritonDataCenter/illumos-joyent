@@ -25,7 +25,7 @@
 
 /*
  * Copyright 2019 Joyent, Inc.
- * Copyright 2025 Edgecast Cloud LLC.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef _LX_BRAND_H
@@ -287,6 +287,7 @@ typedef enum lx_proc_flags {
  */
 extern void (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
 extern void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
+extern int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 
 #define	LX_RLFAKE_LOCKS		0
 #define	LX_RLFAKE_NICE		1
@@ -649,6 +650,8 @@ typedef struct lx_zone_data {
 	char lxzd_bootid[UUID_PRINTABLE_STRING_LENGTH];	/* procfs boot_id */
 	gid_t lxzd_ttygrp;			/* tty gid for pty chown */
 	vfs_t *lxzd_cgroup;			/* cgroup for this zone */
+	boolean_t lxzd_cgroup_mounting;		/* cgroup mount in progress */
+	uint_t lxzd_cgroup_lastid;		/* last cgroup ID assigned */
 	pid_t lxzd_lockd_pid;			/* pid of NFS lockd */
 	list_t *lxzd_vdisks;			/* virtual disks (zvols) */
 	dev_t lxzd_zfs_dev;			/* major num for zfs */

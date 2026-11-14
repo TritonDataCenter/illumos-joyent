@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2021 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>
@@ -27,6 +28,7 @@
 #include <sys/mode.h>
 #include <sys/policy.h>
 #include <sys/sdt.h>
+#include <sys/atomic.h>
 
 #include "cgrps.h"
 
@@ -34,10 +36,33 @@ static int cgrp_dirmakecgnode(cgrp_node_t *, cgrp_mnt_t *, struct vattr *,
 	enum de_op, cgrp_node_t **, struct cred *);
 static int cgrp_diraddentry(cgrp_node_t *, cgrp_node_t *, char *);
 
+/*
+ * cgroup v1 files. Note that the top-level release_agent file is handled
+ * separately in cgrp_dirinit() so that N_DIRENTS() remains the number of
+ * entries in a non-root cgroup.
+ */
 static cgrp_subsys_dirent_t cgrp_generic_dir[] = {
-	{ CG_PROCS,		"cgroup.procs" },
-	{ CG_NOTIFY,		"notify_on_release" },
-	{ CG_TASKS,		"tasks" }
+	{ CG_PROCS,		"cgroup.procs",		0644,	0 },
+	{ CG_NOTIFY,		"notify_on_release",	0644,	0 },
+	{ CG_TASKS,		"tasks",		0644,	0 }
+};
+
+/*
+ * cgroup v2 core interface files. We do not currently emulate any
+ * controllers, so only the cgroup.* files exist.
+ */
+static cgrp_subsys_dirent_t cgrp_unified_dir[] = {
+	{ CG_PROCS,		"cgroup.procs",		0644,	0 },
+	{ CG_THREADS,		"cgroup.threads",	0644,	0 },
+	{ CG_CONTROLLERS,	"cgroup.controllers",	0444,	0 },
+	{ CG_SUBTREE_CTL,	"cgroup.subtree_control", 0644,	0 },
+	{ CG_EVENTS,		"cgroup.events",	0444,
+	    CGSD_NONROOT_ONLY },
+	{ CG_TYPE,		"cgroup.type",		0644,
+	    CGSD_NONROOT_ONLY },
+	{ CG_MAX_DEPTH,		"cgroup.max.depth",	0644,	0 },
+	{ CG_MAX_DESC,		"cgroup.max.descendants", 0644,	0 },
+	{ CG_STAT,		"cgroup.stat",		0444,	0 }
 };
 
 typedef struct cgrp_ssde {
@@ -56,6 +81,9 @@ static cgrp_ssde_t cg_ssde_dir[] = {
 
 	/* CG_SSID_GENERIC */
 	{cgrp_generic_dir, CGDIRLISTSZ(cgrp_generic_dir)},
+
+	/* CG_SSID_UNIFIED */
+	{cgrp_unified_dir, CGDIRLISTSZ(cgrp_unified_dir)},
 };
 
 
@@ -216,59 +244,24 @@ cgrp_cg_hash_remove(cgrp_mnt_t *cgm, cgrp_node_t *cn)
 }
 
 /*
- * Count up the number of threads already running in the zone and initialize the
- * first cgroup's task counter.
+ * Return the cgroup that a thread with cgroup ID (br_cgroupid) 'cgid' is in.
  *
- * We have to look at all of the processes to find applicable ones.
+ * Unmounting the file system does not reset the cgroup ID of the threads in
+ * the zone, so a thread can still have the ID of a cgroup from an earlier
+ * mount. Since cgroup IDs are not reused (see cgrp_dirinit()), such an ID is
+ * not found in this mount, and such a thread is in the top-level cgroup, like
+ * every thread which was running when the file system was mounted.
  */
-static void
-cgrp_cg_hash_init(cgrp_node_t *cn)
+cgrp_node_t *
+cgrp_cg_lwp_lookup(cgrp_mnt_t *cgm, uint_t cgid)
 {
-	int i;
-	int cnt = 0;
-	zoneid_t zoneid = curproc->p_zone->zone_id;
-	pid_t schedpid = curproc->p_zone->zone_zsched->p_pid;
+	cgrp_node_t *cn;
 
-	/* Scan all of the process entries */
-	mutex_enter(&pidlock);
-	for (i = 1; i < v.v_proc; i++) {
-		proc_t *p;
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
 
-		/*
-		 * Skip indices for which there is no pid_entry, PIDs for
-		 * which there is no corresponding process, system processes,
-		 * a PID of 0, the pid for our zsched process,  anything the
-		 * security policy doesn't allow us to look at, its not an
-		 * lx-branded process and processes that are not in the zone.
-		 */
-		if ((p = pid_entry(i)) == NULL ||
-		    p->p_stat == SIDL ||
-		    (p->p_flag & SSYS) != 0 ||
-		    p->p_pid == 0 ||
-		    p->p_pid == schedpid ||
-		    secpolicy_basic_procinfo(CRED(), p, curproc) != 0 ||
-		    p->p_zone->zone_id != zoneid) {
-			continue;
-		}
-
-		mutex_enter(&p->p_lock);
-		if (p->p_brand != &lx_brand) {
-			mutex_exit(&p->p_lock);
-			continue;
-		}
-		cnt += p->p_lwpcnt;
-		mutex_exit(&p->p_lock);
-	}
-
-	/*
-	 * There should be at least the init process with 1 thread in the zone
-	 */
-	ASSERT(cnt > 0);
-	cn->cgn_task_cnt = cnt;
-
-	DTRACE_PROBE2(cgrp__grp__init, void *, cn, int, cnt);
-
-	mutex_exit(&pidlock);
+	if ((cn = cgrp_cg_hash_lookup(cgm, cgid)) == NULL)
+		cn = cgm->cg_rootnode;
+	return (cn);
 }
 
 cgrp_node_t *
@@ -317,8 +310,16 @@ int
 cgrp_num_pseudo_ents(cgrp_ssid_t ssid)
 {
 	cgrp_ssde_t *ssdp = &cg_ssde_dir[ssid];
+	int i, n = 0;
 
-	return (ssdp->cg_ssde_nfiles);
+	/* Count the entries in a non-root cgroup */
+	for (i = 0; i < ssdp->cg_ssde_nfiles; i++) {
+		if ((ssdp->cg_ssde_files[i].cgrp_ssd_flags &
+		    CGSD_ROOT_ONLY) == 0)
+			n++;
+	}
+
+	return (n);
 }
 
 int
@@ -460,9 +461,15 @@ cgrp_direnter(
 
 		/*
 		 * The entry does not exist. Check write permission in
-		 * directory to see if entry can be created.
+		 * directory to see if entry can be created. DE_CREATE is only
+		 * used by cgrp_addnode(), to create the pseudo files of a new
+		 * cgroup, which must not fail: the permission to create the
+		 * cgroup was checked on its parent, while the new cgroup's own
+		 * mode (e.g. 0555, from mkdir -m or the umask) may not allow
+		 * writing to it.
 		 */
-		if ((error = cgrp_taccess(dir, VWRITE, cred)) != 0)
+		if (op != DE_CREATE &&
+		    (error = cgrp_taccess(dir, VWRITE, cred)) != 0)
 			goto out;
 		if (op == DE_CREATE || op == DE_MKDIR) {
 			/*
@@ -519,16 +526,71 @@ out:
 }
 
 /*
+ * Return the name of the pseudo files of type 'type' in this mount.
+ */
+static char *
+cgrp_pseudo_name(cgrp_mnt_t *cgm, cgrp_nodetype_t type)
+{
+	cgrp_ssde_t *ssdp = &cg_ssde_dir[cgm->cg_ssid];
+	int i;
+
+	for (i = 0; i < ssdp->cg_ssde_nfiles; i++) {
+		if (ssdp->cg_ssde_files[i].cgrp_ssd_type == type)
+			return (ssdp->cg_ssde_files[i].cgrp_ssd_name);
+	}
+	return (NULL);
+}
+
+/*
+ * Release the holds on a list of pseudo file nodes returned by
+ * cgrp_dirdelete() for the removal of the cgroup dir 'dvp'. Must be called
+ * without cg_contents held.
+ *
+ * For each file which was unlinked, generate a remove event first, so that
+ * file event watchers learn that the file is gone. In particular, an inotify
+ * watch on the file is removed, reporting IN_DELETE_SELF and IN_IGNORED, and
+ * drops its hold on the vnode, which would otherwise keep the file system
+ * from being unmounted.
+ */
+void
+cgrp_rele_list(cgrp_node_t *cn, vnode_t *dvp)
+{
+	while (cn != NULL) {
+		cgrp_node_t *next = cn->cgn_rlnext;
+
+		ASSERT(MUTEX_NOT_HELD(&VTOCGM(cn->cgn_vnode)->cg_contents));
+
+		cn->cgn_rlnext = NULL;
+		/* An unlinked pseudo file can't be linked again */
+		if (cn->cgn_nlink == 0) {
+			vnevent_remove(CGNTOV(cn), dvp,
+			    cgrp_pseudo_name(VTOCGM(cn->cgn_vnode),
+			    cn->cgn_type), NULL);
+		}
+		cgnode_rele(cn);
+		cn = next;
+	}
+}
+
+/*
  * Delete entry cn of name "nm" from parent dir. This is used to both remove
  * a cgroup directory and to remove the pseudo file nodes within the cgroup
  * directory (by recursively calling itself). It frees the dir entry space
  * and decrements link count on cgrp_node(s).
  *
+ * For DR_RMDIR, the pseudo file nodes are held while they are removed, and
+ * those holds are passed back through 'rlistp' (linked through cgn_rlnext),
+ * even on error. The caller must release them with cgrp_rele_list() once it
+ * has dropped cg_contents, since releasing the last hold on a node takes
+ * cg_contents in cgrp_inactive(). We don't drop cg_contents here, so that
+ * nothing (a new task or sub-cgroup) can enter the cgroup after the caller
+ * has checked that it is empty and before it is gone.
+ *
  * Return 0 on success.
  */
 int
 cgrp_dirdelete(cgrp_node_t *dir, cgrp_node_t *cn, char *nm, enum dr_op op,
-    cred_t *cred)
+    cred_t *cred, cgrp_node_t **rlistp)
 {
 	cgrp_mnt_t *cgm = VTOCGM(cn->cgn_vnode);
 	cgrp_dirent_t *cndp;
@@ -552,7 +614,14 @@ cgrp_dirdelete(cgrp_node_t *dir, cgrp_node_t *cn, char *nm, enum dr_op op,
 			return (EEXIST); /* thus in ufs */
 	}
 
-	if ((error = cgrp_taccess(dir, VEXEC|VWRITE, cred)) != 0)
+	/*
+	 * DR_REMOVE is only used below, to remove the pseudo files of a cgroup
+	 * which is being removed. As on Linux, removing a cgroup only requires
+	 * write access to its parent, which was checked by the DR_RMDIR call,
+	 * and not to the cgroup itself.
+	 */
+	if (op != DR_REMOVE &&
+	    (error = cgrp_taccess(dir, VEXEC|VWRITE, cred)) != 0)
 		return (error);
 
 	if (dir->cgn_dir == NULL)
@@ -569,6 +638,7 @@ cgrp_dirdelete(cgrp_node_t *dir, cgrp_node_t *cn, char *nm, enum dr_op op,
 		cgrp_dirent_t *cdp;
 
 		ASSERT(cn->cgn_type == CG_CGROUP_DIR);
+		ASSERT(rlistp != NULL);
 
 		cdp = cn->cgn_dir;
 		while (cdp) {
@@ -585,13 +655,25 @@ cgrp_dirdelete(cgrp_node_t *dir, cgrp_node_t *cn, char *nm, enum dr_op op,
 			nextp = cdp->cgd_next;
 
 			cgnode_hold(pseudo_node);
+			pseudo_node->cgn_rlnext = *rlistp;
+			*rlistp = pseudo_node;
 			error = cgrp_dirdelete(cn, pseudo_node,
-			    cdp->cgd_name, DR_REMOVE, cred);
-			mutex_exit(&cgm->cg_contents);
-			cgnode_rele(pseudo_node);
+			    cdp->cgd_name, DR_REMOVE, cred, NULL);
+			/*
+			 * The pseudo file may still be open, but it holds no
+			 * reference on this dir, which will be freed once it
+			 * is released. Orphan the file so that accesses to it
+			 * fail with ENODEV instead of using the freed dir.
+			 * Once cgroup.events is gone, stop posting
+			 * notifications for it. We only do this once the file
+			 * has been unlinked, since if the removal fails the
+			 * cgroup stays around and still needs them.
+			 */
 			if (error != 0)
 				return (error);
-			mutex_enter(&cgm->cg_contents);
+			pseudo_node->cgn_parent = NULL;
+			if (cn->cgn_events == pseudo_node)
+				cn->cgn_events = NULL;
 
 			cdp = nextp;
 		}
@@ -728,17 +810,24 @@ cgrp_addnode(cgrp_mnt_t *cgm, cgrp_node_t *dir, char *name,
 	 */
 	ncn->cgn_nodeid = cgrp_inode(type, dir->cgn_nodeid);
 	ncn->cgn_type = type;
+	if (type == CG_EVENTS)
+		dir->cgn_events = ncn;
 
 	/*
 	 * Since we're creating these entries here and not via the
-	 * normal VOP_CREATE code path, we need to do the rele to drop
-	 * our hold. This will leave the vnode v_count at 0 when we
-	 * come out of cgrp_inactive but we won't reclaim the vnode
-	 * there since the cgn_nlink value will still be 1.
+	 * normal VOP_CREATE code path, we need to drop our hold. The node is
+	 * linked (cgn_nlink is 1), so releasing the last hold would only have
+	 * cgrp_inactive() decrement v_count to 0, not reclaim the node. Do
+	 * that directly, rather than through VN_RELE(), which would require
+	 * us to drop cg_contents (taken by cgrp_inactive()). That way a mkdir
+	 * holds cg_contents throughout, from checking that the name is free
+	 * and the cgroup.max.* limits are not exceeded until the new cgroup
+	 * is entered into its parent and counted.
 	 */
-	mutex_exit(&cgm->cg_contents);
-	cgnode_rele(ncn);
-	mutex_enter(&cgm->cg_contents);
+	ASSERT(ncn->cgn_nlink != 0);
+	mutex_enter(&CGNTOV(ncn)->v_lock);
+	VN_RELE_LOCKED(CGNTOV(ncn));
+	mutex_exit(&CGNTOV(ncn)->v_lock);
 }
 
 /*
@@ -770,14 +859,23 @@ cgrp_dirinit(cgrp_node_t *parent, cgrp_node_t *dir, cred_t *cr)
 	 */
 
 	/*
-	 * Set the cgroup ID for this cgrp_node by using a counter on each
-	 * mount.
+	 * Set the cgroup ID for this cgrp_node. The top-level cgroup always
+	 * has ID 0, which is what every thread starts out with. Other IDs come
+	 * from a per-zone counter, so that they are not reused if the file
+	 * system is unmounted and mounted again; see cgrp_cg_lwp_lookup().
 	 */
-	dir->cgn_id = cgm->cg_grp_gen++;
+	if (parent == dir) {
+		dir->cgn_id = 0;
+	} else {
+		lx_zone_data_t *lxzd = cgm->cg_lxzdata;
+		uint_t id;
+
+		do {
+			id = atomic_inc_uint_nv(&lxzd->lxzd_cgroup_lastid);
+		} while (id == 0);
+		dir->cgn_id = id;
+	}
 	cgrp_cg_hash_insert(cgm, dir);
-	/* Initialise the first cgroup if this is top-level group */
-	if (parent == dir)
-		cgrp_cg_hash_init(dir);
 
 	/*
 	 * Initialize the entries
@@ -818,6 +916,8 @@ cgrp_dirinit(cgrp_node_t *parent, cgrp_node_t *dir, cred_t *cr)
 	dir->cgn_size = 2 * sizeof (cgrp_dirent_t) + 5;	/* dot and dotdot */
 	dir->cgn_dirents = 2;
 	dir->cgn_nlink = 2;
+	dir->cgn_max_depth = CGRP_LIMIT_MAX;
+	dir->cgn_max_desc = CGRP_LIMIT_MAX;
 
 	bzero(&nattr, sizeof (struct vattr));
 	nattr.va_mode = (mode_t)(0644);
@@ -825,17 +925,26 @@ cgrp_dirinit(cgrp_node_t *parent, cgrp_node_t *dir, cred_t *cr)
 	nattr.va_rdev = 0;
 
 	/*
-	 * If this is the top-level dir in the file system then it always
-	 * has a release_agent pseudo file. Only the top-level dir has this
-	 * file.
+	 * If this is the top-level dir of a cgroup v1 file system then it
+	 * always has a release_agent pseudo file. Only the top-level dir has
+	 * this file. There is no release agent in cgroup v2; cgroup.events
+	 * is used to notify about empty cgroups instead.
 	 */
-	if (parent == dir) {
+	if (parent == dir && !CG_IS_V2(cgm)) {
 		cgrp_addnode(cgm, dir, "release_agent", CG_REL_AGENT, &nattr,
 		    cr);
 	}
 
 	pseudo_files = ssdp->cg_ssde_files;
 	for (i = 0; i < ssdp->cg_ssde_nfiles; i++) {
+		uint_t flags = pseudo_files[i].cgrp_ssd_flags;
+
+		if (parent == dir && (flags & CGSD_NONROOT_ONLY) != 0)
+			continue;
+		if (parent != dir && (flags & CGSD_ROOT_ONLY) != 0)
+			continue;
+
+		nattr.va_mode = pseudo_files[i].cgrp_ssd_mode;
 		cgrp_addnode(cgm, dir, pseudo_files[i].cgrp_ssd_name,
 		    pseudo_files[i].cgrp_ssd_type, &nattr, cr);
 	}
@@ -905,12 +1014,15 @@ cgrp_diraddentry(cgrp_node_t *dir, cgrp_node_t *cn, char *name)
 	if (cn->cgn_vnode->v_vfsp != dir->cgn_vnode->v_vfsp)
 		return (EXDEV);
 
-	/* Allocate and initialize directory entry */
+	/*
+	 * Allocate and initialize directory entry. Unlike tmpfs, which this
+	 * code derives from, there is no file system size limit to enforce,
+	 * so we can sleep for the memory (cgrp_addnode() can't handle a
+	 * failure here).
+	 */
 	namelen = strlen(name) + 1;
 	alloc_size = namelen + sizeof (cgrp_dirent_t);
-	cdp = kmem_zalloc(alloc_size, KM_NOSLEEP_LAZY);
-	if (cdp == NULL)
-		return (ENOSPC);
+	cdp = kmem_zalloc(alloc_size, KM_SLEEP);
 
 	cn->cgn_parent = dir;
 
@@ -1020,4 +1132,229 @@ cgrp_dirmakecgnode(cgrp_node_t *dir, cgrp_mnt_t *cgm, struct vattr *va,
 
 	*newnode = cn;
 	return (0);
+}
+
+/*
+ * Construct the path of the cgroup 'cn', relative to the mount point of the
+ * file system (e.g. "/system.slice/foo.service"). The top-level cgroup is "/".
+ *
+ * Returns 0 on success, or ENAMETOOLONG if the path won't fit.
+ */
+int
+cgrp_get_path(cgrp_node_t *cn, char *buf, size_t blen)
+{
+	size_t off;
+
+	ASSERT(MUTEX_HELD(&VTOCGM(cn->cgn_vnode)->cg_contents));
+	ASSERT(cn->cgn_type == CG_CGROUP_DIR);
+	ASSERT(blen >= 2);
+
+	/* Build the path backwards from the end of the buffer. */
+	off = blen - 1;
+	buf[off] = '\0';
+
+	while (cn->cgn_parent != NULL && cn->cgn_parent != cn) {
+		cgrp_node_t *parent = cn->cgn_parent;
+		cgrp_dirent_t *dp;
+		size_t len;
+
+		for (dp = parent->cgn_dir; dp != NULL; dp = dp->cgd_next) {
+			if (dp->cgd_cgrp_node == cn &&
+			    strcmp(dp->cgd_name, ".") != 0 &&
+			    strcmp(dp->cgd_name, "..") != 0)
+				break;
+		}
+		if (dp == NULL)
+			return (ENOENT);
+
+		len = strlen(dp->cgd_name);
+		if (len + 1 > off)
+			return (ENAMETOOLONG);
+		off -= len;
+		bcopy(dp->cgd_name, &buf[off], len);
+		buf[--off] = '/';
+
+		cn = parent;
+	}
+
+	if (off == blen - 1) {
+		/* top-level cgroup */
+		(void) strlcpy(buf, "/", blen);
+	} else {
+		ovbcopy(&buf[off], buf, blen - off);
+	}
+
+	return (0);
+}
+
+/*
+ * Taskq callback to deliver cgroup.events notifications. We generate a
+ * VE_RESIZE vnode event on the cgroup.events vnode, which the inotify driver
+ * reports as IN_MODIFY. This is how systemd (and others) learn that a cgroup
+ * has become empty (or populated) in cgroup v2.
+ *
+ * This is done asynchronously since the populated state changes in contexts
+ * (e.g. lwp creation with p_lock held) where calling into the vnode event
+ * framework is not safe.
+ *
+ * cgrp_evtq has a single thread, shared by all mounts (i.e. all lx zones).
+ * So that a zone which keeps changing the populated state of its cgroups
+ * can't hold up the notifications of other zones, we only deliver the
+ * notifications which were pending when we started. If more have been
+ * queued in the meantime, we dispatch ourselves again, at the end of the
+ * queue.
+ */
+static void
+cgrp_events_notify(void *arg)
+{
+	cgrp_mnt_t *cgm = arg;
+	cgrp_node_t *cn;
+
+	mutex_enter(&cgm->cg_contents);
+	cn = cgm->cg_evlist;
+	cgm->cg_evlist = NULL;
+	mutex_exit(&cgm->cg_contents);
+
+	while (cn != NULL) {
+		cgrp_node_t *next;
+
+		/*
+		 * A node can be queued again as soon as it is no longer
+		 * marked as pending, which reuses cgn_evnext, so take it off
+		 * our batch first.
+		 */
+		mutex_enter(&cgm->cg_contents);
+		next = cn->cgn_evnext;
+		cn->cgn_evnext = NULL;
+		cn->cgn_evpend = B_FALSE;
+		mutex_exit(&cgm->cg_contents);
+
+		vnevent_resize(CGNTOV(cn), NULL);
+		/* Drop the hold taken in cgrp_events_post */
+		cgnode_rele(cn);
+		cn = next;
+	}
+
+	mutex_enter(&cgm->cg_contents);
+	if (cgm->cg_evlist != NULL) {
+		/* cg_evsched stays set; the taskq entry is ours again */
+		taskq_dispatch_ent(cgrp_evtq, cgrp_events_notify, cgm, 0,
+		    &cgm->cg_evtqent);
+	} else {
+		cgm->cg_evsched = B_FALSE;
+		/* Wake up cgrp_events_drain() */
+		cv_broadcast(&cgm->cg_evcv);
+	}
+	mutex_exit(&cgm->cg_contents);
+	/* cgm must not be referenced after this point */
+}
+
+/*
+ * Wait until no notification task is queued or running for this mount. Since
+ * a task drops the hold on each node it delivers before it next checks the
+ * list, all holds taken by cgrp_events_post() have been released once this
+ * returns. cgrp_evtq is shared by all mounts, so we must not use taskq_wait()
+ * here, which could be held up indefinitely by notifications for other zones.
+ */
+void
+cgrp_events_drain(cgrp_mnt_t *cgm)
+{
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
+
+	while (cgm->cg_evsched)
+		cv_wait(&cgm->cg_evcv, &cgm->cg_contents);
+}
+
+/*
+ * Queue a change notification for the cgroup.events file of cgroup 'dir'.
+ */
+static void
+cgrp_events_post(cgrp_mnt_t *cgm, cgrp_node_t *dir)
+{
+	cgrp_node_t *ev = dir->cgn_events;
+
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
+
+	if (ev == NULL || ev->cgn_evpend)
+		return;
+
+	/*
+	 * The hold keeps the node around until the notification has been
+	 * delivered, even if the cgroup is removed in the meantime.
+	 */
+	cgnode_hold(ev);
+	ev->cgn_evpend = B_TRUE;
+	ev->cgn_evnext = cgm->cg_evlist;
+	cgm->cg_evlist = ev;
+
+	if (!cgm->cg_evsched) {
+		cgm->cg_evsched = B_TRUE;
+		taskq_dispatch_ent(cgrp_evtq, cgrp_events_notify, cgm, 0,
+		    &cgm->cg_evtqent);
+	}
+}
+
+/*
+ * Adjust the number of threads in cgroup 'cn' by 'delta', maintaining the
+ * per-subtree thread count used for the cgroup v2 "populated" state, and
+ * queueing a cgroup.events notification for every cgroup whose populated state
+ * changes.
+ *
+ * The thread counts of the top-level cgroup are not maintained. Doing so would
+ * require counting the threads already running in the zone when the file
+ * system is mounted, which can't be done reliably since the lwp fork hook
+ * runs with p_lock held. The counts are also not needed: the top-level cgroup
+ * can't be removed, has no cgroup.events file, and is never released.
+ */
+void
+cgrp_task_adjust(cgrp_mnt_t *cgm, cgrp_node_t *cn, int delta)
+{
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
+	ASSERT(delta == 1 || delta == -1);
+
+	if (cn == cgm->cg_rootnode)
+		return;
+
+	if (delta > 0) {
+		cn->cgn_task_cnt++;
+	} else {
+		ASSERT(cn->cgn_task_cnt > 0);
+		cn->cgn_task_cnt--;
+	}
+
+	if (!CG_IS_V2(cgm))
+		return;
+
+	for (;;) {
+		boolean_t changed;
+
+		if (delta > 0) {
+			changed = (cn->cgn_subtree_cnt++ == 0);
+		} else {
+			ASSERT(cn->cgn_subtree_cnt > 0);
+			changed = (--cn->cgn_subtree_cnt == 0);
+		}
+
+		if (changed)
+			cgrp_events_post(cgm, cn);
+
+		cn = cn->cgn_parent;
+		if (cn == NULL || cn == cgm->cg_rootnode)
+			break;
+	}
+}
+
+/*
+ * Adjust the descendant count of all ancestors of the cgroup 'cn'. Used for
+ * cgroup.stat.
+ */
+void
+cgrp_ndesc_adjust(cgrp_node_t *cn, int delta)
+{
+	ASSERT(MUTEX_HELD(&VTOCGM(cn->cgn_vnode)->cg_contents));
+
+	while (cn->cgn_parent != NULL && cn->cgn_parent != cn) {
+		cn = cn->cgn_parent;
+		cn->cgn_ndesc += delta;
+	}
 }

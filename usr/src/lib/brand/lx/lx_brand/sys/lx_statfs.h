@@ -22,6 +22,7 @@
  * Copyright 2006 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2017 Joyent, Inc.  All rights reserved.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #ifndef	_LX_STATFS_H
@@ -66,6 +67,7 @@ struct lx_statfs64 {
  */
 #define	LX_AUTOFS_SUPER_MAGIC		0x0187
 #define	LX_CGROUP_SUPER_MAGIC		0x27e0eb
+#define	LX_CGROUP2_SUPER_MAGIC		0x63677270
 #define	LX_DEVFS_SUPER_MAGIC		0x1373
 #define	LX_DEVPTS_SUPER_MAGIC		0x1cd1
 #define	LX_EXT2_SUPER_MAGIC		0xEF53
