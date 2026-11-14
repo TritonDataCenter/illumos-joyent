@@ -28,6 +28,7 @@
  * Copyright (c) 2015 by Delphix. All rights reserved.
  * Copyright 2016 Toomas Soome <tsoome@me.com>
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*	Copyright (c) 1984, 1986, 1987, 1988, 1989 AT&T	*/
@@ -989,6 +990,105 @@ fastboot_bename(const char *bename, char *mountpoint, size_t mpsz)
 	return (rc);
 }
 
+#if defined(__x86)
+/*
+ * True if the root file system is a ramdisk, as on SmartOS: the root is
+ * loaded from boot media and there are no boot environments.
+ */
+static boolean_t
+root_is_ramdisk(void)
+{
+	static const char ramdisk[] = "/devices/ramdisk";
+	struct mnttab mnt, mpref = { 0 };
+	boolean_t ret = B_FALSE;
+	FILE *fp;
+
+	if ((fp = fopen(MNTTAB, "r")) == NULL)
+		return (B_FALSE);
+	mpref.mnt_mountp = "/";
+	if (getmntany(fp, &mnt, &mpref) == 0 &&
+	    strncmp(mnt.mnt_special, ramdisk, sizeof (ramdisk) - 1) == 0)
+		ret = B_TRUE;
+	(void) fclose(fp);
+	return (ret);
+}
+
+typedef struct bootfs_cb {
+	int	bc_count;		/* pools with bootfs set */
+	char	bc_mountpoint[MAXPATHLEN];
+} bootfs_cb_t;
+
+static int
+bootfs_pool_cb(zpool_handle_t *zhp, void *arg)
+{
+	bootfs_cb_t *bc = arg;
+	char bootfs[ZFS_MAX_DATASET_NAME_LEN];
+	zfs_handle_t *zfhp;
+	char *mp;
+
+	if (zpool_get_prop(zhp, ZPOOL_PROP_BOOTFS, bootfs, sizeof (bootfs),
+	    NULL, B_FALSE) == 0 && bootfs[0] != '\0' &&
+	    strcmp(bootfs, "-") != 0) {
+		bc->bc_count++;
+		if ((zfhp = zfs_open(g_zfs, bootfs, ZFS_TYPE_FILESYSTEM)) !=
+		    NULL) {
+			if (zfs_is_mounted(zfhp, &mp)) {
+				(void) strlcpy(bc->bc_mountpoint, mp,
+				    sizeof (bc->bc_mountpoint));
+				free(mp);
+			}
+			zfs_close(zfhp);
+		}
+	}
+	zpool_close(zhp);
+	return (0);
+}
+
+/*
+ * Find where the boot file system is mounted when booting from a pool made
+ * bootable by piadm(8): the bootfs of the one pool that has one set.  Returns
+ * 0 if it is mounted and holds a 64-bit kernel.
+ */
+static int
+get_bootfs_mountpoint(char *mountpoint, size_t mpsz)
+{
+	bootfs_cb_t bc = { 0 };
+	char kernpath[MAXPATHLEN];
+	struct stat64 statbuf;
+
+	if ((g_zfs = libzfs_init()) == NULL) {
+		(void) fprintf(stderr, gettext("Internal error: failed to "
+		    "initialize ZFS library\n"));
+		return (-1);
+	}
+	(void) zpool_iter(g_zfs, bootfs_pool_cb, &bc);
+	libzfs_fini(g_zfs);
+
+	if (bc.bc_count != 1) {
+		(void) fprintf(stderr, gettext("%s: Fast reboot needs exactly "
+		    "one pool with bootfs set; found %d\n"), cmdname,
+		    bc.bc_count);
+		return (-1);
+	}
+	if (bc.bc_mountpoint[0] == '\0') {
+		(void) fprintf(stderr, gettext("%s: The boot file system is "
+		    "not mounted\n"), cmdname);
+		return (-1);
+	}
+
+	(void) snprintf(kernpath, sizeof (kernpath),
+	    "%s/platform/i86pc/kernel/amd64/unix", bc.bc_mountpoint);
+	if (stat64(kernpath, &statbuf) != 0) {
+		(void) fprintf(stderr, gettext("%s: %s: %s\n"), cmdname,
+		    kernpath, strerror(errno));
+		return (-1);
+	}
+
+	(void) strlcpy(mountpoint, bc.bc_mountpoint, mpsz);
+	return (0);
+}
+#endif	/* __x86 */
+
 /*
  * Returns 0 on successful parsing of the arguments;
  * returns EINVAL on parsing failures that should abort the reboot attempt;
@@ -1061,6 +1161,26 @@ parse_fastboot_args(char *bootargs_buf, size_t buf_size,
 		return (rc);
 
 #if defined(__x86)
+	/*
+	 * With a ramdisk root there are no boot environments.  Unless a root
+	 * was given, boot the active platform from the mounted boot file
+	 * system, passing any options through.
+	 */
+	if (bename == NULL && (newarg == NULL || newarg[0] == '-') &&
+	    root_is_ramdisk()) {
+		if (get_bootfs_mountpoint(mountpoint, sizeof (mountpoint)) !=
+		    0 || snprintf(bootargs_buf, buf_size,
+		    "%s /platform/i86pc/kernel/amd64/unix%s%s", mountpoint,
+		    buflen != 0 ? " " : "", bootargs_saved) >= buf_size) {
+			bcopy(bootargs_saved, bootargs_buf, buf_size);
+			(void) fprintf(stderr,
+			    gettext("%s: Falling back to regular reboot.\n"),
+			    cmdname);
+			return (-1);
+		}
+		return (0);
+	}
+
 	/* Read boot args from Boot Environment */
 	if ((bootargs_buf[0] == 0 || isdigit(bootargs_buf[0])) &&
 	    bename == NULL) {

@@ -3,6 +3,7 @@
 \ Copyright 2012 Garrett D'Amore <garrett@damore.org>.  All rights reserved.
 \ Copyright 2019 Joyent, Inc.
 \ Copyright 2025 Oxide Computer Company
+\ Copyright 2026 Edgecast Cloud LLC.
 \
 \ CDDL HEADER START
 \
@@ -448,6 +449,7 @@ fastboot_info_t
 	fi_pagetable_pa
 	fi_last_table_pa
 	fi_new_mbi_pa
+	fi_mb_magic
 	fi_valid
 
 zone

@@ -167,6 +167,11 @@ uint8_t saved_drives[FASTBOOT_SAVED_DRIVES_SIZE];
 char saved_cmdline[FASTBOOT_SAVED_CMDLINE_LEN];
 int saved_cmdline_len = 0;
 size_t saved_file_size[FASTBOOT_MAX_FILES_MAP];
+/* 8-byte aligned, as multiboot2 tags are aligned relative to the address */
+uint64_t saved_mb2[FASTBOOT_SAVED_MB2_SIZE / sizeof (uint64_t)];
+uint8_t saved_mod_data[FASTBOOT_SAVED_MODS_SIZE];
+fastboot_saved_mod_t saved_mods[MAX_BOOT_MODULES];
+uint_t saved_mod_cnt = 0;
 
 /*
  * Turn off fastreboot_onpanic to avoid panic loop.
@@ -1298,6 +1303,78 @@ save_boot_info(struct xboot_info *xbi)
 		saved_file_size[FASTBOOT_NAME_BOOTARCHIVE] += modp->bm_size;
 	}
 }
+
+/*
+ * Save the Multiboot 2 information structure and the boot modules for Fast
+ * Reboot.  The boot archive and its hash are read again from disk when the
+ * new kernel is loaded; every other module (the loader environment, a console
+ * font, plain files) is copied here so that it can be passed on unchanged.
+ */
+static void
+save_boot_info_mb2(struct xboot_info *xbi)
+{
+	multiboot2_info_header_t *mbi = xbi->bi_mb_info;
+	struct boot_modules *modp;
+	uint32_t off = 0;
+	uint_t i, nrootfs = 0, nhash = 0;
+
+	/*
+	 * Fast reboot reloads exactly one boot archive, and at most one hash
+	 * of it.
+	 */
+	for (i = 0, modp = (struct boot_modules *)(uintptr_t)xbi->bi_modules;
+	    i < xbi->bi_module_cnt; i++, modp++) {
+		if (modp->bm_type == BMT_ROOTFS)
+			nrootfs++;
+		else if (modp->bm_type == BMT_HASH)
+			nhash++;
+	}
+	if (nrootfs != 1 || nhash > 1) {
+		DBG_MSG("unexpected boot archive modules: clearing "
+		    "fastreboot_capable\n");
+		fastreboot_disable(FBNS_BOOTMOD);
+		return;
+	}
+
+	if (mbi->mbi_total_size > sizeof (saved_mb2)) {
+		DBG(mbi->mbi_total_size);
+		DBG_MSG("multiboot2 info too big: clearing "
+		    "fastreboot_capable\n");
+		fastreboot_disable(FBNS_MULTIBOOT2);
+		return;
+	}
+	bcopy(mbi, saved_mb2, mbi->mbi_total_size);
+
+	saved_file_size[FASTBOOT_NAME_UNIX] = FOUR_MEG - PAGESIZE;
+	for (i = 0, modp = (struct boot_modules *)(uintptr_t)xbi->bi_modules;
+	    i < xbi->bi_module_cnt; i++, modp++) {
+		fastboot_saved_mod_t *smp = &saved_mods[i];
+
+		smp->fsm_type = modp->bm_type;
+		smp->fsm_size = modp->bm_size;
+
+		if (modp->bm_type == BMT_ROOTFS) {
+			saved_file_size[FASTBOOT_NAME_BOOTARCHIVE] +=
+			    modp->bm_size;
+			continue;
+		}
+		if (modp->bm_type == BMT_HASH)
+			continue;
+
+		if (modp->bm_size > sizeof (saved_mod_data) - off) {
+			DBG(modp->bm_size);
+			DBG_MSG("boot modules too big: clearing "
+			    "fastreboot_capable\n");
+			fastreboot_disable(FBNS_BOOTMOD);
+			return;
+		}
+		bcopy((void *)(uintptr_t)modp->bm_addr, &saved_mod_data[off],
+		    modp->bm_size);
+		smp->fsm_offset = off;
+		off += P2ROUNDUP(modp->bm_size, sizeof (uint64_t));
+	}
+	saved_mod_cnt = xbi->bi_module_cnt;
+}
 #endif	/* __xpv */
 
 /*
@@ -1588,23 +1665,14 @@ build_boot_properties(struct xboot_info *xbp)
 	}
 
 	/*
-	 * If there are any boot time modules or hashes present, then disable
-	 * fast reboot.
+	 * With Multiboot 1, fast reboot can only pass on a single module, the
+	 * boot archive, so disable it if there are any boot time modules or
+	 * hashes present.  With Multiboot 2 the other modules are saved and
+	 * passed on (see save_boot_info_mb2()).
 	 */
-	if (xbp->bi_module_cnt > 1) {
-		fastreboot_disable(FBNS_BOOTMOD);
-	}
-
 #ifndef __xpv
-	/*
-	 * Disable fast reboot if we're using the Multiboot 2 boot protocol,
-	 * since we don't currently support MB2 info and module relocation.
-	 * Note that fast reboot will have already been disabled if multiple
-	 * modules are present, since the current implementation assumes that
-	 * we only have a single module, the boot_archive.
-	 */
-	if (xbp->bi_mb_version != 1) {
-		fastreboot_disable(FBNS_MULTIBOOT2);
+	if (xbp->bi_mb_version == 1 && xbp->bi_module_cnt > 1) {
+		fastreboot_disable(FBNS_BOOTMOD);
 	}
 #endif
 
@@ -1857,6 +1925,15 @@ build_boot_properties(struct xboot_info *xbp)
 		multiboot2_info_header_t *mbi = xbp->bi_mb_info;
 		multiboot_tag_bootdev_t *bootdev = NULL;
 		multiboot_tag_network_t *netdev = NULL;
+
+		/*
+		 * Save the multiboot2 information and boot modules for Fast
+		 * Reboot.
+		 */
+		if (mbi != NULL)
+			save_boot_info_mb2(xbp);
+		else
+			fastreboot_disable(FBNS_MULTIBOOT2);
 
 		if (mbi != NULL) {
 			bootdev = dboot_multiboot2_find_tag(mbi,

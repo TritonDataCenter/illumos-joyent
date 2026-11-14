@@ -23,6 +23,7 @@
  * Copyright 2008 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  * Copyright 2018 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 
@@ -221,7 +222,7 @@ dboot_jump:
 	/* Jump to dboot */
 	movl	$DBOOT_ENTRY_ADDRESS, %edi
 	movl	FI_NEW_MBI_PA(%esp), %ebx
-	movl	$MB_BOOTLOADER_MAGIC, %eax
+	movl	FI_MB_MAGIC(%esp), %eax
 	jmp	*%edi
 
 	.code64
