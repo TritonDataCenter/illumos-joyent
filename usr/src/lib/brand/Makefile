@@ -27,7 +27,7 @@ include ../../Makefile.master
 
 .PARALLEL:
 
-i386_SUBDIRS= bhyve kvm lx
+i386_SUBDIRS= bhyve kvm lx rshyve
 i386_MSGSUBDIRS= lx
 
 SUBDIRS= shared .WAIT sn1 solaris10 ipkg labeled \

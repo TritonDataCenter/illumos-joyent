@@ -586,6 +586,7 @@ f etc/zones/Joyent.xml 0444 root bin
 f etc/zones/SUNWblank.xml 0444 root bin
 f etc/zones/SUNWdefault.xml 0444 root bin
 f etc/zones/SYSbhyve.xml 0444 root bin
+f etc/zones/SYSrshyve.xml 0444 root bin
 f etc/zones/index 0644 root sys
 s etc/zprofile=profile
 f etc/zshrc 0644 root bin
@@ -5868,6 +5869,17 @@ f usr/lib/brand/lx/poststate 0755 root root
 f usr/lib/brand/lx/prestate 0755 root root
 f usr/lib/brand/lx/pts_ignorelist 0444 root root
 f usr/lib/brand/lx/statechange 0755 root root
+d usr/lib/brand/rshyve 0555 root sys
+f usr/lib/brand/rshyve/attach 0555 root sys
+f usr/lib/brand/rshyve/bhhwcompat 0555 root sys
+f usr/lib/brand/rshyve/binstall 0755 root root
+f usr/lib/brand/rshyve/boot 0555 root sys
+f usr/lib/brand/rshyve/config.xml 0444 root sys
+f usr/lib/brand/rshyve/detach 0555 root sys
+f usr/lib/brand/rshyve/platform.xml 0444 root sys
+f usr/lib/brand/rshyve/statechange 0555 root sys
+f usr/lib/brand/rshyve/uninstall 0555 root sys
+f usr/lib/brand/rshyve/zhyve 0555 root sys
 d usr/lib/brand/shared 0755 root sys
 f usr/lib/brand/shared/common.ksh 0444 root bin
 f usr/lib/brand/shared/query 0755 root bin
