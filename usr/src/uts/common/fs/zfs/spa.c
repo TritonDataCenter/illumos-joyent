@@ -32,7 +32,7 @@
  * Copyright (c) 2017, Intel Corporation.
  * Copyright 2020 Joshua M. Clulow <josh@sysmgr.org>
  * Copyright 2021 OmniOS Community Edition (OmniOSce) Association.
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  * Copyright 2026 Edgecast Cloud LLC.
  */
 
@@ -3617,7 +3617,7 @@ spa_ld_get_props(spa_t *spa)
 		return (spa_vdev_err(rvd, VDEV_AUX_CORRUPT_DATA, EIO));
 
 	if (error == 0) {
-		uint64_t autoreplace;
+		uint64_t autoreplace = 0;
 
 		spa_prop_find(spa, ZPOOL_PROP_BOOTFS, &spa->spa_bootfs);
 		spa_prop_find(spa, ZPOOL_PROP_AUTOREPLACE, &autoreplace);
@@ -6255,8 +6255,6 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	vdev_t *rvd = spa->spa_root_vdev;
 	vdev_t *oldvd, *newvd, *newrootvd, *pvd, *tvd;
 	vdev_ops_t *pvops;
-	char *oldvdpath, *newvdpath;
-	int newvd_isspare;
 	int error;
 
 	ASSERT(spa_writeable(spa));
@@ -6418,9 +6416,17 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 		spa_event_notify(spa, newvd, NULL, ESC_ZFS_VDEV_SPARE);
 	}
 
-	oldvdpath = spa_strdup(oldvd->vdev_path);
-	newvdpath = spa_strdup(newvd->vdev_path);
-	newvd_isspare = newvd->vdev_isspare;
+	/*
+	 * Log the attach in the txg that syncs it.  We can't wait for a new
+	 * tx here: we hold the config lock, which txg sync needs.
+	 */
+	dmu_tx_t *tx = dmu_tx_create_assigned(spa->spa_dsl_pool, txg);
+	spa_history_log_internal(spa, "vdev attach", tx,
+	    "%s vdev=%s %s vdev=%s",
+	    replacing && newvd->vdev_isspare ? "spare in" :
+	    replacing ? "replace" : "attach", newvd->vdev_path,
+	    replacing ? "for" : "to", oldvd->vdev_path);
+	dmu_tx_commit(tx);
 
 	/*
 	 * Mark newvd's DTL dirty in this txg.
@@ -6449,15 +6455,6 @@ spa_vdev_attach(spa_t *spa, uint64_t guid, nvlist_t *nvroot, int replacing)
 	 */
 	(void) spa_vdev_exit(spa, newrootvd, dtl_max_txg, 0);
 
-	spa_history_log_internal(spa, "vdev attach", NULL,
-	    "%s vdev=%s %s vdev=%s",
-	    replacing && newvd_isspare ? "spare in" :
-	    replacing ? "replace" : "attach", newvdpath,
-	    replacing ? "for" : "to", oldvdpath);
-
-	spa_strfree(oldvdpath);
-	spa_strfree(newvdpath);
-
 	return (0);
 }
 
@@ -6476,7 +6473,6 @@ spa_vdev_detach(spa_t *spa, uint64_t guid, uint64_t pguid, int replace_done)
 	vdev_t *vd, *pvd, *cvd, *tvd;
 	boolean_t unspare = B_FALSE;
 	uint64_t unspare_guid = 0;
-	char *vdpath;
 
 	ASSERT(spa_writeable(spa));
 
@@ -6601,6 +6597,15 @@ spa_vdev_detach(spa_t *spa, uint64_t guid, uint64_t pguid, int replace_done)
 	error = vdev_label_init(vd, 0, VDEV_LABEL_REMOVE);
 
 	/*
+	 * Log the detach in the txg that syncs it.  We can't wait for a new
+	 * tx here: we hold the config lock, which txg sync needs.
+	 */
+	dmu_tx_t *tx = dmu_tx_create_assigned(spa->spa_dsl_pool, txg);
+	spa_history_log_internal(spa, "detach", tx, "vdev=%s",
+	    vd->vdev_path != NULL ? vd->vdev_path : "none");
+	dmu_tx_commit(tx);
+
+	/*
 	 * Remove vd from its parent and compact the parent's children.
 	 */
 	vdev_remove_child(pvd, vd);
@@ -6670,7 +6675,6 @@ spa_vdev_detach(spa_t *spa, uint64_t guid, uint64_t pguid, int replace_done)
 	 * But first make sure we're not on any *other* txg's DTL list, to
 	 * prevent vd from being accessed after it's freed.
 	 */
-	vdpath = spa_strdup(vd->vdev_path);
 	for (int t = 0; t < TXG_SIZE; t++)
 		(void) txg_list_remove_this(&tvd->vdev_dtl_list, vd, t);
 	vd->vdev_detached = B_TRUE;
@@ -6683,10 +6687,6 @@ spa_vdev_detach(spa_t *spa, uint64_t guid, uint64_t pguid, int replace_done)
 	spa_open_ref(spa, FTAG);
 
 	error = spa_vdev_exit(spa, vd, txg, 0);
-
-	spa_history_log_internal(spa, "detach", NULL,
-	    "vdev=%s", vdpath);
-	spa_strfree(vdpath);
 
 	/*
 	 * If this was the removal of the original device in a hot spare vdev,
@@ -6953,6 +6953,46 @@ spa_vdev_trim(spa_t *spa, nvlist_t *nv, uint64_t cmd_type, uint64_t rate,
 	return (total_errors);
 }
 
+typedef struct spa_split_dtl_arg {
+	spa_t		*ssda_spa;	/* the new pool */
+	uint64_t	*ssda_objs;	/* original DTL space map objects */
+	uint_t		ssda_count;	/* nitems in ssda_objs */
+} spa_split_dtl_arg_t;
+
+/*
+ * Record the DTL space map object of every leaf that has one into objs[],
+ * advancing *idxp. These are the objects that will be carried, via the
+ * copied MOS, onto the split disks.
+ */
+static void
+spa_split_collect_dtl(vdev_t *vd, uint64_t *objs, uint_t *idxp)
+{
+	if (vd->vdev_ops->vdev_op_leaf) {
+		if (vd->vdev_dtl_sm != NULL)
+			objs[(*idxp)++] = space_map_object(vd->vdev_dtl_sm);
+		return;
+	}
+	for (uint64_t c = 0; c < vd->vdev_children; c++)
+		spa_split_collect_dtl(vd->vdev_child[c], objs, idxp);
+}
+
+/*
+ * Callback that frees the inherited DTL space map objects from the new
+ * pool MOS. The new pool MOS is a byte copy of the original pool, so it
+ * contains a DTL space map object for every leaf of the original pool.
+ * The new pool references none of them because split leaves
+ * start with an empty DTL and allocate their own on demand.
+ */
+static void
+spa_split_dtl_free_sync(void *arg, dmu_tx_t *tx)
+{
+	spa_split_dtl_arg_t *ssda = arg;
+	objset_t *mos = ssda->ssda_spa->spa_meta_objset;
+
+	for (uint_t i = 0; i < ssda->ssda_count; i++)
+		space_map_free_obj(mos, ssda->ssda_objs[i], tx);
+}
+
 /*
  * Split a set of devices from their mirrors, and create a new pool from them.
  */
@@ -6967,7 +7007,9 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 	nvlist_t **child, *nvl, *tmp;
 	dmu_tx_t *tx;
 	char *altroot = NULL;
-	vdev_t *rvd, **vml = NULL;			/* vdev modify list */
+	vdev_t *rvd, **vml = NULL;	/* vdev modify list */
+	uint64_t *dtl_objs = NULL;	/* DTL objs from original pool */
+	uint_t ndtl = 0, nleaves;
 	boolean_t activate_slog;
 
 	ASSERT(spa_writeable(spa));
@@ -7108,6 +7150,11 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 		return (spa_vdev_exit(spa, NULL, txg, error));
 	}
 
+	/* Create array of DTL objects. */
+	nleaves = vdev_count_leaves(spa);
+	dtl_objs = kmem_zalloc(nleaves * sizeof (uint64_t), KM_SLEEP);
+	spa_split_collect_dtl(spa->spa_root_vdev, dtl_objs, &ndtl);
+
 	/* stop writers from using the disks */
 	for (c = 0; c < children; c++) {
 		if (vml[c] != NULL)
@@ -7209,6 +7256,20 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 		    B_TRUE));
 	}
 
+	/*
+	 * Free the DTL space map objects inherited from the original pool
+	 * MOS so we won't leak them.
+	 */
+	if (ndtl != 0) {
+		spa_split_dtl_arg_t ssda;
+
+		ssda.ssda_spa = newspa;
+		ssda.ssda_objs = dtl_objs;
+		ssda.ssda_count = ndtl;
+		VERIFY0(dsl_sync_task(spa_name(newspa), NULL,
+		    spa_split_dtl_free_sync, &ssda, 0, ZFS_SPACE_CHECK_NONE));
+	}
+
 	/* set the props */
 	if (props != NULL) {
 		spa_configfile_set(newspa, props, B_FALSE);
@@ -7229,10 +7290,8 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 
 	/* finally, update the original pool's config */
 	txg = spa_vdev_config_enter(spa);
-	tx = dmu_tx_create_dd(spa_get_dsl(spa)->dp_mos_dir);
-	error = dmu_tx_assign(tx, TXG_WAIT);
-	if (error != 0)
-		dmu_tx_abort(tx);
+	/* We can't wait for a new tx while we hold the config lock. */
+	tx = dmu_tx_create_assigned(spa_get_dsl(spa), txg);
 	for (c = 0; c < children; c++) {
 		if (vml[c] != NULL) {
 			vdev_t *tvd = vml[c]->vdev_top;
@@ -7248,20 +7307,52 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 			}
 
 			vdev_split(vml[c]);
-			if (error == 0)
-				spa_history_log_internal(spa, "detach", tx,
-				    "vdev=%s", vml[c]->vdev_path);
 
-			vdev_free(vml[c]);
+			/*
+			 * As in spa_vdev_detach(), mark the vdev detached
+			 * and dirty its DTL, so that vdev_dtl_sync() frees
+			 * the leaf's DTL space map object.
+			 */
+			vml[c]->vdev_detached = B_TRUE;
+
+			/*
+			 * The leaf ZAP was transferred to the new pool
+			 * and this pool's copy is destroyed by the AVZ
+			 * rebuild below, so clear it to keep
+			 * vdev_dtl_sync() from destroying it again.
+			 */
+			vml[c]->vdev_leaf_zap = 0;
+
+			/*
+			 * vml[c]->vdev_top may be stale; the
+			 * surviving top-level vdev is rvd->vdev_child[c].
+			 */
+			if (vml[c]->vdev_dtl_sm != NULL)
+				vdev_dirty(rvd->vdev_child[c], VDD_DTL,
+				    vml[c], txg);
+
+			spa_history_log_internal(spa, "detach", tx,
+			    "vdev=%s", vml[c]->vdev_path);
 		}
 	}
 	spa->spa_avz_action = AVZ_ACTION_REBUILD;
 	vdev_config_dirty(spa->spa_root_vdev);
 	spa->spa_config_splitting = NULL;
 	nvlist_free(nvl);
-	if (error == 0)
-		dmu_tx_commit(tx);
+	dmu_tx_commit(tx);
 	(void) spa_vdev_exit(spa, NULL, txg, 0);
+
+	/*
+	 * txg is synced, free vdevs.
+	 */
+	spa_config_enter(spa, SCL_STATE_ALL, spa, RW_WRITER);
+	for (c = 0; c < children; c++) {
+		if (vml[c] != NULL) {
+			ASSERT3P(vml[c]->vdev_dtl_sm, ==, NULL);
+			vdev_free(vml[c]);
+		}
+	}
+	spa_config_exit(spa, SCL_STATE_ALL, spa);
 
 	if (zio_injection_enabled)
 		zio_handle_panic_injection(spa, FTAG, 3);
@@ -7271,6 +7362,8 @@ spa_vdev_split_mirror(spa_t *spa, char *newname, nvlist_t *config,
 	    "from pool %s", spa_name(spa));
 
 	kmem_free(vml, children * sizeof (vdev_t *));
+	if (dtl_objs != NULL)
+		kmem_free(dtl_objs, nleaves * sizeof (uint64_t));
 
 	/* if we're not going to mount the filesystems in userland, export */
 	if (exp)
@@ -7304,6 +7397,9 @@ out:
 	(void) spa_vdev_exit(spa, NULL, txg, error);
 
 	kmem_free(vml, children * sizeof (vdev_t *));
+	if (dtl_objs != NULL)
+		kmem_free(dtl_objs, nleaves * sizeof (uint64_t));
+
 	return (error);
 }
 

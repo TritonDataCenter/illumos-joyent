@@ -152,7 +152,6 @@ COMMON_SUBDIRS=		\
 	echo		\
 	ed		\
 	eeprom		\
-	efibootmgr	\
 	eject		\
 	emul64ioctl	\
 	enhance		\
@@ -499,6 +498,7 @@ i386_SUBDIRS=		\
 	biosdev		\
 	cxgbetool	\
 	diskscan	\
+	efibootmgr	\
 	ficl		\
 	nvmeadm		\
 	pptadm		\
