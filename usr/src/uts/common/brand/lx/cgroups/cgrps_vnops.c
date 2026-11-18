@@ -11,6 +11,7 @@
 
 /*
  * Copyright 2016 Joyent, Inc.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/types.h>
@@ -77,26 +78,29 @@ cgrp_close(struct vnode *vp, int flag, int count, offset_t offset,
 }
 
 /*
- * Lookup proc or task based on pid and typ.
+ * Lookup proc or task based on pid and typ. 'cr' are the credentials the file
+ * being written was opened with.
  */
 static proc_t *
-cgrp_p_for_wr(pid_t pid, cgrp_wr_type_t typ)
+cgrp_p_for_wr(pid_t pid, cgrp_wr_type_t typ, cred_t *cr)
 {
 	int i;
 	zoneid_t zoneid = curproc->p_zone->zone_id;
 	pid_t schedpid = curproc->p_zone->zone_zsched->p_pid;
+	proc_t *pp;
 
 	ASSERT(MUTEX_HELD(&pidlock));
 
 	/* getting a proc from a pid is easy */
-	if (typ == CG_WR_PROCS)
-		return (prfind(pid));
-
-	ASSERT(typ == CG_WR_TASKS);
+	if (typ == CG_WR_PROCS && (pp = prfind(pid)) != NULL)
+		return (pp);
 
 	/*
 	 * We have to scan all of the process entries to find the proc
-	 * containing this task.
+	 * containing this task. We also do this for a cgroup.procs write of
+	 * an ID which is not a process ID, since Linux then moves the whole
+	 * process containing that thread. (Thread IDs are allocated from the
+	 * same space as process IDs, so this can't find another process.)
 	 */
 	mutex_exit(&pidlock);
 	for (i = 1; i < v.v_proc; i++) {
@@ -116,7 +120,7 @@ cgrp_p_for_wr(pid_t pid, cgrp_wr_type_t typ)
 		    (p->p_flag & SSYS) != 0 ||
 		    p->p_pid == 0 ||
 		    p->p_pid == schedpid ||
-		    secpolicy_basic_procinfo(CRED(), p, curproc) != 0 ||
+		    secpolicy_basic_procinfo(cr, p, curproc) != 0 ||
 		    p->p_brand != &lx_brand ||
 		    p->p_zone->zone_id != zoneid) {
 			mutex_exit(&pidlock);
@@ -166,15 +170,19 @@ cgrp_thr_move(cgrp_mnt_t *cgm, lx_lwp_data_t *plwpd, cgrp_node_t *ncn,
 	ASSERT(MUTEX_HELD(&cgm->cg_contents));
 	ASSERT(MUTEX_HELD(&p->p_lock));
 
-	ocn = cgrp_cg_hash_lookup(cgm, plwpd->br_cgroupid);
-	VERIFY(ocn != NULL);
+	ocn = cgrp_cg_lwp_lookup(cgm, plwpd->br_cgroupid);
 
-	ASSERT(ocn->cgn_task_cnt > 0);
-	atomic_dec_32(&ocn->cgn_task_cnt);
-	atomic_inc_32(&ncn->cgn_task_cnt);
+	ASSERT(ocn == cgm->cg_rootnode || ocn->cgn_task_cnt > 0);
+	/*
+	 * Add to the new cgroup first so that the populated state of common
+	 * ancestors does not flap in cgroup v2.
+	 */
+	cgrp_task_adjust(cgm, ncn, 1);
+	cgrp_task_adjust(cgm, ocn, -1);
 	plwpd->br_cgroupid = cg_id;
 
-	if (ocn->cgn_task_cnt == 0 && ocn->cgn_dirents == N_DIRENTS(cgm) &&
+	if (!CG_IS_V2(cgm) && ocn != cgm->cg_rootnode &&
+	    ocn->cgn_task_cnt == 0 && ocn->cgn_dirents == N_DIRENTS(cgm) &&
 	    ocn->cgn_notify == 1) {
 		/*
 		 * We want to drop p_lock before queuing the event since
@@ -194,16 +202,109 @@ cgrp_thr_move(cgrp_mnt_t *cgm, lx_lwp_data_t *plwpd, cgrp_node_t *ncn,
  * Assign either all of the threads, or a single thread, for the specified pid
  * to the new cgroup. Controlled by the typ argument.
  */
+/*
+ * Return the ID of the cgroup that the pseudo file 'cn' belongs to. The
+ * cgroup's state lives on the containing directory. When the cgroup is
+ * removed, cgrp_dirdelete() clears cgn_parent on its pseudo files, since a
+ * file which is still open does not keep the directory node around. Like
+ * Linux, we return ENODEV for any access to a file of a removed cgroup.
+ */
 static int
-cgrp_proc_set_id(cgrp_mnt_t *cgm, uint_t cg_id, pid_t pid, cgrp_wr_type_t typ)
+cgrp_parent_id(cgrp_mnt_t *cgm, cgrp_node_t *cn, uint_t *idp)
+{
+	int error = 0;
+
+	mutex_enter(&cgm->cg_contents);
+	if (cn->cgn_parent == NULL)
+		error = ENODEV;
+	else
+		*idp = cn->cgn_parent->cgn_id;
+	mutex_exit(&cgm->cg_contents);
+
+	return (error);
+}
+
+/*
+ * Return the parent cgroup of 'cn', or NULL for the top-level cgroup.
+ */
+static cgrp_node_t *
+cgrp_cg_parent(cgrp_mnt_t *cgm, cgrp_node_t *cn)
+{
+	return (cn == cgm->cg_rootnode ? NULL : cn->cgn_parent);
+}
+
+/*
+ * cgroup v2 delegation containment: to move a process from cgroup 'src_id'
+ * to cgroup 'dst_id', the writer must also have write access to the
+ * cgroup.procs file of the nearest common ancestor of the two cgroups (write
+ * access to the destination's cgroup.procs was checked when it was opened).
+ * As on Linux, 'cr' are the credentials the file was opened with.
+ */
+static int
+cgrp_procs_ancestor_access(cgrp_mnt_t *cgm, uint_t src_id, uint_t dst_id,
+    cred_t *cr)
+{
+	cgrp_node_t *src, *dst, *anc, *cn;
+	cgrp_dirent_t *cdp;
+	int error;
+
+	mutex_enter(&cgm->cg_contents);
+	if ((dst = cgrp_cg_hash_lookup(cgm, dst_id)) == NULL) {
+		mutex_exit(&cgm->cg_contents);
+		return (ENODEV);
+	}
+	src = cgrp_cg_lwp_lookup(cgm, src_id);
+
+	anc = cgm->cg_rootnode;
+	for (cn = src; cn != NULL; cn = cgrp_cg_parent(cgm, cn)) {
+		cgrp_node_t *dn;
+
+		for (dn = dst; dn != NULL && dn != cn;
+		    dn = cgrp_cg_parent(cgm, dn))
+			;
+		if (dn != NULL) {
+			anc = cn;
+			break;
+		}
+	}
+
+	error = ENOENT;
+	for (cdp = anc->cgn_dir; cdp != NULL; cdp = cdp->cgd_next) {
+		if (cdp->cgd_cgrp_node->cgn_type == CG_PROCS) {
+			error = cgrp_taccess(cdp->cgd_cgrp_node, VWRITE, cr);
+			break;
+		}
+	}
+	mutex_exit(&cgm->cg_contents);
+
+	return (error);
+}
+
+static int
+cgrp_proc_set_id(cgrp_mnt_t *cgm, uint_t cg_id, pid_t pid, cgrp_wr_type_t typ,
+    cred_t *cr)
 {
 	proc_t *p;
 	kthread_t *t;
 	int error;
 	cgrp_node_t *ncn;
+	boolean_t checked = B_FALSE;
+	uint_t checked_id = 0;
 
-	if (pid == 1)
+	if (pid == 1) {
 		pid = curproc->p_zone->zone_proc_initpid;
+	} else if (pid == 0) {
+		/* Linux interprets 0 as the writing process or thread */
+		if (typ == CG_WR_PROCS) {
+			pid = curproc->p_pid;
+		} else {
+			lx_lwp_data_t *lwpd = ttolxlwp(curthread);
+
+			if (lwpd == NULL)
+				return (ESRCH);
+			pid = lwpd->br_pid;
+		}
+	}
 
 	/*
 	 * Move one or all threads to this cgroup.
@@ -217,7 +318,7 @@ cgrp_proc_set_id(cgrp_mnt_t *cgm, uint_t cg_id, pid_t pid, cgrp_wr_type_t typ)
 restart:
 	mutex_enter(&pidlock);
 
-	p = cgrp_p_for_wr(pid, typ);
+	p = cgrp_p_for_wr(pid, typ, cr);
 	if (p == NULL) {
 		mutex_exit(&pidlock);
 		return (ESRCH);
@@ -226,14 +327,15 @@ restart:
 	/*
 	 * Fail writes for pids for which there is no corresponding process,
 	 * system processes, a pid of 0, the pid for our zsched process,
-	 * anything the security policy doesn't allow us to look at, and
+	 * anything the security policy doesn't allow us to look at (as on
+	 * Linux, with the credentials the file was opened with), and
 	 * processes that are not in the zone.
 	 */
 	if (p->p_stat == SIDL ||
 	    (p->p_flag & SSYS) != 0 ||
 	    p->p_pid == 0 ||
 	    p->p_pid == curproc->p_zone->zone_zsched->p_pid ||
-	    secpolicy_basic_procinfo(CRED(), p, curproc) != 0 ||
+	    secpolicy_basic_procinfo(cr, p, curproc) != 0 ||
 	    p->p_zone->zone_id != curproc->p_zone->zone_id) {
 		mutex_exit(&pidlock);
 		return (ESRCH);
@@ -255,29 +357,67 @@ restart:
 	mutex_enter(&cgm->cg_contents);
 
 	ncn = cgrp_cg_hash_lookup(cgm, cg_id);
-	VERIFY(ncn != NULL);
+	if (ncn == NULL) {
+		/* The cgroup was removed after we looked up its ID. */
+		mutex_exit(&cgm->cg_contents);
+		mutex_exit(&p->p_lock);
+		return (ENODEV);
+	}
 
 	do {
 		lx_lwp_data_t *plwpd = ttolxlwp(t);
-		if (plwpd != NULL && plwpd->br_cgroupid != cg_id) {
-			if (typ == CG_WR_PROCS) {
-				if (cgrp_thr_move(cgm, plwpd, ncn, cg_id, p)) {
+
+		if (plwpd == NULL) {
+			t = t->t_forw;
+			continue;
+		}
+
+		if (typ == CG_WR_PROCS) {
+			if (plwpd->br_cgroupid == cg_id) {
+				t = t->t_forw;
+				continue;
+			}
+			if (CG_IS_V2(cgm)) {
+				uint_t src_id = cgrp_cg_lwp_lookup(cgm,
+				    plwpd->br_cgroupid)->cgn_id;
+
+				if (!checked || src_id != checked_id) {
 					/*
-					 * We dropped all of the locks so we
-					 * need to start over.
+					 * Check access to the common ancestor
+					 * before we move anything. Drop our
+					 * locks first, since the access check
+					 * can block, and start over after.
 					 */
+					mutex_exit(&cgm->cg_contents);
+					mutex_exit(&p->p_lock);
+					error = cgrp_procs_ancestor_access(cgm,
+					    src_id, cg_id, cr);
+					if (error != 0)
+						return (error);
+					checked = B_TRUE;
+					checked_id = src_id;
 					goto restart;
 				}
-
-			} else if (plwpd->br_pid == pid) {
-				/* type is CG_WR_TASKS and we found the task */
-				error = 0;
-				if (cgrp_thr_move(cgm, plwpd, ncn, cg_id, p)) {
-					goto done;
-				} else {
-					break;
-				}
 			}
+			if (cgrp_thr_move(cgm, plwpd, ncn, cg_id, p)) {
+				/*
+				 * We dropped all of the locks so we need to
+				 * start over.
+				 */
+				goto restart;
+			}
+		} else if (plwpd->br_pid == pid) {
+			/*
+			 * Type is CG_WR_TASKS and we found the task. If it is
+			 * already in this cgroup there is nothing to do, but
+			 * like Linux, we report success.
+			 */
+			error = 0;
+			if (plwpd->br_cgroupid != cg_id &&
+			    cgrp_thr_move(cgm, plwpd, ncn, cg_id, p)) {
+				goto done;
+			}
+			break;
 		}
 		t = t->t_forw;
 	} while (t != p->p_tlist);
@@ -331,7 +471,7 @@ cgrp_get_pid_str(struct uio *uio, pid_t *pid)
 }
 
 static int
-cgrp_wr_notify(cgrp_node_t *cn, struct uio *uio)
+cgrp_wr_notify(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 {
 	int error;
 	uint_t value;
@@ -347,52 +487,78 @@ cgrp_wr_notify(cgrp_node_t *cn, struct uio *uio)
 	if (value != 0 && value != 1)
 		return (EINVAL);
 
-	/*
-	 * The flag is on the containing dir. We don't bother taking the
-	 * cg_contents lock since this is a simple assignment.
-	 */
-	cn->cgn_parent->cgn_notify = value;
-	return (0);
-}
-
-static int
-cgrp_wr_rel_agent(cgrp_mnt_t *cgm, struct uio *uio)
-{
-	int error;
-	int len;
-	char *wrp;
-
-	len = uio->uio_offset + uio->uio_resid;
-	if (len > MAXPATHLEN)
-		return (EFBIG);
-
+	/* The flag is on the containing dir. */
 	mutex_enter(&cgm->cg_contents);
-
-	wrp = &cgm->cg_agent[uio->uio_offset];
-	error = uiomove(wrp, uio->uio_resid, UIO_WRITE, uio);
-	cgm->cg_agent[len] = '\0';
-	if (len > 1 && cgm->cg_agent[len - 1] == '\n')
-		cgm->cg_agent[len - 1] = '\0';
-
+	if (cn->cgn_parent == NULL) {
+		error = ENODEV;
+	} else {
+		cn->cgn_parent->cgn_notify = value;
+	}
 	mutex_exit(&cgm->cg_contents);
 	return (error);
 }
 
+#define	CGRP_ISSPACE(c)	((c) == ' ' || (c) == '\t' || (c) == '\n' || \
+	(c) == '\r' || (c) == '\v' || (c) == '\f')
+
+/*
+ * Handle a write to the release_agent pseudo file (cgroup v1). Like Linux,
+ * each write replaces the whole agent path, with leading and trailing
+ * whitespace removed, and the file offset is ignored.
+ */
+static int
+cgrp_wr_rel_agent(cgrp_mnt_t *cgm, struct uio *uio)
+{
+	size_t len = uio->uio_resid;
+	char *buf, *start, *end;
+	int error;
+
+	if (len > MAXPATHLEN)
+		return (EFBIG);
+
+	/*
+	 * Copy in without holding cg_contents (which the lwp fork and exit
+	 * hooks need), since copying in can fault and block for a long time.
+	 * If it fails, the agent path is left unchanged.
+	 */
+	buf = kmem_alloc(CGRP_AGENT_LEN, KM_SLEEP);
+	if ((error = uiomove(buf, len, UIO_WRITE, uio)) != 0) {
+		kmem_free(buf, CGRP_AGENT_LEN);
+		return (error);
+	}
+	buf[len] = '\0';
+
+	for (start = buf; CGRP_ISSPACE(*start); start++)
+		;
+	end = start + strlen(start);
+	while (end > start && CGRP_ISSPACE(end[-1]))
+		*--end = '\0';
+
+	mutex_enter(&cgm->cg_contents);
+	(void) strlcpy(cgm->cg_agent, start, sizeof (cgm->cg_agent));
+	mutex_exit(&cgm->cg_contents);
+
+	kmem_free(buf, CGRP_AGENT_LEN);
+	return (0);
+}
+
 static int
 cgrp_wr_proc_or_task(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio,
-    cgrp_wr_type_t typ)
+    cgrp_wr_type_t typ, cred_t *cr)
 {
-	/* the cgroup ID is on the containing dir */
-	uint_t cg_id = cn->cgn_parent->cgn_id;
+	uint_t cg_id;
 	int error;
 	pid_t pidnum;
+
+	if ((error = cgrp_parent_id(cgm, cn, &cg_id)) != 0)
+		return (error);
 
 	while (uio->uio_resid > 0) {
 		error = cgrp_get_pid_str(uio, &pidnum);
 		if (error != 0)
 			return (error);
 
-		error = cgrp_proc_set_id(cgm, cg_id, pidnum, typ);
+		error = cgrp_proc_set_id(cgm, cg_id, pidnum, typ, cr);
 		if (error != 0)
 			return (error);
 	}
@@ -400,11 +566,148 @@ cgrp_wr_proc_or_task(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio,
 	return (0);
 }
 
+/*
+ * Copy in a (short) string written to a cgroup v2 pseudo file. Trailing
+ * whitespace is removed.
+ */
 static int
-cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
+cgrp_get_wr_str(struct uio *uio, char *buf, size_t blen)
+{
+	size_t len = uio->uio_resid;
+	int error;
+
+	if (len >= blen)
+		return (EINVAL);
+
+	error = uiomove(buf, len, UIO_WRITE, uio);
+	if (error != 0)
+		return (error);
+	buf[len] = '\0';
+
+	while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == ' ' ||
+	    buf[len - 1] == '\t'))
+		buf[--len] = '\0';
+
+	return (0);
+}
+
+/*
+ * Handle a write to cgroup.subtree_control. The input is a space separated
+ * list of "+<controller>" or "-<controller>" tokens. Since we do not emulate
+ * any controllers, any controller name is an error, just as it is on Linux
+ * for a controller which is not available.
+ */
+static int
+cgrp_wr_subtree_ctl(struct uio *uio)
+{
+	char buf[256];
+	char *p;
+	int error;
+
+	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
+		return (error);
+
+	for (p = buf; *p != '\0'; p++) {
+		if (*p != ' ' && *p != '\t' && *p != '\n')
+			return (ENOENT);
+	}
+
+	return (0);
+}
+
+/*
+ * Handle a write to cgroup.type. Only "domain" cgroups are supported; we do
+ * not support threaded cgroups.
+ */
+static int
+cgrp_wr_type(struct uio *uio)
+{
+	char buf[32];
+	int error;
+
+	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
+		return (error);
+
+	if (strcmp(buf, "domain") == 0)
+		return (0);
+	if (strcmp(buf, "threaded") == 0)
+		return (EOPNOTSUPP);
+	return (EINVAL);
+}
+
+/*
+ * Handle a write to cgroup.max.depth or cgroup.max.descendants. As on Linux,
+ * the value is either "max" or a non-negative integer, and the limits are
+ * enforced when a cgroup is created (see cgrp_mkdir()).
+ */
+static int
+cgrp_wr_max(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
+{
+	char buf[32];
+	char *p, *ep;
+	long val;
+	int error;
+
+	if ((error = cgrp_get_wr_str(uio, buf, sizeof (buf))) != 0)
+		return (error);
+
+	for (p = buf; *p == ' ' || *p == '\t' || *p == '\n'; p++)
+		;
+	if (strcmp(p, "max") == 0) {
+		val = CGRP_LIMIT_MAX;
+	} else {
+		if (*p == '\0')
+			return (EINVAL);
+		error = ddi_strtol(p, &ep, 0, &val);
+		if ((error != 0 && error != ERANGE) || *ep != '\0')
+			return (EINVAL);
+		if (error == ERANGE || val < 0 || val > CGRP_LIMIT_MAX)
+			return (ERANGE);
+	}
+
+	mutex_enter(&cgm->cg_contents);
+	if (cn->cgn_parent == NULL) {
+		mutex_exit(&cgm->cg_contents);
+		return (ENODEV);
+	}
+	if (cn->cgn_type == CG_MAX_DEPTH)
+		cn->cgn_parent->cgn_max_depth = (int)val;
+	else
+		cn->cgn_parent->cgn_max_desc = (int)val;
+	mutex_exit(&cgm->cg_contents);
+
+	return (0);
+}
+
+/*
+ * Check the cgroup.max.depth and cgroup.max.descendants limits of 'parent'
+ * and all of its ancestors before creating a cgroup in 'parent', as Linux
+ * does in cgroup_check_hierarchy_limits().
+ */
+static boolean_t
+cgrp_check_limits(cgrp_mnt_t *cgm, cgrp_node_t *parent)
+{
+	cgrp_node_t *cn;
+	int level = 0;
+
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
+
+	for (cn = parent; cn != NULL; cn = cgrp_cg_parent(cgm, cn)) {
+		if (cn->cgn_ndesc >= (uint_t)cn->cgn_max_desc)
+			return (B_FALSE);
+		if (level >= cn->cgn_max_depth)
+			return (B_FALSE);
+		level++;
+	}
+	return (B_TRUE);
+}
+
+static int
+cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio, cred_t *cr)
 {
 	int error = 0;
 	rlim64_t limit = uio->uio_llimit;
+	uint_t cg_id;
 
 	ASSERT(CGNTOV(cn)->v_type == VREG);
 
@@ -423,18 +726,49 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	if (limit > MAXOFF_T)
 		limit = MAXOFF_T;
 
+	/*
+	 * Fail writes to any file of a removed cgroup with ENODEV. Handlers
+	 * which act on the cgroup check this again under cg_contents, but
+	 * this also covers the ones which don't change any state.
+	 */
+	if ((error = cgrp_parent_id(cgm, cn, &cg_id)) != 0)
+		return (error);
+
 	switch (cn->cgn_type) {
 	case CG_NOTIFY:
-		error = cgrp_wr_notify(cn, uio);
+		error = cgrp_wr_notify(cgm, cn, uio);
 		break;
 	case CG_PROCS:
-		error = cgrp_wr_proc_or_task(cgm, cn, uio, CG_WR_PROCS);
+		error = cgrp_wr_proc_or_task(cgm, cn, uio, CG_WR_PROCS, cr);
 		break;
 	case CG_REL_AGENT:
 		error = cgrp_wr_rel_agent(cgm, uio);
 		break;
 	case CG_TASKS:
-		error = cgrp_wr_proc_or_task(cgm, cn, uio, CG_WR_TASKS);
+		error = cgrp_wr_proc_or_task(cgm, cn, uio, CG_WR_TASKS, cr);
+		break;
+	case CG_THREADS:
+		/*
+		 * Threads can only be migrated individually within a threaded
+		 * subtree, which we do not support.
+		 */
+		error = EOPNOTSUPP;
+		break;
+	case CG_SUBTREE_CTL:
+		error = cgrp_wr_subtree_ctl(uio);
+		break;
+	case CG_TYPE:
+		error = cgrp_wr_type(uio);
+		break;
+	case CG_MAX_DEPTH:
+	case CG_MAX_DESC:
+		error = cgrp_wr_max(cgm, cn, uio);
+		break;
+	case CG_CONTROLLERS:
+	case CG_EVENTS:
+	case CG_STAT:
+		/* read-only files */
+		error = EACCES;
 		break;
 	default:
 		VERIFY(0);
@@ -444,12 +778,80 @@ cgrp_wr(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 }
 
 /*
- * Read value from the notify_on_release pseudo file on the parent node
- * (which is the actual cgroup node). We don't bother taking the cg_contents
- * lock since it's a single instruction so an empty group action/read will
- * only see one value or the other.
+ * Copy the portion of the generated pseudo file contents in 'buf' which
+ * corresponds to the uio offset out to the reader.
  */
-/* ARGSUSED */
+static int
+cgrp_rd_buf(const char *buf, size_t len, struct uio *uio)
+{
+	if (uio->uio_offset >= (offset_t)len)
+		return (0);
+
+	len -= uio->uio_offset;
+	if (uio->uio_resid < len)
+		len = uio->uio_resid;
+
+	return (uiomove((void *)&buf[uio->uio_offset], len, UIO_READ, uio));
+}
+
+/*
+ * Read one of the cgroup v2 pseudo files whose contents are generated from
+ * the state of the cgroup.
+ */
+static int
+cgrp_rd_v2(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
+{
+	char buf[128];
+	size_t len = 0;
+	cgrp_node_t *dir;
+
+	mutex_enter(&cgm->cg_contents);
+	/* the state is on the containing dir */
+	if ((dir = cn->cgn_parent) == NULL) {
+		mutex_exit(&cgm->cg_contents);
+		return (ENODEV);
+	}
+	switch (cn->cgn_type) {
+	case CG_CONTROLLERS:
+	case CG_SUBTREE_CTL:
+		/* no controllers are available */
+		len = snprintf(buf, sizeof (buf), "\n");
+		break;
+	case CG_EVENTS:
+		len = snprintf(buf, sizeof (buf), "populated %u\nfrozen 0\n",
+		    dir->cgn_subtree_cnt > 0 ? 1 : 0);
+		break;
+	case CG_TYPE:
+		len = snprintf(buf, sizeof (buf), "domain\n");
+		break;
+	case CG_MAX_DEPTH:
+	case CG_MAX_DESC: {
+		int val = (cn->cgn_type == CG_MAX_DEPTH) ?
+		    dir->cgn_max_depth : dir->cgn_max_desc;
+
+		if (val == CGRP_LIMIT_MAX)
+			len = snprintf(buf, sizeof (buf), "max\n");
+		else
+			len = snprintf(buf, sizeof (buf), "%d\n", val);
+		break;
+	}
+	case CG_STAT:
+		len = snprintf(buf, sizeof (buf),
+		    "nr_descendants %u\nnr_dying_descendants 0\n",
+		    dir->cgn_ndesc);
+		break;
+	default:
+		VERIFY(0);
+	}
+	mutex_exit(&cgm->cg_contents);
+
+	return (cgrp_rd_buf(buf, MIN(len, sizeof (buf) - 1), uio));
+}
+
+/*
+ * Read value from the notify_on_release pseudo file on the parent node
+ * (which is the actual cgroup node).
+ */
 static int
 cgrp_rd_notify(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 {
@@ -457,8 +859,16 @@ cgrp_rd_notify(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	int error = 0;
 	char buf[16];
 	char *rdp;
+	uint_t value;
+
 	/* the flag is on the containing dir */
-	uint_t value = cn->cgn_parent->cgn_notify;
+	mutex_enter(&cgm->cg_contents);
+	if (cn->cgn_parent == NULL) {
+		mutex_exit(&cgm->cg_contents);
+		return (ENODEV);
+	}
+	value = cn->cgn_parent->cgn_notify;
+	mutex_exit(&cgm->cg_contents);
 
 	len = snprintf(buf, sizeof (buf), "%u\n", value);
 	if (uio->uio_offset > len)
@@ -478,30 +888,22 @@ cgrp_rd_notify(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 static int
 cgrp_rd_rel_agent(cgrp_mnt_t *cgm, struct uio *uio)
 {
-	int len;
-	int error = 0;
-	char *rdp;
+	char *buf;
+	size_t len;
+	int error;
 
+	/*
+	 * Copy the agent path, so that we don't hold cg_contents (which the
+	 * lwp fork and exit hooks need) while copying out to the reader.
+	 */
+	buf = kmem_alloc(CGRP_AGENT_LEN, KM_SLEEP);
 	mutex_enter(&cgm->cg_contents);
-
-	if (cgm->cg_agent[0] == '\0') {
-		mutex_exit(&cgm->cg_contents);
-		return (0);
-	}
-
-	len = strlen(cgm->cg_agent);
-	if (uio->uio_offset > len) {
-		mutex_exit(&cgm->cg_contents);
-		return (0);
-	}
-
-	len -= uio->uio_offset;
-	rdp = &cgm->cg_agent[uio->uio_offset];
-	len = (uio->uio_resid < len) ? uio->uio_resid : len;
-
-	error = uiomove(rdp, len, UIO_READ, uio);
-
+	(void) strlcpy(buf, cgm->cg_agent, CGRP_AGENT_LEN);
 	mutex_exit(&cgm->cg_contents);
+
+	len = strlen(buf);
+	error = cgrp_rd_buf(buf, len, uio);
+	kmem_free(buf, CGRP_AGENT_LEN);
 
 	return (error);
 }
@@ -509,7 +911,10 @@ cgrp_rd_rel_agent(cgrp_mnt_t *cgm, struct uio *uio)
 /*
  * Read pids from the cgroup.procs pseudo file. We have to look at all of the
  * processes to find applicable ones, then report pids for any process which
- * has all of its threads in the same cgroup.
+ * has at least one of its threads in the cgroup. This matches cgroup v1 on
+ * Linux, where the threads of a process can be in different cgroups (via the
+ * tasks file) and such a process is listed in each of them. In cgroup v2 all
+ * threads of a process are always in the same cgroup.
  */
 static int
 cgrp_rd_procs(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
@@ -521,8 +926,10 @@ cgrp_rd_procs(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	int error = 0;
 	pid_t initpid = curproc->p_zone->zone_proc_initpid;
 	pid_t schedpid = curproc->p_zone->zone_zsched->p_pid;
-	/* the cgroup ID is on the containing dir */
-	uint_t cg_id = cn->cgn_parent->cgn_id;
+	uint_t cg_id;
+
+	if ((error = cgrp_parent_id(cgm, cn, &cg_id)) != 0)
+		return (error);
 
 	/* Scan all of the process entries */
 	for (i = 1; i < v.v_proc && (uresid = uio->uio_resid) > 0; i++) {
@@ -563,14 +970,15 @@ cgrp_rd_procs(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 		}
 
 		/*
-		 * Check if all threads are in this cgroup.
+		 * Check if any thread is in this cgroup.
 		 */
-		in_cg = B_TRUE;
+		in_cg = B_FALSE;
 		mutex_enter(&cgm->cg_contents);
 		do {
 			lx_lwp_data_t *plwpd = ttolxlwp(t);
-			if (plwpd == NULL || plwpd->br_cgroupid != cg_id) {
-				in_cg = B_FALSE;
+			if (plwpd != NULL && cgrp_cg_lwp_lookup(cgm,
+			    plwpd->br_cgroupid)->cgn_id == cg_id) {
+				in_cg = B_TRUE;
 				break;
 			}
 
@@ -580,10 +988,7 @@ cgrp_rd_procs(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 
 		mutex_exit(&p->p_lock);
 		if (!in_cg) {
-			/*
-			 * This proc, or at least one of its threads, is not
-			 * in this cgroup.
-			 */
+			/* None of the threads of this proc is in this cgroup */
 			mutex_exit(&pidlock);
 			continue;
 		}
@@ -626,64 +1031,73 @@ cgrp_rd_procs(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 }
 
 /*
- * We are given a locked process we know is valid, report on any of its thresds
- * that are in the cgroup.
+ * Collect the IDs of the threads of process 'p' which are in cgroup 'cg_id'
+ * into 'tids', which has room for 'n' IDs. Returns the number of IDs.
+ * The caller holds P_PR_LOCK, p_lock and cg_contents.
  */
-static int
-cgrp_rd_proc_tasks(uint_t cg_id, proc_t *p, pid_t initpid, ssize_t *offset,
-    struct uio *uio)
+static uint_t
+cgrp_proc_tasks(cgrp_mnt_t *cgm, uint_t cg_id, proc_t *p, pid_t initpid,
+    pid_t *tids, uint_t n)
 {
-	int error = 0;
-	uint_t tid;
-	char buf[16];
-	char *rdp;
 	kthread_t *t;
+	uint_t cnt = 0;
 
 	ASSERT(p->p_proc_flag & P_PR_LOCK);
+	ASSERT(MUTEX_HELD(&p->p_lock));
+	ASSERT(MUTEX_HELD(&cgm->cg_contents));
 
-	/*
-	 * Report all threads in this cgroup.
-	 */
-	t = p->p_tlist;
+	if ((t = p->p_tlist) == NULL)
+		return (0);
 	do {
 		lx_lwp_data_t *plwpd = ttolxlwp(t);
-		if (plwpd == NULL) {
-			t = t->t_forw;
-			continue;
-		}
 
-		if (plwpd->br_cgroupid == cg_id) {
-			int len;
-
+		if (plwpd != NULL && cnt < n &&
+		    cgrp_cg_lwp_lookup(cgm, plwpd->br_cgroupid)->cgn_id ==
+		    cg_id) {
 			/*
 			 * Convert taskid to the Linux default of 1 if
 			 * we're the zone's init process.
 			 */
-			tid = plwpd->br_pid;
-			if (tid == initpid)
-				tid = 1;
-
-			len = snprintf(buf, sizeof (buf), "%u\n", tid);
-			if ((*offset + len) > uio->uio_offset) {
-				int diff;
-
-				diff = (int)(uio->uio_offset - *offset);
-				ASSERT(diff < len);
-				*offset = *offset + diff;
-				rdp = &buf[diff];
-				len -= diff;
-				if (len > uio->uio_resid)
-					len = uio->uio_resid;
-
-				error = uiomove(rdp, len, UIO_READ, uio);
-				if (error != 0)
-					return (error);
-			}
-			*offset = *offset + len;
+			tids[cnt++] = (plwpd->br_pid == initpid) ? 1 :
+			    plwpd->br_pid;
 		}
-
 		t = t->t_forw;
-	} while (t != p->p_tlist && uio->uio_resid > 0);
+	} while (t != p->p_tlist);
+
+	return (cnt);
+}
+
+/*
+ * Copy out the part of the list of thread IDs 'tids' which corresponds to
+ * the uio offset. '*offset' is the file offset of the start of the list,
+ * and is advanced past it.
+ */
+static int
+cgrp_rd_tids(pid_t *tids, uint_t cnt, ssize_t *offset, struct uio *uio)
+{
+	uint_t i;
+
+	for (i = 0; i < cnt && uio->uio_resid > 0; i++) {
+		char buf[16];
+		int len;
+
+		len = snprintf(buf, sizeof (buf), "%u\n", (uint_t)tids[i]);
+		if ((*offset + len) > uio->uio_offset) {
+			int diff = (int)(uio->uio_offset - *offset);
+			int error;
+
+			ASSERT(diff >= 0 && diff < len);
+			*offset += diff;
+			len -= diff;
+			if (len > uio->uio_resid)
+				len = uio->uio_resid;
+
+			error = uiomove(&buf[diff], len, UIO_READ, uio);
+			if (error != 0)
+				return (error);
+		}
+		*offset += len;
+	}
 
 	return (0);
 }
@@ -692,8 +1106,10 @@ cgrp_rd_proc_tasks(uint_t cg_id, proc_t *p, pid_t initpid, ssize_t *offset,
  * Read PIDs from the tasks pseudo file.  In order to do this, the process
  * table is walked, searching for entries which are in the correct state and
  * match this zone.  The LX emulated PIDs will be reported from branded entries
- * which fulfill the criteria.  Since records are being emulated for every task
- * in the process, PR_LOCK is acquired to prevent changes during output.
+ * which fulfill the criteria.  The IDs of a process's threads in the cgroup
+ * are collected with PR_LOCK, p_lock and cg_contents held, and copied out
+ * once they have all been dropped, since copying out can fault and block
+ * for a long time, and cg_contents is needed by the lwp fork and exit hooks.
  *
  * Note: If the buffer is filled and the accessing process is forced into a
  * subsequent read, the reported threads may changes while locks are dropped in
@@ -708,12 +1124,16 @@ cgrp_rd_tasks(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 	cred_t *cred = CRED();
 	int error = 0;
 	pid_t initpid = curproc->p_zone->zone_proc_initpid;
-	/* the cgroup ID is on the containing dir */
-	uint_t cg_id = cn->cgn_parent->cgn_id;
+	uint_t cg_id;
+
+	if ((error = cgrp_parent_id(cgm, cn, &cg_id)) != 0)
+		return (error);
 
 	/* Scan all of the process entries */
 	for (i = 1; i < v.v_proc && uio->uio_resid > 0; i++) {
 		proc_t *p;
+		pid_t *tids;
+		uint_t n, cnt;
 
 		mutex_enter(&pidlock);
 		for (;;) {
@@ -774,17 +1194,28 @@ cgrp_rd_tasks(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 			continue;
 		}
 
-		/* Shuffle locks and output the entry. */
+		/*
+		 * P_PR_LOCK keeps threads from exiting, but new ones can still
+		 * be created; any created after we sample p_lwpcnt are left
+		 * out, just like those created after this read.
+		 */
+		if ((n = p->p_lwpcnt) == 0) {
+			sprunlock(p);
+			continue;
+		}
 		mutex_exit(&p->p_lock);
-		mutex_enter(&cgm->cg_contents);
-		error = cgrp_rd_proc_tasks(cg_id, p, initpid, &offset, uio);
-		mutex_exit(&cgm->cg_contents);
+		tids = kmem_alloc(n * sizeof (pid_t), KM_SLEEP);
 		mutex_enter(&p->p_lock);
 
+		mutex_enter(&cgm->cg_contents);
+		cnt = cgrp_proc_tasks(cgm, cg_id, p, initpid, tids, n);
+		mutex_exit(&cgm->cg_contents);
 		sprunlock(p);
-		if (error != 0) {
+
+		error = cgrp_rd_tids(tids, cnt, &offset, uio);
+		kmem_free(tids, n * sizeof (pid_t));
+		if (error != 0)
 			return (error);
-		}
 	}
 
 	return (0);
@@ -813,7 +1244,17 @@ cgrp_rd(cgrp_mnt_t *cgm, cgrp_node_t *cn, struct uio *uio)
 		error = cgrp_rd_rel_agent(cgm, uio);
 		break;
 	case CG_TASKS:
+	case CG_THREADS:
 		error = cgrp_rd_tasks(cgm, cn, uio);
+		break;
+	case CG_CONTROLLERS:
+	case CG_SUBTREE_CTL:
+	case CG_EVENTS:
+	case CG_TYPE:
+	case CG_MAX_DEPTH:
+	case CG_MAX_DESC:
+	case CG_STAT:
+		error = cgrp_rd_v2(cgm, cn, uio);
 		break;
 	default:
 		VERIFY(0);
@@ -863,7 +1304,7 @@ cgrp_write(struct vnode *vp, struct uio *uiop, int ioflag, struct cred *cred,
 		uiop->uio_loffset = cn->cgn_size;
 	}
 
-	error = cgrp_wr(cgm, cn, uiop);
+	error = cgrp_wr(cgm, cn, uiop, cred);
 
 	return (error);
 }
@@ -910,10 +1351,13 @@ cgrp_setattr(struct vnode *vp, struct vattr *vap, int flags, struct cred *cred,
 	long mask;
 
 	/*
-	 * Cannot set these attributes
+	 * Cannot set these attributes. Note that va_mode is only valid when
+	 * AT_MODE is set; e.g. chown(2) leaves it uninitialized.
 	 */
 	if ((vap->va_mask & AT_NOSET) || (vap->va_mask & AT_XVATTR) ||
-	    (vap->va_mode & (S_ISUID | S_ISGID)) || (vap->va_mask & AT_SIZE))
+	    ((vap->va_mask & AT_MODE) &&
+	    (vap->va_mode & (S_ISUID | S_ISGID))) ||
+	    (vap->va_mask & AT_SIZE))
 		return (EINVAL);
 
 	cgm = VTOCGM(cn->cgn_vnode);
@@ -1173,7 +1617,8 @@ cgrp_rename(
 	/*
 	 * Unlink from source.
 	 */
-	error = err = cgrp_dirdelete(fromparent, fromcn, onm, DR_RENAME, cred);
+	error = err = cgrp_dirdelete(fromparent, fromcn, onm, DR_RENAME, cred,
+	    NULL);
 
 	/*
 	 * The following handles the case where our source cgrp_node was
@@ -1204,14 +1649,20 @@ cgrp_mkdir(struct vnode *dvp, char *nm, struct vattr *va, struct vnode **vpp,
 	cgrp_mnt_t *cgm = VTOCGM(dvp);
 	int error;
 
+	mutex_enter(&cgm->cg_contents);
+
 	/*
 	 * Might be dangling directory.  Catch it here, because a ENOENT
-	 * return from cgrp_dirlookup() is an "ok return".
+	 * return from cgrp_dirlookup() is an "ok return". This must be
+	 * checked with cg_contents held: the cgn_parent pointer of a removed
+	 * directory is stale (nothing holds its old parent, which can be freed
+	 * in turn), so we must not get to cgrp_check_limits() for one.
 	 */
-	if (parent->cgn_nlink == 0)
+	if (parent->cgn_nlink == 0) {
+		mutex_exit(&cgm->cg_contents);
 		return (ENOENT);
+	}
 
-	mutex_enter(&cgm->cg_contents);
 	error = cgrp_dirlookup(parent, nm, &self, cred);
 	if (error == 0) {
 		ASSERT(self != NULL);
@@ -1224,6 +1675,11 @@ cgrp_mkdir(struct vnode *dvp, char *nm, struct vattr *va, struct vnode **vpp,
 		return (error);
 	}
 
+	if (CG_IS_V2(cgm) && !cgrp_check_limits(cgm, parent)) {
+		mutex_exit(&cgm->cg_contents);
+		return (EAGAIN);
+	}
+
 	error = cgrp_direnter(cgm, parent, nm, DE_MKDIR, (cgrp_node_t *)NULL,
 	    va, &self, cred);
 	if (error) {
@@ -1232,6 +1688,8 @@ cgrp_mkdir(struct vnode *dvp, char *nm, struct vattr *va, struct vnode **vpp,
 			cgnode_rele(self);
 		return (error);
 	}
+	if (CG_IS_V2(cgm))
+		cgrp_ndesc_adjust(self, 1);
 	mutex_exit(&cgm->cg_contents);
 	*vpp = CGNTOV(self);
 	return (0);
@@ -1245,6 +1703,7 @@ cgrp_rmdir(struct vnode *dvp, char *nm, struct vnode *cdir, struct cred *cred,
 	cgrp_node_t *parent = VTOCGN(dvp);
 	cgrp_mnt_t *cgm;
 	cgrp_node_t *self = NULL;
+	cgrp_node_t *rlist = NULL;
 	struct vnode *vp;
 	int error = 0;
 
@@ -1279,8 +1738,13 @@ cgrp_rmdir(struct vnode *dvp, char *nm, struct vnode *cdir, struct cred *cred,
 
 	/*
 	 * Check for the existence of any sub-cgroup directories or tasks in
-	 * the cgroup.
+	 * the cgroup. cgroup v2 reports EBUSY in this case.
 	 */
+	if (CG_IS_V2(cgm) &&
+	    (self->cgn_subtree_cnt > 0 || CGN_HAS_SUBDIRS(self))) {
+		error = EBUSY;
+		goto done;
+	}
 	if (self->cgn_task_cnt > 0 || self->cgn_dirents > N_DIRENTS(cgm)) {
 		error = EEXIST;
 		/*
@@ -1298,12 +1762,17 @@ cgrp_rmdir(struct vnode *dvp, char *nm, struct vnode *cdir, struct cred *cred,
 	if (vn_mountedvfs(vp) != NULL) {
 		error = EBUSY;
 	} else {
-		error = cgrp_dirdelete(parent, self, nm, DR_RMDIR, cred);
+		error = cgrp_dirdelete(parent, self, nm, DR_RMDIR, cred,
+		    &rlist);
+		/* self->cgn_parent is still valid after the removal */
+		if (error == 0 && CG_IS_V2(cgm))
+			cgrp_ndesc_adjust(self, -1);
 	}
 
 	vn_vfsunlock(vp);
 
-	if (parent->cgn_task_cnt == 0 &&
+	if (!CG_IS_V2(cgm) && parent != cgm->cg_rootnode &&
+	    parent->cgn_task_cnt == 0 &&
 	    parent->cgn_dirents == N_DIRENTS(cgm) && parent->cgn_notify == 1) {
 		cgrp_rel_agent_event(cgm, parent, B_FALSE);
 		ASSERT(MUTEX_NOT_HELD(&cgm->cg_contents));
@@ -1313,6 +1782,8 @@ cgrp_rmdir(struct vnode *dvp, char *nm, struct vnode *cdir, struct cred *cred,
 done:
 	mutex_exit(&cgm->cg_contents);
 dropped:
+	/* Release the pseudo file nodes, now that cg_contents is dropped */
+	cgrp_rele_list(rlist, CGNTOV(self));
 	vnevent_rmdir(CGNTOV(self), dvp, nm, ct);
 	cgnode_rele(self);
 

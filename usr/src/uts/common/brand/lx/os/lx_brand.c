@@ -28,7 +28,7 @@
  * Copyright 2020 Joyent, Inc.
  * Copyright 2026 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2024 MNX Cloud, Inc.
- * Copyright 2025 Edgecast Cloud LLC.
+ * Copyright 2026 Edgecast Cloud LLC.
  * Copyright 2026 Oxide Computer Company
  */
 
@@ -229,6 +229,7 @@ static int lx_systrace_enabled;
  */
 void (*lx_cgrp_initlwp)(vfs_t *, uint_t, id_t, pid_t);
 void (*lx_cgrp_freelwp)(vfs_t *, uint_t, id_t, pid_t);
+int (*lx_cgrp_pidcgroup)(vfs_t *, uint_t, char *, size_t);
 
 /*
  * While this is effectively mmu.hole_start - PAGESIZE, we don't particularly
