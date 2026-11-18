@@ -292,6 +292,7 @@ dump_write(dmu_sendarg_t *dsp, dmu_object_type_t type, uint64_t object,
 
 	/* only set the compression fields if the buf is compressed or raw */
 	if (raw || lsize != psize) {
+		ASSERT(bp != NULL);
 		ASSERT(!BP_IS_EMBEDDED(bp));
 		ASSERT3S(psize, >, 0);
 
@@ -381,7 +382,17 @@ dump_write_embedded(dmu_sendarg_t *dsp, uint64_t object, uint64_t offset,
 
 	decode_embedded_bp_compressed(bp, buf);
 
-	if (dump_record(dsp, buf, P2ROUNDUP(drrw->drr_psize, 8)) != 0)
+	/*
+	 * The record payload is padded to 8 bytes; zero the padding so that
+	 * no uninitialized stack memory is sent.
+	 */
+	uint32_t psize = drrw->drr_psize;
+	uint32_t rsize = P2ROUNDUP(psize, 8);
+
+	if (psize != rsize)
+		bzero(buf + psize, rsize - psize);
+
+	if (dump_record(dsp, buf, rsize) != 0)
 		return (EINTR);
 	return (0);
 }

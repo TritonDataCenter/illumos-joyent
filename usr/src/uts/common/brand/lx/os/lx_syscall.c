@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2019 Joyent, Inc.
  * Copyright 2019 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/kmem.h>
@@ -354,7 +355,7 @@ lx_syscall_enter(void)
 	 * Check that the system call number is within the bounds we expect.
 	 */
 	syscall_num = lwpd->br_syscall_num;
-	if (syscall_num < 0 || syscall_num > LX_MAX_SYSCALL(lwp)) {
+	if (syscall_num < 0 || syscall_num >= LX_MAX_SYSCALL(lwp)) {
 		lx_syscall_unsup_msg(NULL, syscall_num, 0);
 
 		(void) set_errno(ENOTSUP);
@@ -646,7 +647,7 @@ lx_sysent_t lx_sysent32[] = {
 	{"wait4",	lx_wait4,		0,		4}, /* 114 */
 	{"swapoff",	lx_swapoff,		0,		1}, /* 115 */
 	{"sysinfo",	lx_sysinfo32,		0,		1}, /* 116 */
-	{"ipc",		NULL,			0,		5}, /* 117 */
+	{"ipc",		NULL,			LX_SYS_EBPARG6,	6}, /* 117 */
 	{"fsync",	NULL,			0,		1}, /* 118 */
 	{"sigreturn",	NULL,			0,		1}, /* 119 */
 	{"clone",	NULL,			0,		5}, /* 120 */

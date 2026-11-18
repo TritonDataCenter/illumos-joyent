@@ -13,7 +13,7 @@
 /*
  * Copyright 2014 Pluribus Networks Inc.
  * Copyright 2019 Joyent, Inc.
- * Copyright 2022 Oxide Computer Company
+ * Copyright 2026 Oxide Computer Company
  */
 
 #ifndef _VMM_IMPL_H_
@@ -80,7 +80,8 @@ struct vmm_softc {
 	vmm_zsd_t	*vmm_zsd;
 
 	kstat_t		*vmm_kstat_vm;
-	kstat_t		*vmm_kstat_vcpu[VM_MAXCPU];
+	kstat_t		**vmm_kstat_vcpu;
+	kmutex_t	vmm_kstat_lock;	/* serialises vCPU kstat creation */
 };
 typedef struct vmm_softc vmm_softc_t;
 

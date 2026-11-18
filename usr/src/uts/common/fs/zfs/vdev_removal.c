@@ -22,6 +22,7 @@
 /*
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2011, 2018 by Delphix. All rights reserved.
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <sys/zfs_context.h>
@@ -671,7 +672,7 @@ spa_finish_removal(spa_t *spa, dsl_scan_state_t state, dmu_tx_t *tx)
 		vdev_t *vd = vdev_lookup_top(spa, svr->svr_vdev_id);
 		vdev_indirect_config_t *vic = &vd->vdev_indirect_config;
 
-		if (srp->sr_prev_indirect_vdev != UINT64_MAX) {
+		if (srp->sr_prev_indirect_vdev != -1) {
 			vdev_t *pvd = vdev_lookup_top(spa,
 			    srp->sr_prev_indirect_vdev);
 			ASSERT3P(pvd->vdev_ops, ==, &vdev_indirect_ops);
@@ -1824,10 +1825,6 @@ spa_vdev_remove_log(vdev_t *vd, uint64_t *txg)
 	vdev_metaslab_fini(vd);
 	spa_log_sm_set_blocklimit(spa);
 
-	spa_history_log_internal(spa, "vdev remove", NULL,
-	    "%s vdev %llu (log) %s", spa_name(spa), vd->vdev_id,
-	    (vd->vdev_path != NULL) ? vd->vdev_path : "-");
-
 	/* Make sure these changes are sync'ed */
 	spa_vdev_config_exit(spa, NULL, *txg, 0, FTAG);
 
@@ -2067,16 +2064,21 @@ spa_vdev_remove(spa_t *spa, uint64_t guid, boolean_t unspare)
 {
 	vdev_t *vd;
 	nvlist_t **spares, **l2cache, *nv;
-	uint64_t txg = 0;
+	uint64_t txg;
 	uint_t nspares, nl2cache;
 	int error = 0;
 	boolean_t locked = MUTEX_HELD(&spa_namespace_lock);
 	sysevent_t *ev = NULL;
+	char *vd_type = NULL, *vd_path = NULL;
 
 	ASSERT(spa_writeable(spa));
 
-	if (!locked)
-		txg = spa_vdev_enter(spa);
+	/*
+	 * If our caller (spa_vdev_detach()) holds the locks, this is the txg
+	 * that its spa_vdev_enter() returned.
+	 */
+	ASSERT(!locked || spa_config_held(spa, SCL_ALL, RW_WRITER) == SCL_ALL);
+	txg = locked ? spa_last_synced_txg(spa) + 1 : spa_vdev_enter(spa);
 
 	ASSERT(MUTEX_HELD(&spa_namespace_lock));
 	if (spa_feature_is_active(spa, SPA_FEATURE_POOL_CHECKPOINT)) {
@@ -2100,15 +2102,14 @@ spa_vdev_remove(spa_t *spa, uint64_t guid, boolean_t unspare)
 		 * in this pool.
 		 */
 		if (vd == NULL || unspare) {
-			char *nvstr = fnvlist_lookup_string(nv,
-			    ZPOOL_CONFIG_PATH);
-			spa_history_log_internal(spa, "vdev remove", NULL,
-			    "%s vdev (%s) %s", spa_name(spa),
-			    VDEV_TYPE_SPARE, nvstr);
 			if (vd == NULL)
 				vd = spa_lookup_by_guid(spa, guid, B_TRUE);
 			ev = spa_event_create(spa, vd, NULL,
 			    ESC_ZFS_VDEV_REMOVE_AUX);
+
+			vd_type = VDEV_TYPE_SPARE;
+			vd_path = spa_strdup(fnvlist_lookup_string(
+			    nv, ZPOOL_CONFIG_PATH));
 			spa_vdev_remove_aux(spa->spa_spares.sav_config,
 			    ZPOOL_CONFIG_SPARES, spares, nspares, nv);
 			spa_load_spares(spa);
@@ -2120,9 +2121,9 @@ spa_vdev_remove(spa_t *spa, uint64_t guid, boolean_t unspare)
 	    nvlist_lookup_nvlist_array(spa->spa_l2cache.sav_config,
 	    ZPOOL_CONFIG_L2CACHE, &l2cache, &nl2cache) == 0 &&
 	    (nv = spa_nvlist_lookup_by_guid(l2cache, nl2cache, guid)) != NULL) {
-		char *nvstr = fnvlist_lookup_string(nv, ZPOOL_CONFIG_PATH);
-		spa_history_log_internal(spa, "vdev remove", NULL,
-		    "%s vdev (%s) %s", spa_name(spa), VDEV_TYPE_L2CACHE, nvstr);
+		vd_type = VDEV_TYPE_L2CACHE;
+		vd_path = spa_strdup(fnvlist_lookup_string(
+		    nv, ZPOOL_CONFIG_PATH));
 		/*
 		 * Cache devices can always be removed.
 		 */
@@ -2134,6 +2135,9 @@ spa_vdev_remove(spa_t *spa, uint64_t guid, boolean_t unspare)
 		spa->spa_l2cache.sav_sync = B_TRUE;
 	} else if (vd != NULL && vd->vdev_islog) {
 		ASSERT(!locked);
+		vd_type = VDEV_TYPE_LOG;
+		vd_path = spa_strdup((vd->vdev_path != NULL) ?
+		    vd->vdev_path : "-");
 		error = spa_vdev_remove_log(vd, &txg);
 	} else if (vd != NULL) {
 		ASSERT(!locked);
@@ -2145,8 +2149,23 @@ spa_vdev_remove(spa_t *spa, uint64_t guid, boolean_t unspare)
 		error = SET_ERROR(ENOENT);
 	}
 
+	/*
+	 * Log the removal in the txg that syncs the config change.  We can't
+	 * wait for a new tx here: we hold the config lock, which txg sync
+	 * needs.
+	 */
+	if (error == 0 && vd_path != NULL) {
+		dmu_tx_t *tx = dmu_tx_create_assigned(spa->spa_dsl_pool, txg);
+		spa_history_log_internal(spa, "vdev remove", tx,
+		    "%s vdev (%s) %s", spa_name(spa), vd_type, vd_path);
+		dmu_tx_commit(tx);
+	}
+
 	if (!locked)
 		error = spa_vdev_exit(spa, NULL, txg, error);
+
+	if (vd_path != NULL)
+		spa_strfree(vd_path);
 
 	if (ev != NULL) {
 		if (error != 0) {
@@ -2172,13 +2191,6 @@ spa_removal_get_stats(spa_t *spa, pool_removal_stat_t *prs)
 	prs->prs_end_time = spa->spa_removing_phys.sr_end_time;
 	prs->prs_to_copy = spa->spa_removing_phys.sr_to_copy;
 	prs->prs_copied = spa->spa_removing_phys.sr_copied;
-
-	if (spa->spa_vdev_removal != NULL) {
-		for (int i = 0; i < TXG_SIZE; i++) {
-			prs->prs_copied +=
-			    spa->spa_vdev_removal->svr_bytes_done[i];
-		}
-	}
 
 	prs->prs_mapping_memory = 0;
 	uint64_t indirect_vdev_id =

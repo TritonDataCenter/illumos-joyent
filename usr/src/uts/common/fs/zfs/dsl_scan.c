@@ -26,6 +26,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2017, 2019, Datto Inc. All rights reserved.
  * Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <sys/dsl_scan.h>
@@ -126,6 +127,7 @@ static boolean_t scan_ds_queue_contains(dsl_scan_t *scn, uint64_t dsobj,
 static void scan_ds_queue_insert(dsl_scan_t *scn, uint64_t dsobj, uint64_t txg);
 static void scan_ds_queue_remove(dsl_scan_t *scn, uint64_t dsobj);
 static void scan_ds_queue_sync(dsl_scan_t *scn, dmu_tx_t *tx);
+static uint64_t dsl_scan_count_leaves(vdev_t *vd);
 
 extern int zfs_vdev_async_write_active_min_dirty_percent;
 
@@ -455,6 +457,14 @@ dsl_scan_init(dsl_pool_t *dp, uint64_t txg)
 	ASSERT(!scn->scn_async_destroying);
 	scn->scn_async_destroying = spa_feature_is_active(dp->dp_spa,
 	    SPA_FEATURE_ASYNC_DESTROY);
+
+	/*
+	 * Calculate the max number of in-flight bytes for pool-wide
+	 * scanning operations (minimum 1MB). Limits for the issuing
+	 * phase are done per top-level vdev and are handled separately.
+	 */
+	scn->scn_maxinflight_bytes = MAX(zfs_scan_vdev_limit *
+	    dsl_scan_count_leaves(spa->spa_root_vdev), 1ULL << 20);
 
 	avl_create(&scn->scn_queue, scan_ds_queue_compare, sizeof (scan_ds_t),
 	    offsetof(scan_ds_t, sds_node));
@@ -1398,6 +1408,10 @@ dsl_scan_zil_record(zilog_t *zilog, lr_t *lrc, void *arg, uint64_t claim_txg)
 		if (claim_txg == 0 || bp->blk_birth < claim_txg)
 			return (0);
 
+		/* Several records can share a dmu_sync() block. */
+		if (zil_bp_tree_add(zilog, bp) != 0)
+			return (0);
+
 		SET_BOOKMARK(&zb, zh->zh_log.blk_cksum.zc_word[ZIL_ZC_OBJSET],
 		    lr->lr_foid, ZB_ZIL_LEVEL,
 		    lr->lr_offset / BP_GET_LSIZE(bp));
@@ -1894,6 +1908,7 @@ dsl_scan_visitbp(blkptr_t *bp, const zbookmark_phys_t *zb,
 {
 	dsl_pool_t *dp = scn->scn_dp;
 	blkptr_t *bp_toread = NULL;
+	spa_feature_t f;
 
 	if (dsl_scan_check_suspend(scn, zb))
 		return;
@@ -1920,6 +1935,17 @@ dsl_scan_visitbp(blkptr_t *bp, const zbookmark_phys_t *zb,
 		scn->scn_holes_this_txg++;
 		return;
 	}
+
+	/*
+	 * Check if this block contradicts any filesystem flags.
+	 */
+	f = SPA_FEATURE_LARGE_BLOCKS;
+	if (BP_GET_LSIZE(bp) > SPA_OLD_MAXBLOCKSIZE)
+		ASSERT(dsl_dataset_feature_is_active(ds, f));
+
+	f = zio_checksum_to_feature(BP_GET_CHECKSUM(bp));
+	if (f != SPA_FEATURE_NONE)
+		ASSERT(dsl_dataset_feature_is_active(ds, f));
 
 	if (bp->blk_birth <= scn->scn_phys.scn_cur_min_txg) {
 		scn->scn_lt_min_this_txg++;
@@ -2460,7 +2486,7 @@ dsl_scan_ddt_entry(dsl_scan_t *scn, enum zio_checksum checksum,
 	zbookmark_phys_t zb = { 0 };
 	int p;
 
-	if (scn->scn_phys.scn_state != DSS_SCANNING)
+	if (!dsl_scan_is_running(scn))
 		return;
 
 	/*
@@ -3559,7 +3585,7 @@ dsl_scan_sync(dsl_pool_t *dp, dmu_tx_t *tx)
 		uint64_t nr_leaves = dsl_scan_count_leaves(spa->spa_root_vdev);
 
 		/*
-		 * Calculate the max number of in-flight bytes for pool-wide
+		 * Recalculate the max number of in-flight bytes for pool-wide
 		 * scanning operations (minimum 1MB). Limits for the issuing
 		 * phase are done per top-level vdev and are handled separately.
 		 */
@@ -3937,6 +3963,8 @@ scan_exec_io(dsl_pool_t *dp, const blkptr_t *bp, int zio_flags,
 	dsl_scan_t *scn = dp->dp_scan;
 	size_t size = BP_GET_PSIZE(bp);
 	abd_t *data = abd_alloc_for_io(size, B_FALSE);
+
+	ASSERT3U(scn->scn_maxinflight_bytes, >, 0);
 
 	if (queue == NULL) {
 		mutex_enter(&spa->spa_scrub_lock);
