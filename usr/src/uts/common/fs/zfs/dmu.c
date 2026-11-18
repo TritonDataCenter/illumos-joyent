@@ -27,6 +27,8 @@
  * Copyright 2016 Nexenta Systems, Inc. All rights reserved.
  * Copyright (c) 2011, 2017 by Delphix. All rights reserved.
  * Copyright (c) 2018 DilOS
+ * Copyright 2026 Oxide Computer Company
+ * Copyright (c) 2019 Datto Inc.
  */
 
 #include <sys/dmu.h>
@@ -74,9 +76,9 @@ static xuio_stats_t xuio_stats = {
 int zfs_nopwrite_enabled = 1;
 
 /*
- * Tunable to control percentage of dirtied blocks from frees in one TXG.
- * After this threshold is crossed, additional dirty blocks from frees
- * wait until the next TXG.
+ * Tunable to control percentage of dirtied L1 blocks from frees allowed into
+ * one TXG. After this threshold is crossed, additional dirty blocks from frees
+ * will wait until the next TXG.
  * A value of zero will disable this throttle.
  */
 uint32_t zfs_per_txg_dirty_frees_percent = 30;
@@ -770,25 +772,46 @@ dmu_prefetch(objset_t *os, uint64_t object, int64_t level, uint64_t offset,
  *
  * On input, *start should be the first offset that does not need to be
  * freed (e.g. "offset + length").  On return, *start will be the first
- * offset that should be freed.
+ * offset that should be freed and l1blks is set to the number of level 1
+ * indirect blocks found within the chunk.
  */
 static int
-get_next_chunk(dnode_t *dn, uint64_t *start, uint64_t minimum)
+get_next_chunk(dnode_t *dn, uint64_t *start, uint64_t minimum,
+    uint64_t *l1blks)
 {
+	uint64_t blks;
 	uint64_t maxblks = DMU_MAX_ACCESS >> (dn->dn_indblkshift + 1);
 	/* bytes of data covered by a level-1 indirect block */
-	uint64_t iblkrange =
-	    dn->dn_datablksz * EPB(dn->dn_indblkshift, SPA_BLKPTRSHIFT);
+	uint64_t iblkrange = (uint64_t)dn->dn_datablksz *
+	    EPB(dn->dn_indblkshift, SPA_BLKPTRSHIFT);
+	uint64_t total_l1blks;
 
 	ASSERT3U(minimum, <=, *start);
 
-	if (*start - minimum <= iblkrange * maxblks) {
+	/* dn_nlevels == 1 means we don't have any L1 blocks */
+	if (dn->dn_nlevels <= 1) {
+		*l1blks = 0;
+		*start = minimum;
+		return (0);
+	}
+
+	/*
+	 * Check if we can free the entire range assuming that all of the
+	 * L1 blocks in this range have data. If we can, we use this
+	 * worst case value as an estimate so we can avoid having to look
+	 * at the object's actual data.
+	 */
+	total_l1blks =
+	    (roundup(*start, iblkrange) - (minimum / iblkrange * iblkrange)) /
+	    iblkrange;
+	if (total_l1blks <= maxblks) {
+		*l1blks = total_l1blks;
 		*start = minimum;
 		return (0);
 	}
 	ASSERT(ISP2(iblkrange));
 
-	for (uint64_t blks = 0; *start > minimum && blks < maxblks; blks++) {
+	for (blks = 0; *start > minimum && blks < maxblks; blks++) {
 		int err;
 
 		/*
@@ -806,6 +829,7 @@ get_next_chunk(dnode_t *dn, uint64_t *start, uint64_t minimum)
 			*start = minimum;
 			break;
 		} else if (err != 0) {
+			*l1blks = blks;
 			return (err);
 		}
 
@@ -814,6 +838,8 @@ get_next_chunk(dnode_t *dn, uint64_t *start, uint64_t minimum)
 	}
 	if (*start < minimum)
 		*start = minimum;
+	*l1blks = blks;
+
 	return (0);
 }
 
@@ -849,14 +875,15 @@ dmu_free_long_range_impl(objset_t *os, dnode_t *dn, uint64_t offset,
 		dirty_frees_threshold =
 		    zfs_per_txg_dirty_frees_percent * zfs_dirty_data_max / 100;
 	else
-		dirty_frees_threshold = zfs_dirty_data_max / 4;
+		dirty_frees_threshold = zfs_dirty_data_max / 20;
 
 	if (length == DMU_OBJECT_END || offset + length > object_size)
 		length = object_size - offset;
 
 	while (length != 0) {
 		uint64_t chunk_end, chunk_begin, chunk_len;
-		uint64_t long_free_dirty_all_txgs = 0;
+		uint64_t l1blks;
+		uint64_t txg, long_free_dirty;
 		dmu_tx_t *tx;
 
 		if (dmu_objset_zfs_unmounting(dn->dn_objset))
@@ -865,31 +892,13 @@ dmu_free_long_range_impl(objset_t *os, dnode_t *dn, uint64_t offset,
 		chunk_end = chunk_begin = offset + length;
 
 		/* move chunk_begin backwards to the beginning of this chunk */
-		err = get_next_chunk(dn, &chunk_begin, offset);
+		err = get_next_chunk(dn, &chunk_begin, offset, &l1blks);
 		if (err)
 			return (err);
 		ASSERT3U(chunk_begin, >=, offset);
 		ASSERT3U(chunk_begin, <=, chunk_end);
 
 		chunk_len = chunk_end - chunk_begin;
-
-		mutex_enter(&dp->dp_lock);
-		for (int t = 0; t < TXG_SIZE; t++) {
-			long_free_dirty_all_txgs +=
-			    dp->dp_long_free_dirty_pertxg[t];
-		}
-		mutex_exit(&dp->dp_lock);
-
-		/*
-		 * To avoid filling up a TXG with just frees wait for
-		 * the next TXG to open before freeing more chunks if
-		 * we have reached the threshold of frees
-		 */
-		if (dirty_frees_threshold != 0 &&
-		    long_free_dirty_all_txgs >= dirty_frees_threshold) {
-			txg_wait_open(dp, 0, B_TRUE);
-			continue;
-		}
 
 		tx = dmu_tx_create(os);
 		dmu_tx_hold_free(tx, dn->dn_object, chunk_begin, chunk_len);
@@ -905,13 +914,41 @@ dmu_free_long_range_impl(objset_t *os, dnode_t *dn, uint64_t offset,
 			return (err);
 		}
 
+		txg = dmu_tx_get_txg(tx);
+
 		mutex_enter(&dp->dp_lock);
-		dp->dp_long_free_dirty_pertxg[dmu_tx_get_txg(tx) & TXG_MASK] +=
-		    chunk_len;
+		long_free_dirty = dp->dp_long_free_dirty_pertxg[txg & TXG_MASK];
+		mutex_exit(&dp->dp_lock);
+
+		/*
+		 * To avoid filling up a TXG with just frees, wait for
+		 * the next TXG to open before freeing more chunks if
+		 * we have reached the threshold of frees.
+		 */
+		if (dirty_frees_threshold != 0 &&
+		    long_free_dirty >= dirty_frees_threshold) {
+			dmu_tx_commit(tx);
+			txg_wait_open(dp, 0, B_TRUE);
+			continue;
+		}
+
+		/*
+		 * In order to prevent unnecessary write throttling, for each
+		 * TXG, we track the cumulative size of L1 blocks being dirtied
+		 * in dnode_free_range() below. We compare this number to a
+		 * tunable threshold, past which we prevent new L1 dirty freeing
+		 * blocks from being added into the open TXG. See
+		 * dmu_free_long_range_impl() for details. The threshold
+		 * prevents write throttle activation due to dirty freeing L1
+		 * blocks taking up a large percentage of zfs_dirty_data_max.
+		 */
+		mutex_enter(&dp->dp_lock);
+		dp->dp_long_free_dirty_pertxg[txg & TXG_MASK] +=
+		    l1blks << dn->dn_indblkshift;
 		mutex_exit(&dp->dp_lock);
 		DTRACE_PROBE3(free__long__range,
-		    uint64_t, long_free_dirty_all_txgs, uint64_t, chunk_len,
-		    uint64_t, dmu_tx_get_txg(tx));
+		    uint64_t, long_free_dirty, uint64_t, chunk_len,
+		    uint64_t, txg);
 		dnode_free_range(dn, chunk_begin, chunk_len, tx);
 
 		dmu_tx_commit(tx);
@@ -1812,11 +1849,25 @@ dmu_assign_arcbuf_by_dbuf(dmu_buf_t *handle, uint64_t offset, arc_buf_t *buf,
 	return (err);
 }
 
-typedef struct {
+/*
+ * A dmu_sync() that found another dmu_sync() of the same buffer in progress,
+ * and is waiting for that write's blkptr.  dsw_zio is an unissued child of
+ * the waiter's log block zio, which holds that log block until
+ * dmu_sync_done() fills in its blkptr and issues dsw_zio.
+ */
+typedef struct dmu_sync_waiter {
+	list_node_t		dsw_node;
+	dmu_sync_cb_t		*dsw_done;
+	zgd_t			*dsw_zgd;
+	zio_t			*dsw_zio;
+} dmu_sync_waiter_t;
+
+typedef struct dmu_sync_arg {
 	dbuf_dirty_record_t	*dsa_dr;
 	dmu_sync_cb_t		*dsa_done;
 	zgd_t			*dsa_zgd;
 	dmu_tx_t		*dsa_tx;
+	list_t			dsa_waiters;	/* dmu_sync_waiter_t */
 } dmu_sync_arg_t;
 
 /* ARGSUSED */
@@ -1855,6 +1906,7 @@ dmu_sync_done(zio_t *zio, arc_buf_t *buf, void *varg)
 	dbuf_dirty_record_t *dr = dsa->dsa_dr;
 	dmu_buf_impl_t *db = dr->dr_dbuf;
 	zgd_t *zgd = dsa->dsa_zgd;
+	dmu_sync_waiter_t *dsw;
 
 	/*
 	 * Record the vdev(s) backing this blkptr so they can be flushed after
@@ -1866,6 +1918,8 @@ dmu_sync_done(zio_t *zio, arc_buf_t *buf, void *varg)
 
 	mutex_enter(&db->db_mtx);
 	ASSERT(dr->dt.dl.dr_override_state == DR_IN_DMU_SYNC);
+	ASSERT3P(dr->dt.dl.dr_sync_arg, ==, dsa);
+	dr->dt.dl.dr_sync_arg = NULL;
 	if (zio->io_error == 0) {
 		dr->dt.dl.dr_nopwrite = !!(zio->io_flags & ZIO_FLAG_NOPWRITE);
 		if (dr->dt.dl.dr_nopwrite) {
@@ -1903,6 +1957,25 @@ dmu_sync_done(zio_t *zio, arc_buf_t *buf, void *varg)
 	mutex_exit(&db->db_mtx);
 
 	dsa->dsa_done(dsa->dsa_zgd, zio->io_error);
+
+	/*
+	 * Give our blkptr to the dmu_sync()s that waited for this write.
+	 * No more can be added, since dr_sync_arg is cleared.  Their log
+	 * blocks wait for their dsw_zio.
+	 */
+	while ((dsw = list_remove_head(&dsa->dsa_waiters)) != NULL) {
+		if (zio->io_error == 0) {
+			*dsw->dsw_zgd->zgd_bp = *zio->io_bp;
+			zil_lwb_add_block(dsw->dsw_zgd->zgd_lwb,
+			    dsw->dsw_zgd->zgd_bp);
+		} else {
+			dsw->dsw_zio->io_error = zio->io_error;
+		}
+		dsw->dsw_done(dsw->dsw_zgd, zio->io_error);
+		zio_nowait(dsw->dsw_zio);
+		kmem_free(dsw, sizeof (*dsw));
+	}
+	list_destroy(&dsa->dsa_waiters);
 
 	kmem_free(dsa, sizeof (*dsa));
 }
@@ -2012,9 +2085,6 @@ dmu_sync_late_arrival(zio_t *pio, objset_t *os, dmu_sync_cb_t *done, zgd_t *zgd,
  *	ENOENT: the block was dbuf_free_range()'d, so there's nothing to do.
  *		The caller should not log the write.
  *
- *	EALREADY: this block is already in the process of being synced.
- *		The caller should track its progress (somehow).
- *
  *	EIO: could not do the I/O.
  *		The caller should do a txg_wait_synced().
  *
@@ -2022,7 +2092,12 @@ dmu_sync_late_arrival(zio_t *pio, objset_t *os, dmu_sync_cb_t *done, zgd_t *zgd,
  *		The caller should log this blkptr in the done callback.
  *		It is possible that the I/O will fail, in which case
  *		the error will be reported to the done callback and
- *		propagated to pio from zio_done().
+ *		propagated to pio from zio_done().  If another dmu_sync()
+ *		of the block in this txg is in progress, *zgd_bp is set to
+ *		its blkptr, and the done callback is called with its error,
+ *		when it completes.  If one has completed, *zgd_bp is set to
+ *		its blkptr and the done callback is called before dmu_sync()
+ *		returns.
  */
 int
 dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
@@ -2060,7 +2135,6 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 	 * sync thread will block in dbuf_sync_leaf() until we drop db_mtx.
 	 */
 	mutex_enter(&db->db_mtx);
-
 	if (txg <= spa_last_synced_txg(os->os_spa)) {
 		/*
 		 * This txg has already synced.  There's nothing to do.
@@ -2137,26 +2211,53 @@ dmu_sync(zio_t *pio, uint64_t txg, dmu_sync_cb_t *done, zgd_t *zgd)
 	DB_DNODE_EXIT(db);
 
 	ASSERT(dr->dr_txg == txg);
-	if (dr->dt.dl.dr_override_state == DR_IN_DMU_SYNC ||
-	    dr->dt.dl.dr_override_state == DR_OVERRIDDEN) {
+	if (dr->dt.dl.dr_override_state == DR_IN_DMU_SYNC) {
+		dmu_sync_arg_t *wdsa = dr->dt.dl.dr_sync_arg;
+		dmu_sync_waiter_t *dsw;
+
 		/*
-		 * We have already issued a sync write for this buffer,
-		 * or this buffer has already been synced.  It could not
-		 * have been dirtied since, or we would have cleared the state.
+		 * Another sync write of this buffer is in progress.  Its copy
+		 * holds our data: the buffer could not have been dirtied
+		 * since, or we would have cleared the state.  dmu_sync_done()
+		 * will give us its blkptr.  Until then, hold our log block
+		 * with a child of pio, as our own write would.
 		 */
+		dsw = kmem_alloc(sizeof (*dsw), KM_SLEEP);
+		dsw->dsw_done = done;
+		dsw->dsw_zgd = zgd;
+		dsw->dsw_zio = zio_null(pio, os->os_spa, NULL, NULL, NULL,
+		    ZIO_FLAG_CANFAIL);
+		list_insert_tail(&wdsa->dsa_waiters, dsw);
 		mutex_exit(&db->db_mtx);
-		return (SET_ERROR(EALREADY));
+		return (0);
+	}
+	if (dr->dt.dl.dr_override_state == DR_OVERRIDDEN) {
+		/*
+		 * This buffer has already been written by a sync write, and
+		 * not dirtied since.  Log that write's blkptr.  The same
+		 * blkptr may be in other log records; claim and free skip
+		 * duplicates.
+		 */
+		*zgd->zgd_bp = dr->dt.dl.dr_overridden_by;
+		mutex_exit(&db->db_mtx);
+		zil_lwb_add_block(zgd->zgd_lwb, zgd->zgd_bp);
+		done(zgd, 0);
+		return (0);
 	}
 
 	ASSERT(dr->dt.dl.dr_override_state == DR_NOT_OVERRIDDEN);
-	dr->dt.dl.dr_override_state = DR_IN_DMU_SYNC;
-	mutex_exit(&db->db_mtx);
 
 	dsa = kmem_alloc(sizeof (dmu_sync_arg_t), KM_SLEEP);
 	dsa->dsa_dr = dr;
 	dsa->dsa_done = done;
 	dsa->dsa_zgd = zgd;
 	dsa->dsa_tx = NULL;
+	list_create(&dsa->dsa_waiters, sizeof (dmu_sync_waiter_t),
+	    offsetof(dmu_sync_waiter_t, dsw_node));
+
+	dr->dt.dl.dr_override_state = DR_IN_DMU_SYNC;
+	dr->dt.dl.dr_sync_arg = dsa;
+	mutex_exit(&db->db_mtx);
 
 	zio_nowait(arc_write(pio, os->os_spa, txg,
 	    zgd->zgd_bp, dr->dt.dl.dr_data, DBUF_IS_L2CACHEABLE(db),

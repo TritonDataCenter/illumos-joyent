@@ -24,6 +24,7 @@ user = root
 tests = [
 	'auto_destruct',
 	'cpuid_ioctl',
+	'cpuset_size',
 	'datarw_constraints',
 	'datarw_msrs',
 	'datarw_vcpu',
@@ -40,7 +41,8 @@ tests = [
 	'mem_seg_map',
 	'npt_ops',
 	'pause_resume',
-	'self_destruct'
+	'self_destruct',
+	'vcpu_alloc'
 	]
 
 [/opt/bhyve-tests/tests/kdev]

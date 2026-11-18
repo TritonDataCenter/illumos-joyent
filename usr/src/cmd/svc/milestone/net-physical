@@ -27,6 +27,7 @@
 # Copyright 2012 Milan Jurik. All rights reserved.
 # Copyright 2021 Joyent, Inc.
 # Copyright 2021 Tintri by DDN, Inc. All rights reserved.
+# Copyright 2026 Edgecast Cloud LLC.
 #
 
 #
@@ -261,7 +262,7 @@ function vnic_up6
 function create_aggrs
 {
     set -o xtrace
-    typeset links macs mode mtu
+    typeset links macs mode mtu link curmtu var tag val
     if [[ -z "${SYSINFO_Aggregations}" ]]; then
         return 0
     fi
@@ -273,6 +274,42 @@ function create_aggrs
         eval "mode=\${SYSINFO_Aggregation_${aggr}_LACP_mode}"
         eval "mtu=\${CONFIG_${aggr}_mtu}"
         [[ -z "$mode" ]] && mode="off"
+        [[ -n "$mtu" ]] && valid_mtu ${aggr} ${mtu}
+
+        #
+        # setup_mtu later sets the aggr to the largest MTU of the nic tags
+        # on it, so include those here too.
+        #
+        for var in ${!CONFIG_@}; do
+            [[ $var == *_nic ]] || continue
+            eval "val=\${${var}}"
+            [[ "$val" == "$aggr" ]] || continue
+            tag=${var#CONFIG_}
+            tag=${tag%_nic}
+            eval "val=\${CONFIG_${tag}_mtu}"
+            [[ -z "$val" ]] && continue
+            valid_mtu ${tag} ${val}
+            if [[ -z "$mtu" ]] || (( val > mtu )); then
+                mtu=$val
+            fi
+        done
+
+        #
+        # Set the MTU on the underlying links before creating the aggr.
+        # The aggr takes its MTU from its links, and some drivers (e.g.
+        # mlxcx) refuse to change the MTU once the aggr has started them.
+        #
+        if [[ -n "$mtu" ]]; then
+            for link in ${links//,/ }; do
+                curmtu=$(dladm show-linkprop -c -o value -p mtu ${link})
+                [[ $? -eq 0 ]] && [[ "$curmtu" -eq "${mtu}" ]] && continue
+                dladm set-linkprop -p mtu=${mtu} ${link}
+                if [[ $? -ne 0 ]]; then
+                    echo "Failed to set mtu on link ${link} to ${mtu}"
+                    exit $SMF_EXIT_ERR_FATAL
+                fi
+            done
+        fi
 
         echo "Creating aggr: ${aggr} (mode=${mode}, links=${links})"
         dladm create-aggr -l ${links//,/ -l } -L ${mode} ${aggr}

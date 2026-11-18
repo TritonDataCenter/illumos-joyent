@@ -30,6 +30,7 @@
 # Copyright (c) 2025, Klara, Inc.
 # Copyright 2024 MNX Cloud, Inc.
 # Copyright 2026 Gordon W. Ross
+# Copyright 2026 Oxide Computer Company
 #
 
 UNAME=$(uname)
@@ -1786,6 +1787,7 @@ function check_pool_status # pool token keyword <verbose>
 #	is_pool_removing - to check if the pool is removing a vdev
 #	is_pool_removed - to check if the pool is remove completed
 #	is_pool_discarding - to check if the pool has checkpoint being discarded
+#	is_pool_suspended - to check if the pool's I/O is suspended
 #
 function is_pool_resilvering #pool <verbose>
 {
@@ -1839,6 +1841,12 @@ function is_pool_discarding #pool
 {
 	check_pool_status "$1" "checkpoint" "discarding"
 	return $?
+}
+
+function is_pool_suspended #pool
+{
+	check_pool_status "$1" "see" "ZFS-8000-HC" ||
+	    check_pool_status "$1" "see" "ZFS-8000-JQ"
 }
 
 function wait_for_degraded
@@ -2936,6 +2944,40 @@ function new_fs #<args>
 }
 
 #
+# Print the logical sector size of a disk, slice or raw device path, or
+# nothing if it cannot be determined (e.g. the disk has no label).
+#
+function get_sector_size #<disk>
+{
+	typeset dev=$1
+
+	is_illumos || return 0
+
+	if [[ $dev != /* ]]; then
+		dev=$DEV_RDSKDIR/$dev
+		[[ -e $dev ]] || dev=${dev}s2
+	fi
+	prtvtoc $dev 2>/dev/null | awk '/bytes\/sector/ {print $2; exit}'
+}
+
+#
+# Skip the test unless UFS can be created on all of the given disks or
+# slices.  UFS supports only 512-byte sectors.  A disk whose sector size is
+# unknown is assumed to be usable.
+#
+function verify_ufs_capable #<disk> ...
+{
+	typeset disk
+	typeset secsize
+
+	for disk in "$@"; do
+		secsize=$(get_sector_size $disk)
+		[[ -z $secsize || $secsize == 512 ]] || log_unsupported \
+		    "UFS does not support the $secsize-byte sectors of $disk"
+	done
+}
+
+#
 # Wait for the specified arcstat to reach non-zero quiescence.
 # If echo is 1 echo the value after reaching quiescence, otherwise
 # if echo is 0 print the arcstat we are waiting on.
@@ -2972,6 +3014,38 @@ function arcstat_quiescence_echo # stat
 {
 	typeset stat=$1
 	arcstat_quiescence $stat 1
+}
+
+#
+# Return 0 if the process <pid> is still running, 1 otherwise.  A zombie
+# that has not been reaped yet counts as running.
+#
+function is_process_running #pid
+{
+	kill -0 $1 2>/dev/null
+}
+
+#
+# Return 0 if the process <pid> has exited, 1 otherwise.
+#
+function is_process_exited #pid
+{
+	! kill -0 $1 2>/dev/null
+}
+
+#
+# Run <command> with its arguments once a second until it succeeds, for up to
+# <seconds> seconds.  Return 0 if it succeeded, 1 if it never did.
+#
+function wait_for #seconds command [args ...]
+{
+	typeset -i tries=$1
+	shift
+	until "$@"; do
+		((tries-- > 0)) || return 1
+		sleep 1
+	done
+	return 0
 }
 
 #
