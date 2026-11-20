@@ -675,11 +675,10 @@ mac_compute_soft_ring_count(flow_entry_t *flent, int rx_srs_cnt, int maxcpus)
 			 */
 			if (mac_soft_ring_enable)
 				srings = srings * 2;
-		} else if (mac_check_overlay == B_TRUE &&
-		    (mcip->mci_state_flags & MCIS_IS_VNIC) != 0) {
-			/* Is this a VNIC on an overlay? */
+		} else if (mac_check_overlay) {
+			/* Is this an overlay device? */
 			mac_handle_t mh = (mac_handle_t)mcip->mci_mip;
-			if (mac_is_overlay(mh) == B_TRUE) {
+			if (mac_is_overlay(mh)) {
 				srings = mac_rx_soft_ring_10gig_count;
 			}
 		}

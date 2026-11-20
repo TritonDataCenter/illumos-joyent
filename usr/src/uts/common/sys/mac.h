@@ -425,6 +425,19 @@ typedef void		(*mac_rx_t)(void *, mac_resource_handle_t, mblk_t *,
 typedef	mblk_t		*(*mac_receive_t)(void *, size_t);
 
 /*
+ * Callback for mac_siphon_set. This function takes packets from an input mblk_t
+ * chain, returning the chain of all packets not of interest to the callback.
+ *
+ * The caller may provide three pointers to optional arguments (tail, count,
+ * byte_length). If not NULL the callback should not assume the referenced
+ * values are valid, but MUST fill them out correctly for the contents of the
+ * returned mblk_t chain. The callback must correctly fill these values even
+ * where the input packet is NULL.
+ */
+typedef mblk_t		*(*mac_siphon_t)(void *, mblk_t *, mblk_t **, uint_t *,
+			    size_t *);
+
+/*
  * MAC resource types
  */
 typedef enum {

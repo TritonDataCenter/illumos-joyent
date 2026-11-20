@@ -24,6 +24,7 @@
  * Copyright 2019 Joyent, Inc.
  * Copyright 2022 Garrett D'Amore <garrett@damore.org>
  * Copyright 2023 Oxide Computer Company
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <regex.h>
@@ -227,7 +228,10 @@ static devfsadm_create_t misc_cbt[] = {
 	},
 	{ "pseudo", DDI_NT_EEPROM, "eedev",
 	    TYPE_EXACT | DRV_EXACT, ILEVEL_0, eeprom_create
-	}
+	},
+	{ "pseudo", "ddi_pseudo", "proteus",
+	    TYPE_EXACT | DRV_EXACT, ILEVEL_0, minor_name
+	},
 };
 
 DEVFSADM_CREATE_INIT_V0(misc_cbt);
