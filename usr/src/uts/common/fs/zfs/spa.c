@@ -113,6 +113,7 @@ typedef enum zti_modes {
 
 #define	ZTI_P(n, q)	{ ZTI_MODE_FIXED, (n), (q) }
 #define	ZTI_BATCH	{ ZTI_MODE_BATCH, 0, 1 }
+#define	ZTI_BATCH_N(q)	{ ZTI_MODE_BATCH, 0, (q) }
 #define	ZTI_NULL	{ ZTI_MODE_NULL, 0, 0 }
 
 #define	ZTI_N(n)	ZTI_P(n, 1)
@@ -139,7 +140,8 @@ static const char *const zio_taskq_types[ZIO_TASKQ_TYPES] = {
  * point of lock contention. The ZTI_P(#, #) macro indicates that we need an
  * additional degree of parallelism specified by the number of threads per-
  * taskq and the number of taskqs; when dispatching an event in this case, the
- * particular taskq is chosen at random.
+ * particular taskq is chosen at random. ZTI_BATCH_N(#) splits the batch thread
+ * budget across that many taskqs, using fewer on small systems.
  *
  * The different taskq priorities are to handle the different contexts (issue
  * and interrupt) and then to reserve threads for ZIO_PRIORITY_NOW I/Os that
@@ -149,7 +151,7 @@ const zio_taskq_info_t zio_taskqs[ZIO_TYPES][ZIO_TASKQ_TYPES] = {
 	/* ISSUE	ISSUE_HIGH	INTR		INTR_HIGH */
 	{ ZTI_ONE,	ZTI_NULL,	ZTI_ONE,	ZTI_NULL }, /* NULL */
 	{ ZTI_N(8),	ZTI_NULL,	ZTI_P(12, 8),	ZTI_NULL }, /* READ */
-	{ ZTI_BATCH,	ZTI_N(5),	ZTI_N(8),	ZTI_N(5) }, /* WRITE */
+	{ ZTI_BATCH_N(8), ZTI_N(5),	ZTI_P(12, 8),	ZTI_N(5) }, /* WRITE */
 	{ ZTI_P(12, 8),	ZTI_NULL,	ZTI_ONE,	ZTI_NULL }, /* FREE */
 	{ ZTI_ONE,	ZTI_NULL,	ZTI_ONE,	ZTI_NULL }, /* CLAIM */
 	{ ZTI_ONE,	ZTI_NULL,	ZTI_ONE,	ZTI_NULL }, /* IOCTL */
@@ -962,6 +964,9 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 
 	ASSERT3U(count, >, 0);
 
+	if (mode == ZTI_MODE_BATCH)
+		count = MAX(1, MIN(count, max_ncpus / 8));
+
 	tqs->stqs_count = count;
 	tqs->stqs_taskq = kmem_alloc(count * sizeof (taskq_t *), KM_SLEEP);
 
@@ -974,7 +979,7 @@ spa_taskqs_init(spa_t *spa, zio_type_t t, zio_taskq_type_t q)
 	case ZTI_MODE_BATCH:
 		batch = B_TRUE;
 		flags |= TASKQ_THREADS_CPU_PCT;
-		value = zio_taskq_batch_pct;
+		value = MAX(1, zio_taskq_batch_pct / count);
 		break;
 
 	default:

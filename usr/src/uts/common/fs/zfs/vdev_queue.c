@@ -174,7 +174,17 @@ int zfs_vdev_async_write_active_max_dirty_percent = 60;
  * we include spans of optional I/Os to aid aggregation at the disk even when
  * they aren't able to help us aggregate at this level.
  */
+/*
+ * Issue I/O to solid-state leaf disks directly while fewer than
+ * zfs_vdev_queue_bypass_max bypassed I/Os are in flight and nothing is queued.
+ * Beyond that, I/O goes through the queue, where the per-class limits and zone
+ * scheduling apply.
+ */
+boolean_t zfs_vdev_queue_bypass_ssd = B_TRUE;
+uint32_t zfs_vdev_queue_bypass_max = 128;
+
 int zfs_vdev_aggregation_limit = 1 << 20;
+int zfs_vdev_aggregation_limit_non_rotating = SPA_OLD_MAXBLOCKSIZE;
 int zfs_vdev_read_gap_limit = 32 << 10;
 int zfs_vdev_write_gap_limit = 4 << 10;
 
@@ -263,6 +273,12 @@ vdev_queue_init(vdev_t *vd)
 
 	mutex_init(&vq->vq_lock, NULL, MUTEX_DEFAULT, NULL);
 	vq->vq_vdev = vd;
+	for (int i = 0; i < VDEV_QUEUE_BYPASS_LISTS; i++) {
+		mutex_init(&vq->vq_bypass[i].vqb_lock, NULL, MUTEX_DEFAULT,
+		    NULL);
+		list_create(&vq->vq_bypass[i].vqb_list, sizeof (zio_t),
+		    offsetof(struct zio, io_bypass_node));
+	}
 
 	avl_create(&vq->vq_active_tree, vdev_queue_offset_compare,
 	    sizeof (zio_t), offsetof(struct zio, io_queue_node));
@@ -313,7 +329,119 @@ vdev_queue_fini(vdev_t *vd)
 	avl_destroy(vdev_queue_type_tree(vq, ZIO_TYPE_WRITE));
 	avl_destroy(vdev_queue_type_tree(vq, ZIO_TYPE_TRIM));
 
+	for (int i = 0; i < VDEV_QUEUE_BYPASS_LISTS; i++) {
+		list_destroy(&vq->vq_bypass[i].vqb_list);
+		mutex_destroy(&vq->vq_bypass[i].vqb_lock);
+	}
 	mutex_destroy(&vq->vq_lock);
+}
+
+/* Not a valid zone ID; marks a queue whose I/Os may come from several zones. */
+#define	VQ_ZONE_MIXED	((zoneid_t)-1)
+
+/*
+ * Track whether all queued sync I/Os come from one zone, so that zone
+ * scheduling can be skipped when there is no other zone to be fair to. If
+ * the tracked zone's I/Os drain while others remain, the queue is treated as
+ * mixed until it empties.
+ */
+static void
+vdev_queue_zone_add(vdev_queue_t *vq, zio_t *zio)
+{
+	zio_priority_t p = zio->io_priority;
+
+	if (p != ZIO_PRIORITY_SYNC_READ && p != ZIO_PRIORITY_SYNC_WRITE)
+		return;
+
+	if (vq->vq_sync_zone_cnt[p] == 0 && vq->vq_sync_other_cnt[p] == 0)
+		vq->vq_sync_zone[p] = zio->io_zoneid;
+
+	if (zio->io_zoneid == vq->vq_sync_zone[p])
+		vq->vq_sync_zone_cnt[p]++;
+	else
+		vq->vq_sync_other_cnt[p]++;
+}
+
+static void
+vdev_queue_zone_remove(vdev_queue_t *vq, zio_t *zio)
+{
+	zio_priority_t p = zio->io_priority;
+
+	if (p != ZIO_PRIORITY_SYNC_READ && p != ZIO_PRIORITY_SYNC_WRITE)
+		return;
+
+	if (zio->io_zoneid == vq->vq_sync_zone[p]) {
+		ASSERT3U(vq->vq_sync_zone_cnt[p], >, 0);
+		if (--vq->vq_sync_zone_cnt[p] == 0 &&
+		    vq->vq_sync_other_cnt[p] != 0)
+			vq->vq_sync_zone[p] = VQ_ZONE_MIXED;
+	} else {
+		ASSERT3U(vq->vq_sync_other_cnt[p], >, 0);
+		vq->vq_sync_other_cnt[p]--;
+	}
+}
+
+boolean_t
+vdev_queue_one_zone(vdev_queue_t *vq, zio_priority_t p)
+{
+	ASSERT(MUTEX_HELD(&vq->vq_lock));
+	ASSERT(p == ZIO_PRIORITY_SYNC_READ || p == ZIO_PRIORITY_SYNC_WRITE);
+	return (vq->vq_sync_other_cnt[p] == 0);
+}
+
+static void
+vdev_queue_bypass_kstat(zio_t *zio, boolean_t start)
+{
+	spa_t *spa = zio->io_spa;
+
+	mutex_enter(&spa->spa_iokstat_lock);
+	if (spa->spa_iokstat != NULL) {
+		kstat_io_t *ksio = spa->spa_iokstat->ks_data;
+
+		if (start) {
+			kstat_runq_enter(ksio);
+		} else {
+			kstat_runq_exit(ksio);
+			if (zio->io_type == ZIO_TYPE_READ) {
+				ksio->reads++;
+				ksio->nread += zio->io_size;
+			} else if (zio->io_type == ZIO_TYPE_WRITE) {
+				ksio->writes++;
+				ksio->nwritten += zio->io_size;
+			}
+		}
+	}
+	mutex_exit(&spa->spa_iokstat_lock);
+}
+
+static boolean_t
+vdev_queue_bypass(vdev_queue_t *vq, zio_t *zio)
+{
+	vdev_t *vd = zio->io_vd;
+	vdev_queue_bypass_t *vqb;
+	uint_t idx;
+
+	if (!zfs_vdev_queue_bypass_ssd || !vd->vdev_nonrot ||
+	    strcmp(vd->vdev_ops->vdev_op_type, VDEV_TYPE_DISK) != 0 ||
+	    zio->io_type == ZIO_TYPE_TRIM ||
+	    (zio->io_flags & ZIO_FLAG_NODATA) || vq->vq_queued != 0)
+		return (B_FALSE);
+
+	if (atomic_inc_32_nv(&vq->vq_bypass_active) >
+	    zfs_vdev_queue_bypass_max) {
+		atomic_dec_32(&vq->vq_bypass_active);
+		return (B_FALSE);
+	}
+
+	idx = CPU_SEQID % VDEV_QUEUE_BYPASS_LISTS;
+	vqb = &vq->vq_bypass[idx];
+	mutex_enter(&vqb->vqb_lock);
+	zio->io_timestamp = gethrtime();
+	list_insert_tail(&vqb->vqb_list, zio);
+	mutex_exit(&vqb->vqb_lock);
+	zio->io_queue_bypass = idx + 1;
+	vdev_queue_bypass_kstat(zio, B_TRUE);
+	return (B_TRUE);
 }
 
 static void
@@ -323,6 +451,8 @@ vdev_queue_io_add(vdev_queue_t *vq, zio_t *zio)
 
 	ASSERT3U(zio->io_priority, <, ZIO_PRIORITY_NUM_QUEUEABLE);
 	zfs_zone_zio_enqueue(zio);
+	vdev_queue_zone_add(vq, zio);
+	vq->vq_queued++;
 	avl_add(vdev_queue_class_tree(vq, zio->io_priority), zio);
 	avl_add(vdev_queue_type_tree(vq, zio->io_type), zio);
 
@@ -340,6 +470,8 @@ vdev_queue_io_remove(vdev_queue_t *vq, zio_t *zio)
 
 	ASSERT3U(zio->io_priority, <, ZIO_PRIORITY_NUM_QUEUEABLE);
 	zfs_zone_zio_dequeue(zio);
+	vdev_queue_zone_remove(vq, zio);
+	vq->vq_queued--;
 	avl_remove(vdev_queue_class_tree(vq, zio->io_priority), zio);
 	avl_remove(vdev_queue_type_tree(vq, zio->io_type), zio);
 
@@ -553,6 +685,9 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	boolean_t stretch = B_FALSE;
 	avl_tree_t *t = vdev_queue_type_tree(vq, zio->io_type);
 	enum zio_flag flags = zio->io_flags & ZIO_FLAG_AGG_INHERIT;
+	int limit = vq->vq_vdev->vdev_nonrot ?
+	    zfs_vdev_aggregation_limit_non_rotating :
+	    zfs_vdev_aggregation_limit;
 
 	if (zio->io_flags & ZIO_FLAG_DONT_AGGREGATE)
 		return (NULL);
@@ -590,7 +725,7 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	 */
 	while ((dio = AVL_PREV(t, first)) != NULL &&
 	    (dio->io_flags & ZIO_FLAG_AGG_INHERIT) == flags &&
-	    IO_SPAN(dio, last) <= zfs_vdev_aggregation_limit &&
+	    IO_SPAN(dio, last) <= limit &&
 	    IO_GAP(dio, first) <= maxgap &&
 	    dio->io_type == zio->io_type) {
 		first = dio;
@@ -614,7 +749,7 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 	 */
 	while ((dio = AVL_NEXT(t, last)) != NULL &&
 	    (dio->io_flags & ZIO_FLAG_AGG_INHERIT) == flags &&
-	    (IO_SPAN(first, dio) <= zfs_vdev_aggregation_limit ||
+	    (IO_SPAN(first, dio) <= limit ||
 	    (dio->io_flags & ZIO_FLAG_OPTIONAL)) &&
 	    IO_GAP(last, dio) <= maxgap &&
 	    dio->io_type == zio->io_type) {
@@ -682,6 +817,18 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 		nio = AVL_NEXT(t, dio);
 		ASSERT3U(dio->io_type, ==, aio->io_type);
 
+		zio_add_child(dio, aio);
+		vdev_queue_io_remove(vq, dio);
+	} while (dio != last);
+
+	/*
+	 * We need to drop the vdev queue's lock to avoid a deadlock that we
+	 * could encounter since this I/O will complete immediately. The
+	 * constituent I/Os now belong to aio alone, so their data is copied
+	 * into it without the lock held.
+	 */
+	mutex_exit(&vq->vq_lock);
+	while ((dio = zio_walk_parents(aio, &zl)) != NULL) {
 		if (dio->io_flags & ZIO_FLAG_NODATA) {
 			ASSERT3U(dio->io_type, ==, ZIO_TYPE_WRITE);
 			abd_zero_off(aio->io_abd,
@@ -690,16 +837,8 @@ vdev_queue_aggregate(vdev_queue_t *vq, zio_t *zio)
 			abd_copy_off(aio->io_abd, dio->io_abd,
 			    dio->io_offset - aio->io_offset, 0, dio->io_size);
 		}
-
-		zio_add_child(dio, aio);
-		vdev_queue_io_remove(vq, dio);
-	} while (dio != last);
-
-	/*
-	 * We need to drop the vdev queue's lock to avoid a deadlock that we
-	 * could encounter since this I/O will complete immediately.
-	 */
-	mutex_exit(&vq->vq_lock);
+	}
+	zl = NULL;
 	while ((dio = zio_walk_parents(aio, &zl)) != NULL) {
 		zio_vdev_io_bypass(dio);
 		zio_execute(dio);
@@ -812,6 +951,9 @@ vdev_queue_io(zio_t *zio)
 
 	zio->io_flags |= ZIO_FLAG_DONT_CACHE | ZIO_FLAG_DONT_QUEUE;
 
+	if (vdev_queue_bypass(vq, zio))
+		return (zio);
+
 	mutex_enter(&vq->vq_lock);
 	zio->io_timestamp = gethrtime();
 	vdev_queue_io_add(vq, zio);
@@ -834,6 +976,22 @@ vdev_queue_io_done(zio_t *zio)
 {
 	vdev_queue_t *vq = &zio->io_vd->vdev_queue;
 	zio_t *nio;
+
+	if (zio->io_queue_bypass != 0) {
+		hrtime_t now = gethrtime();
+
+		vdev_queue_bypass_t *vqb =
+		    &vq->vq_bypass[zio->io_queue_bypass - 1];
+
+		mutex_enter(&vqb->vqb_lock);
+		list_remove(&vqb->vqb_list, zio);
+		mutex_exit(&vqb->vqb_lock);
+		zio->io_delta = now - zio->io_timestamp;
+		vq->vq_io_complete_ts = now;
+		atomic_dec_32(&vq->vq_bypass_active);
+		vdev_queue_bypass_kstat(zio, B_FALSE);
+		return;
+	}
 
 	mutex_enter(&vq->vq_lock);
 
@@ -901,9 +1059,11 @@ vdev_queue_change_io_priority(zio_t *zio, zio_priority_t priority)
 		zio_priority_t oldpri = zio->io_priority;
 
 		zfs_zone_zio_dequeue(zio);
+		vdev_queue_zone_remove(vq, zio);
 		avl_remove(vdev_queue_class_tree(vq, zio->io_priority), zio);
 		zio->io_priority = priority;
 		avl_add(vdev_queue_class_tree(vq, zio->io_priority), zio);
+		vdev_queue_zone_add(vq, zio);
 		zfs_zone_zio_enqueue(zio);
 
 		mutex_enter(&spa->spa_iokstat_lock);
@@ -927,7 +1087,8 @@ vdev_queue_change_io_priority(zio_t *zio, zio_priority_t priority)
 int
 vdev_queue_length(vdev_t *vd)
 {
-	return (avl_numnodes(&vd->vdev_queue.vq_active_tree));
+	return (avl_numnodes(&vd->vdev_queue.vq_active_tree) +
+	    vd->vdev_queue.vq_bypass_active);
 }
 
 uint64_t
