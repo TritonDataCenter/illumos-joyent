@@ -59,6 +59,7 @@ i386_DIRS= \
 	/usr/lib/brand/lx \
 	/usr/lib/brand/lx/amd64 \
 	/usr/lib/brand/lx/distros \
+	/usr/lib/brand/rshyve \
 	/usr/lib/xen \
 	/usr/lib/xen/bin \
 	/usr/share/bhyve
