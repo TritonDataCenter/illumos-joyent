@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2016 Joyent, Inc.
  * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/param.h>
@@ -331,11 +332,21 @@ kadmin(int cmd, int fcn, void *mdep, cred_t *credp)
 	/* FALLTHROUGH */
 
 	case A_REBOOT:
-		if ((mdep != NULL) && (*(char *)mdep == '/')) {
+		if ((mdep != NULL) && (*(char *)mdep == '/'))
 			buf = i_convert_boot_device_name(mdep, NULL, &buflen);
-			mdboot(cmd, fcn, buf, invoke_cb);
-		} else
-			mdboot(cmd, fcn, mdep, invoke_cb);
+		else
+			buf = mdep;
+
+		/*
+		 * reboot(8) uses A_REBOOT, which skips the mdpreboot() call
+		 * that A_SHUTDOWN makes above.  A fast reboot needs it: that is
+		 * where the new kernel is loaded, while file systems are still
+		 * mounted.
+		 */
+		if (cmd == A_REBOOT && fcn == AD_FASTREBOOT)
+			mdpreboot(cmd, fcn, buf);
+
+		mdboot(cmd, fcn, buf, invoke_cb);
 		/* no return expected */
 		break;
 
