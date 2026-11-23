@@ -230,6 +230,7 @@ if [ $? -ne 0 ]; then
             fatal "failed to set checksum=noparity on dump zvol"
         zpool set feature@multi_vdev_crash_dump=enabled ${SYS_ZPOOL} || \
             fatal "failed to enable multi_vdev_crash_dump ZFS feature"
+        dumpadm -i
         dumpadm -y -d /dev/zvol/dsk/${SYS_ZPOOL}/dump || \
             fatal "failed to configure dump device"
 
