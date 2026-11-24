@@ -477,6 +477,8 @@ struct zio {
 					/* file). */
 	avl_node_t	io_queue_node;
 	avl_node_t	io_offset_node;
+	uint8_t		io_queue_bypass;	/* bypass list + 1 */
+	list_node_t	io_bypass_node;
 	avl_node_t	io_alloc_node;
 	zio_alloc_list_t	io_alloc_list;
 

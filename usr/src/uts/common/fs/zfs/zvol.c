@@ -1394,7 +1394,7 @@ zvol_read(dev_t dev, uio_t *uio, cred_t *cr)
 			bytes = volsize - uio->uio_loffset;
 
 		tot_bytes += bytes;
-		error =  dmu_read_uio(zv->zv_objset, ZVOL_OBJ, uio, bytes);
+		error = dmu_read_uio_dnode(zv->zv_dn, uio, bytes);
 		if (error) {
 			/* convert checksum errors into IO errors */
 			if (error == ECKSUM)

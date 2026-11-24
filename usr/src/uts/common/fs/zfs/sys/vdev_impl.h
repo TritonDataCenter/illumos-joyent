@@ -143,6 +143,17 @@ typedef struct vdev_queue_class {
 	avl_tree_t	vqc_queued_tree;
 } vdev_queue_class_t;
 
+/*
+ * I/Os issued past the queue, oldest first, for vdev_deadman(). Spread over
+ * several lists to keep the locks uncontended.
+ */
+#define	VDEV_QUEUE_BYPASS_LISTS	8
+
+typedef struct vdev_queue_bypass {
+	kmutex_t	vqb_lock;
+	list_t		vqb_list;
+} vdev_queue_bypass_t;
+
 struct vdev_queue {
 	vdev_t		*vq_vdev;
 	vdev_queue_class_t vq_class[ZIO_PRIORITY_NUM_QUEUEABLE];
@@ -152,9 +163,22 @@ struct vdev_queue {
 	avl_tree_t	vq_trim_offset_tree;
 	uint64_t	vq_last_offset;
 	zoneid_t	vq_last_zone_id;
+	/*
+	 * For the sync read and write classes: the zone of the I/Os queued so
+	 * far, how many of them are queued, and how many queued I/Os may be
+	 * from other zones. See vdev_queue_zone_add().
+	 */
+	zoneid_t	vq_sync_zone[2];
+	uint32_t	vq_sync_zone_cnt[2];
+	uint32_t	vq_sync_other_cnt[2];
+	uint32_t	vq_queued;		/* I/Os waiting in the queue */
+	uint32_t	vq_bypass_active;	/* I/Os issued past the queue */
+	vdev_queue_bypass_t vq_bypass[VDEV_QUEUE_BYPASS_LISTS];
 	hrtime_t	vq_io_complete_ts; /* time last i/o completed */
 	kmutex_t	vq_lock;
 };
+
+extern boolean_t vdev_queue_one_zone(vdev_queue_t *, zio_priority_t);
 
 typedef enum vdev_alloc_bias {
 	VDEV_BIAS_NONE,

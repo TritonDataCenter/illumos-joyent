@@ -1398,7 +1398,8 @@ zfs_zone_schedule(vdev_queue_t *vq, zio_priority_t p, avl_index_t idx,
 	 * If there are more than a few zios already queued up, then use
 	 * scheduling to get the next zio.
 	 */
-	if (!zfs_zone_schedule_enable || cnt < zfs_zone_schedule_thresh)
+	if (!zfs_zone_schedule_enable || cnt < zfs_zone_schedule_thresh ||
+	    vdev_queue_one_zone(vq, p))
 		zio = avl_nearest(tree, idx, AVL_AFTER);
 	else
 		zio = get_next_zio(vqc, cnt, p, tree);

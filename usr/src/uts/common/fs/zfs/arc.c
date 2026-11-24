@@ -26,6 +26,7 @@
  * Copyright 2017 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2011, 2019, Delphix. All rights reserved.
  * Copyright (c) 2020, George Amanakis. All rights reserved.
+ * Copyright (c) 2019, 2024, 2025, Klara, Inc.
  * Copyright (c) 2020, The FreeBSD Foundation [1]
  * Copyright 2024 Bill Sommerfeld <sommerfeld@hamachi.org>
  * Copyright 2025 Edgecast Cloud LLC.
@@ -322,13 +323,37 @@ static zthr_t		*arc_reap_zthr;
 
 /*
  * This thread's job is to keep arc_size under arc_c, by calling
- * arc_adjust(), which improves arc_is_overflowing().
+ * arc_evict(), which improves arc_is_overflowing().
  */
-static zthr_t		*arc_adjust_zthr;
+static zthr_t		*arc_evict_zthr;
+static arc_buf_hdr_t **arc_state_evict_markers;
+static int arc_state_evict_marker_count;
 
-static kmutex_t		arc_adjust_lock;
-static kcondvar_t	arc_adjust_waiters_cv;
-static boolean_t	arc_adjust_needed = B_FALSE;
+static kmutex_t		arc_evict_lock;
+static boolean_t	arc_evict_needed = B_FALSE;
+
+/*
+ * Threads that must wait for eviction before allocating. Each waits until
+ * arc_evict_count, the total bytes evicted, reaches its aew_count. Both are
+ * protected by arc_evict_lock.
+ */
+typedef struct arc_evict_waiter {
+	list_node_t	aew_node;
+	kcondvar_t	aew_cv;
+	uint64_t	aew_count;
+} arc_evict_waiter_t;
+
+static list_t		arc_evict_waiters;
+static uint64_t		arc_evict_count;
+
+typedef enum arc_ovf_level {
+	ARC_OVF_NONE,		/* under the target, or within one block */
+	ARC_OVF_SOME,		/* over, but only eviction needs to happen */
+	ARC_OVF_SEVERE		/* allocations must wait for eviction */
+} arc_ovf_level_t;
+
+static taskq_t *arc_evict_taskq;
+static struct evict_arg *arc_evict_arg;
 
 uint_t arc_reduce_dnlc_percent = 3;
 
@@ -353,6 +378,13 @@ int arc_kmem_cache_reap_retry_ms = 1000;
 
 /* shift of arc_c for calculating overflow limit in arc_get_data_impl */
 int zfs_arc_overflow_shift = 8;
+
+/*
+ * A thread waiting for eviction before allocating waits for this percentage
+ * of its allocation to be evicted. Above 100, eviction makes net progress
+ * while allocations keep arriving.
+ */
+uint_t zfs_arc_eviction_pct = 200;
 
 /* shift of arc_c for calculating both min and max arc_p */
 int arc_p_min_shift = 4;
@@ -424,6 +456,18 @@ uint_t zfs_arc_anon_limit_percent = 25;		/* anon block dirty limit */
 uint_t zfs_arc_pool_dirty_percent = 20;		/* each pool's anon allowance */
 
 boolean_t zfs_compressed_arc_enabled = B_TRUE;
+
+/*
+ * Controls the number of ARC eviction threads to dispatch sublists to.
+ *
+ * Possible values:
+ * 0  (auto) compute the number of threads using a logarithmic formula.
+ * 1  (disabled) one thread - parallel eviction is disabled.
+ * 2+ (manual) set the number manually.
+ *
+ * See arc_evict_thread_init() for how "auto" is computed.
+ */
+static uint_t zfs_arc_evict_threads = 0;
 
 /* The 6 states: */
 static arc_state_t ARC_anon;
@@ -591,12 +635,6 @@ arc_stats_t arc_stats = {
 	} while (0)
 
 kstat_t			*arc_ksp;
-static arc_state_t	*arc_anon;
-static arc_state_t	*arc_mru;
-static arc_state_t	*arc_mru_ghost;
-static arc_state_t	*arc_mfu;
-static arc_state_t	*arc_mfu_ghost;
-static arc_state_t	*arc_l2c_only;
 
 /*
  * There are also some ARC variables that we want to export, but that are
@@ -803,7 +841,8 @@ static void arc_free_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag);
 static void arc_hdr_free_pabd(arc_buf_hdr_t *, boolean_t);
 static void arc_hdr_alloc_pabd(arc_buf_hdr_t *, int);
 static void arc_access(arc_buf_hdr_t *, kmutex_t *);
-static boolean_t arc_is_overflowing();
+static arc_ovf_level_t arc_is_overflowing(boolean_t);
+static void arc_evict_wake_waiters(boolean_t);
 static void arc_buf_watch(arc_buf_t *);
 static l2arc_dev_t *l2arc_vdev_get(vdev_t *vd);
 
@@ -2087,7 +2126,6 @@ arc_evictable_space_increment(arc_buf_hdr_t *hdr, arc_state_t *state)
 		return;
 	}
 
-	ASSERT(!GHOST_STATE(state));
 	if (hdr->b_l1hdr.b_pabd != NULL) {
 		(void) zfs_refcount_add_many(&state->arcs_esize[type],
 		    arc_hdr_size(hdr), hdr);
@@ -2127,7 +2165,6 @@ arc_evictable_space_decrement(arc_buf_hdr_t *hdr, arc_state_t *state)
 		return;
 	}
 
-	ASSERT(!GHOST_STATE(state));
 	if (hdr->b_l1hdr.b_pabd != NULL) {
 		(void) zfs_refcount_remove_many(&state->arcs_esize[type],
 		    arc_hdr_size(hdr), hdr);
@@ -3784,7 +3821,7 @@ arc_buf_destroy(arc_buf_t *buf, void* tag)
  *    - arc_mfu_ghost -> deleted
  */
 static int64_t
-arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
+arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock, uint64_t *real_evicted)
 {
 	arc_state_t *evicted_state, *state;
 	int64_t bytes_evicted = 0;
@@ -3794,6 +3831,7 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 	ASSERT(MUTEX_HELD(hash_lock));
 	ASSERT(HDR_HAS_L1HDR(hdr));
 
+	*real_evicted = 0;
 	state = hdr->b_l1hdr.b_state;
 	if (GHOST_STATE(state)) {
 		ASSERT(!HDR_IO_IN_PROGRESS(hdr));
@@ -3855,8 +3893,11 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 			ARCSTAT_BUMP(arcstat_mutex_miss);
 			break;
 		}
-		if (buf->b_data != NULL)
+		if (buf->b_data != NULL) {
 			bytes_evicted += HDR_GET_LSIZE(hdr);
+			if (!ARC_BUF_SHARED(buf))
+				*real_evicted += arc_buf_size(buf);
+		}
 		mutex_exit(&buf->b_evict_lock);
 		arc_buf_destroy_impl(buf);
 	}
@@ -3899,11 +3940,15 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 		 * This ensures that the accounting is updated correctly
 		 * in arc_free_data_impl().
 		 */
-		if (hdr->b_l1hdr.b_pabd != NULL)
+		if (hdr->b_l1hdr.b_pabd != NULL) {
+			*real_evicted += arc_hdr_size(hdr);
 			arc_hdr_free_pabd(hdr, B_FALSE);
+		}
 
-		if (HDR_HAS_RABD(hdr))
+		if (HDR_HAS_RABD(hdr)) {
+			*real_evicted += HDR_GET_PSIZE(hdr);
 			arc_hdr_free_pabd(hdr, B_TRUE);
+		}
 
 		arc_change_state(evicted_state, hdr, hash_lock);
 		ASSERT(HDR_IN_HASH_TABLE(hdr));
@@ -3916,23 +3961,21 @@ arc_evict_hdr(arc_buf_hdr_t *hdr, kmutex_t *hash_lock)
 
 static uint64_t
 arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
-    uint64_t spa, int64_t bytes)
+    uint64_t spa, uint64_t bytes)
 {
 	multilist_sublist_t *mls;
-	uint64_t bytes_evicted = 0;
+	uint64_t bytes_evicted = 0, real_evicted = 0;
 	arc_buf_hdr_t *hdr;
 	kmutex_t *hash_lock;
-	int evict_count = 0;
+	int evict_count = zfs_arc_evict_batch_limit;
 
 	ASSERT3P(marker, !=, NULL);
-	IMPLY(bytes < 0, bytes == ARC_EVICT_ALL);
 
 	mls = multilist_sublist_lock(ml, idx);
 
-	for (hdr = multilist_sublist_prev(mls, marker); hdr != NULL;
+	for (hdr = multilist_sublist_prev(mls, marker); likely(hdr != NULL);
 	    hdr = multilist_sublist_prev(mls, marker)) {
-		if ((bytes != ARC_EVICT_ALL && bytes_evicted >= bytes) ||
-		    (evict_count >= zfs_arc_evict_batch_limit))
+		if ((evict_count <= 0) || (bytes_evicted >= bytes))
 			break;
 
 		/*
@@ -3980,10 +4023,13 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 		ASSERT(!MUTEX_HELD(hash_lock));
 
 		if (mutex_tryenter(hash_lock)) {
-			uint64_t evicted = arc_evict_hdr(hdr, hash_lock);
+			uint64_t revicted;
+			uint64_t evicted = arc_evict_hdr(hdr, hash_lock,
+			    &revicted);
 			mutex_exit(hash_lock);
 
 			bytes_evicted += evicted;
+			real_evicted += revicted;
 
 			/*
 			 * If evicted is zero, arc_evict_hdr() must have
@@ -3991,31 +4037,7 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 			 * evict_count in this case.
 			 */
 			if (evicted != 0)
-				evict_count++;
-
-			/*
-			 * If arc_size isn't overflowing, signal any
-			 * threads that might happen to be waiting.
-			 *
-			 * For each header evicted, we wake up a single
-			 * thread. If we used cv_broadcast, we could
-			 * wake up "too many" threads causing arc_size
-			 * to significantly overflow arc_c; since
-			 * arc_get_data_impl() doesn't check for overflow
-			 * when it's woken up (it doesn't because it's
-			 * possible for the ARC to be overflowing while
-			 * full of un-evictable buffers, and the
-			 * function should proceed in this case).
-			 *
-			 * If threads are left sleeping, due to not
-			 * using cv_broadcast here, they will be woken
-			 * up via cv_broadcast in arc_adjust_cb() just
-			 * before arc_adjust_zthr sleeps.
-			 */
-			mutex_enter(&arc_adjust_lock);
-			if (!arc_is_overflowing())
-				cv_signal(&arc_adjust_waiters_cv);
-			mutex_exit(&arc_adjust_lock);
+				evict_count--;
 		} else {
 			ARCSTAT_BUMP(arcstat_mutex_miss);
 		}
@@ -4023,8 +4045,107 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
 
 	multilist_sublist_unlock(mls);
 
+	/*
+	 * Credit the evicted bytes to threads waiting in
+	 * arc_wait_for_eviction(), once per batch.
+	 */
+	if (real_evicted != 0) {
+		mutex_enter(&arc_evict_lock);
+		arc_evict_count += real_evicted;
+		arc_evict_wake_waiters(B_FALSE);
+		mutex_exit(&arc_evict_lock);
+	}
+
 	return (bytes_evicted);
 }
+
+/*
+ * Allocate an array of buffer headers used as placeholders during arc state
+ * eviction.
+ */
+static arc_buf_hdr_t **
+arc_state_alloc_markers(int count)
+{
+	arc_buf_hdr_t **markers;
+
+	markers = kmem_zalloc(sizeof (*markers) * count, KM_SLEEP);
+	for (int i = 0; i < count; i++) {
+		markers[i] = kmem_cache_alloc(hdr_full_cache, KM_SLEEP);
+
+		/*
+		 * A b_spa of 0 is used to indicate that this header is
+		 * a marker. This fact is used in arc_evict_type() and
+		 * arc_evict_state_impl().
+		 */
+		markers[i]->b_spa = 0;
+
+	}
+	return (markers);
+}
+
+static void
+arc_state_free_markers(arc_buf_hdr_t **markers, int count)
+{
+	for (int i = 0; i < count; i++)
+		kmem_cache_free(hdr_full_cache, markers[i]);
+	kmem_free(markers, sizeof (*markers) * count);
+}
+
+typedef struct evict_arg {
+	taskq_ent_t		eva_tqent;
+	multilist_t		*eva_ml;
+	arc_buf_hdr_t		*eva_marker;
+	int			eva_idx;
+	uint64_t		eva_spa;
+	uint64_t		eva_bytes;
+	uint64_t		eva_evicted;
+} evict_arg_t;
+
+static void
+arc_evict_task(void *arg)
+{
+	evict_arg_t *eva = arg;
+	eva->eva_evicted = arc_evict_state_impl(eva->eva_ml, eva->eva_idx,
+	    eva->eva_marker, eva->eva_spa, eva->eva_bytes);
+}
+
+static void
+arc_evict_thread_init(void)
+{
+	if (zfs_arc_evict_threads == 0) {
+		/*
+		 * Compute number of threads we want to use for eviction.
+		 *
+		 * Normally, it's log2(ncpus) + ncpus/32, which gets us to the
+		 * default max of 16 threads at ~256 CPUs.
+		 *
+		 * However, that formula goes to two threads at 4 CPUs, which
+		 * is still rather to low to be really useful, so we just go
+		 * with 1 thread at fewer than 6 cores.
+		 */
+		if (max_ncpus < 6)
+			zfs_arc_evict_threads = 1;
+		else
+			zfs_arc_evict_threads =
+			    (highbit64(max_ncpus) - 1) + max_ncpus / 32;
+	} else if (zfs_arc_evict_threads > max_ncpus)
+		zfs_arc_evict_threads = max_ncpus;
+
+	if (zfs_arc_evict_threads > 1) {
+		arc_evict_taskq = taskq_create("arc_evict",
+		    zfs_arc_evict_threads, defclsyspri, 0, INT_MAX,
+		    TASKQ_PREPOPULATE);
+		arc_evict_arg = kmem_zalloc(
+		    sizeof (evict_arg_t) * zfs_arc_evict_threads, KM_SLEEP);
+	}
+}
+
+/*
+ * The minimum number of bytes we can evict at once is a block size.
+ * So, SPA_MAXBLOCKSIZE is a reasonable minimal value per an eviction task.
+ * We use this value to compute a scaling factor for the eviction tasks.
+ */
+#define	MIN_EVICT_SIZE	(SPA_MAXBLOCKSIZE)
 
 /*
  * Evict buffers from the given arc state, until we've removed the
@@ -4040,17 +4161,18 @@ arc_evict_state_impl(multilist_t *ml, int idx, arc_buf_hdr_t *marker,
  * the given arc state; which is used by arc_flush().
  */
 static uint64_t
-arc_evict_state(arc_state_t *state, uint64_t spa, int64_t bytes,
+arc_evict_state(arc_state_t *state, uint64_t spa, uint64_t bytes,
     arc_buf_contents_t type)
 {
 	uint64_t total_evicted = 0;
 	multilist_t *ml = state->arcs_list[type];
 	int num_sublists;
 	arc_buf_hdr_t **markers;
-
-	IMPLY(bytes < 0, bytes == ARC_EVICT_ALL);
+	evict_arg_t *eva = NULL;
 
 	num_sublists = multilist_get_num_sublists(ml);
+
+	boolean_t use_evcttq = zfs_arc_evict_threads > 1;
 
 	/*
 	 * If we've tried to evict from each sublist, made some
@@ -4059,44 +4181,104 @@ arc_evict_state(arc_state_t *state, uint64_t spa, int64_t bytes,
 	 * pick up where we left off for each individual sublist, rather
 	 * than starting from the tail each time.
 	 */
-	markers = kmem_zalloc(sizeof (*markers) * num_sublists, KM_SLEEP);
+	if (zthr_iscurthread(arc_evict_zthr)) {
+		markers = arc_state_evict_markers;
+		ASSERT3S(num_sublists, <=, arc_state_evict_marker_count);
+	} else {
+		markers = arc_state_alloc_markers(num_sublists);
+	}
 	for (int i = 0; i < num_sublists; i++) {
-		markers[i] = kmem_cache_alloc(hdr_full_cache, KM_SLEEP);
-
-		/*
-		 * A b_spa of 0 is used to indicate that this header is
-		 * a marker. This fact is used in arc_adjust_type() and
-		 * arc_evict_state_impl().
-		 */
-		markers[i]->b_spa = 0;
-
 		multilist_sublist_t *mls = multilist_sublist_lock(ml, i);
 		multilist_sublist_insert_tail(mls, markers[i]);
 		multilist_sublist_unlock(mls);
 	}
 
+	if (use_evcttq) {
+		if (zthr_iscurthread(arc_evict_zthr))
+			eva = arc_evict_arg;
+		else
+			eva = kmem_alloc(sizeof (evict_arg_t) *
+			    zfs_arc_evict_threads, KM_NOSLEEP);
+		if (eva) {
+			for (int i = 0; i < zfs_arc_evict_threads; i++) {
+				taskq_init_ent(&eva[i].eva_tqent);
+				eva[i].eva_ml = ml;
+				eva[i].eva_spa = spa;
+			}
+		} else {
+			/*
+			 * Fall back to the regular single evict if it is not
+			 * possible to allocate memory for the taskq entries.
+			 */
+			use_evcttq = B_FALSE;
+		}
+	}
+
+	/*
+	 * Start eviction using a randomly selected sublist, this is to try and
+	 * evenly balance eviction across all sublists. Always starting at the
+	 * same sublist (e.g. index 0) would cause evictions to favor certain
+	 * sublists over others.
+	 */
+	uint64_t scan_evicted = 0;
+	int sublists_left = num_sublists;
+	int sublist_idx = multilist_get_random_index(ml);
+
 	/*
 	 * While we haven't hit our target number of bytes to evict, or
 	 * we're evicting all available buffers.
 	 */
-	while (total_evicted < bytes || bytes == ARC_EVICT_ALL) {
-		/*
-		 * Start eviction using a randomly selected sublist,
-		 * this is to try and evenly balance eviction across all
-		 * sublists. Always starting at the same sublist
-		 * (e.g. index 0) would cause evictions to favor certain
-		 * sublists over others.
-		 */
-		int sublist_idx = multilist_get_random_index(ml);
-		uint64_t scan_evicted = 0;
+	while (total_evicted < bytes) {
+		uint64_t evict = MIN_EVICT_SIZE;
+		uint_t ntasks = zfs_arc_evict_threads;
 
-		for (int i = 0; i < num_sublists; i++) {
+		if (use_evcttq) {
+			if (sublists_left < ntasks)
+				ntasks = sublists_left;
+
+			if (ntasks < 2)
+				use_evcttq = B_FALSE;
+		}
+
+		if (use_evcttq) {
+			uint64_t left = bytes - total_evicted;
+
+			if (bytes == ARC_EVICT_ALL) {
+				evict = bytes;
+			} else if (left > ntasks * MIN_EVICT_SIZE) {
+				evict = DIV_ROUND_UP(left, ntasks);
+			} else {
+				ntasks = DIV_ROUND_UP(left, MIN_EVICT_SIZE);
+				if (ntasks == 1)
+					use_evcttq = B_FALSE;
+			}
+		}
+
+		for (int i = 0; sublists_left > 0; i++, sublist_idx++,
+		    sublists_left--) {
 			uint64_t bytes_remaining;
 			uint64_t bytes_evicted;
 
-			if (bytes == ARC_EVICT_ALL)
-				bytes_remaining = ARC_EVICT_ALL;
-			else if (total_evicted < bytes)
+			/* we've reached the end, wrap to the beginning */
+			if (sublist_idx >= num_sublists)
+				sublist_idx = 0;
+
+			if (use_evcttq) {
+				if (i == ntasks)
+					break;
+
+				eva[i].eva_marker = markers[sublist_idx];
+				eva[i].eva_idx = sublist_idx;
+				eva[i].eva_bytes = evict;
+
+				taskq_dispatch_ent(arc_evict_taskq,
+				    arc_evict_task, &eva[i], 0,
+				    &eva[i].eva_tqent);
+
+				continue;
+			}
+
+			if (total_evicted < bytes)
 				bytes_remaining = bytes - total_evicted;
 			else
 				break;
@@ -4106,18 +4288,23 @@ arc_evict_state(arc_state_t *state, uint64_t spa, int64_t bytes,
 
 			scan_evicted += bytes_evicted;
 			total_evicted += bytes_evicted;
+		}
 
-			/* we've reached the end, wrap to the beginning */
-			if (++sublist_idx >= num_sublists)
-				sublist_idx = 0;
+		if (use_evcttq) {
+			taskq_wait(arc_evict_taskq);
+
+			for (int i = 0; i < ntasks; i++) {
+				scan_evicted += eva[i].eva_evicted;
+				total_evicted += eva[i].eva_evicted;
+			}
 		}
 
 		/*
-		 * If we didn't evict anything during this scan, we have
-		 * no reason to believe we'll evict more during another
+		 * If we scanned all sublists and didn't evict anything, we
+		 * have no reason to believe we'll evict more during another
 		 * scan, so break the loop.
 		 */
-		if (scan_evicted == 0) {
+		if (scan_evicted == 0 && sublists_left == 0) {
 			/* This isn't possible, let's make that obvious */
 			ASSERT3S(bytes, !=, 0);
 
@@ -4134,16 +4321,35 @@ arc_evict_state(arc_state_t *state, uint64_t spa, int64_t bytes,
 
 			break;
 		}
+
+		/*
+		 * If we scanned all sublists but still have more to do,
+		 * reset the counts so we can go around again.
+		 */
+		if (sublists_left == 0) {
+			sublists_left = num_sublists;
+			sublist_idx = multilist_get_random_index(ml);
+			scan_evicted = 0;
+
+			/*
+			 * Since we're about to reconsider all sublists,
+			 * re-enable use of the evict threads if available.
+			 */
+			use_evcttq = (zfs_arc_evict_threads > 1 && eva != NULL);
+		}
 	}
+
+	if (eva != NULL && eva != arc_evict_arg)
+		kmem_free(eva, sizeof (evict_arg_t) * zfs_arc_evict_threads);
 
 	for (int i = 0; i < num_sublists; i++) {
 		multilist_sublist_t *mls = multilist_sublist_lock(ml, i);
 		multilist_sublist_remove(mls, markers[i]);
 		multilist_sublist_unlock(mls);
-
-		kmem_cache_free(hdr_full_cache, markers[i]);
 	}
-	kmem_free(markers, sizeof (*markers) * num_sublists);
+
+	if (markers != arc_state_evict_markers)
+		arc_state_free_markers(markers, num_sublists);
 
 	return (total_evicted);
 }
@@ -4188,10 +4394,10 @@ arc_flush_state(arc_state_t *state, uint64_t spa, arc_buf_contents_t type,
  * evict everything it can, when passed a negative value for "bytes".
  */
 static uint64_t
-arc_adjust_impl(arc_state_t *state, uint64_t spa, int64_t bytes,
+arc_evict_impl(arc_state_t *state, uint64_t spa, int64_t bytes,
     arc_buf_contents_t type)
 {
-	int64_t delta;
+	uint64_t delta;
 
 	if (bytes > 0 && zfs_refcount_count(&state->arcs_esize[type]) > 0) {
 		delta = MIN(zfs_refcount_count(&state->arcs_esize[type]),
@@ -4207,7 +4413,7 @@ arc_adjust_impl(arc_state_t *state, uint64_t spa, int64_t bytes,
  * capped by the arc_meta_limit tunable.
  */
 static uint64_t
-arc_adjust_meta(uint64_t meta_used)
+arc_evict_meta(uint64_t meta_used)
 {
 	uint64_t total_evicted = 0;
 	int64_t target;
@@ -4223,7 +4429,7 @@ arc_adjust_meta(uint64_t meta_used)
 	    (int64_t)(zfs_refcount_count(&arc_anon->arcs_size) +
 	    zfs_refcount_count(&arc_mru->arcs_size) - arc_p));
 
-	total_evicted += arc_adjust_impl(arc_mru, 0, target, ARC_BUFC_METADATA);
+	total_evicted += arc_evict_impl(arc_mru, 0, target, ARC_BUFC_METADATA);
 
 	/*
 	 * Similar to the above, we want to evict enough bytes to get us
@@ -4234,7 +4440,7 @@ arc_adjust_meta(uint64_t meta_used)
 	    (int64_t)(zfs_refcount_count(&arc_mfu->arcs_size) -
 	    (arc_c - arc_p)));
 
-	total_evicted += arc_adjust_impl(arc_mfu, 0, target, ARC_BUFC_METADATA);
+	total_evicted += arc_evict_impl(arc_mfu, 0, target, ARC_BUFC_METADATA);
 
 	return (total_evicted);
 }
@@ -4248,7 +4454,7 @@ arc_adjust_meta(uint64_t meta_used)
  * returned.
  */
 static arc_buf_contents_t
-arc_adjust_type(arc_state_t *state)
+arc_evict_type(arc_state_t *state)
 {
 	multilist_t *data_ml = state->arcs_list[ARC_BUFC_DATA];
 	multilist_t *meta_ml = state->arcs_list[ARC_BUFC_METADATA];
@@ -4318,7 +4524,7 @@ arc_adjust_type(arc_state_t *state)
  * Evict buffers from the cache, such that arc_size is capped by arc_c.
  */
 static uint64_t
-arc_adjust(void)
+arc_evict(void)
 {
 	uint64_t total_evicted = 0;
 	uint64_t bytes;
@@ -4330,7 +4536,7 @@ arc_adjust(void)
 	 * If we're over arc_meta_limit, we want to correct that before
 	 * potentially evicting data buffers below.
 	 */
-	total_evicted += arc_adjust_meta(ameta);
+	total_evicted += arc_evict_meta(ameta);
 
 	/*
 	 * Adjust MRU size
@@ -4354,9 +4560,9 @@ arc_adjust(void)
 	 * type. If we cannot satisfy the number of bytes from this
 	 * type, spill over into the next type.
 	 */
-	if (arc_adjust_type(arc_mru) == ARC_BUFC_METADATA &&
+	if (arc_evict_type(arc_mru) == ARC_BUFC_METADATA &&
 	    ameta > arc_meta_min) {
-		bytes = arc_adjust_impl(arc_mru, 0, target, ARC_BUFC_METADATA);
+		bytes = arc_evict_impl(arc_mru, 0, target, ARC_BUFC_METADATA);
 		total_evicted += bytes;
 
 		/*
@@ -4366,9 +4572,9 @@ arc_adjust(void)
 		target -= bytes;
 
 		total_evicted +=
-		    arc_adjust_impl(arc_mru, 0, target, ARC_BUFC_DATA);
+		    arc_evict_impl(arc_mru, 0, target, ARC_BUFC_DATA);
 	} else {
-		bytes = arc_adjust_impl(arc_mru, 0, target, ARC_BUFC_DATA);
+		bytes = arc_evict_impl(arc_mru, 0, target, ARC_BUFC_DATA);
 		total_evicted += bytes;
 
 		/*
@@ -4378,7 +4584,7 @@ arc_adjust(void)
 		target -= bytes;
 
 		total_evicted +=
-		    arc_adjust_impl(arc_mru, 0, target, ARC_BUFC_METADATA);
+		    arc_evict_impl(arc_mru, 0, target, ARC_BUFC_METADATA);
 	}
 
 	/*
@@ -4390,9 +4596,9 @@ arc_adjust(void)
 	 */
 	target = asize - arc_c;
 
-	if (arc_adjust_type(arc_mfu) == ARC_BUFC_METADATA &&
+	if (arc_evict_type(arc_mfu) == ARC_BUFC_METADATA &&
 	    ameta > arc_meta_min) {
-		bytes = arc_adjust_impl(arc_mfu, 0, target, ARC_BUFC_METADATA);
+		bytes = arc_evict_impl(arc_mfu, 0, target, ARC_BUFC_METADATA);
 		total_evicted += bytes;
 
 		/*
@@ -4402,9 +4608,9 @@ arc_adjust(void)
 		target -= bytes;
 
 		total_evicted +=
-		    arc_adjust_impl(arc_mfu, 0, target, ARC_BUFC_DATA);
+		    arc_evict_impl(arc_mfu, 0, target, ARC_BUFC_DATA);
 	} else {
-		bytes = arc_adjust_impl(arc_mfu, 0, target, ARC_BUFC_DATA);
+		bytes = arc_evict_impl(arc_mfu, 0, target, ARC_BUFC_DATA);
 		total_evicted += bytes;
 
 		/*
@@ -4414,7 +4620,7 @@ arc_adjust(void)
 		target -= bytes;
 
 		total_evicted +=
-		    arc_adjust_impl(arc_mfu, 0, target, ARC_BUFC_METADATA);
+		    arc_evict_impl(arc_mfu, 0, target, ARC_BUFC_METADATA);
 	}
 
 	/*
@@ -4431,13 +4637,13 @@ arc_adjust(void)
 	target = zfs_refcount_count(&arc_mru->arcs_size) +
 	    zfs_refcount_count(&arc_mru_ghost->arcs_size) - arc_c;
 
-	bytes = arc_adjust_impl(arc_mru_ghost, 0, target, ARC_BUFC_DATA);
+	bytes = arc_evict_impl(arc_mru_ghost, 0, target, ARC_BUFC_DATA);
 	total_evicted += bytes;
 
 	target -= bytes;
 
 	total_evicted +=
-	    arc_adjust_impl(arc_mru_ghost, 0, target, ARC_BUFC_METADATA);
+	    arc_evict_impl(arc_mru_ghost, 0, target, ARC_BUFC_METADATA);
 
 	/*
 	 * We assume the sum of the mru list and mfu list is less than
@@ -4450,13 +4656,13 @@ arc_adjust(void)
 	target = zfs_refcount_count(&arc_mru_ghost->arcs_size) +
 	    zfs_refcount_count(&arc_mfu_ghost->arcs_size) - arc_c;
 
-	bytes = arc_adjust_impl(arc_mfu_ghost, 0, target, ARC_BUFC_DATA);
+	bytes = arc_evict_impl(arc_mfu_ghost, 0, target, ARC_BUFC_DATA);
 	total_evicted += bytes;
 
 	target -= bytes;
 
 	total_evicted +=
-	    arc_adjust_impl(arc_mfu_ghost, 0, target, ARC_BUFC_METADATA);
+	    arc_evict_impl(arc_mfu_ghost, 0, target, ARC_BUFC_METADATA);
 
 	return (total_evicted);
 }
@@ -4510,11 +4716,11 @@ arc_reduce_target_size(int64_t to_free)
 	}
 
 	if (asize > arc_c) {
-		/* See comment in arc_adjust_cb_check() on why lock+flag */
-		mutex_enter(&arc_adjust_lock);
-		arc_adjust_needed = B_TRUE;
-		mutex_exit(&arc_adjust_lock);
-		zthr_wakeup(arc_adjust_zthr);
+		/* See comment in arc_evict_cb_check() on why lock+flag */
+		mutex_enter(&arc_evict_lock);
+		arc_evict_needed = B_TRUE;
+		mutex_exit(&arc_evict_lock);
+		zthr_wakeup(arc_evict_zthr);
 	}
 }
 
@@ -4695,7 +4901,7 @@ arc_kmem_reap_soon(void)
 
 /* ARGSUSED */
 static boolean_t
-arc_adjust_cb_check(void *arg, zthr_t *zthr)
+arc_evict_cb_check(void *arg, zthr_t *zthr)
 {
 	/*
 	 * This is necessary in order for the mdb ::arc dcmd to
@@ -4704,7 +4910,7 @@ arc_adjust_cb_check(void *arg, zthr_t *zthr)
 	 * this call, the command may show stale stats for the
 	 * anon, mru, mru_ghost, mfu, and mfu_ghost lists. Even
 	 * with this change, the data might be up to 1 second
-	 * out of date(the arc_adjust_zthr has a maximum sleep
+	 * out of date(the arc_evict_zthr has a maximum sleep
 	 * time of 1 second); but that should suffice.  The
 	 * arc_state_t structures can be queried directly if more
 	 * accurate information is needed.
@@ -4716,35 +4922,35 @@ arc_adjust_cb_check(void *arg, zthr_t *zthr)
 	 * We have to rely on arc_get_data_impl() to tell us when to adjust,
 	 * rather than checking if we are overflowing here, so that we are
 	 * sure to not leave arc_get_data_impl() waiting on
-	 * arc_adjust_waiters_cv.  If we have become "not overflowing" since
+	 * arc_wait_for_eviction().  If we have become "not overflowing" since
 	 * arc_get_data_impl() checked, we need to wake it up.  We could
 	 * broadcast the CV here, but arc_get_data_impl() may have not yet
 	 * gone to sleep.  We would need to use a mutex to ensure that this
 	 * function doesn't broadcast until arc_get_data_impl() has gone to
-	 * sleep (e.g. the arc_adjust_lock).  However, the lock ordering of
+	 * sleep (e.g. the arc_evict_lock).  However, the lock ordering of
 	 * such a lock would necessarily be incorrect with respect to the
 	 * zthr_lock, which is held before this function is called, and is
 	 * held by arc_get_data_impl() when it calls zthr_wakeup().
 	 */
-	return (arc_adjust_needed);
+	return (arc_evict_needed);
 }
 
 /*
- * Keep arc_size under arc_c by running arc_adjust which evicts data
+ * Keep arc_size under arc_c by running arc_evict which evicts data
  * from the ARC.
  */
 /* ARGSUSED */
 static void
-arc_adjust_cb(void *arg, zthr_t *zthr)
+arc_evict_cb(void *arg, zthr_t *zthr)
 {
 	uint64_t evicted = 0;
 
 	/* Evict from cache */
-	evicted = arc_adjust();
+	evicted = arc_evict();
 
 	/*
 	 * If evicted is zero, we couldn't evict anything
-	 * via arc_adjust(). This could be due to hash lock
+	 * via arc_evict(). This could be due to hash lock
 	 * collisions, but more likely due to the majority of
 	 * arc buffers being unevictable. Therefore, even if
 	 * arc_size is above arc_c, another pass is unlikely to
@@ -4753,18 +4959,18 @@ arc_adjust_cb(void *arg, zthr_t *zthr)
 	 * checked here so that if the arc is shutting down, the
 	 * broadcast will wake any remaining arc adjust waiters.
 	 */
-	mutex_enter(&arc_adjust_lock);
-	arc_adjust_needed = !zthr_iscancelled(arc_adjust_zthr) &&
+	mutex_enter(&arc_evict_lock);
+	arc_evict_needed = !zthr_iscancelled(arc_evict_zthr) &&
 	    evicted > 0 && aggsum_compare(&arc_size, arc_c) > 0;
-	if (!arc_adjust_needed) {
+	if (!arc_evict_needed) {
 		/*
 		 * We're either no longer overflowing, or we
 		 * can't evict anything more, so we should wake
 		 * up any waiters.
 		 */
-		cv_broadcast(&arc_adjust_waiters_cv);
+		arc_evict_wake_waiters(B_TRUE);
 	}
-	mutex_exit(&arc_adjust_lock);
+	mutex_exit(&arc_evict_lock);
 }
 
 /* ARGSUSED */
@@ -4802,7 +5008,7 @@ arc_reap_cb_check(void *arg, zthr_t *zthr)
 /*
  * Keep enough free memory in the system by reaping the ARC's kmem
  * caches.  To cause more slabs to be reapable, we may reduce the
- * target size of the cache (arc_c), causing the arc_adjust_cb()
+ * target size of the cache (arc_c), causing the arc_evict_cb()
  * to free more buffers.
  */
 /* ARGSUSED */
@@ -4902,10 +5108,12 @@ arc_adapt(int bytes, arc_state_t *state)
 
 	/*
 	 * If we're within (2 * maxblocksize) bytes of the target
-	 * cache size, increment the target cache size
+	 * cache size, increment the target cache size. The upper bound
+	 * avoids aggsum_compare(), which locks every bucket while arc_size
+	 * sits near arc_c, as it does whenever the ARC is full.
 	 */
-	if (aggsum_compare(&arc_size, arc_c - (2ULL << SPA_MAXBLOCKSHIFT)) >
-	    0) {
+	if (aggsum_upper_bound(&arc_size) >
+	    (int64_t)(arc_c - (2ULL << SPA_MAXBLOCKSHIFT))) {
 		atomic_add_64(&arc_c, (int64_t)bytes);
 		if (arc_c > arc_c_max)
 			arc_c = arc_c_max;
@@ -4918,16 +5126,13 @@ arc_adapt(int bytes, arc_state_t *state)
 }
 
 /*
- * Check if arc_size has grown past our upper threshold, determined by
- * zfs_arc_overflow_shift.
+ * Check how far arc_size has grown past arc_c. Beyond one block the eviction
+ * thread should run; beyond half of arc_c >> zfs_arc_overflow_shift, or at
+ * all when memory is short (!lax), allocations wait for it.
  */
-static boolean_t
-arc_is_overflowing(void)
+static arc_ovf_level_t
+arc_is_overflowing(boolean_t lax)
 {
-	/* Always allow at least one block of overflow */
-	uint64_t overflow = MAX(SPA_MAXBLOCKSIZE,
-	    arc_c >> zfs_arc_overflow_shift);
-
 	/*
 	 * We just compare the lower bound here for performance reasons. Our
 	 * primary goals are to make sure that the arc never grows without
@@ -4937,7 +5142,75 @@ arc_is_overflowing(void)
 	 * in the ARC. In practice, that's in the tens of MB, which is low
 	 * enough to be safe.
 	 */
-	return (aggsum_lower_bound(&arc_size) >= arc_c + overflow);
+	int64_t over = aggsum_lower_bound(&arc_size) - (int64_t)arc_c -
+	    SPA_MAXBLOCKSIZE;
+
+	if (over < 0)
+		return (ARC_OVF_NONE);
+	if (!lax)
+		return (ARC_OVF_SEVERE);
+	return (over < (int64_t)(arc_c >> zfs_arc_overflow_shift) / 2 ?
+	    ARC_OVF_SOME : ARC_OVF_SEVERE);
+}
+
+/*
+ * Wake the threads waiting in arc_wait_for_eviction() whose share of eviction
+ * has happened, or all of them.
+ */
+static void
+arc_evict_wake_waiters(boolean_t all)
+{
+	arc_evict_waiter_t *aw;
+
+	ASSERT(MUTEX_HELD(&arc_evict_lock));
+	while ((aw = list_head(&arc_evict_waiters)) != NULL &&
+	    (all || aw->aew_count <= arc_evict_count)) {
+		list_remove(&arc_evict_waiters, aw);
+		cv_signal(&aw->aew_cv);
+	}
+}
+
+/*
+ * Before allocating `amount` bytes, make sure the eviction thread is keeping
+ * up. A modest overflow only wakes it; a severe one waits until it has
+ * evicted as much as this and the earlier waiters are allocating.
+ */
+static void
+arc_wait_for_eviction(uint64_t amount)
+{
+	arc_evict_waiter_t aw;
+	arc_evict_waiter_t *last;
+
+	switch (arc_is_overflowing(arc_available_memory() >= 0)) {
+	case ARC_OVF_NONE:
+		return;
+	case ARC_OVF_SOME:
+		if (!arc_evict_needed) {
+			arc_evict_needed = B_TRUE;
+			zthr_wakeup(arc_evict_zthr);
+		}
+		return;
+	case ARC_OVF_SEVERE:
+	default:
+		break;
+	}
+
+	list_link_init(&aw.aew_node);
+	cv_init(&aw.aew_cv, NULL, CV_DEFAULT, NULL);
+
+	mutex_enter(&arc_evict_lock);
+	last = list_tail(&arc_evict_waiters);
+	aw.aew_count = MAX(last != NULL ? last->aew_count : 0,
+	    arc_evict_count) + amount;
+	list_insert_tail(&arc_evict_waiters, &aw);
+	arc_evict_needed = B_TRUE;
+	zthr_wakeup(arc_evict_zthr);
+	do {
+		cv_wait(&aw.aew_cv, &arc_evict_lock);
+	} while (list_link_active(&aw.aew_node));
+	mutex_exit(&arc_evict_lock);
+
+	cv_destroy(&aw.aew_cv);
 }
 
 static abd_t *
@@ -4999,28 +5272,7 @@ arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag,
 	 * In this case, we want to proceed regardless if we're
 	 * overflowing; thus we don't use a while loop here.
 	 */
-	if (arc_is_overflowing()) {
-		mutex_enter(&arc_adjust_lock);
-
-		/*
-		 * Now that we've acquired the lock, we may no longer be
-		 * over the overflow limit, lets check.
-		 *
-		 * We're ignoring the case of spurious wake ups. If that
-		 * were to happen, it'd let this thread consume an ARC
-		 * buffer before it should have (i.e. before we're under
-		 * the overflow limit and were signalled by the reclaim
-		 * thread). As long as that is a rare occurrence, it
-		 * shouldn't cause any harm.
-		 */
-		if (arc_is_overflowing()) {
-			arc_adjust_needed = B_TRUE;
-			zthr_wakeup(arc_adjust_zthr);
-			(void) cv_wait(&arc_adjust_waiters_cv,
-			    &arc_adjust_lock);
-		}
-		mutex_exit(&arc_adjust_lock);
-	}
+	arc_wait_for_eviction(size * zfs_arc_eviction_pct / 100);
 
 	VERIFY3U(hdr->b_type, ==, type);
 	if (type == ARC_BUFC_METADATA) {
@@ -5056,7 +5308,7 @@ arc_get_data_impl(arc_buf_hdr_t *hdr, uint64_t size, void *tag,
 		 * If we are growing the cache, and we are adding anonymous
 		 * data, and we have outgrown arc_p, update arc_p
 		 */
-		if (aggsum_compare(&arc_size, arc_c) < 0 &&
+		if (aggsum_upper_bound(&arc_size) < (int64_t)arc_c &&
 		    hdr->b_l1hdr.b_state == arc_anon &&
 		    (zfs_refcount_count(&arc_anon->arcs_size) +
 		    zfs_refcount_count(&arc_mru->arcs_size) > arc_p))
@@ -6981,55 +7233,47 @@ arc_state_multilist_index_func(multilist_t *ml, void *obj)
 }
 
 static void
+arc_state_multilist_init(multilist_t **mlp,
+    multilist_sublist_index_func_t *index_func, int *maxcountp)
+{
+	*mlp = multilist_create(sizeof (arc_buf_hdr_t),
+	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node), index_func);
+	*maxcountp = MAX(*maxcountp, multilist_get_num_sublists(*mlp));
+}
+
+static void
 arc_state_init(void)
 {
-	arc_anon = &ARC_anon;
-	arc_mru = &ARC_mru;
-	arc_mru_ghost = &ARC_mru_ghost;
-	arc_mfu = &ARC_mfu;
-	arc_mfu_ghost = &ARC_mfu_ghost;
-	arc_l2c_only = &ARC_l2c_only;
+	int num_sublists = 0;
 
-	arc_mru->arcs_list[ARC_BUFC_METADATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_mru->arcs_list[ARC_BUFC_DATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_mru_ghost->arcs_list[ARC_BUFC_METADATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_mru_ghost->arcs_list[ARC_BUFC_DATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_mfu->arcs_list[ARC_BUFC_METADATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_mfu->arcs_list[ARC_BUFC_DATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_mfu_ghost->arcs_list[ARC_BUFC_METADATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_mfu_ghost->arcs_list[ARC_BUFC_DATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_l2c_only->arcs_list[ARC_BUFC_METADATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
-	arc_l2c_only->arcs_list[ARC_BUFC_DATA] =
-	    multilist_create(sizeof (arc_buf_hdr_t),
-	    offsetof(arc_buf_hdr_t, b_l1hdr.b_arc_node),
-	    arc_state_multilist_index_func);
+	arc_state_multilist_init(&arc_mru->arcs_list[ARC_BUFC_METADATA],
+	    arc_state_multilist_index_func, &num_sublists);
+	arc_state_multilist_init(&arc_mru->arcs_list[ARC_BUFC_DATA],
+	    arc_state_multilist_index_func, &num_sublists);
+	arc_state_multilist_init(&arc_mru_ghost->arcs_list[ARC_BUFC_METADATA],
+	    arc_state_multilist_index_func, &num_sublists);
+	arc_state_multilist_init(&arc_mru_ghost->arcs_list[ARC_BUFC_DATA],
+	    arc_state_multilist_index_func, &num_sublists);
+	arc_state_multilist_init(&arc_mfu->arcs_list[ARC_BUFC_METADATA],
+	    arc_state_multilist_index_func, &num_sublists);
+	arc_state_multilist_init(&arc_mfu->arcs_list[ARC_BUFC_DATA],
+	    arc_state_multilist_index_func, &num_sublists);
+	arc_state_multilist_init(&arc_mfu_ghost->arcs_list[ARC_BUFC_METADATA],
+	    arc_state_multilist_index_func, &num_sublists);
+	arc_state_multilist_init(&arc_mfu_ghost->arcs_list[ARC_BUFC_DATA],
+	    arc_state_multilist_index_func, &num_sublists);
+
+	arc_state_multilist_init(&arc_l2c_only->arcs_list[ARC_BUFC_METADATA],
+	    arc_state_multilist_index_func, &num_sublists);
+	arc_state_multilist_init(&arc_l2c_only->arcs_list[ARC_BUFC_DATA],
+	    arc_state_multilist_index_func, &num_sublists);
+
+	/*
+	 * Keep track of the number of markers needed to reclaim buffers from
+	 * any ARC state.  The markers will be pre-allocated so as to minimize
+	 * the number of memory allocations performed by the eviction thread.
+	 */
+	arc_state_evict_marker_count = num_sublists;
 
 	zfs_refcount_create(&arc_anon->arcs_esize[ARC_BUFC_METADATA]);
 	zfs_refcount_create(&arc_anon->arcs_esize[ARC_BUFC_DATA]);
@@ -7192,16 +7436,16 @@ arc_dynamic_resize(void *arg)
 		}
 
 		/* Last unlocked reality-check case. */
-		boolean_t force_arc_adjust;
+		boolean_t force_arc_evict;
 
 		if (new_max != 0 && new_min != 0) {
 			if (new_min > new_max)
 				return (ERANGE);
-			force_arc_adjust = B_TRUE;
+			force_arc_evict = B_TRUE;
 		} else if (new_max == 0 && new_min == 0) {
-			force_arc_adjust = B_FALSE;
+			force_arc_evict = B_FALSE;
 		} else {
-			force_arc_adjust = B_TRUE;
+			force_arc_evict = B_TRUE;
 		}
 
 #ifdef _KERNEL
@@ -7213,11 +7457,11 @@ arc_dynamic_resize(void *arg)
 		    uint64_t, allmem, uint64_t, zfs_init_allmem);
 
 		/* Use a light touch for now. */
-		if (mutex_tryenter(&arc_adjust_lock) == 0)
+		if (mutex_tryenter(&arc_evict_lock) == 0)
 			return (EAGAIN);
 
 		/*
-		 * At this point we have arc_adjust_lock, and won't let it go
+		 * At this point we have arc_evict_lock, and won't let it go
 		 * until we reach bottom after filling in all "write" fields.
 		 * We also can count on no non-mdb scribbling of arc_c_*.
 		 */
@@ -7276,19 +7520,19 @@ arc_dynamic_resize(void *arg)
 			 * doing if they're using this.
 			 */
 
-			/* Make sure arc_adjust is triggered if need be. */
-			arc_adjust_needed =
-			    (arc_adjust_needed || force_arc_adjust);
+			/* Make sure arc_evict is triggered if need be. */
+			arc_evict_needed =
+			    (arc_evict_needed || force_arc_evict);
 			/* arc_get_data_impl() does this with the lock held! */
-			if (force_arc_adjust)
-				zthr_wakeup(arc_adjust_zthr);
+			if (force_arc_evict)
+				zthr_wakeup(arc_evict_zthr);
 		}
 	} /* Else don't bother locking, just report back */
 
 	/*
 	 * Fill in all pertinent fields, even if written anew above!
 	 * "read" (cmd == 0) can be unreliable-ish due to concurrency.
-	 * "write" (cmd != 0) is under arc_adjust_lock protection.
+	 * "write" (cmd != 0) is under arc_evict_lock protection.
 	 */
 	return_data[0] = arc_c_min;
 	return_data[1] = arc_c_max;
@@ -7299,7 +7543,7 @@ arc_dynamic_resize(void *arg)
 	return_data[6] = zfs_arc_max;
 
 	if (cmd != 0)
-		mutex_exit(&arc_adjust_lock);
+		mutex_exit(&arc_evict_lock);
 
 	return (err);
 }
@@ -7318,8 +7562,9 @@ arc_init(void)
 	/* Writing reality checks for arc_dynamic_resize() to cache (sic). */
 	zfs_init_allmem = allmem;
 
-	mutex_init(&arc_adjust_lock, NULL, MUTEX_DEFAULT, NULL);
-	cv_init(&arc_adjust_waiters_cv, NULL, CV_DEFAULT, NULL);
+	mutex_init(&arc_evict_lock, NULL, MUTEX_DEFAULT, NULL);
+	list_create(&arc_evict_waiters, sizeof (arc_evict_waiter_t),
+	    offsetof(arc_evict_waiter_t, aew_node));
 
 	/*
 	 * Set the minimum cache size to 1/64 of all memory, with a hard
@@ -7424,6 +7669,8 @@ arc_init(void)
 	ASSERT(!arc_initialized);
 	buf_init();
 
+	arc_evict_thread_init();
+
 	arc_ksp = kstat_create("zfs", 0, "arcstats", "misc", KSTAT_TYPE_NAMED,
 	    sizeof (arc_stats) / sizeof (kstat_named_t), KSTAT_FLAG_VIRTUAL);
 
@@ -7433,8 +7680,10 @@ arc_init(void)
 		kstat_install(arc_ksp);
 	}
 
-	arc_adjust_zthr = zthr_create(arc_adjust_cb_check,
-	    arc_adjust_cb, NULL);
+	arc_state_evict_markers =
+	    arc_state_alloc_markers(arc_state_evict_marker_count);
+	arc_evict_zthr = zthr_create(arc_evict_cb_check,
+	    arc_evict_cb, NULL);
 	arc_reap_zthr = zthr_create_timer(arc_reap_cb_check,
 	    arc_reap_cb, NULL, SEC2NSEC(1));
 
@@ -7470,14 +7719,25 @@ arc_fini(void)
 		arc_ksp = NULL;
 	}
 
-	(void) zthr_cancel(arc_adjust_zthr);
-	zthr_destroy(arc_adjust_zthr);
+	if (arc_evict_taskq != NULL)
+		taskq_wait(arc_evict_taskq);
+
+	(void) zthr_cancel(arc_evict_zthr);
+	zthr_destroy(arc_evict_zthr);
 
 	(void) zthr_cancel(arc_reap_zthr);
 	zthr_destroy(arc_reap_zthr);
+	arc_state_free_markers(arc_state_evict_markers,
+	    arc_state_evict_marker_count);
 
-	mutex_destroy(&arc_adjust_lock);
-	cv_destroy(&arc_adjust_waiters_cv);
+	if (arc_evict_taskq != NULL) {
+		taskq_destroy(arc_evict_taskq);
+		kmem_free(arc_evict_arg,
+		    sizeof (evict_arg_t) * zfs_arc_evict_threads);
+	}
+
+	mutex_destroy(&arc_evict_lock);
+	list_destroy(&arc_evict_waiters);
 
 	/*
 	 * buf_fini() must proceed arc_state_fini() because buf_fin() may

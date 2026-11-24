@@ -158,7 +158,7 @@ struct taskq {
 
 /* Special form of taskq dispatch that uses preallocated entries. */
 void taskq_dispatch_ent(taskq_t *, task_func_t, void *, uint_t, taskq_ent_t *);
-
+void taskq_init_ent(taskq_ent_t *);
 
 #define	tq_thread tq_thr._tq_thread
 #define	tq_threadlist tq_thr._tq_threadlist
