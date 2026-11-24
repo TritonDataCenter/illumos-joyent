@@ -48,6 +48,11 @@ extern char **environ;
 #define	ZHYVE_CMD_FILE	"/var/run/bhyve/zhyve.cmd"
 #define	BHYVE_ZONE_PATH	"/bhyve.zone"
 
+/* The rshyve brand builds this file with its own hypervisor. */
+#ifndef ZHYVE_HYPERVISOR
+#define	ZHYVE_HYPERVISOR	"/usr/sbin/bhyve"
+#endif
+
 /*
  * Do a read of the specified size or return an error.  Returns 0 on success
  * and -1 on error.  Sets errno to EINVAL if EOF is encountered.  For other
@@ -287,7 +292,7 @@ main(int argc, char **argv)
 
 	try_bhyve_override(tmpargs);
 
-	(void) execv("/usr/sbin/bhyve", tmpargs);
+	(void) execv(ZHYVE_HYPERVISOR, tmpargs);
 
 	perror("execv failed");
 	return (EXIT_FAILURE);
