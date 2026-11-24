@@ -1363,6 +1363,8 @@ mac_client_open(mac_handle_t mh, mac_client_handle_t *mchp, char *name,
 	mcip->mci_rx_arg = NULL;
 	mcip->mci_rx_p_fn = NULL;
 	mcip->mci_rx_p_arg = NULL;
+	mcip->mci_siphon = NULL;
+	mcip->mci_siphon_arg = NULL;
 	mcip->mci_p_unicast_list = NULL;
 	mcip->mci_direct_rx.mdrx_v4 = NULL;
 	mcip->mci_direct_rx.mdrx_v6 = NULL;
@@ -1641,6 +1643,48 @@ void
 mac_rx_clear(mac_client_handle_t mch)
 {
 	mac_rx_set(mch, mac_rx_def, NULL);
+}
+
+/*
+ * Set the siphon callback for the specified MAC client.
+ */
+void
+mac_siphon_set(mac_client_handle_t mch, mac_siphon_t rx_fn, void *arg)
+{
+	mac_client_impl_t *mcip = (mac_client_impl_t *)mch;
+	mac_impl_t	*mip = mcip->mci_mip;
+	int		err = 0;
+
+	/*
+	 * Quiesce here works to a similar end as in `mac_rx_set`, avoiding the
+	 * use of (rw)locks and refcnts. This ensures that the interrupt/poll/
+	 * worker/softring threads are not actively processing any packets, and
+	 * that no new packets will be processed by the MAC client until we
+	 * restart the client. Equally, the caller then knows that (in case of
+	 * `mac_siphon_clear`) they can safely free any arguments.
+	 *
+	 * This is sufficient given that the siphon function is bound only to
+	 * the client, unlike promiscuous mode handlers (which must be bound to
+	 * both the client AND the underlying MAC, with the latter having no
+	 * quiesce mechanism).
+	 */
+	i_mac_perim_enter(mip);
+	mac_rx_client_quiesce(mch);
+
+	mcip->mci_siphon = rx_fn;
+	mcip->mci_siphon_arg = arg;
+	mac_rx_client_restart(mch);
+
+	i_mac_perim_exit(mip);
+}
+
+/*
+ * Reset the siphon callback for the specified MAC client.
+ */
+void
+mac_siphon_clear(mac_client_handle_t mch)
+{
+	mac_siphon_set(mch, NULL, NULL);
 }
 
 void
