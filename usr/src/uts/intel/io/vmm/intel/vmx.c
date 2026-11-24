@@ -2389,7 +2389,9 @@ vmx_exit_process(struct vmx_vcpu *vcpu, struct vm_exit *vmexit)
 	case EXIT_REASON_EXT_INTR:
 		/*
 		 * External interrupts serve only to cause VM exits and allow
-		 * the host interrupt handler to run.
+		 * the host interrupt handler to run, which vmx_run() did
+		 * before it called here: see
+		 * vmx_exit_handle_possible_extintr().
 		 *
 		 * If this external interrupt triggers a virtual interrupt
 		 * to a VM, then that state will be recorded by the
@@ -2406,10 +2408,6 @@ vmx_exit_process(struct vmx_vcpu *vcpu, struct vm_exit *vmexit)
 		 */
 		if (!(intr_info & VMCS_INTR_VALID))
 			return (1);
-		KASSERT((intr_info & VMCS_INTR_VALID) != 0 &&
-		    (intr_info & VMCS_INTR_T_MASK) == VMCS_INTR_T_HWINTR,
-		    ("VM exit interruption info invalid: %x", intr_info));
-		vmx_trigger_hostintr(intr_info & 0xff);
 
 		/*
 		 * This is special. We want to treat this as an 'handled'
@@ -2708,6 +2706,26 @@ vmx_exit_handle_possible_nmi(struct vm_exit *vmexit)
 	}
 }
 
+/*
+ * An external interrupt acknowledged on VM exit stays in service, blocking
+ * interrupts of equal or lower priority (cross-calls included), until its
+ * host handler runs.  That must happen before this thread can block.
+ */
+static __inline void
+vmx_exit_handle_possible_extintr(struct vm_exit *vmexit)
+{
+	if (vmexit->u.vmx.exit_reason == EXIT_REASON_EXT_INTR) {
+		const uint32_t intr_info = vmcs_read(VMCS_EXIT_INTR_INFO);
+
+		/* Ignored here as it is in vmx_exit_process(). */
+		if ((intr_info & VMCS_INTR_VALID) == 0)
+			return;
+
+		VERIFY3U(intr_info & VMCS_INTR_T_MASK, ==, VMCS_INTR_T_HWINTR);
+		vmx_trigger_hostintr(intr_info & 0xff);
+	}
+}
+
 static __inline void
 vmx_dr_enter_guest(struct vmxctx *vmxctx)
 {
@@ -2979,6 +2997,9 @@ vmx_run(void *vcpui, uint64_t rip)
 			vmx_exit_handle_possible_nmi(vmexit);
 		}
 		enable_intr();
+		if (rc == VMX_GUEST_VMEXIT) {
+			vmx_exit_handle_possible_extintr(vmexit);
+		}
 		vmc_table_exit(vmc);
 
 		if (rc == VMX_GUEST_VMEXIT) {
