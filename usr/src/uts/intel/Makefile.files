@@ -53,6 +53,7 @@ CORE_OBJS +=		\
 	fpu.o		\
 	i86_subr.o	\
 	lock_prim.o	\
+	memcmp.o	\
 	ovbcopy.o	\
 	pic.o		\
 	retpoline.o	\

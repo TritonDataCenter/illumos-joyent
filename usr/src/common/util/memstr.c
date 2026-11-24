@@ -65,22 +65,6 @@ memset(void *s, int c, size_t n)
 	return (s);
 }
 
-int
-memcmp(const void *s1, const void *s2, size_t n)
-{
-	const uchar_t *ps1 = s1;
-	const uchar_t *ps2 = s2;
-
-	if (s1 != s2 && n != 0) {
-		do {
-			if (*ps1++ != *ps2++)
-				return (ps1[-1] - ps2[-1]);
-		} while (--n != 0);
-	}
-
-	return (0);
-}
-
 #pragma weak _memcpy = memcpy
 void *
 memcpy(void *s1, const void *s2, size_t n)
