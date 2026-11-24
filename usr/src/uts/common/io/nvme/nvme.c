@@ -673,6 +673,13 @@ uint32_t nvme_vendor_specific_admin_cmd_size = 1 << 24;
 uint_t nvme_vendor_specific_admin_cmd_max_timeout = 60;
 
 /*
+ * Maximum number of blkdev I/O completions handled in the interrupt thread
+ * per completion queue pass. The rest go to the queue's taskq, as all
+ * completions do when this is 0.
+ */
+uint_t nvme_inline_done_max = 8;
+
+/*
  * This ID space, AVL, and lock are used for keeping track of minor state across
  * opens between different devices.
  */
@@ -749,7 +756,7 @@ static boolean_t nvme_identify_int(nvme_t *, uint32_t, uint8_t, void **);
 static int nvme_set_features(nvme_t *, boolean_t, uint32_t, uint8_t, uint32_t,
     uint32_t *);
 static int nvme_write_cache_set(nvme_t *, boolean_t);
-static int nvme_set_nqueues(nvme_t *);
+static void nvme_set_nqueues(nvme_t *);
 
 static void nvme_free_dma(nvme_dma_t *);
 static int nvme_zalloc_dma(nvme_t *, size_t, uint_t, ddi_dma_attr_t *,
@@ -771,6 +778,7 @@ static boolean_t nvme_check_dma_hdl(nvme_dma_t *);
 static int nvme_fill_prp(nvme_cmd_t *, ddi_dma_handle_t);
 
 static void nvme_bd_xfer_done(void *);
+static void nvme_bd_xfer_done_inline(nvme_cmd_t *);
 static void nvme_bd_driveinfo(void *, bd_drive_t *);
 static int nvme_bd_mediainfo(void *, bd_media_t *);
 static int nvme_bd_cmd(nvme_namespace_t *, bd_xfer_t *, uint8_t);
@@ -2118,6 +2126,9 @@ nvme_process_iocq(nvme_t *nvme, nvme_cq_t *cq)
 {
 	nvme_reg_cqhdbl_t head = { 0 };
 	nvme_cmd_t *cmd;
+	nvme_cmd_t *inline_head = NULL;
+	nvme_cmd_t **inline_tail = &inline_head;
+	uint_t ninline = 0;
 	uint_t completed = 0;
 
 	if (ddi_dma_sync(cq->ncq_dma->nd_dmah, 0, 0, DDI_DMA_SYNC_FORKERNEL) !=
@@ -2152,8 +2163,18 @@ nvme_process_iocq(nvme_t *nvme, nvme_cq_t *cq)
 		cmd->nc_state = NVME_CMD_QUEUED;
 		if ((cmd->nc_flags & NVME_CMD_F_USELOCK) != 0)
 			mutex_exit(&cmd->nc_mutex);
-		taskq_dispatch_ent(cq->ncq_cmd_taskq, cmd->nc_callback, cmd,
-		    TQ_NOSLEEP, &cmd->nc_tqent);
+
+		if ((cmd->nc_flags & NVME_CMD_F_INLINE) != 0 &&
+		    ninline < nvme_inline_done_max) {
+			ASSERT0(cmd->nc_flags & NVME_CMD_F_USELOCK);
+			cmd->nc_inline_next = NULL;
+			*inline_tail = cmd;
+			inline_tail = &cmd->nc_inline_next;
+			ninline++;
+		} else {
+			taskq_dispatch_ent(cq->ncq_cmd_taskq, cmd->nc_callback,
+			    cmd, TQ_NOSLEEP, &cmd->nc_tqent);
+		}
 
 		completed++;
 	}
@@ -2167,6 +2188,11 @@ nvme_process_iocq(nvme_t *nvme, nvme_cq_t *cq)
 	}
 
 	mutex_exit(&cq->ncq_mutex);
+
+	while ((cmd = inline_head) != NULL) {
+		inline_head = cmd->nc_inline_next;
+		nvme_bd_xfer_done_inline(cmd);
+	}
 
 	return (completed);
 }
@@ -3541,38 +3567,6 @@ nvme_identify_int(nvme_t *nvme, uint32_t nsid, uint8_t cns, void **buf)
 	return (nvme_identify(nvme, B_FALSE, &id, buf));
 }
 
-static boolean_t
-nvme_get_current_nqueues(nvme_t *nvme, nvme_nqueues_t *nq)
-{
-	nvme_cmd_t *cmd = nvme_alloc_admin_cmd(nvme, KM_SLEEP);
-	nvme_get_features_dw10_t gf_dw10 = { 0 };
-	boolean_t ret = B_FALSE;
-
-	gf_dw10.b.gt_fid = NVME_FEAT_NQUEUES;
-
-	cmd->nc_sqid = 0;
-	cmd->nc_callback = nvme_wakeup_cmd;
-	cmd->nc_sqe.sqe_opc = NVME_OPC_GET_FEATURES;
-	cmd->nc_sqe.sqe_cdw10 = gf_dw10.r;
-	cmd->nc_flags |= NVME_CMD_F_DONTPANIC;
-
-	nvme_admin_cmd(cmd, nvme_admin_cmd_timeout);
-
-	if ((ret = nvme_check_cmd_status(cmd)) != 0) {
-		dev_err(nvme->n_dip, CE_WARN,
-		    "!GET FEATURES NQUEUES failed with sct = %x, sc = %x",
-		    cmd->nc_cqe.cqe_sf.sf_sct, cmd->nc_cqe.cqe_sf.sf_sc);
-		goto fail;
-	}
-
-	nq->r = cmd->nc_cqe.cqe_dw0;
-	ret = B_TRUE;
-
-fail:
-	nvme_free_cmd(cmd);
-	return (ret);
-}
-
 static int
 nvme_set_features(nvme_t *nvme, boolean_t user, uint32_t nsid, uint8_t feature,
     uint32_t val, uint32_t *res)
@@ -3622,6 +3616,42 @@ fail:
 	return (ret);
 }
 
+/*
+ * Ask for one I/O queue pair per CPU and record what the controller allocated.
+ * The current value from GET FEATURES is not a maximum; Intel P4510s report a
+ * single queue there but allocate one per CPU when asked. Some controllers,
+ * including bhyve, accept this SET FEATURES only once per reset.
+ */
+static int
+nvme_request_nqueues(nvme_t *nvme)
+{
+	const uint_t want = MIN(ddi_ncpus_expected(), UINT16_MAX);
+	nvme_nqueues_t req = { 0 };
+	nvme_nqueues_t nq = { 0 };
+	int ret;
+
+	req.b.nq_nsq = (nvme->n_submission_queues == -1 ?
+	    want : nvme->n_submission_queues) - 1;
+	req.b.nq_ncq = (nvme->n_completion_queues == -1 ?
+	    want : nvme->n_completion_queues) - 1;
+
+	ret = nvme_set_features(nvme, B_TRUE, 0, NVME_FEAT_NQUEUES, req.r,
+	    &nq.r);
+	if (ret != 0 && req.r != 0) {
+		req.r = 0;
+		ret = nvme_set_features(nvme, B_TRUE, 0, NVME_FEAT_NQUEUES,
+		    req.r, &nq.r);
+	}
+	if (ret != 0)
+		return (ret);
+
+	nvme->n_submission_queues_supported =
+	    MIN(nq.b.nq_nsq, req.b.nq_nsq) + 1;
+	nvme->n_completion_queues_supported =
+	    MIN(nq.b.nq_ncq, req.b.nq_ncq) + 1;
+	return (0);
+}
+
 static int
 nvme_write_cache_set(nvme_t *nvme, boolean_t enable)
 {
@@ -3642,12 +3672,9 @@ nvme_write_cache_set(nvme_t *nvme, boolean_t enable)
 	    nwc.r, &nwc.r));
 }
 
-static int
+static void
 nvme_set_nqueues(nvme_t *nvme)
 {
-	nvme_nqueues_t nq = { 0 };
-	int ret;
-
 	/*
 	 * The default is to allocate one completion queue per vector.
 	 */
@@ -3660,12 +3687,16 @@ nvme_set_nqueues(nvme_t *nvme)
 	 */
 	nvme->n_completion_queues = MIN(nvme->n_completion_queues,
 	    nvme->n_intr_cnt);
+	nvme->n_completion_queues = MIN(nvme->n_completion_queues,
+	    nvme->n_completion_queues_supported);
 
 	/*
 	 * The default is to use one submission queue per completion queue.
 	 */
 	if (nvme->n_submission_queues == -1)
 		nvme->n_submission_queues = nvme->n_completion_queues;
+	nvme->n_submission_queues = MIN(nvme->n_submission_queues,
+	    nvme->n_submission_queues_supported);
 
 	/*
 	 * There is no point in having more completion queues than
@@ -3676,24 +3707,6 @@ nvme_set_nqueues(nvme_t *nvme)
 
 	ASSERT(nvme->n_submission_queues > 0);
 	ASSERT(nvme->n_completion_queues > 0);
-
-	nq.b.nq_nsq = nvme->n_submission_queues - 1;
-	nq.b.nq_ncq = nvme->n_completion_queues - 1;
-
-	ret = nvme_set_features(nvme, B_FALSE, 0, NVME_FEAT_NQUEUES, nq.r,
-	    &nq.r);
-
-	if (ret == 0) {
-		/*
-		 * Never use more than the requested number of queues.
-		 */
-		nvme->n_submission_queues = MIN(nvme->n_submission_queues,
-		    nq.b.nq_nsq + 1);
-		nvme->n_completion_queues = MIN(nvme->n_completion_queues,
-		    nq.b.nq_ncq + 1);
-	}
-
-	return (ret);
 }
 
 static int
@@ -4506,7 +4519,6 @@ nvme_init(nvme_t *nvme)
 	nvme_reg_cap_t cap;
 	nvme_reg_vs_t vs;
 	nvme_reg_csts_t csts;
-	nvme_nqueues_t nq;
 	int i = 0;
 	uint_t tq_threads;
 	char model[sizeof (nvme->n_idctl->id_model) + 1];
@@ -4847,12 +4859,9 @@ nvme_init(nvme_t *nvme)
 		}
 	}
 
-	if (nvme_get_current_nqueues(nvme, &nq)) {
-		nvme->n_submission_queues_supported = nq.b.nq_nsq + 1;
-		nvme->n_completion_queues_supported = nq.b.nq_ncq + 1;
-	} else {
+	if (nvme_request_nqueues(nvme) != 0) {
 		dev_err(nvme->n_dip, CE_WARN,
-		    "!failed to retrieve number of supported queues");
+		    "!failed to allocate I/O queues");
 		goto fail;
 	}
 
@@ -4861,9 +4870,9 @@ nvme_init(nvme_t *nvme)
 	 */
 	if ((nvme->n_intr_types & (DDI_INTR_TYPE_MSI | DDI_INTR_TYPE_MSIX))
 	    != 0) {
-		const uint16_t nqueues = MIN(
+		const uint16_t nqueues = MIN(UINT16_MAX, MIN(
 		    nvme->n_submission_queues_supported,
-		    nvme->n_completion_queues_supported);
+		    nvme->n_completion_queues_supported));
 
 		nvme_release_interrupts(nvme);
 		if ((nvme_setup_interrupts(nvme, DDI_INTR_TYPE_MSIX,
@@ -4880,12 +4889,7 @@ nvme_init(nvme_t *nvme)
 	 * Create I/O queue pairs.
 	 */
 
-	if (nvme_set_nqueues(nvme) != 0) {
-		dev_err(nvme->n_dip, CE_WARN,
-		    "!failed to set number of I/O queues to %d",
-		    nvme->n_intr_cnt);
-		goto fail;
-	}
+	nvme_set_nqueues(nvme);
 
 	/*
 	 * Reallocate I/O queue array
@@ -5111,6 +5115,12 @@ nvme_setup_interrupts(nvme_t *nvme, int intr_type, int nqpairs)
 		    __func__);
 		goto fail;
 	}
+
+	/*
+	 * Completing I/O in the interrupt thread takes adaptive locks in
+	 * blkdev and its consumers, which a high-level interrupt cannot do.
+	 */
+	nvme->n_inline_done = nvme->n_intr_pri < ddi_intr_get_hilevel_pri();
 
 	for (i = 0; i < count; i++) {
 		ret = ddi_intr_add_handler(nvme->n_inth[i], nvme_intr,
@@ -5927,6 +5937,8 @@ nvme_create_nvm_cmd(nvme_namespace_t *ns, uint8_t opc, bd_xfer_t *xfer)
 	cmd->nc_sqe.sqe_opc = opc;
 	cmd->nc_callback = nvme_bd_xfer_done;
 	cmd->nc_xfer = xfer;
+	if ((xfer->x_flags & BD_XFER_POLL) == 0 && nvme->n_inline_done)
+		cmd->nc_flags |= NVME_CMD_F_INLINE;
 
 	switch (opc) {
 	case NVME_OPC_NVM_WRITE:
@@ -5977,6 +5989,18 @@ nvme_bd_xfer_done(void *arg)
 	nvme_free_cmd(cmd);
 
 	bd_xfer_done(xfer, error);
+}
+
+static void
+nvme_bd_xfer_done_inline(nvme_cmd_t *cmd)
+{
+	bd_xfer_t *xfer = cmd->nc_xfer;
+	int error;
+
+	error = nvme_check_cmd_status(cmd);
+	nvme_free_cmd(cmd);
+
+	bd_xfer_done_intr(xfer, error);
 }
 
 static void
