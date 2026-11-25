@@ -12,6 +12,7 @@
 /*
  * Copyright 2019 Joyent, Inc.
  * Copyright 2020 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/errno.h>
@@ -1205,6 +1206,36 @@ ict_tiocsctty(file_t *fp, int cmd, intptr_t arg, int lxcmd)
 	return ((error != 0) ? set_errno(error) : 0);
 }
 
+/*
+ * On illumos, TIOCNOTTY on /dev/tty (the "sy" driver) always fails with
+ * EINVAL, since syioctl() would deadlock with its own tty_hold() on the
+ * controlling terminal. On Linux, ioctl(open("/dev/tty"), TIOCNOTTY) is the
+ * usual way to drop the controlling terminal; systemd's release_terminal()
+ * relies on it after acquiring /dev/console. Without this, pid 1 keeps the
+ * console as its controlling terminal and agetty can no longer acquire it.
+ *
+ * We hold no tty_hold() here, so we can call freectty() directly, just like
+ * the stream head does for TIOCNOTTY on the terminal itself.
+ */
+/* ARGSUSED */
+static int
+ict_tiocnotty(file_t *fp, int cmd, intptr_t arg, int lxcmd)
+{
+	vnode_t *vp = fp->f_vnode;
+	int error, rv;
+
+	if (vp->v_type == VCHR &&
+	    getmajor(vp->v_rdev) == ddi_name_to_major("sy")) {
+		/* freectty() always assumes curproc. */
+		if (freectty(B_FALSE) == EINTR)
+			return (set_errno(EINTR));
+		return (0);
+	}
+
+	error = VOP_IOCTL(vp, cmd, arg, FLUSER(fp), fp->f_cred, &rv, NULL);
+	return ((error != 0) ? set_errno(error) : 0);
+}
+
 /* Socket-related translators */
 
 /* ARGSUSED */
@@ -1681,7 +1712,6 @@ static lx_ioc_cmd_translator_t lx_ioc_xlate_fd[] = {
 	/* terminal related */
 	LX_IOC_CMD_TRANSLATOR_PASS(TIOCGETD)
 	LX_IOC_CMD_TRANSLATOR_PASS(TIOCGSID)
-	LX_IOC_CMD_TRANSLATOR_PASS(TIOCNOTTY)
 	LX_IOC_CMD_TRANSLATOR_PASS(TIOCPKT)
 
 	LX_IOC_CMD_TRANSLATOR_FILTER(TCSETS,		ict_tcsets)
@@ -1699,6 +1729,7 @@ static lx_ioc_cmd_translator_t lx_ioc_xlate_fd[] = {
 	LX_IOC_CMD_TRANSLATOR_CUSTOM(LX_TIOCSPTLCK,	ict_sptlock)
 	LX_IOC_CMD_TRANSLATOR_CUSTOM(LX_TIOCGPTN,	ict_gptn)
 	LX_IOC_CMD_TRANSLATOR_FILTER(TIOCSCTTY,		ict_tiocsctty)
+	LX_IOC_CMD_TRANSLATOR_FILTER(TIOCNOTTY,		ict_tiocnotty)
 
 	LX_IOC_CMD_TRANSLATOR_END
 };

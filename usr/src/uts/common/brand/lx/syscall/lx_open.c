@@ -24,6 +24,7 @@
  * Use is subject to license terms.
  * Copyright 2018 Joyent, Inc.
  * Copyright 2024 OmniOS Community Edition (OmniOSce) Association.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 #include <sys/systm.h>
@@ -34,6 +35,9 @@
 #include <sys/stat.h>
 #include <sys/inttypes.h>
 #include <sys/mutex.h>
+#include <sys/proc.h>
+#include <sys/session.h>
+#include <sys/sunddi.h>
 
 #include <sys/lx_types.h>
 #include <sys/lx_fcntl.h>
@@ -53,8 +57,16 @@ ltos_open_flags(int input)
 {
 	int flags;
 
-	if (input & LX_O_PATH)
+	/*
+	 * An O_PATH open on Linux never opens the underlying device, so it can
+	 * never acquire a controlling terminal. We emulate O_PATH with a real
+	 * (read-only) open, so make sure that it does not either; e.g. systemd
+	 * (pid 1) opens the console with O_PATH to chown it.
+	 */
+	if (input & LX_O_PATH) {
 		input &= (LX_O_DIRECTORY | LX_O_NOFOLLOW | LX_O_CLOEXEC);
+		input |= LX_O_NOCTTY;
+	}
 
 	/*
 	 * The illumos O_ACCMODE also includes O_SEARCH|O_EXEC
@@ -159,6 +171,51 @@ lx_open_postprocess(int fd, int fmode)
 	return (error);
 }
 
+/*
+ * On Linux, opening /dev/console never makes it the controlling terminal
+ * (see tty_open()), whereas on illumos a session leader without a controlling
+ * terminal acquires any tty it opens without O_NOCTTY. systemd (pid 1) opens
+ * /dev/console from time to time; if it became pid 1's controlling terminal,
+ * nothing else (e.g. agetty via TIOCSCTTY) could acquire it until reboot.
+ *
+ * Return B_TRUE if this open would make the zone console our controlling
+ * terminal. To keep the common path cheap, only session leaders without a
+ * controlling terminal look up the path.
+ */
+static major_t lx_zcons_major = DDI_MAJOR_T_NONE;
+
+static boolean_t
+lx_open_acquires_console(int atfd, char *path)
+{
+	proc_t *p = curproc;
+	sess_t *sp;
+	boolean_t can_acquire;
+	boolean_t rv = B_FALSE;
+	vnode_t *vp;
+
+	mutex_enter(&p->p_splock);
+	sp = p->p_sessp;
+	can_acquire = (sp->s_sidp == p->p_pidp && sp->s_vp == NULL);
+	mutex_exit(&p->p_splock);
+
+	if (!can_acquire)
+		return (B_FALSE);
+
+	if (lx_zcons_major == DDI_MAJOR_T_NONE)
+		lx_zcons_major = ddi_name_to_major("zcons");
+	if (lx_zcons_major == DDI_MAJOR_T_NONE)
+		return (B_FALSE);
+
+	if (lx_vp_at(atfd, path, &vp, 0) != 0)
+		return (B_FALSE);
+
+	if (vp->v_type == VCHR && getmajor(vp->v_rdev) == lx_zcons_major)
+		rv = B_TRUE;
+
+	VN_RELE(vp);
+	return (rv);
+}
+
 long
 lx_openat(int atfd, char *path, int fmode, int cmode)
 {
@@ -169,6 +226,11 @@ lx_openat(int atfd, char *path, int fmode, int cmode)
 		atfd = AT_FDCWD;
 
 	flags = ltos_open_flags(fmode);
+
+	if ((fmode & (LX_O_NOCTTY | LX_O_PATH)) == 0 &&
+	    lx_open_acquires_console(atfd, path)) {
+		flags |= O_NOCTTY;
+	}
 
 	if ((fmode & (LX_O_NOFOLLOW|LX_O_PATH|__FLXPATH)) ==
 	    (LX_O_NOFOLLOW|LX_O_PATH|__FLXPATH)) {
