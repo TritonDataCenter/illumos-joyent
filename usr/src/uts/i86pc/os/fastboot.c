@@ -21,6 +21,7 @@
 
 /*
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -94,6 +95,11 @@
 #include <sys/machelf.h>
 #include <sys/kobj.h>
 #include <sys/multiboot.h>
+#include <sys/multiboot2.h>
+#include <sys/multiboot2_impl.h>
+#include <sys/bootinfo.h>
+#include <sys/memlist.h>
+#include <sys/sha1.h>
 #include <sys/kobj_lex.h>
 
 /*
@@ -216,6 +222,10 @@ extern uint8_t saved_drives[FASTBOOT_SAVED_DRIVES_SIZE];
 extern char saved_cmdline[FASTBOOT_SAVED_CMDLINE_LEN];
 extern int saved_cmdline_len;
 extern size_t saved_file_size[];
+extern uint64_t saved_mb2[];
+extern uint8_t saved_mod_data[];
+extern fastboot_saved_mod_t saved_mods[];
+extern uint_t saved_mod_cnt;
 
 extern void* contig_alloc(size_t size, ddi_dma_attr_t *attr,
     uintptr_t align, int cansleep);
@@ -236,11 +246,18 @@ extern void vprintf(const char *, va_list);
 #define	FAILSAFE_BOOTFILE32	"/boot/platform/i86pc/kernel/unix"
 #define	FAILSAFE_BOOTFILE64	"/boot/platform/i86pc/kernel/amd64/unix"
 
+/*
+ * Length of the boot archive hash: an ASCII SHA-1 digest.
+ */
+#define	FASTBOOT_HASH_LEN	(SHA1_DIGEST_LENGTH * 2)
+
 static uint_t fastboot_vatoindex(fastboot_info_t *, uintptr_t, int);
 static void fastboot_map_with_size(fastboot_info_t *, uintptr_t,
     paddr_t, size_t, int);
 static void fastboot_build_pagetables(fastboot_info_t *);
 static int fastboot_build_mbi(char *, fastboot_info_t *);
+static int fastboot_build_mbi2(char *, fastboot_info_t *, const char *,
+    size_t);
 static void fastboot_free_file(fastboot_file_t *);
 
 static const char fastboot_enomem_msg[] = "!Fastboot: Couldn't allocate 0x%"
@@ -446,6 +463,48 @@ fastboot_elf32_find_loadables(void *img, off_t imgsz, fastboot_section_t *sectp,
 }
 
 /*
+ * Allocate memory below 1G for the new multiboot info structure (mbi),
+ * zero it, and record its physical address in fi_new_mbi_pa.  If we have
+ * reserved memory for mbi but it's not enough, free it and reallocate.
+ */
+static int
+fastboot_alloc_mbi(fastboot_info_t *nk, size_t size)
+{
+	if (nk->fi_mbi_size && nk->fi_mbi_size < size) {
+		contig_free((void *)nk->fi_new_mbi_va, nk->fi_mbi_size);
+		nk->fi_mbi_size = 0;
+	}
+
+	if (nk->fi_mbi_size == 0) {
+		if ((nk->fi_new_mbi_va =
+		    (uintptr_t)contig_alloc(size, &fastboot_below_1G_dma_attr,
+		    PAGESIZE, 0)) == 0) {
+			cmn_err(CE_NOTE, fastboot_enomem_msg,
+			    (uint64_t)size, "1G");
+			return (-1);
+		}
+		/*
+		 * fi_mbi_size must be set after the allocation succeeds
+		 * as it's used to determine how much memory to free.
+		 */
+		nk->fi_mbi_size = size;
+	}
+
+	/*
+	 * Initalize memory
+	 */
+	bzero((void *)nk->fi_new_mbi_va, nk->fi_mbi_size);
+
+	/*
+	 * Get PA for the new mbi
+	 */
+	nk->fi_new_mbi_pa = mmu_ptob((uint64_t)hat_getpfnum(kas.a_hat,
+	    (caddr_t)nk->fi_new_mbi_va));
+
+	return (0);
+}
+
+/*
  * Create multiboot info structure (mbi) base on the saved mbi.
  * Recalculate values of the pointer type fields in the data
  * structure based on the new starting physical address of the
@@ -477,42 +536,13 @@ fastboot_build_mbi(char *mdep, fastboot_info_t *nk)
 
 	/*
 	 * Allocate memory for the new multiboot info structure (mbi).
-	 * If we have reserved memory for mbi but it's not enough,
-	 * free it and reallocate.
 	 */
 	size = PAGESIZE + P2ROUNDUP(arglen, PAGESIZE);
-	if (nk->fi_mbi_size && nk->fi_mbi_size < size) {
-		contig_free((void *)nk->fi_new_mbi_va, nk->fi_mbi_size);
-		nk->fi_mbi_size = 0;
-	}
+	if (fastboot_alloc_mbi(nk, size) != 0)
+		return (-1);
 
-	if (nk->fi_mbi_size == 0) {
-		if ((nk->fi_new_mbi_va =
-		    (uintptr_t)contig_alloc(size, &fastboot_below_1G_dma_attr,
-		    PAGESIZE, 0)) == 0) {
-			cmn_err(CE_NOTE, fastboot_enomem_msg,
-			    (uint64_t)size, "1G");
-			return (-1);
-		}
-		/*
-		 * fi_mbi_size must be set after the allocation succeeds
-		 * as it's used to determine how much memory to free.
-		 */
-		nk->fi_mbi_size = size;
-	}
-
-	/*
-	 * Initalize memory
-	 */
-	bzero((void *)nk->fi_new_mbi_va, nk->fi_mbi_size);
-
-	/*
-	 * Get PA for the new mbi
-	 */
 	start_addr_va = nk->fi_new_mbi_va;
-	start_addr_pa = mmu_ptob((uint64_t)hat_getpfnum(kas.a_hat,
-	    (caddr_t)start_addr_va));
-	nk->fi_new_mbi_pa = (paddr_t)start_addr_pa;
+	start_addr_pa = nk->fi_new_mbi_pa;
 
 	/*
 	 * Populate the rest of the fields in the data structure
@@ -582,6 +612,275 @@ fastboot_build_mbi(char *mdep, fastboot_info_t *nk)
 	    sizeof (*mbi) - offsetof(multiboot_info_t, config_table));
 	mbi->flags &= ~(MB_INFO_CONFIG_TABLE | MB_INFO_BOOT_LOADER_NAME |
 	    MB_INFO_APM_TABLE | MB_INFO_VIDEO_INFO);
+
+	nk->fi_mb_magic = MB_BOOTLOADER_MAGIC;
+
+	return (0);
+}
+
+/*
+ * True if the current boot used Multiboot 2 and its information was saved
+ * (see save_boot_info_mb2() in fakebop.c).
+ */
+static boolean_t
+fastboot_is_mb2(void)
+{
+	return (((multiboot2_info_header_t *)saved_mb2)->mbi_total_size != 0);
+}
+
+/*
+ * Read the hash file that goes with the new boot archive, if there is one.
+ * On success *bufp is either NULL (no hash file) or a buffer of *sizep bytes
+ * the caller must kmem_free().
+ */
+static int
+fastboot_read_hash(char **bufp, size_t *sizep)
+{
+	char		path[OBP_MAXPATHLEN];
+	struct _buf	*file;
+	uint64_t	fsize;
+
+	*bufp = NULL;
+	*sizep = 0;
+
+	if (snprintf(path, sizeof (path), "%s.hash",
+	    fastboot_filename[FASTBOOT_NAME_BOOTARCHIVE]) >= sizeof (path))
+		return (-1);
+
+	if ((file = kobj_open_file(path)) == (struct _buf *)-1)
+		return (0);
+
+	if (kobj_get_filesize(file, &fsize) != 0 ||
+	    fsize < FASTBOOT_HASH_LEN || fsize > PAGESIZE) {
+		cmn_err(CE_NOTE, "!Fastboot: Bad size for %s", path);
+		kobj_close_file(file);
+		return (-1);
+	}
+
+	*bufp = kmem_alloc(fsize, KM_SLEEP);
+	if (kobj_read_file(file, *bufp, fsize, 0) != (int)fsize) {
+		cmn_err(CE_NOTE, "!Fastboot: Couldn't read %s", path);
+		kmem_free(*bufp, fsize);
+		*bufp = NULL;
+		kobj_close_file(file);
+		return (-1);
+	}
+	kobj_close_file(file);
+
+	*sizep = fsize;
+	return (0);
+}
+
+/*
+ * The loader usually passes the boot archive's hash as a "hash=" word in the
+ * archive's module command line instead of as a separate module.  Update that
+ * word, in place, for the new boot archive: replace the value with the new
+ * hash, or remove the word if the new archive has no hash file.
+ */
+static int
+fastboot_update_cmdline_hash(char *cmdline, const char *hash)
+{
+	char *word, *val, *end;
+
+	for (word = cmdline; (word = strstr(word, "hash=")) != NULL;
+	    word++) {
+		if (word == cmdline || word[-1] == ' ')
+			break;
+	}
+	if (word == NULL)
+		return (0);
+
+	val = word + strlen("hash=");
+	if ((end = strchr(val, ' ')) == NULL)
+		end = val + strlen(val);
+
+	if (hash != NULL) {
+		if (end - val != FASTBOOT_HASH_LEN)
+			return (-1);
+		bcopy(hash, val, FASTBOOT_HASH_LEN);
+	} else {
+		/* Remove the word and one of the spaces around it. */
+		if (*end == ' ')
+			end++;
+		else if (word != cmdline)
+			word--;
+		ovbcopy(end, word, strlen(end) + 1);
+	}
+	return (0);
+}
+
+/*
+ * Create a Multiboot 2 info structure from the one saved at boot.  Every tag
+ * is copied except the command line, which is replaced, and the module tags,
+ * which are pointed at the new boot archive, the new hash and the saved
+ * copies of the other modules.  The module contents go in the same
+ * allocation, each on its own page, ahead of the info structure.
+ */
+static int
+fastboot_build_mbi2(char *mdep, fastboot_info_t *nk, const char *hash,
+    size_t hashsize)
+{
+	multiboot2_info_header_t *old = (multiboot2_info_header_t *)saved_mb2;
+	multiboot2_info_header_t *mbi;
+	multiboot_tag_string_t	*cmdtagp;
+	multiboot_tag_t		*tagp, *ntagp;
+	uintptr_t	old_end = (uintptr_t)old + old->mbi_total_size;
+	uintptr_t	start_addr_va;	/* starting VA of the allocation */
+	paddr_t		start_addr_pa;	/* starting PA of the allocation */
+	uint32_t	mod_start[MAX_BOOT_MODULES];
+	uint32_t	mod_end[MAX_BOOT_MODULES];
+	const char	*cmdline;
+	size_t		cmdlen, info_offs, size, offs;
+	uint_t		i, midx;
+
+	if (mdep != NULL && strlen(mdep) != 0)
+		cmdline = mdep;
+	else
+		cmdline = saved_cmdline;
+	cmdlen = strlen(cmdline) + 1;
+
+	/*
+	 * Size the allocation: page-aligned module contents (the boot
+	 * archive itself is placed by the switcher), then the saved tags
+	 * plus a new command line tag.
+	 */
+	size = 0;
+	for (i = 0; i < saved_mod_cnt; i++) {
+		if (saved_mods[i].fsm_type == BMT_ROOTFS)
+			continue;
+		size += P2ROUNDUP(saved_mods[i].fsm_type == BMT_HASH ?
+		    hashsize : saved_mods[i].fsm_size, PAGESIZE);
+	}
+	info_offs = size;
+	size += old->mbi_total_size + sizeof (multiboot_tag_string_t) +
+	    cmdlen + MULTIBOOT_TAG_ALIGN;
+	size = P2ROUNDUP(size, PAGESIZE);
+
+	if (fastboot_alloc_mbi(nk, size) != 0)
+		return (-1);
+
+	start_addr_va = nk->fi_new_mbi_va;
+	start_addr_pa = nk->fi_new_mbi_pa;
+
+	/*
+	 * Place the module contents.  The boot module sizes are exact
+	 * (mod_end is one past the last byte), since dboot hashes bm_size
+	 * bytes of the boot archive.
+	 */
+	offs = 0;
+	for (i = 0; i < saved_mod_cnt; i++) {
+		fastboot_saved_mod_t *smp = &saved_mods[i];
+		fastboot_file_t *fb = &nk->fi_files[FASTBOOT_BOOTARCHIVE];
+		const void *src;
+		size_t len;
+
+		switch (smp->fsm_type) {
+		case BMT_ROOTFS:
+			mod_start[i] = fb->fb_dest_pa;
+			mod_end[i] = fb->fb_dest_pa + fb->fb_size;
+			continue;
+		case BMT_HASH:
+			if (hash == NULL) {
+				cmn_err(CE_NOTE, "!Fastboot: No hash file for "
+				    "the boot archive");
+				return (-1);
+			}
+			src = hash;
+			len = hashsize;
+			break;
+		default:
+			src = &saved_mod_data[smp->fsm_offset];
+			len = smp->fsm_size;
+			break;
+		}
+
+		bcopy(src, (void *)(start_addr_va + offs), len);
+		mod_start[i] = start_addr_pa + offs;
+		mod_end[i] = start_addr_pa + offs + len;
+		offs += P2ROUNDUP(len, PAGESIZE);
+	}
+	ASSERT3U(offs, ==, info_offs);
+
+	/*
+	 * The new command line comes first, then the saved tags.
+	 */
+	mbi = (multiboot2_info_header_t *)(start_addr_va + info_offs);
+	offs = sizeof (*mbi);
+
+	cmdtagp = (multiboot_tag_string_t *)((uintptr_t)mbi + offs);
+	cmdtagp->mb_type = MULTIBOOT_TAG_TYPE_CMDLINE;
+	cmdtagp->mb_size = sizeof (*cmdtagp) + cmdlen;
+	bcopy(cmdline, cmdtagp->mb_string, cmdlen);
+	offs += P2ROUNDUP(cmdtagp->mb_size, MULTIBOOT_TAG_ALIGN);
+
+	midx = 0;
+	for (tagp = &old->mbi_tags[0]; tagp->mb_type != MULTIBOOT_TAG_TYPE_END;
+	    tagp = (multiboot_tag_t *)P2ROUNDUP((uintptr_t)tagp +
+	    tagp->mb_size, MULTIBOOT_TAG_ALIGN)) {
+		if ((uintptr_t)tagp + sizeof (*tagp) > old_end ||
+		    tagp->mb_size < sizeof (*tagp) ||
+		    (uintptr_t)tagp + tagp->mb_size > old_end) {
+			cmn_err(CE_NOTE, "!Fastboot: Bad saved multiboot2 "
+			    "information");
+			return (-1);
+		}
+
+		if (tagp->mb_type == MULTIBOOT_TAG_TYPE_CMDLINE)
+			continue;
+
+		ntagp = (multiboot_tag_t *)((uintptr_t)mbi + offs);
+		bcopy(tagp, ntagp, tagp->mb_size);
+		offs += P2ROUNDUP(tagp->mb_size, MULTIBOOT_TAG_ALIGN);
+
+		if (tagp->mb_type == MULTIBOOT_TAG_TYPE_MODULE) {
+			multiboot_tag_module_t *modp =
+			    (multiboot_tag_module_t *)ntagp;
+			char *cp, *end = (char *)ntagp + ntagp->mb_size - 1;
+
+			if (midx >= saved_mod_cnt) {
+				cmn_err(CE_NOTE, "!Fastboot: Too many saved "
+				    "multiboot2 modules");
+				return (-1);
+			}
+			modp->mb_mod_start = mod_start[midx];
+			modp->mb_mod_end = mod_end[midx];
+
+			/*
+			 * dboot split the module command line into words in
+			 * place with strsep(); put the separators back.
+			 */
+			for (cp = modp->mb_cmdline; cp < end; cp++) {
+				if (*cp == '\0')
+					*cp = ' ';
+			}
+
+			if (saved_mods[midx].fsm_type == BMT_ROOTFS &&
+			    fastboot_update_cmdline_hash(modp->mb_cmdline,
+			    hash) != 0) {
+				cmn_err(CE_NOTE, "!Fastboot: Couldn't update "
+				    "the boot archive hash");
+				return (-1);
+			}
+			midx++;
+		}
+	}
+
+	if (midx != saved_mod_cnt) {
+		cmn_err(CE_NOTE, "!Fastboot: Saved multiboot2 modules don't "
+		    "match the saved boot modules");
+		return (-1);
+	}
+
+	ntagp = (multiboot_tag_t *)((uintptr_t)mbi + offs);
+	ntagp->mb_type = MULTIBOOT_TAG_TYPE_END;
+	ntagp->mb_size = sizeof (*ntagp);
+	offs += sizeof (*ntagp);
+
+	mbi->mbi_total_size = offs;
+	mbi->mbi_reserved = 0;
+
+	nk->fi_new_mbi_pa = start_addr_pa + info_offs;
+	nk->fi_mb_magic = MULTIBOOT2_BOOTLOADER_MAGIC;
 
 	return (0);
 }
@@ -1200,7 +1499,39 @@ load_kernel_retry:
 	/*
 	 * Build the new multiboot_info structure
 	 */
-	if (fastboot_build_mbi(fastboot_args, &newkernel) != 0) {
+	if (fastboot_is_mb2()) {
+		fastboot_file_t *ufb, *afb;
+		char	*hash;
+		size_t	hashsize;
+		int	in_mem, rv;
+
+		/*
+		 * The switcher copies the new kernel and boot archive to
+		 * fixed low addresses.  With UEFI, firmware can own parts of
+		 * that range, so make sure it is all memory the new kernel
+		 * will consider usable.
+		 */
+		ufb = &newkernel.fi_files[FASTBOOT_UNIX];
+		afb = &newkernel.fi_files[FASTBOOT_BOOTARCHIVE];
+		memlist_read_lock();
+		in_mem = address_in_memlist(phys_install, ufb->fb_dest_pa,
+		    afb->fb_next_pa - ufb->fb_dest_pa);
+		memlist_read_unlock();
+		if (!in_mem) {
+			cmn_err(CE_NOTE, "!Fastboot: 0x%lx-0x%lx is not all "
+			    "usable memory", ufb->fb_dest_pa, afb->fb_next_pa);
+			goto err_out;
+		}
+
+		if (fastboot_read_hash(&hash, &hashsize) != 0)
+			goto err_out;
+		rv = fastboot_build_mbi2(fastboot_args, &newkernel, hash,
+		    hashsize);
+		if (hash != NULL)
+			kmem_free(hash, hashsize);
+		if (rv != 0)
+			goto err_out;
+	} else if (fastboot_build_mbi(fastboot_args, &newkernel) != 0) {
 		goto err_out;
 	}
 

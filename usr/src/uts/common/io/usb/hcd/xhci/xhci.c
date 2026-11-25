@@ -12,6 +12,7 @@
 /*
  * Copyright (c) 2019, Joyent, Inc.
  * Copyright 2024 Oxide Computer Company
+ * Copyright 2026 Edgecast Cloud LLC.
  */
 
 /*
@@ -2225,6 +2226,63 @@ xhci_getinfo(dev_info_t *dip, ddi_info_cmd_t cmd, void *arg, void **outp)
 	return (DDI_SUCCESS);
 }
 
+/*
+ * Poll an operational register for quiesce(9E), which can't use
+ * xhci_reg_poll() because it may not block.  Waits up to tries ms.
+ */
+static boolean_t
+xhci_quiesce_poll(xhci_t *xhcip, int reg, uint32_t mask, uint32_t targ,
+    uint_t tries)
+{
+	uint_t i;
+
+	for (i = 0; i < tries; i++) {
+		if ((xhci_get32(xhcip, XHCI_R_OPER, reg) & mask) == targ)
+			return (B_TRUE);
+		drv_usecwait(1000);
+	}
+	return (B_FALSE);
+}
+
+/*
+ * quiesce(9E) entry point, used by fast reboot.
+ *
+ * This is called when the system is single-threaded at high PIL with
+ * preemption disabled, so it can't take locks or block.  Stop the controller
+ * so it does no more DMA, then reset it, as xhci_controller_stop() and
+ * xhci_controller_reset() do (the specification only allows a reset once the
+ * controller has halted).
+ */
+static int
+xhci_quiesce(dev_info_t *dip)
+{
+	xhci_t *xhcip;
+	uint32_t cmdreg;
+
+	xhcip = ddi_get_soft_state(xhci_soft_state, ddi_get_instance(dip));
+	if (xhcip == NULL)
+		return (DDI_FAILURE);
+
+	if (!(xhcip->xhci_seq & XHCI_ATTACH_REGS_MAP))
+		return (DDI_SUCCESS);
+
+	cmdreg = xhci_get32(xhcip, XHCI_R_OPER, XHCI_USBCMD);
+	cmdreg &= ~(XHCI_CMD_RS | XHCI_CMD_INTE);
+	xhci_put32(xhcip, XHCI_R_OPER, XHCI_USBCMD, cmdreg);
+	if (!xhci_quiesce_poll(xhcip, XHCI_USBSTS, XHCI_STS_HCH, XHCI_STS_HCH,
+	    50))
+		return (DDI_FAILURE);
+
+	cmdreg = xhci_get32(xhcip, XHCI_R_OPER, XHCI_USBCMD);
+	xhci_put32(xhcip, XHCI_R_OPER, XHCI_USBCMD, cmdreg | XHCI_CMD_HCRST);
+	drv_usecwait(xhci_reset_delay);
+	if (!xhci_quiesce_poll(xhcip, XHCI_USBCMD, XHCI_CMD_HCRST, 0, 500) ||
+	    !xhci_quiesce_poll(xhcip, XHCI_USBSTS, XHCI_STS_CNR, 0, 500))
+		return (DDI_FAILURE);
+
+	return (DDI_SUCCESS);
+}
+
 static struct cb_ops xhci_cb_ops = {
 	xhci_open,		/* cb_open */
 	xhci_close,		/* cb_close */
@@ -2258,7 +2316,7 @@ static struct dev_ops xhci_dev_ops = {
 	&xhci_cb_ops,			/* devo_cb_ops */
 	&usba_hubdi_busops,		/* devo_bus_ops */
 	usba_hubdi_root_hub_power,	/* devo_power */
-	ddi_quiesce_not_supported	/* devo_quiesce */
+	xhci_quiesce			/* devo_quiesce */
 };
 
 static struct modldrv xhci_modldrv = {
